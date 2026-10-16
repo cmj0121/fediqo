@@ -21,19 +21,87 @@ public struct RowChanges: Sendable, Equatable {
     public var said: [SourceProfile] = []
     /// The sources removed, by host.
     public var removedHosts: [String] = []
+    /// Changes to rows the store does not hold, each made on the file as one statement, in the
+    /// order they were made: after `deletes` and before `upserts`, so a row the store holds is
+    /// written as the store holds it.
+    public var ops: [StoreOp] = []
 
     public init(
         upserts: [Note] = [], deletes: [NoteKey] = [], sources: [Source]? = nil, said: [SourceProfile] = [],
-        removedHosts: [String] = []
+        removedHosts: [String] = [], ops: [StoreOp] = []
     ) {
         self.upserts = upserts
         self.deletes = deletes
         self.sources = sources
         self.said = said
         self.removedHosts = removedHosts
+        self.ops = ops
     }
 
-    public var isEmpty: Bool { upserts.isEmpty && deletes.isEmpty && sources == nil && removedHosts.isEmpty }
+    public var isEmpty: Bool {
+        upserts.isEmpty && deletes.isEmpty && sources == nil && removedHosts.isEmpty && ops.isEmpty
+    }
+}
+
+/// A change to every row of the file it names, made by the file in one statement (#357): what a
+/// store holding only some of the rows cannot make row by row, for rows too many to read in.
+/// Each is numbered as it is made, so one handed back after a failed write is the same one.
+public struct StoreOp: Sendable, Equatable {
+    public let number: Int
+    public let kind: Kind
+
+    public init(number: Int, kind: Kind) {
+        self.number = number
+        self.kind = kind
+    }
+
+    public enum Kind: Sendable, Equatable {
+        /// What a reader's reads said they did to these hosts' posts taken back, and what those
+        /// reads left owing (`ItemStore.forgetReaderMarks`).
+        case forgetReaderMarks(Hosts)
+    }
+
+    /// The hosts an op is about.
+    public enum Hosts: Sendable, Equatable {
+        case only(String)
+        case allBut(Set<String>)
+
+        public func contains(_ host: String) -> Bool {
+            switch self {
+            case .only(let only): host == only
+            case .allBut(let kept): !kept.contains(host)
+            }
+        }
+    }
+}
+
+/// Which rows of the file a letting go names (#357), **never a kept one**: the file answers
+/// with their keys, and the store lets go of each by key.
+public enum RowSelection: Sendable, Equatable {
+    /// Every row of a host.
+    case host(String)
+    /// Every row posted inside a span, of one host or of every one.
+    case span(Range<Date>, host: String?)
+    /// Every row marked gone from its source, at or before a moment or at any.
+    case gone(markedBy: Date?)
+}
+
+/// A row of the file that refers to another (`Note.heldWith`), as the room limit asks of it:
+/// the row, where it stands in the order rows go in, whether it is kept — and what it refers to.
+public struct Referrer: Sendable, Equatable {
+    public let key: NoteKey
+    public let target: NoteKey
+    public let postedAt: Date
+    public let arrival: Int64
+    public let kept: Bool
+
+    public init(key: NoteKey, target: NoteKey, postedAt: Date, arrival: Int64, kept: Bool) {
+        self.key = key
+        self.target = target
+        self.postedAt = postedAt
+        self.arrival = arrival
+        self.kept = kept
+    }
 }
 
 /// A row of the file as it was read (#357): the note, and where it stands in the order the
@@ -69,6 +137,51 @@ public struct PageCursor: Sendable, Hashable {
     }
 }
 
+/// The file's rows, read by key where the store's pool lacks them (#357): what lets `ItemStore`
+/// hold only what was read and still merge, keep and let go as the whole store did.
+/// **Synchronous**, called from inside the store's actor and never the main actor: each call is
+/// a few lookups by index. A row that holds no item, or will not decode, is not handed back.
+public protocol HeldRows: Sendable {
+    /// The rows under `keys` that the file holds.
+    func rows(_ keys: [NoteKey]) throws -> [HeldRow]
+    /// Every row of `host` whose id starts `idPrefix`: a forum topic's kept replies.
+    func rows(host: String, idPrefix: String) throws -> [HeldRow]
+    /// Every row of `host` its source names by one of `statusIDs` — what a reference names
+    /// before it knows the row's key (`Reference.statusID`).
+    func rows(host: String, statusIDs: [String]) throws -> [HeldRow]
+    /// Every row the person keeps (`Note.kept`): few, and what a post kept reblogs is held for.
+    func keptRows() throws -> [HeldRow]
+    /// What the rows under `keys` reblog, read off their references alone: what a kept row
+    /// that will not decode still holds.
+    func reblogged(by keys: [NoteKey]) throws -> [NoteKey]
+    /// The keys of the rows `selection` names, none of them kept.
+    func keys(_ selection: RowSelection) throws -> [NoteKey]
+    /// At most `limit` rows not kept, the oldest posted first and two of one moment in the order
+    /// they arrived, from past `after` on — and where the next are asked from, or nothing where
+    /// none are left. A row that will not decode is passed over.
+    func oldest(_ limit: Int, after: PageCursor?) throws -> (rows: [HeldRow], next: PageCursor?)
+    /// Every row that refers to one of `keys` (`Note.heldWith`).
+    func referring(to keys: [NoteKey]) throws -> [Referrer]
+    /// Whether a row of `hosts` says what a reader did, or owes a load as one
+    /// (`StoreOp.Kind.forgetReaderMarks`).
+    func marked(_ hosts: StoreOp.Hosts) throws -> Bool
+    /// How many rows the file holds.
+    func rowCount() throws -> Int
+}
+
+/// What a `HeldRows` read throws where some rows it found will not decode: those, by key, and
+/// every row it could read. The pool takes the rows and **answers for none of the keys** — it
+/// cannot say what such a row holds, so a copy of it is not taken over it.
+public struct RowsUnread: Error {
+    public let keys: [NoteKey]
+    public let rows: [HeldRow]
+
+    public init(keys: [NoteKey], rows: [HeldRow]) {
+        self.keys = keys
+        self.rows = rows
+    }
+}
+
 /// The store's rows, **with every key a change reached remembered until a save takes it**
 /// (`ItemStore.takeChanges`). Read as the dictionary it wraps; a row set to what it already
 /// was is no change, and a row set to nothing is a row to delete.
@@ -96,6 +209,12 @@ struct HeldNotes: Sequence {
             rows[key] = newValue
             touched.insert(key)
         }
+    }
+
+    /// `note` as the file holds it, laid in under a key that holds nothing: read, and so owed
+    /// no write.
+    mutating func lay(_ note: Note) {
+        rows[note.key] = note
     }
 
     var values: Dictionary<NoteKey, Note>.Values { rows.values }

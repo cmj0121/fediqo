@@ -84,6 +84,10 @@ extension StoreFile {
         "CREATE INDEX IF NOT EXISTS note_page ON note(posted_at DESC, id ASC)",
         "CREATE INDEX IF NOT EXISTS note_status ON note(host, \(statusIDExpression))",
         "CREATE INDEX IF NOT EXISTS note_owing ON note(host) WHERE refs_due",
+        "CREATE INDEX IF NOT EXISTS note_kept ON note(kept) WHERE kept",
+        "CREATE INDEX IF NOT EXISTS note_gone ON note(gone_at) WHERE gone_at IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS note_refers ON note(host) WHERE instr(refs, '\"id\"') > 0",
+        "CREATE INDEX IF NOT EXISTS note_marked ON note(host) WHERE \(readerSaidOrOwing)",
     ]
 
     /// A row's `statusID`, as `note_status` holds it; a read by it must spell it the same way
@@ -294,6 +298,42 @@ extension StoreFile {
         }
     }
 
+    /// How many names one statement asks for, well under SQLite's limit on arguments.
+    private static let asked = 500
+
+    /// `rows` asked `asked` names at a time, of one host.
+    private static func held(
+        _ db: Database, host: String, _ names: [String], by column: String, _ sources: [String: Source]
+    ) throws -> [HeldRow] {
+        var found: [Row] = []
+        for start in stride(from: 0, to: names.count, by: asked) {
+            let some = Array(names[start..<min(start + asked, names.count)])
+            let marks = Array(repeating: "?", count: some.count).joined(separator: ",")
+            found += try Row.fetchAll(
+                db, sql: "SELECT rowid AS rowid, * FROM note WHERE host = ? AND \(column) IN (\(marks))",
+                arguments: StatementArguments([host] + some)
+            )
+        }
+        return try read(found, sources)
+    }
+
+    /// `rows` as the pool takes them: a row that holds no item is no row; **one that will not
+    /// decode is no answer** — `RowsUnread` names it, with every row that did decode — never a
+    /// row that is not there, which a copy landing would then be written over.
+    private static func read(_ rows: [Row], _ sources: [String: Source]) throws -> [HeldRow] {
+        var read: [HeldRow] = []
+        var unread: [NoteKey] = []
+        for row in rows {
+            do {
+                if let held = try heldRow(row, sources: sources) { read.append(held) }
+            } catch {
+                unread.append(NoteKey(host: row["host"], id: row["id"]))
+            }
+        }
+        guard unread.isEmpty else { throw RowsUnread(keys: unread, rows: read) }
+        return read
+    }
+
     /// `prefilter` as an SQL expression over a row of `note`, and its arguments: true for every
     /// row the timeline may show. **A cell that is not JSON is let through**, for the decode to
     /// judge, and never hidden by a rule that cannot be asked of it.
@@ -350,4 +390,216 @@ extension StoreFile {
             ? "(CASE WHEN \(text) THEN \(ascii) AND \(folded) ELSE 0 END)"
             : "(CASE WHEN \(text) THEN NOT (\(ascii)) OR \(folded) ELSE 1 END)"
     }
+}
+
+/// The file read by key for `ItemStore`'s pool (#357): by the primary key, a forum topic's
+/// replies by the key's prefix, and a source's own id by `note_status`, once a page has made it.
+extension StoreFile: HeldRows {
+    public func rows(_ keys: [NoteKey]) throws -> [HeldRow] {
+        try db.read { db in
+            let sources = try sourcesByHost(cached: db)
+            var found: [HeldRow] = []
+            var unread: [NoteKey] = []
+            for (host, keys) in Dictionary(grouping: keys, by: \.host).sorted(by: { $0.key < $1.key }) {
+                do {
+                    found += try Self.held(db, host: host, keys.map(\.id), by: "id", sources)
+                } catch let partly as RowsUnread {
+                    found += partly.rows
+                    unread += partly.keys
+                }
+            }
+            guard unread.isEmpty else { throw RowsUnread(keys: unread, rows: found) }
+            return found
+        }
+    }
+
+    public func rows(host: String, idPrefix: String) throws -> [HeldRow] {
+        try db.read { db in
+            try Self.read(
+                Row.fetchAll(
+                    db, sql: "SELECT rowid AS rowid, * FROM note WHERE host = ? AND substr(id, 1, length(?)) = ?",
+                    arguments: [host, idPrefix, idPrefix]
+                ),
+                sourcesByHost(cached: db)
+            )
+        }
+    }
+
+    public func rows(host: String, statusIDs: [String]) throws -> [HeldRow] {
+        try db.read { db in
+            try Self.held(db, host: host, statusIDs, by: Self.statusIDExpression, sourcesByHost(cached: db))
+        }
+    }
+
+    /// By `note_kept`, where a page has made it: asked once a run, by the first letting go that
+    /// must know what a kept post holds.
+    public func keptRows() throws -> [HeldRow] {
+        try db.read { db in
+            try Self.read(Row.fetchAll(db, sql: "SELECT rowid AS rowid, * FROM note WHERE kept"), sourcesByHost(cached: db))
+        }
+    }
+
+    /// Off `refs` alone, as `ReferenceRow` writes it, of the row's own host: nothing of a row
+    /// whose references are not JSON.
+    public func reblogged(by keys: [NoteKey]) throws -> [NoteKey] {
+        try db.read { db in
+            var reblogged: [NoteKey] = []
+            for (host, keys) in Dictionary(grouping: keys, by: \.host).sorted(by: { $0.key < $1.key }) {
+                let ids = keys.map(\.id)
+                for start in stride(from: 0, to: ids.count, by: Self.asked) {
+                    let some = Array(ids[start..<min(start + Self.asked, ids.count)])
+                    let marks = Array(repeating: "?", count: some.count).joined(separator: ",")
+                    reblogged += try String.fetchAll(db, sql: """
+                        SELECT json_extract(r.value, '$.id') FROM note n, json_each(CASE WHEN json_valid(n.refs) THEN n.refs ELSE '[]' END) r
+                        WHERE n.host = ? AND n.id IN (\(marks)) AND r.type = 'object'
+                        AND json_extract(r.value, '$.kind') = 'reblogs' AND json_type(r.value, '$.id') = 'text'
+                        """, arguments: StatementArguments([host] + some)).map { NoteKey(host: host, id: $0) }
+                }
+            }
+            return reblogged
+        }
+    }
+}
+
+/// What the file lets go of and changes itself (#357): the rows a letting go names, the oldest
+/// the room limit lets go, what refers to them, and a reader's marks taken back — **asked of
+/// every row of the file**, so a store that holds only some of them lets go of what the whole
+/// store would.
+extension StoreFile {
+    public func keys(_ selection: RowSelection) throws -> [NoteKey] {
+        var sql = "SELECT host, id FROM note WHERE NOT kept"
+        var arguments: [any DatabaseValueConvertible] = []
+        switch selection {
+        case .host(let host):
+            sql += " AND host = ?"
+            arguments = [host]
+        case .span(let span, let host):
+            sql += " AND posted_at >= ? AND posted_at < ?"
+            arguments = [span.lowerBound, span.upperBound]
+            if let host {
+                sql += " AND host = ?"
+                arguments.append(host)
+            }
+        case .gone(let cutoff):
+            sql += " AND gone_at IS NOT NULL"
+            if let cutoff {
+                sql += " AND gone_at <= ?"
+                arguments = [cutoff]
+            }
+        }
+        return try db.read { db in
+            try Row.fetchAll(db, sql: sql, arguments: StatementArguments(arguments)).map { NoteKey(host: $0["host"], id: $0["id"]) }
+        }
+    }
+
+    /// By `note_page`, sorting only the rows of one moment by when they arrived.
+    public func oldest(_ limit: Int, after: PageCursor?) throws -> (rows: [HeldRow], next: PageCursor?) {
+        try db.read { db in
+            // A range on `posted_at` alone, so `note_page` answers it; the moment it starts at is cut by rowid.
+            let past = after == nil ? "" : " AND posted_at >= ? AND NOT (posted_at = ? AND rowid <= ?)"
+            let arguments: StatementArguments = after.map { [$0.postedAt, $0.postedAt, $0.rowid, limit] } ?? [limit]
+            let found = try Row.fetchAll(
+                db, sql: "SELECT rowid AS rowid, * FROM note WHERE NOT kept\(past) ORDER BY posted_at ASC, rowid ASC LIMIT ?",
+                arguments: arguments
+            )
+            let sources = try sourcesByHost(cached: db)
+            let next = found.count < limit ? nil : found.last.flatMap { row in
+                String.fromDatabaseValue(row["posted_at"] as DatabaseValue)
+                    .map { PageCursor(postedAt: $0, id: row["id"], rowid: row["rowid"]) }
+            }
+            return (found.compactMap { Self.decoded($0, sources) }, next)
+        }
+    }
+
+    /// Off `refs` alone, as `ReferenceRow` writes it: a reference names a row of its own host.
+    /// Only a cell that names an id is taken apart.
+    public func referring(to keys: [NoteKey]) throws -> [Referrer] {
+        try db.read { db in
+            var found: [Referrer] = []
+            for (host, keys) in Dictionary(grouping: keys, by: \.host).sorted(by: { $0.key < $1.key }) {
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT n.arrival AS rowid, n.id AS id, n.posted_at AS posted_at, n.kept AS kept,
+                    json_extract(r.value, '$.id') AS target
+                    FROM (SELECT rowid AS arrival, id, posted_at, kept, refs FROM note
+                          WHERE host = ? AND instr(refs, '"id"') > 0) n,
+                    json_each(CASE WHEN json_valid(n.refs) THEN n.refs ELSE '[]' END) r
+                    WHERE r.type = 'object' AND json_type(r.value, '$.id') = 'text'
+                    AND json_extract(r.value, '$.id') IN (SELECT value FROM json_each(?))
+                    """, arguments: [host, try Self.json(keys.map(\.id))])
+                for row in rows {
+                    let posted: Date? = row["posted_at"]
+                    guard let posted else { continue }
+                    found.append(Referrer(
+                        key: NoteKey(host: host, id: row["id"]), target: NoteKey(host: host, id: row["target"]),
+                        postedAt: posted, arrival: row["rowid"], kept: row["kept"]
+                    ))
+                }
+            }
+            return found
+        }
+    }
+
+    public func marked(_ hosts: StoreOp.Hosts) throws -> Bool {
+        let (named, arguments) = try Self.rows(of: hosts)
+        return try db.read { db in
+            try Bool.fetchOne(
+                db, sql: "SELECT EXISTS (SELECT 1 FROM note WHERE \(named) AND \(Self.readerSaidOrOwing) AND \(Self.readerMarked))",
+                arguments: arguments
+            ) ?? false
+        }
+    }
+
+    public func rowCount() throws -> Int {
+        try db.read { db in try Int.fetchOne(db, sql: "SELECT count(*) FROM note") ?? 0 }
+    }
+
+    /// `op`, made on every row it names, inside the save's transaction.
+    static func make(_ op: StoreOp, in db: Database) throws {
+        switch op.kind {
+        case .forgetReaderMarks(let hosts):
+            // Every cell is read as it stood before this statement: what a row owed is judged
+            // by the marks it is losing, as `ItemStore.forgetReaderMarks` judges it.
+            let (named, arguments) = try rows(of: hosts)
+            try db.execute(sql: """
+                UPDATE note SET bookmarked = NULL,
+                facts = CASE WHEN json_valid(facts) THEN json_remove(facts, '$.boosted', '$.favourited') ELSE facts END,
+                refs_due = CASE WHEN refs_due AND \(arrivedAsReader) THEN 0 ELSE refs_due END
+                WHERE \(named) AND \(readerSaidOrOwing) AND \(readerMarked)
+                """, arguments: arguments)
+        }
+    }
+
+    /// The rows of `hosts`, and its one argument.
+    private static func rows(of hosts: StoreOp.Hosts) throws -> (String, StatementArguments) {
+        switch hosts {
+        case .only(let host): ("host = ?", [host])
+        case .allBut(let kept): ("host NOT IN (SELECT value FROM json_each(?))", [try json(kept.sorted())])
+        }
+    }
+
+    private static func json(_ values: [String]) throws -> String {
+        String(decoding: try JSONEncoder().encode(values), as: UTF8.self)
+    }
+
+    /// What a reader's reads said they did: a boost, a favourite, a bookmark — any word on it.
+    static let readerSaid = """
+        (bookmarked IS NOT NULL OR (CASE WHEN json_valid(facts) THEN \
+        json_extract(facts, '$.boosted') IS NOT NULL OR json_extract(facts, '$.favourited') IS NOT NULL ELSE 0 END))
+        """
+
+    /// Whether a row arrived by a signed read (`ItemStore.arrivedAsReader`): through no public
+    /// timeline nor Trends, and through home or a list or saying what the reader did.
+    private static let arrivedAsReader = """
+        (NOT EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(categories) THEN categories ELSE '[]' END) j \
+        WHERE j.type = 'object' AND json_extract(j.value, '$.kind') IN ('public', 'trends')) \
+        AND (EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(categories) THEN categories ELSE '[]' END) j \
+        WHERE j.type = 'object' AND json_extract(j.value, '$.kind') IN ('home', 'list')) OR \(readerSaid)))
+        """
+
+    /// Every row the taking back of a reader's marks may change, as `note_marked` holds them: a
+    /// statement names it word for word for the index to answer it.
+    static let readerSaidOrOwing = "(\(readerSaid) OR refs_due)"
+
+    /// A row the taking back of a reader's marks changes.
+    private static let readerMarked = "(\(readerSaid) OR (refs_due AND \(arrivedAsReader)))"
 }

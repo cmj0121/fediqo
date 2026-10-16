@@ -119,7 +119,9 @@ extension ShellSession {
         var rounds = 0
         while over > 0, rounds < Self.roomRounds {
             rounds += 1
-            let count = RoomPolicy.postsToLetGo(over: over, bytes: held, posts: holdings.posts)
+            // Weighed by every row of the file where there is one: the pool is only part (#357).
+            let rows = await store.rowsHeld() ?? holdings.posts
+            let count = RoomPolicy.postsToLetGo(over: over, bytes: held, posts: rows)
             let went = await store.letGoOldest(count: count)
             guard went.posts > 0 else { break }
             posts += went.posts

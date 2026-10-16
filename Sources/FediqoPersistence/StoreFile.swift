@@ -54,7 +54,44 @@ public struct StoreFile: Sendable {
             lock.lock()
             defer { lock.unlock() }
             current = fresh
+            sources = nil
         }
+
+        /// The sources by host as last read (`sourcesByHost(cached:)`), with what they were read
+        /// as of: the connection's `data_version`, which another connection's commit moves, and
+        /// how many of this one's own writes there had been, which it does not.
+        private var sources: (version: Int, writes: Int, byHost: [String: Source])?
+        private var writes = 0
+
+        /// This connection has written, or tried to: the sources it holds may have changed.
+        func wrote() {
+            lock.lock()
+            defer { lock.unlock() }
+            writes += 1
+        }
+
+        func sources(at version: Int) -> [String: Source]? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let sources, sources.version == version, sources.writes == writes else { return nil }
+            return sources.byHost
+        }
+
+        func keep(_ byHost: [String: Source], at version: Int) {
+            lock.lock()
+            defer { lock.unlock() }
+            sources = (version, writes, byHost)
+        }
+    }
+
+    /// `sourcesByHost`, read again only where the source table may have changed since: a
+    /// handful of rows, read for each lookup of the pool otherwise.
+    func sourcesByHost(cached db: Database) throws -> [String: Source] {
+        let version = try Int.fetchOne(db, sql: "PRAGMA data_version") ?? 0
+        if let byHost = held.sources(at: version) { return byHost }
+        let byHost = try Self.sourcesByHost(db)
+        held.keep(byHost, at: version)
+        return byHost
     }
 
     /// Why a connection could not be made again.
@@ -697,6 +734,7 @@ public struct StoreFile: Sendable {
     /// them.
     public func save(_ changes: RowChanges) async throws {
         let said = Dictionary(changes.said.map { ($0.host, $0) }, uniquingKeysWith: { a, _ in a })
+        defer { held.wrote() }
         try await db.write { db in
             for host in changes.removedHosts {
                 try db.execute(sql: "DELETE FROM source WHERE host = ?", arguments: [host])
@@ -707,6 +745,7 @@ public struct StoreFile: Sendable {
             for key in changes.deletes {
                 try db.execute(sql: "DELETE FROM note WHERE host = ? AND id = ?", arguments: [key.host, key.id])
             }
+            for op in changes.ops { try Self.make(op, in: db) }
             for note in changes.upserts {
                 try NoteRecord(note).upsert(db)
             }
@@ -729,6 +768,7 @@ public struct StoreFile: Sendable {
         sources: [Source], notes: [Note], said: [SourceProfile], replacingNotices notices: [NoticeReach]?
     ) async throws {
         let saidByHost = Dictionary(said.map { ($0.host, $0) }, uniquingKeysWith: { a, _ in a })
+        defer { held.wrote() }
         try await db.write { db in
             if let notices { try Self.write(notices: notices, in: db) }
             try NoteRecord.deleteAll(db)

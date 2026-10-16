@@ -14,6 +14,47 @@ public actor ItemStore {
     /// row a change reaches is remembered until a save takes it (`takeChanges`), so a save
     /// writes the rows that changed and no others (#357).
     private var notes = HeldNotes()
+    /// The file a row the pool lacks is read from, by key (#357) — or nothing for a store that
+    /// holds every row there is: a test's, `Staged`'s, one with no file. **That is the whole
+    /// pool**, the store as it was before any of this, and nothing here reads anything.
+    ///
+    /// Two things hold of the pool, and make what it shows what the whole store would:
+    /// - **What a timeline read from the file shows from where it was read to up is here**:
+    ///   its pages are read one after another and laid in (`take`), what arrives lands here,
+    ///   and nothing is let go but by what lets a row go.
+    /// - **What a row here holds with it is here, where the file has it** (`Note.heldWith`,
+    ///   `Note.topicKey`): every row is laid in with what it holds, and every way in reads what
+    ///   it is about to merge with first. So a reference not held here is not held at all.
+    private let disk: (any HeldRows)?
+    /// Whether rows of this store may be in the file and not here (#357): what it counts of them
+    /// is then at least what there is, never all of it (C11), and it cannot be taken away whole.
+    public nonisolated var heldInPart: Bool { disk != nil }
+    /// The changes to rows not held here that the file has yet to make (`StoreOp`): made, and not
+    /// yet taken by a save, or handed back by one that failed.
+    private var opsOwed: [StoreOp] = []
+    /// Every such change made since the file was last laid in whole (`replace`). **A row read
+    /// from the file is read as every one of them leaves it** (`unlanded`), landed or not: a
+    /// read begun before a change landed may be handed in after, and a change made again
+    /// changes nothing. Few, and — round 1's pool only growing — never one too many.
+    private var opsRun: [StoreOp] = []
+    private var opsMade = 0
+    /// The last change made before the file was last laid in whole: one numbered no higher,
+    /// handed back by a save taken before, is of rows no longer there and is not owed again.
+    private var opsFloor = 0
+    /// Every key the pool answers for (#357): each row laid in, each key asked of the file.
+    /// **One among these that is not in the pool is not held**, whatever the file still says —
+    /// a row let go is not read back before the save that deletes it lands.
+    private var looked: Set<NoteKey> = []
+    /// The source's ids each host's rows were already looked for by (`HeldRows.rows(host:
+    /// statusIDs:)`): one not found then is held, if ever, by a row that landed here since.
+    private var namesAsked: [String: Set<String>] = [:]
+    /// The "newer posts remain" marks a read on said again this run, by host (`land(_:of:
+    /// ifSourceHere:)`): a row of the file laid in later says them no more, as every row held
+    /// then stopped saying them.
+    private var remainSaid: [String: Set<TimelineGap>] = [:]
+    /// The first arrival of a row new to a store over a file: after every `rowid` there is, so a
+    /// copy read from the file is the earlier of two (#114), as it arrived first.
+    private static let arrivingAfterTheFile = 1 << 62
     /// The sources as the last write that landed left them on disk, with what each said of
     /// itself — nil where that is not known, and the next save writes every source. What a save
     /// finds the sources changed by, without every way of changing one having to say so.
@@ -157,7 +198,9 @@ public actor ItemStore {
     /// taken the notices at this mark has nothing new to take.
     public var noticesMark: [Int] { [noticesRevision, noticeEpochLast] }
 
-    public init() {}
+    public init() {
+        disk = nil
+    }
 
     /// The revision, each time something here really changed — so a screen reading this store
     /// renews itself with no key pressed (#175).
@@ -235,6 +278,31 @@ public actor ItemStore {
         sources: [Source], notes incoming: [Note], said: [SourceProfile] = [], notices: [NoticeReach] = [],
         unsent: [Unsent] = [], readFromDisk: Bool = false, skipped: [NoteKey] = []
     ) {
+        self.init(
+            sources: sources, notes: incoming, said: said, notices: notices, unsent: unsent,
+            readFromDisk: readFromDisk, skipped: skipped, disk: nil
+        )
+    }
+
+    /// A store over `rows`, the file's (#357): **no row read here** — the sources, what each
+    /// said, the notices and the texts, which are few — and each read by key once it is wanted,
+    /// or laid in from a page (`take`). Nothing is owed a write until it changes.
+    public init(
+        sources: [Source], said: [SourceProfile] = [], notices: [NoticeReach] = [], unsent: [Unsent] = [],
+        rows: any HeldRows
+    ) {
+        self.init(
+            sources: sources, notes: [], said: said, notices: notices, unsent: unsent, readFromDisk: true,
+            skipped: [], disk: rows
+        )
+    }
+
+    private init(
+        sources: [Source], notes incoming: [Note], said: [SourceProfile], notices: [NoticeReach],
+        unsent: [Unsent], readFromDisk: Bool, skipped: [NoteKey], disk: (any HeldRows)?
+    ) {
+        self.disk = disk
+        if disk != nil { arrivals = Self.arrivingAfterTheFile }
         for text in unsent where !self.unsent.contains(where: { $0.id == text.id }) {
             self.unsent.append(text)
         }
@@ -352,10 +420,23 @@ public actor ItemStore {
         sourcesWritten = nil
         hostsOwed = []
         arrival = [:]
-        arrivals = 0
+        arrivals = disk == nil ? 0 : Self.arrivingAfterTheFile
         for note in incoming where notes[note.key] != nil && arrival[note.key] == nil {
             arrival[note.key] = arrivals
             arrivals += 1
+        }
+        // What the file holds once the read back is written is what came: the pool answers
+        // for every row of it, and for nothing it knew of before.
+        if disk != nil {
+            looked = Set(incoming.map(\.key))
+            namesAsked = [:]
+            remainSaid = [:]
+            undecodable = []
+            keptSpared = []
+            keptRead = true
+            opsOwed = []
+            opsRun = []
+            opsFloor = opsMade
         }
         sourcesWatcher?(sourceList.map(\.host))
         noticeEpochLast += 1
@@ -477,7 +558,23 @@ public actor ItemStore {
 
     /// `ingest(_:)`'s landing. `exempt` takes `incoming` in whatever its age: the posts a post
     /// read again quotes (#214), which the keep window does not cut while it quotes them.
-    private func admit(_ incoming: [Note], exempt: Bool, owing: Bool = true) {
+    private func admit(_ landing: [Note], exempt: Bool, owing: Bool = true) {
+        guard !landing.isEmpty else { return }
+        // Every row this landing merges with, or asks about, read in first (#357): a copy of a
+        // row the file holds and the pool does not is that row, and never a row new here. **A
+        // copy of a row the file could not be read for is not taken** — nor what it brought.
+        let unread = pool((landing + landing.flatMap(\.brought)).flatMap(Self.reach))
+        let taken = unread.isEmpty ? landing : landing.compactMap { note -> Note? in
+            guard !unread.contains(note.key) else { return nil }
+            var taken = note
+            taken.brought = note.brought.filter { !unread.contains($0.key) }
+            return taken
+        }
+        admitRead(taken, exempt: exempt, owing: owing)
+    }
+
+    /// `admit`, of a landing whose rows the pool answers for, every one.
+    private func admitRead(_ incoming: [Note], exempt: Bool, owing: Bool) {
         guard !incoming.isEmpty else { return }
         // A copy of a row the person keeps is taken in whatever its age (#284): the row is here
         // past the window, and what its source says of it now is still news about it.
@@ -616,6 +713,8 @@ public actor ItemStore {
         // of that board would otherwise show the topic without replies All shows. Only where a
         // topic's boards grew, which is rare: one pass over that forum's rows then.
         if !boarded.isEmpty {
+            // Its replies the file holds and the pool does not are laid in, given the board.
+            for topic in boarded { poolRows(host: topic.host, idPrefix: topic.id + ":post:") }
             for (key, note) in notes where note.source.kind == .discuz {
                 guard let topic = note.topicKey, boarded.contains(topic) else { continue }
                 let through = Self.throughItsBoard(note, in: notes)
@@ -682,11 +781,13 @@ public actor ItemStore {
     public func refresh(_ incoming: [Note], ifSourceHere host: String, acted: ReaderMark? = nil) -> Bool {
         let host = host.lowercased()
         guard sourceList.contains(where: { $0.host == host }) else { return false }
+        // What the file could not be read for is not held as far as this knows: not laid over.
+        let unread = pool(incoming.filter { $0.source.host == host }.flatMap(Self.reach))
         var moved = false
         var shown = false
         var replies = false
         var held: [Note] = []
-        for note in incoming where note.source.host == host {
+        for note in incoming where note.source.host == host && !unread.contains(note.key) {
             // A row does not change what it is (#290), here as in `admit`: one post read again,
             // a thread, an act's answer are all read as posts, and one named as a reblog this
             // device holds is not laid over it.
@@ -758,6 +859,7 @@ public actor ItemStore {
     /// the row as it was. A thread's opening post, kept as the reader scrolls, is not (#154).
     @discardableResult
     public func keep(_ openings: [NoteKey: ForumOpening], shown: Bool = false) -> Bool {
+        pool(openings.keys)
         var moved = false
         var replies = false
         for (key, opening) in openings {
@@ -807,7 +909,10 @@ public actor ItemStore {
         let host = raw.lowercased()
         guard sourceList.contains(where: { $0.host == host }) else { return }
         ingest(read.notes)
+        pool([read.newerRemainAbove, read.missingBelow].compactMap { $0 })
         let remain = TimelineGap(.newerRemain, in: category)
+        // Said again, it is said again of the rows the file holds too, once they are read.
+        if disk != nil { remainSaid[host, default: []].insert(remain) }
         var marked: [NoteKey: Set<TimelineGap>] = [:]
         for (key, note) in notes where key.host == host && note.gaps.contains(remain) {
             marked[key] = note.gaps.subtracting([remain])
@@ -843,6 +948,7 @@ public actor ItemStore {
         below key: NoteKey, in category: Category, writtenBy me: String? = nil, signedIn: Bool = false
     ) -> MissingPlace? {
         let mark = TimelineGap(.mayBeMissing, in: category)
+        pool([key])
         guard let marked = notes[key], let gap = marked.gaps.first(where: { $0 == mark }),
               let listed = gap.from ?? marked.listed[category]
         else { return nil }
@@ -887,6 +993,7 @@ public actor ItemStore {
         let host = raw.lowercased()
         guard sourceList.contains(where: { $0.host == host }) else { return }
         ingest(down.notes)
+        pool([key])
         let mark = TimelineGap(.mayBeMissing, in: category)
         guard notes[key]?.gaps.contains(mark) == true else { return }
         notes[key]?.gaps.remove(mark)
@@ -940,7 +1047,9 @@ public actor ItemStore {
         hostsOwed.insert(host)
         let told = letNoticesGo(host: host)
         sourcesWatcher?(sourceList.map(\.host))
-        if keepingPosts {
+        // Over a file, its rows of the host the pool does not hold go by key with the rest — or,
+        // where the file would not say which they are, no post goes, as where they stay.
+        guard !keepingPosts, poolKept(), let unpooled = unpooled(.host(host)) else {
             changed(shown: false, replies: false)
             return told
         }
@@ -950,6 +1059,7 @@ public actor ItemStore {
             notes[note.key] = nil
             arrival[note.key] = nil
         }
+        drop(unpooled.filter { !shown.contains($0) })
         changed(shown: true, replies: going.contains { $0.isPartOfTopic })
         return told
     }
@@ -1028,6 +1138,11 @@ public actor ItemStore {
             noticed = true
         }
         if noticed { noticesChanged() }
+        // **Over a file nothing goes, from it or from the pool** (#357): the rows past the limit
+        // stay on disk until the limit is kept there too, and no page shows one
+        // (`PageQuery.keepFrom`). Round 1's pool only grows, so no row in it can be owed a
+        // delete it was never let go for.
+        if disk != nil { return .none }
         let before = notes.count
         // A quoted post a kept post quotes stays, as `ingest` keeps it (#214): the window's reach
         // has passed it, the quote's has not.
@@ -1058,12 +1173,20 @@ public actor ItemStore {
     /// another held post quotes stays whatever its age, as the keep window keeps it (#214): it
     /// goes once the post quoting it has. **A kept post is never one of them** (#284): the oldest
     /// that are not kept go, and where only kept posts are left nothing goes at all.
+    ///
+    /// **Over a file, the oldest of the file** (#357, C9), the rows the pool holds as it holds
+    /// them: what goes is what would go were every row read.
     public func letGoOldest(count: Int) -> WentByLimit {
-        guard count > 0, !notes.isEmpty else { return .none }
-        let going = mayGoForRoom().prefix(count)
-        guard !going.isEmpty else { return .none }
+        guard count > 0, disk != nil || !notes.isEmpty else { return .none }
+        guard let going = disk == nil ? Array(mayGoForRoom().prefix(count)) : mayGoForRoomFromFile(count),
+              !going.isEmpty
+        else { return .none }
         for note in going {
-            notes[note.key] = nil
+            if notes[note.key] == nil {
+                drop([note.key])
+            } else {
+                notes[note.key] = nil
+            }
             self.arrival[note.key] = nil
         }
         strike(carried: Set(going.map(\.key)))
@@ -1076,7 +1199,92 @@ public actor ItemStore {
     /// picture copies — asked of the store each time, so a post un-kept, from this window or
     /// another, is seen by the very next check.
     public func holdsWhatRoomMayLetGo() -> Bool {
-        !mayGoForRoom().isEmpty
+        guard disk != nil else { return !mayGoForRoom().isEmpty }
+        return !(mayGoForRoomFromFile(1) ?? []).isEmpty
+    }
+
+    /// How many rows the file holds, or nothing for a store with no file behind it — what the
+    /// room limit weighs a post by (#357): the pool is not all there is.
+    public func rowsHeld() -> Int? {
+        guard let disk else { return nil }
+        do {
+            return try disk.rowCount()
+        } catch {
+            Self.unread(error)
+            return nil
+        }
+    }
+
+    /// `mayGoForRoom`, the first `count` of them, **over the file** (#357): the file's oldest
+    /// rows not kept, read a chunk at a time, each as the pool holds it where it does, merged with
+    /// the pool's own in the one order; and each spared by `mayGoForRoom`'s rule, asked of every
+    /// row of the file or the pool that refers to it. Nothing where the file would not be read.
+    private func mayGoForRoomFromFile(_ count: Int) -> [Note]? {
+        guard let disk, poolKept() else { return nil }
+        let shown = shownByKept()
+        let arrival = self.arrival
+        typealias Place = (postedAt: Date, arrival: Int64)
+        func before(_ a: Place, _ b: Place) -> Bool {
+            a.postedAt != b.postedAt ? a.postedAt < b.postedAt : a.arrival < b.arrival
+        }
+        func place(_ note: Note) -> Place { (note.postedAt, Int64(arrival[note.key] ?? 0)) }
+        // The pool's rows that may go, in the order they go, and what refers to each in the pool.
+        let pooled = notes.values.filter { !$0.kept && !shown.contains($0.key) }.sorted { before(place($0), place($1)) }
+        var referred: [NoteKey: [Note]] = [:]
+        for note in notes.values {
+            for key in note.heldWith { referred[key, default: []].append(note) }
+        }
+        let chunk = max(2 * count, 200)
+        var chosen: [Note] = []
+        var cursor: PageCursor?
+        var poolAt = 0
+        while chosen.count < count {
+            let read: (rows: [HeldRow], next: PageCursor?)
+            do {
+                read = try disk.oldest(chunk, after: cursor)
+            } catch {
+                Self.unread(error)
+                return nil
+            }
+            // The file's rows the pool does not answer for: one it answers for is here as it
+            // holds it, or is let go already.
+            var batch: [(note: Note, place: Place)] = read.rows
+                .filter { !looked.contains($0.note.key) && notes[$0.note.key] == nil && !shown.contains($0.note.key) }
+                .map { ($0.note, ($0.note.postedAt, $0.arrival)) }
+            // The pool's rows up to the file's last of this chunk, or all that are left past it.
+            let last = read.rows.last.map { (postedAt: $0.note.postedAt, arrival: $0.arrival) }
+            while poolAt < pooled.count, read.next == nil || last.map({ !before($0, place(pooled[poolAt])) }) ?? false {
+                batch.append((pooled[poolAt], place(pooled[poolAt])))
+                poolAt += 1
+            }
+            batch.sort { before($0.place, $1.place) }
+            let askable = batch.filter { !$0.note.isReblog }.map(\.note.key)
+            let fromFile: [Referrer]
+            do {
+                fromFile = askable.isEmpty ? [] : try disk.referring(to: askable)
+            } catch {
+                Self.unread(error)
+                return nil
+            }
+            var referring: [NoteKey: [(stays: Bool, place: Place)]] = [:]
+            for referrer in fromFile where !looked.contains(referrer.key) && notes[referrer.key] == nil {
+                referring[referrer.target, default: []].append(
+                    (referrer.kept || shown.contains(referrer.key), (referrer.postedAt, referrer.arrival))
+                )
+            }
+            for key in askable {
+                for note in referred[key] ?? [] {
+                    referring[key, default: []].append((note.kept || shown.contains(note.key), place(note)))
+                }
+            }
+            for (note, at) in batch where chosen.count < count {
+                let spared = !note.isReblog && (referring[note.key] ?? []).contains { $0.stays || before(at, $0.place) }
+                if !spared { chosen.append(note) }
+            }
+            guard let next = read.next else { break }
+            cursor = next
+        }
+        return chosen
     }
 
     /// The rows `letGoOldest` chooses among, in the order they go: oldest posted first, two of
@@ -1116,16 +1324,28 @@ public actor ItemStore {
     /// source removed, a post its source says is gone. A kept row that could come to say its
     /// post is no longer held would be a keep that kept nothing the person could see.
     private func shownByKept() -> Set<NoteKey> {
-        Set(notes.values.lazy.filter { $0.kept && $0.isReblog }.compactMap(\.reblogKey))
+        Set(notes.values.lazy.filter { $0.kept && $0.isReblog }.compactMap(\.reblogKey)).union(keptSpared)
     }
 
     /// How many rows were posted inside `span` and, where `host` is given, came through that host
     /// — items and a topic's kept replies alike (#248). What a press to let a span go would take, so the question
     /// before it names the true count: a kept post is not counted, since the press leaves it (#284).
+    /// **Over a file, of the pool alone** (#357, C11): at least how many go, and said so.
+    /// The question before the press asks `countGoing`.
     public func count(span: Range<Date>, host raw: String? = nil) -> Int {
         let host = raw?.lowercased()
         let shown = shownByKept()
         return notes.values.reduce(0) { $0 + (Self.inside(span, host: host, $1, shown) ? 1 : 0) }
+    }
+
+    /// How many rows `letGo(span:host:)` would let go now — **over a file, every one of the
+    /// file's**, read or not (C14): what the question before the press names. Of the pool alone
+    /// where the file would not say.
+    public func countGoing(span: Range<Date>, host raw: String? = nil) -> Int {
+        let host = raw?.lowercased()
+        guard poolKept(), let unpooled = unpooled(.span(span, host: host)) else { return count(span: span, host: host) }
+        let shown = shownByKept()
+        return count(span: span, host: host) + unpooled.filter { !shown.contains($0) }.count
     }
 
     /// Lets go of every row posted inside `span`, from `host` or from every host where nil — the
@@ -1143,8 +1363,12 @@ public actor ItemStore {
     @discardableResult
     public func letGo(span: Range<Date>, host raw: String? = nil) -> Int {
         let host = raw?.lowercased()
+        // Over a file, its rows of those days the pool does not hold go by key with the rest —
+        // or, where the file would not say which they are, nothing goes.
+        guard poolKept(), let unpooled = unpooled(.span(span, host: host)) else { return 0 }
         let shown = shownByKept()
         let going = notes.values.filter { Self.inside(span, host: host, $0, shown) }
+        let unheld = unpooled.filter { !shown.contains($0) }
         // **And the copy of a post of those days a notice carries**, an item or not: the reader
         // said these days go. Not one of a post that stays held — a kept one.
         let leaving = Set(going.map(\.key))
@@ -1153,13 +1377,34 @@ public actor ItemStore {
             span.contains(post.postedAt) && (host == nil || post.source.host == host)
                 && (held[post.key] == nil || leaving.contains(post.key))
         }
-        guard !going.isEmpty else { return 0 }
+        guard !going.isEmpty || !unheld.isEmpty else { return 0 }
         for note in going {
             notes[note.key] = nil
             arrival[note.key] = nil
         }
+        drop(unheld)
         changed(shown: going.contains { !$0.isPartOfTopic }, replies: going.contains { $0.isPartOfTopic })
-        return going.count
+        return going.count + unheld.count
+    }
+
+    /// The keys of the file's rows `selection` names that the pool does not answer for — none for
+    /// a store with no file, and nothing where the file would not be read.
+    private func unpooled(_ selection: RowSelection) -> [NoteKey]? {
+        guard let disk else { return [] }
+        do {
+            return try disk.keys(selection).filter { !looked.contains($0) }
+        } catch {
+            Self.unread(error)
+            return nil
+        }
+    }
+
+    /// Rows of the file the pool does not hold, let go: **deleted by the next save, and answered
+    /// for as not held** until it lands and after, so none is read in again.
+    private func drop(_ keys: [NoteKey]) {
+        guard !keys.isEmpty else { return }
+        looked.formUnion(keys)
+        notes.owe(keys, dropped: keys)
     }
 
     /// Whether `note` is what `letGo(span:host:)` reaches: posted inside `span`, from `host`
@@ -1207,6 +1452,8 @@ public actor ItemStore {
         }
         sourcesWritten = (sourceList, saidByHost)
         hostsOwed = []
+        changes.ops = opsOwed
+        opsOwed = []
         return (changes, revision)
     }
 
@@ -1217,6 +1464,7 @@ public actor ItemStore {
         notes.owe(changes.upserts.map(\.key) + changes.deletes, dropped: changes.deletes)
         hostsOwed.formUnion(changes.removedHosts)
         if changes.sources != nil { sourcesWritten = nil }
+        opsOwed = changes.ops.filter { $0.number > opsFloor } + opsOwed
     }
 
     /// **The file put back to an older store behind this one** — a read back's undo writing
@@ -1224,10 +1472,15 @@ public actor ItemStore {
     /// (#344): every row and source held is owed a write, and of `fileHolds`, what the file now
     /// holds, every row this store does not hold is owed a delete. So whatever was saved in
     /// between is written again, and nothing the file was put back to that was let go stays.
+    ///
+    /// **Over a file, a row not held is one the pool answers for and lacks** (#357): a row
+    /// never read is the file's, not let go. And every change the file was to make of the rows
+    /// not held is owed again, the older store knowing none of them.
     public func oweEverything(fileHolds keys: [NoteKey], hosts: [String]) {
         let held = Array(notes.keys)
-        let gone = keys.filter { notes[$0] == nil }
+        let gone = keys.filter { notes[$0] == nil && (disk == nil || looked.contains($0)) }
         notes.owe(held + gone)
+        opsOwed = opsRun
         sourcesWritten = nil
         hostsOwed.formUnion(hosts)
         changed(shown: false, replies: false)
@@ -1476,6 +1729,168 @@ public actor ItemStore {
             .sorted { Self.storeOrder($0, $1, arrival) }
     }
 
+    // MARK: - The pool, read from the file as it is wanted (#357)
+
+    /// Lays `rows` read from the file — a page's, and what it carries — into the pool, each as
+    /// the file holds it, with what each holds. **A row the pool answers for already stays as
+    /// the pool has it**: it may say what no save has written yet, or be let go. Whether any
+    /// row came in; never one in a whole pool.
+    @discardableResult
+    public func take(_ rows: [HeldRow]) -> Bool {
+        let before = notes.count
+        pool(found: rows)
+        return notes.count != before
+    }
+
+    /// `note`'s key and what it holds with it: what reading it in reads.
+    private static func reach(_ note: Note) -> [NoteKey] {
+        [note.key] + note.heldWith + [note.topicKey].compactMap { $0 }
+    }
+
+    /// Reads each row under `keys` the pool does not answer for from the file. **Returns the
+    /// keys it could not answer for** — the file would not be read, or a row will not decode —
+    /// and every way in takes no copy under one of them: what the file holds there is not
+    /// known, and a copy taken for a row new here would be written over it. Its source sends
+    /// it again.
+    @discardableResult
+    private func pool(_ keys: some Sequence<NoteKey>) -> Set<NoteKey> {
+        guard disk != nil else { return [] }
+        return lay(Set(keys).subtracting(looked), found: [])
+    }
+
+    /// Lays `found` in, where the pool does not answer for its rows: the keys not answered for.
+    @discardableResult
+    private func pool(found: [HeldRow]) -> Set<NoteKey> {
+        guard disk != nil else { return [] }
+        return lay([], found: found.filter { looked.insert($0.note.key).inserted })
+    }
+
+    /// `read`, the rows it could and, where some would not decode, the keys of those — which
+    /// the pool does not answer for, so a copy of one is never taken over it. Nothing at all
+    /// where the file could not be read.
+    private func reading(_ read: () throws -> [HeldRow]) -> (rows: [HeldRow], unread: [NoteKey])? {
+        do {
+            return (try read(), [])
+        } catch let partly as RowsUnread {
+            // Said once a run of each, however often a copy of one is turned away.
+            let fresh = Set(partly.keys).subtracting(undecodable)
+            if !fresh.isEmpty {
+                undecodable.formUnion(fresh)
+                NetLog.index.error("Rows of the index that will not decode, not taken: \(fresh.count, privacy: .public)")
+            }
+            return (partly.rows, partly.keys)
+        } catch {
+            Self.unread(error)
+            return nil
+        }
+    }
+
+    /// The rows of the file met this run that will not decode: never answered for, and told once.
+    private var undecodable: Set<NoteKey> = []
+
+    /// Every row of `host` the file holds whose id starts `idPrefix`, laid in.
+    private func poolRows(host: String, idPrefix: String) {
+        guard let disk, let read = reading({ try disk.rows(host: host, idPrefix: idPrefix) }) else { return }
+        pool(found: read.rows.filter { $0.note.id.hasPrefix(idPrefix) })
+    }
+
+    /// Reads `keys` from the file and lays them in with `found`, then what each holds
+    /// (`Note.heldWith`, `Note.topicKey`), until nothing it holds is left to read. **All of it
+    /// or none**: where the file will not be read, nothing is laid in and the pool answers for
+    /// none of it, so no row stands in the pool without what it holds. A row that will not
+    /// decode is left out alone (`RowsUnread`). Returns the keys not answered for.
+    ///
+    /// Each row laid in is then made what opening the whole store made every row: a forum reply
+    /// given its topic's board (#297), what it owes settled against what is held (#293) — and a
+    /// mark a read on said again this run taken off (`remainSaid`), as it came off every row.
+    private func lay(_ keys: Set<NoteKey>, found: [HeldRow]) -> Set<NoteKey> {
+        guard let disk else { return [] }
+        var arriving = found
+        var asking = keys
+        var marked = Set(found.map(\.note.key))
+        var unread: Set<NoteKey> = []
+        var read: [HeldRow] = []
+        while true {
+            for row in arriving where notes[row.note.key] == nil {
+                read.append(row)
+                asking.formUnion(Self.reach(row.note))
+            }
+            asking.subtract(looked)
+            asking.subtract(unread)
+            guard !asking.isEmpty else { break }
+            let next = asking.sorted { ($0.host, $0.id) < ($1.host, $1.id) }
+            looked.formUnion(next)
+            marked.formUnion(next)
+            asking = []
+            guard let answer = reading({ try disk.rows(next) }) else {
+                // Asked again the next time any of it is wanted.
+                looked.subtract(marked)
+                return marked.union(keys)
+            }
+            arriving = answer.rows
+            looked.subtract(answer.unread)
+            unread.formUnion(answer.unread)
+        }
+        var laid: [NoteKey] = []
+        for row in read {
+            let key = row.note.key
+            notes.lay(unlanded(row.note))
+            if let said = remainSaid[key.host], !row.note.gaps.isDisjoint(with: said) {
+                notes[key]?.gaps.subtract(said)
+            }
+            arrival[key] = Int(row.arrival)
+            laid.append(key)
+        }
+        guard !laid.isEmpty else { return unread }
+        for key in laid {
+            guard let note = notes[key], note.source.kind == .discuz else { continue }
+            let through = Self.throughItsBoard(note, in: notes)
+            if through.categories != note.categories { notes[key] = through }
+        }
+        settleOwing(among: Set(laid))
+        // What `all()` and `replies()` hand over grew; nothing is owed a write for it.
+        let parts = laid.compactMap { notes[$0]?.isPartOfTopic }
+        changed(shown: parts.contains(false), replies: parts.contains(true), kept: false)
+        return unread
+    }
+
+    /// Whether the kept rows of the file are in the pool, with what they hold (`poolKept`).
+    private var keptRead = false
+
+    /// Every row the file holds that the person keeps, laid in once a run: **what a letting go
+    /// asks before it lets a post go**, since a kept reblog of it holds it (`shownByKept`) and
+    /// the reblog need not have been read. False where they could not be read, and nothing may
+    /// be let go for being unkept.
+    ///
+    /// **Once a run**: a kept row that will not decode is no reason to read them again — what
+    /// it reblogs is read off its references alone and spared (`keptSpared`).
+    private func poolKept() -> Bool {
+        guard let disk, !keptRead else { return true }
+        guard let read = reading({ try disk.keptRows() }) else { return false }
+        if !read.unread.isEmpty {
+            do {
+                keptSpared = Set(try disk.reblogged(by: read.unread))
+            } catch {
+                Self.unread(error)
+                return false
+            }
+        }
+        pool(found: read.rows)
+        // Laid in, or answered for already: none left out by a read that failed.
+        guard read.rows.allSatisfy({ looked.contains($0.note.key) }) else { return false }
+        keptRead = true
+        return true
+    }
+
+    /// What the kept rows of the file that will not decode reblog: held for them, as
+    /// `shownByKept` holds what a kept reblog shows.
+    private var keptSpared: Set<NoteKey> = []
+
+    /// A read of the file that failed: the rows it was for are not laid in, and nothing else.
+    private static func unread(_ error: any Error) {
+        NetLog.index.error("Rows of the index could not be read: \(String(describing: type(of: error)), privacy: .public)")
+    }
+
     // MARK: - What an item refers to, loaded (#293)
 
     /// The items whose load was given up for this run. Of this run only: never written down.
@@ -1509,12 +1924,8 @@ public actor ItemStore {
     /// which is nearly always, that pass is all — then one pass over their hosts' items for the
     /// names. Returns the items that changed.
     @discardableResult
-    private static func settleOwing(in notes: inout HeldNotes, of hosts: Set<String>?) -> [NoteKey] {
-        // Items that owe — and items that say a post is gone: said once, on one answer, and
-        // taken back where the post turns up after all.
-        let owing = notes.values.filter {
-            ($0.refsDue || $0.refs.contains(where: \.gone)) && (hosts?.contains($0.key.host) ?? true)
-        }
+    private static func settleOwing(in notes: inout HeldNotes, of hosts: Set<String>?, among keys: Set<NoteKey>? = nil) -> [NoteKey] {
+        let owing = Self.owing(in: notes, of: hosts, among: keys)
         guard !owing.isEmpty else { return [] }
         let names = named(in: notes, of: Set(owing.map(\.key.host)))
         var moved: [NoteKey] = []
@@ -1538,10 +1949,42 @@ public actor ItemStore {
         return moved
     }
 
-    /// `settleOwing(in:of:)` over what this store holds. Whether any row changed.
+    /// The items among `notes` of `hosts` — or only those under `keys`, where given — that owe,
+    /// or say a post is gone: said once, on one answer, and taken back where the post turns up
+    /// after all.
+    private static func owing(in notes: HeldNotes, of hosts: Set<String>?, among keys: Set<NoteKey>?) -> [Note] {
+        let candidates = keys.map { $0.compactMap { notes[$0] } } ?? Array(notes.values)
+        return candidates.filter {
+            ($0.refsDue || $0.refs.contains(where: \.gone)) && (hosts?.contains($0.key.host) ?? true)
+        }
+    }
+
+    /// `settleOwing(in:of:among:)` over what this store holds — **and what the file holds** of
+    /// the posts the items owe (#357): read in by the source's id first, so a post held there
+    /// names the reference as it would have in the whole store. Whether any row changed.
     @discardableResult
-    private func settleOwing(of hosts: Set<String>? = nil) -> Bool {
-        let moved = Self.settleOwing(in: &notes, of: hosts)
+    private func settleOwing(of hosts: Set<String>? = nil, among keys: Set<NoteKey>? = nil) -> Bool {
+        if let disk {
+            var asking: [String: Set<String>] = [:]
+            for note in Self.owing(in: notes, of: hosts, among: keys) {
+                for reference in note.refs where reference.kind != .reblogs && reference.id == nil {
+                    guard let statusID = reference.statusID,
+                          namesAsked[note.key.host, default: []].insert(statusID).inserted
+                    else { continue }
+                    asking[note.key.host, default: []].insert(statusID)
+                }
+            }
+            for (host, statusIDs) in asking.sorted(by: { $0.key < $1.key }) {
+                // A row that will not decode names nothing: the reference stays as it is.
+                guard let read = reading({ try disk.rows(host: host, statusIDs: statusIDs.sorted()) }) else {
+                    namesAsked[host]?.subtract(statusIDs)
+                    continue
+                }
+                pool(found: read.rows)
+                if !read.rows.allSatisfy({ looked.contains($0.note.key) }) { namesAsked[host]?.subtract(statusIDs) }
+            }
+        }
+        let moved = Self.settleOwing(in: &notes, of: hosts, among: keys)
         for key in moved where notes[key]?.refsDue == false {
             stalled.remove(key)
             refused[key] = nil
@@ -1588,6 +2031,7 @@ public actor ItemStore {
     public func owed(host raw: String, among items: Set<NoteKey>? = nil) -> [Owed] {
         let host = raw.lowercased()
         guard sourceList.contains(where: { $0.host == host }) else { return [] }
+        if let items { pool(items) }
         let candidates: [Note] = items.map { $0.compactMap { notes[$0] } } ?? Array(notes.values)
         let arrival = self.arrival
         return candidates
@@ -1662,6 +2106,7 @@ public actor ItemStore {
     /// comes back to a row let go of lands nowhere.
     public func land(_ loaded: Loaded, for owed: Owed) {
         let key = owed.item
+        pool([key])
         guard sourceList.contains(where: { $0.host == key.host }), let item = notes[key] else { return }
         /// The item's references, with the one that was asked for settled by `change`.
         func referring(_ change: (Reference) -> Reference) -> [Reference] {
@@ -1749,6 +2194,8 @@ public actor ItemStore {
     /// **The copy a notice carries of it is struck**, whether or not the post was ever an item
     /// here — but for one that stays held, which is still this device's to show.
     public func forget(_ key: NoteKey, at moment: Date = Date()) {
+        // Neither the row nor what keeps it held could be read: nothing is let go, or struck.
+        guard pool([key]).isEmpty, poolKept() else { return }
         let stays = notes[key].map { $0.kept || shownByKept().contains(key) } ?? false
         if !stays { strike(carried: [key]) }
         guard var gone = notes[key] else { return }
@@ -1776,16 +2223,20 @@ public actor ItemStore {
     /// signed-out reader was told is not on disk a moment longer than it is held (#292).
     @discardableResult
     public func forgetReaderMarks(host raw: String) -> Bool {
-        forgetReaderMarks { $0 == raw.lowercased() }
+        forgetReaderMarks(of: .only(raw.lowercased()))
     }
 
     /// `forgetReaderMarks(host:)` for every host not among `hosts` — the ones still signed in to.
     @discardableResult
     public func forgetReaderMarks(keeping hosts: Set<String>) -> Bool {
-        forgetReaderMarks { !hosts.contains($0) }
+        forgetReaderMarks(of: .allBut(hosts))
     }
 
-    private func forgetReaderMarks(where gone: (String) -> Bool) -> Bool {
+    /// **Over a file, its rows the pool does not hold are changed by the file** (`StoreOp`), with
+    /// the next save — and asked for first, so a sweep with nothing left to take writes nothing.
+    /// Where the file would not say, it is changed all the same.
+    private func forgetReaderMarks(of hosts: StoreOp.Hosts) -> Bool {
+        let gone = hosts.contains
         // From here on a read sent before this moment says nothing of the reader (#291): one
         // still on the wire was asked as whoever has just gone. Marked for every host this
         // names, a row with a mark on it or not — the read on its way may bring the first.
@@ -1820,9 +2271,42 @@ public actor ItemStore {
             shown = shown || !note.isPartOfTopic
             replies = replies || note.isPartOfTopic
         }
-        guard shown || replies else { return !told.isEmpty }
+        var onFile = false
+        if let disk {
+            do {
+                onFile = try disk.marked(hosts)
+            } catch {
+                Self.unread(error)
+                onFile = true
+            }
+            if onFile {
+                opsMade += 1
+                let op = StoreOp(number: opsMade, kind: .forgetReaderMarks(hosts))
+                opsOwed.append(op)
+                opsRun.append(op)
+            }
+        }
+        guard shown || replies || onFile else { return !told.isEmpty }
         changed(shown: shown, replies: replies)
         return true
+    }
+
+    /// `note`, read from the file, as every change made of the file's rows this run leaves it
+    /// (`opsRun`), landed or not.
+    private func unlanded(_ note: Note) -> Note {
+        var note = note
+        for op in opsRun {
+            switch op.kind {
+            case .forgetReaderMarks(let hosts):
+                guard hosts.contains(note.key.host) else { continue }
+                let owesAsReader = note.refsDue && Self.arrivedAsReader(note)
+                if note.boosted != nil || note.favourited != nil || note.bookmarked != nil {
+                    note = note.withoutReaderMarks()
+                }
+                if owesAsReader { note.refsDue = false }
+            }
+        }
+        return note
     }
 
     /// Keeps one row, or un-keeps it (#284) — the person's own mark, sent nowhere. Silent where
@@ -1834,6 +2318,7 @@ public actor ItemStore {
     /// goes when a limit next acts or the person next lets something go — as it would have.
     @discardableResult
     public func setKept(_ kept: Bool, for key: NoteKey) -> Bool {
+        pool([key])
         guard var held = notes[key], held.kept != kept else { return false }
         held.kept = kept
         notes[key] = held
@@ -1850,6 +2335,8 @@ public actor ItemStore {
     @discardableResult
     public func stopKeeping(host raw: String? = nil) -> Int {
         let host = raw?.lowercased()
+        // Every kept row of the file is in the pool once read, so the pool's are all of them.
+        guard poolKept() else { return 0 }
         let keeping = notes.values.filter { $0.kept && (host == nil || $0.key.host == host) }
         guard !keeping.isEmpty else { return 0 }
         for var note in keeping {
@@ -1865,6 +2352,7 @@ public actor ItemStore {
     /// it can say how many stay.
     public func keptCount(span: Range<Date>, host raw: String? = nil) -> Int {
         let host = raw?.lowercased()
+        poolKept()
         return notes.values.reduce(0) { sum, note in
             sum + (note.kept && span.contains(note.postedAt) && (host == nil || note.key.host == host) ? 1 : 0)
         }
@@ -1872,7 +2360,8 @@ public actor ItemStore {
 
     /// How many kept rows are marked gone from their source (#294): what `letGoneGo` leaves.
     public func keptGoneCount() -> Int {
-        notes.values.reduce(0) { $0 + ($1.kept && $1.goneSince != nil ? 1 : 0) }
+        poolKept()
+        return notes.values.reduce(0) { $0 + ($1.kept && $1.goneSince != nil ? 1 : 0) }
     }
 
     /// Marks one row as gone from its source (#179): a read of that one post heard the source say
@@ -1885,6 +2374,7 @@ public actor ItemStore {
     /// somebody else's server let go of, which the reader already read and keeps until they say.
     @discardableResult
     public func markGone(_ key: NoteKey, at moment: Date = Date()) -> Bool {
+        pool([key])
         guard sourceList.contains(where: { $0.host == key.host }),
               var held = notes[key], held.goneSince == nil
         else { return false }
@@ -1911,19 +2401,24 @@ public actor ItemStore {
     /// still marked, for as long as it is kept.
     @discardableResult
     public func letGoneGo(markedBy cutoff: Date? = nil) -> Int {
+        // Over a file, its marked rows the pool does not hold go by key with the rest — or,
+        // where the file would not say which they are, nothing goes.
+        guard poolKept(), let unpooled = unpooled(.gone(markedBy: cutoff)) else { return 0 }
         let shown = shownByKept()
         let going = notes.values.filter { note in
             guard !note.kept, !shown.contains(note.key), let gone = note.goneSince else { return false }
             return cutoff.map { gone <= $0 } ?? true
         }
-        guard !going.isEmpty else { return 0 }
+        let unheld = unpooled.filter { !shown.contains($0) }
+        guard !going.isEmpty || !unheld.isEmpty else { return 0 }
         for note in going {
             notes[note.key] = nil
             arrival[note.key] = nil
         }
-        strike(carried: Set(going.map(\.key)))
+        drop(unheld)
+        strike(carried: Set(going.map(\.key) + unheld))
         changed(shown: going.contains { !$0.isPartOfTopic }, replies: going.contains { $0.isPartOfTopic })
-        return going.count
+        return going.count + unheld.count
     }
 
     /// How many places say their source no longer has what lay there (#204) — what a press would
@@ -1964,12 +2459,14 @@ public actor ItemStore {
     /// decode back would be holding a note that disagrees with the store about the categories the
     /// row arrived through and about who boosted it.
     public func note(_ key: NoteKey) -> Note? {
-        notes[key]
+        pool([key])
+        return notes[key]
     }
 
     /// The rows held among `keys`, by key — one hop for a caller that just landed a read and
     /// draws what the store made of it (#284), rather than what the wire said.
     public func notes(_ keys: [NoteKey]) -> [NoteKey: Note] {
+        pool(keys)
         var found: [NoteKey: Note] = [:]
         for key in keys { found[key] = notes[key] }
         return found
@@ -1981,6 +2478,7 @@ public actor ItemStore {
     /// another order says so.
     public func held(host raw: String, idPrefix: String = "") -> [Note] {
         let host = raw.lowercased()
+        poolRows(host: host, idPrefix: idPrefix)
         let arrival = self.arrival
         return notes.values
             .filter { $0.source.host == host && $0.id.hasPrefix(idPrefix) }

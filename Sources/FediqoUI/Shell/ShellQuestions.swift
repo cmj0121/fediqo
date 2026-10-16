@@ -532,7 +532,8 @@ enum ShellQuestion {
 
     /// Letting go of the posts of a span of days, from one source or every one (#248): the title
     /// counts them, the line names the days and where they come from and that they do not come
-    /// back, and the (?) says what stays.
+    /// back, and the (?) says what stays. **The count is every post that goes**, whatever the
+    /// store has read (C14: `ShellSession.spanGoing`).
     static func letGo(_ ask: SpanAsk, language: DummyLanguage? = nil) -> ShellConfirmation {
         let (line, help) = saying(
             keptStay(ask.kept, language: language),
@@ -756,6 +757,9 @@ enum ShellQuestion {
         case .nothingToTake:
             key = "carry.refused.nothingToTake"
             line = L10n.t(key + ".line", language: language)
+        case .heldInPart:
+            key = "carry.refused.heldInPart"
+            line = L10n.t(key + ".line", language: language)
         case .locked:
             key = "carry.refused.locked"
             line = L10n.t(key + ".line", language: language)
@@ -865,6 +869,8 @@ enum ShellQuestion {
             return carryRefused(.storeNotOpened, language: language)
         case .nothingToTake:
             return carryRefused(.nothingToTake, language: language)
+        case .heldInPart:
+            return carryRefused(.heldInPart, language: language)
         case .locked:
             return carryRefused(.locked, language: language)
         case .notAllowed, .wrongCode, .refusedThere, .lost, .malformed, .unsure, .guessing, .timedOut:

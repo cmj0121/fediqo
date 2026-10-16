@@ -606,6 +606,8 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         // A run that did not open this device's store holds none of it: what it would take away
         // is an empty store under this device's name, which is not what the person asked for.
         if storeNotOpened || storeIsNewer { throw PackageFault.nothingToTake }
+        // A store that holds only what was read of the file would carry only that (#357).
+        if contents == .whole, store.heldInPart { throw PackageFault.heldInPart }
         try await unlocked()
         if case .password(let password) = key {
             if password.isEmpty { throw PackageFault.emptyPassword }

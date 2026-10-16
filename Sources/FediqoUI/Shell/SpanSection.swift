@@ -48,12 +48,14 @@ struct SpanSection: View {
             DatePicker(L10n.t("usage.span.to"), selection: $to, in: from..., displayedComponents: .date)
             sourcePicker
             HStack(spacing: ShellSpace.snug) {
-                if let count { ShellReadingLine(Self.countLine(count)) }
+                if let count, let line = Self.countLine(count, atLeast: session.store.heldInPart) {
+                    ShellReadingLine(line)
+                }
                 Spacer(minLength: ShellSpace.snug)
                 ShellMoreButton(Self.more(
-                    SpanAsk(from: from, to: to, host: host), figure: count,
+                    SpanAsk(from: from, to: to, host: host, atLeast: session.store.heldInPart), figure: count,
                     count: { ask in
-                        (await session.spanHeld(ask.span, host: ask.host), await session.spanKept(ask.span, host: ask.host))
+                        (await session.spanGoing(ask.span, host: ask.host), await session.spanKept(ask.span, host: ask.host))
                     },
                     none: { count = 0 },
                     go: { [from, to, host] in
@@ -98,7 +100,7 @@ struct SpanSection: View {
         none: @escaping @MainActor () -> Void, go: @escaping () -> Void,
         language: DummyLanguage? = nil
     ) -> ShellMore {
-        let live = (figure ?? 0) > 0
+        let live = ask.atLeast ? figure != nil : (figure ?? 0) > 0
         let item = ShellMoreItem.danger(
             "trash", L10n.t("usage.span.now", language: language),
             look: live ? .live : .dim(.notNow),
@@ -158,9 +160,12 @@ struct SpanSection: View {
         host ?? L10n.t("usage.span.every.line", language: language)
     }
 
-    /// The live figure: how many posts the span and source hold, or that they hold none.
-    static func countLine(_ count: Int, language: DummyLanguage? = nil) -> String {
-        count == 0 ? L10n.t("usage.span.none", language: language) : L10n.count("prefs.held.posts", count, language: language)
+    /// The live figure: how many posts the span and source hold, or that they hold none — or,
+    /// `atLeast`, how many of them were read, which is at least how many there are (C11), and
+    /// nothing where none were: that is not that there are none.
+    static func countLine(_ count: Int, atLeast: Bool = false, language: DummyLanguage? = nil) -> String? {
+        if atLeast { return count == 0 ? nil : L10n.count("prefs.span.atLeast", count, language: language) }
+        return count == 0 ? L10n.t("usage.span.none", language: language) : L10n.count("prefs.held.posts", count, language: language)
     }
 
     /// Whether the posts a press let go are still in this device's file: the write behind it
@@ -187,6 +192,10 @@ struct SpanAsk: Equatable {
     let from: Date
     let to: Date
     let host: String?
+    /// Whether the store counts only what it has read (#357, C11): the row's figure is then at
+    /// least how many there are, and is said so — and none read is no reason the press is dim.
+    /// The question is counted over every row all the same (C14).
+    var atLeast = false
 
     var span: Range<Date> { SpanSection.span(from: from, to: to) }
 
@@ -204,6 +213,12 @@ extension ShellSession {
     /// would let go (#248), read off the store so a forum topic's kept replies are counted too.
     func spanHeld(_ span: Range<Date>, host: String?) async -> Int {
         await store.count(span: span, host: host)
+    }
+
+    /// How many posts the press would let go of `span` from `host` — **every one, read or not**
+    /// (C14): what the question names, where the row's figure is of what was read.
+    func spanGoing(_ span: Range<Date>, host: String?) async -> Int {
+        await store.countGoing(span: span, host: host)
     }
 
     /// How many kept posts `span` holds from `host`: what the press would leave (#294).
