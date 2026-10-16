@@ -87,7 +87,9 @@ your own hands, or moves to another of your devices nearby when both agree, and 
 through nowhere of ours and not through the Apple account. Part of it goes when you say so —
 by a span of dates, by a source — or when a limit you set is reached, and what a limit let go
 says which limit did. Nothing goes that neither you nor your own limit chose, and a post you
-keep goes by none of them. How each works is under What this device holds, below.
+keep goes by none of them. How each works is under What this device holds, below. This
+build does not let the whole store leave yet: Take away, and moving the store nearby, say it is
+not ready and change nothing. A later version brings them back.
 
 What Fediqo writes on this device is closed while the device is locked. A phone closes all of
 it. A Mac keeps what a running Fediqo already has open and refuses whatever would open it
@@ -138,7 +140,8 @@ was used.
 An empty launch opens Account. Add a Mastodon host or a Discuz forum from the catalog or by
 typing its hostname. It names the protocol; only those two join this session. A server that
 only answers as a Mastodon does — a GoToSocial — is named as what it is, and is not added. What a source
-sends lands in this device's store, and every timeline is a query of that store. Compose
+sends lands in this device's store, and every timeline is a query of that store, read a page
+at a time as far as you read, so Fediqo opens on a timeline at once however much it holds. Compose
 stays off until it has something; Notices can always be entered, and says what would make it
 fill.
 
@@ -487,7 +490,7 @@ on Preferences, and the question before removing says which it will do.
 | --- | --------------------------------------------------------------- |
 | `r` | reload the selected timeline, or ask the page in front again    |
 | `e` | write or change the selected timeline                           |
-| `/` | search the posts this device holds                              |
+| `/` | search the posts this device has read so far                    |
 | `l` | follow whoever's page, or the hashtag whose page, is in front   |
 | `h` | on Trends, open what is rising on your sources                  |
 | Tab | on an opened page, the tab beside; ⇧Tab the one before         |
@@ -509,9 +512,11 @@ three dots on a person's page, behind the three dots of a source's row on a hash
 and behind the three dots of its row among the hashtags you follow. Unfollowing a hashtag
 asks first, naming the hashtag and the source.
 
-Reading toward the end of a timeline asks its sources for the next stretch, with no key
-pressed. On Trends that is the next stretch of what is rising on each Mastodon source: what
-arrives carries the trends category and stands at its publish time like every other post —
+Reading toward the end of a timeline reads the next page of what this device holds, with no
+key pressed, and the foot of the timeline says it is reading further down. Once this device
+has no more for it, reading on asks its sources for the next stretch. On Trends that is the
+next stretch of what is rising on each Mastodon source: what arrives carries the trends
+category and stands at its publish time like every other post —
 nothing here ranks it. A source that has no more to give is named at the foot of the timeline
 for as long as that is so, and is not asked again until `r` reads from the top; the wait
 reading the same sources between times changes none of that. One that fails says so, the
@@ -523,10 +528,11 @@ who wrote it, who boosted it, its text, its hashtags, its source, and its catego
 their English or translated names and by list and board names. `*` stands for any run of
 characters, including none, and `?` for exactly one. Every other character stands for itself:
 there is no regex, operator, field prefix, or quoting. Case, and full-width against
-half-width, do not change what is found. As you type, the posts this device holds are
-searched. Return also asks the sources of the timeline in front that can be searched. What is
-found is in time order. Clearing the field returns to the timeline. While an opened page is
-in front the field stands aside; leaving the page brings it back as it was.
+half-width, do not change what is found. As you type, the posts this device has read so far
+are searched: a post still in the store that no timeline has reached yet is not found.
+Return also asks the sources of the timeline in front that can be searched. What is found
+is in time order. Clearing the field returns to the timeline. While an opened page is in front
+the field stands aside; leaving the page brings it back as it was.
 
 A reblog is a row of its own. Its first line says who reblogged and, at its far end, when —
 the time the row stands at. Under it is the post itself: its author's face and name, and
@@ -790,7 +796,7 @@ says so. Newer posts stay on this device; turning the date off shows them again 
 fetch. The date survives a relaunch.
 
 With no network, everything this device holds still reads: timelines, threads already read,
-and pictures already brought. Rules are written and applied, and a search finds what is held.
+and pictures already brought. Rules are written and applied, and a search finds what has been read.
 What needs a network — asking a source, signing in, posting — says it could not reach the
 source, rather than hanging. When the network returns, what was left unasked is asked again,
 with no relaunch.
@@ -936,12 +942,19 @@ The Usage page is tabbed by purpose: Sources, Time, Keep, and Copies. Tab rotate
 Sources holds the totals and a row for each source: its mark, its hostname and the way in to
 its detail, which holds its figures — how many notices are held of it among them, where any
 are — and its Clear behind three dots. There is one figure of posts for each
-source, counting everything held from it, a forum topic's replies included. Time holds the week or month
+source, counting everything read from it so far, a forum topic's replies included. Time holds the week or month
 breakdown. Keep holds the two limits, Posts you keep, Let go by dates, and What the limits let go. Copies
 holds the pictures this device is keeping, and the drop that takes them. Clear takes a
 server's cached copies and its sign-in, and keeps its posts. Preferences keeps what you
 choose: language, theme, type, the latest date, what becomes of a removed source's posts,
 and the two ways the store leaves — Take away and Move nearby.
+
+A timeline reads the store a page at a time, so a count of posts is of the posts read so far,
+and the store may hold more. Where that is so, the count says "at least" so many: Usage's
+posts, its totals and what you keep, the figure beside Let go by dates, and the questions
+that remove a source or stop keeping. A source none of whose posts has been read says "None
+read yet" rather than none, and Posts you keep reads in what is kept before it says nothing
+is. The question Let go by dates asks names exactly how many go, read or not.
 
 What a source says about itself — its name, its figures, how long a post may be — stays on
 this device with the source. After a relaunch, with or without a network, its page shows what
@@ -987,7 +1000,8 @@ and a store an earlier version left such words in is rid of them the first time 
 opens it. A store that a read back replaced is not kept either, once the whole read back has
 held, and nor is one that was put aside because it was damaged: it is deleted once you have
 been told of it and what took its place has been saved, and, told or not, the first time
-Fediqo is opened 30 days or more after it was put aside. Beyond that, what the system keeps
+Fediqo is opened 30 days or more after it was put aside. Posts older than Keep posts are, in
+this build, only hidden, as The two limits says. Beyond that, what the system keeps
 beneath a file is the system's, and a package you took away earlier still holds what it held.
 
 When the store cannot be opened, Fediqo says why at the first thing you see, and what it does
@@ -1095,10 +1109,15 @@ limit, when, how many posts or picture copies, and from which sources — and ne
 The lines survive a relaunch. What you let go yourself is not written there. Clearing the
 account lets nothing else go.
 
+In this build Keep posts hides an older post from every timeline and lets none go from the
+file: posts past the months stay on disk until a later version lets them go there, and What
+the limits let go has no line for them. Room acts on the file as above. Notices older than the
+months go as before.
+
 #### Let go by dates
 
 Under Keep. Pick a first and a last day, both included, in this device's time zone, and one
-source or every one. Before anything goes, a question says how many posts, from where, and
+source or every one. Before anything goes, a question says exactly how many posts, from where, and
 that they do not come back; nothing goes without a yes. Afterwards they are in no timeline,
 no search, and no count. Nothing outside those days, and nothing from another source, is
 touched. Every source stays joined.
@@ -1112,6 +1131,9 @@ dates, or by a limit. Its sign-in, its pictures and the boards you picked go eit
 nothing reaches it again.
 
 #### Take away
+
+In this build Take away says it is not ready yet: it would carry only the posts read so far,
+and nothing changes. A later version brings it back as written here.
 
 In Preferences. Take away writes what this device holds — posts, timelines,
 rules, what you allowed beyond your sources, what was read, sources, and what signs in to
@@ -1182,6 +1204,24 @@ replaced, as Read back says. A move that fails midway leaves it as it was. Each 
 the move under the other device's name in the run's requests. The first time, the system
 asks whether Fediqo may look for devices on the local network; it looks only while a move or
 a hold is under way.
+
+In this build moving the store, with pictures or without, says it is not ready yet, as Take
+away does, and nothing changes; the sign-ins alone still move.
+
+Opening reads none of the store's posts. Fediqo lands where your sources place it, and the
+timeline is there to use from the first moment: it says it is being read from this device
+until its first page lands, and the launch's octopus is drawn over it without standing in the
+way of a press or a key. Each timeline then reads a page at a time, as far as you read.
+
+The first launch after an upgrade from a build that did not read this way first arranges the
+store to be read by pages, which on a large store takes a few seconds. Meanwhile the timeline
+shows a provisional page of what arrived last, and the real page takes its place once it is
+ready; an older post that arrived late may be missing until then. Later launches do not wait
+for it.
+
+Rows that arrive — a page landing, a provisional page replaced, a timeline read again — ease
+in, and rows that leave ease out. Rows that stay keep their place, and so does what you are
+reading. Where less motion was asked for, nothing moves.
 
 The store survives a relaunch. The first 0.2.0 launch carries an older store forward in
 place, with nothing fetched and nothing for you to do: every source, post, board, sign-in,
