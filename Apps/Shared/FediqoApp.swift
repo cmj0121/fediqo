@@ -107,20 +107,22 @@ final class Launch {
     let storeRead: Bool
 
     /// Built from what the gate opened, on the main actor, before the first frame that shows
-    /// anything. Moving the read off would leave the store empty while that frame draws, and
-    /// every save asked for in the gap would have to be held back or it would write the empty
-    /// store over the index.
+    /// anything: the sources, what each said, the texts and the notices — and no row, so it is
+    /// quick whatever the store weighs (#357). The rows are the file's, read by the pages.
     private init(_ opened: StoreFile.Opened) {
+        // **The very first write of the run** (#357): the pages' index, made where an older
+        // build's file lacks it, off the main actor and with nothing queued on the file ahead of
+        // it — the first page waits for it, and for nothing else. The rest wait for the timeline
+        // to show (`afterFirstPage`).
+        if let file = opened.file {
+            Task.detached(priority: .userInitiated) { try? await file.makePageIndex() }
+        }
         // Where Caches cannot be made, pictures are read from their hyperlinks only.
         let media = try? MediaCache.caches()
         // The one the gate asked: made once for the store, and the same one here.
         let protected = ProtectedSignals.protected(store: StoreFile.applicationSupportDirectory)
         self.protected = protected
-        // What was read is what the file holds: a save writes only what changes from here.
-        store = ItemStore(
-            sources: opened.sources, notes: opened.notes, said: opened.said, notices: opened.notices,
-            unsent: opened.unsent, readFromDisk: true, skipped: opened.skipped
-        )
+        store = Self.store(of: opened)
         // `nil` when the index could not be read and could not be set aside either: this run
         // then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
         // It is also `nil` when the index was written by a newer build, which is left as found.
@@ -183,6 +185,22 @@ final class Launch {
         // here and not by a window: one closed must not stop the saving, and nothing ends this
         // but the run ending, which flushes (`end()`).
         Task { [saver] in await saver.follow() }
+    }
+
+    /// The run's store, made of what was opened. **No row was read** (#357): a pool over the
+    /// file, each row read once it is wanted — a page of the timeline in front, a row a landing
+    /// merges with — and a save writes only what changes from here. With no file there is
+    /// nothing to read, and the store holds what this run brings.
+    private static func store(of opened: StoreFile.Opened) -> ItemStore {
+        guard let file = opened.file else {
+            return ItemStore(
+                sources: opened.sources, notes: [], said: opened.said, notices: opened.notices,
+                unsent: opened.unsent, readFromDisk: true
+            )
+        }
+        return ItemStore(
+            sources: opened.sources, said: opened.said, notices: opened.notices, unsent: opened.unsent, rows: file
+        )
     }
 
     /// What this device calls itself, written into a take-away's header so the device it came
@@ -414,6 +432,32 @@ private struct Live: View {
         return { try await saver.exclusively { try await file.compact() } }
     }
 
+    /// One page of a timeline read from the index (#357), or nothing where this run has none: the
+    /// store then holds every row there is, and nothing is paged.
+    private var readPage: (@Sendable (PageQuery, PageAsk, Int) async throws -> Page)? {
+        guard let file = launch.file else { return nil }
+        return { query, ask, limit in try await file.page(query, ask, limit: limit) }
+    }
+
+    /// A provisional first page (C15), read beside the index's pages' index while a first launch
+    /// after an older build makes it, and nothing once it is made.
+    private var readEarly: (@Sendable (PageQuery, Int) async throws -> Page?)? {
+        guard let file = launch.file else { return nil }
+        return { query, limit in try await file.provisionalPage(query, limit: limit) }
+    }
+
+    /// What waits for the timeline to show (C1): the indexes the reads by key and the lettings go
+    /// go by, made where an older build's file lacks them, and then the index's free pages
+    /// scrubbed, where they are due, where a save would run.
+    private var afterFirstPage: (@Sendable () async -> Void)? {
+        guard let file = launch.file else { return nil }
+        let saver = launch.saver
+        return {
+            try? await file.makeIndexes()
+            _ = try? await saver.exclusively { await file.scrubIfDue() }
+        }
+    }
+
     /// What the rows held weigh, whatever the file does (#249); nothing where this run has no index.
     private var weighStore: (@Sendable () async -> Int)? {
         guard let file = launch.file else { return nil }
@@ -426,6 +470,7 @@ private struct Live: View {
             mastodon: launch.mastodon, persist: save, persistUnsent: saveUnsent,
             savesLanded: { [saver = launch.saver] in await saver.landings() },
             measureStore: measureStore, compactStore: compactStore, weighStore: weighStore,
+            readPage: readPage, readEarly: readEarly, afterFirstPage: afterFirstPage,
             limits: launch.limits,
             storeIsNewer: launch.storeIsNewer,
             storeNoticeSeen: { launch.storeIsNewer = false },

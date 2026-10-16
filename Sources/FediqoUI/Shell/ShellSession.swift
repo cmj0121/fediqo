@@ -374,14 +374,45 @@ final class ShellSession {
     /// Bumped each time `notes` is assigned. Observed, so a view that read a cached timeline
     /// still redraws when the notes under it change.
     private(set) var notesRevision = 0
-    /// The last timeline drawn and what it was drawn from, so a redraw that reads it several
-    /// times evaluates the rules once.
-    @ObservationIgnored var drawnTimeline: DrawnTimeline?
+    /// The timelines last drawn, by query, and what each was drawn from, so a redraw that reads
+    /// one several times evaluates the rules once — and a switch back to one drawn a moment ago
+    /// evaluates them not at all (#357). The few last drawn, oldest let go first.
+    @ObservationIgnored var drawnTimelines: [String: DrawnTimeline] = [:]
+    /// The order `drawnTimelines` were last drawn in, oldest first.
+    @ObservationIgnored var drawnOrder: [String] = []
+    /// How many timelines were drawn: each drawing's stamp.
+    @ObservationIgnored var drawings = 0
+    /// Bumped as the rows that left a timeline have eased out: the list drawn again without them.
+    var leavingEnded = 0
+    /// Reads one page of a timeline from the file (#357): set by the app over its index, and nil
+    /// where the store holds every row there is — a test's, a preview's, a run with no file —
+    /// and then nothing is paged and every timeline is drawn from what is held, whole.
+    @ObservationIgnored var readPage: (@Sendable (PageQuery, PageAsk, Int) async throws -> Page)?
+    /// A provisional first page (C15), read beside the file's pages' index while it is being
+    /// made, and nothing once it is: set by the app beside `readPage`.
+    @ObservationIgnored var readEarly: (@Sendable (PageQuery, Int) async throws -> Page?)?
+    /// Run once, after the first page of the timeline in front is drawn: what waits for the
+    /// timeline to show (C1).
+    @ObservationIgnored var afterFirstPage: (@Sendable () async -> Void)?
+    @ObservationIgnored var firstPageDrawn = false
+    /// Where each timeline has been read down to in the file, by query (#357). Nothing for one
+    /// not read yet, which waits for its first page.
+    var coverage: [TimelineQuery: TimelineCoverage] = [:]
+    /// Whether every kept row of the file is in the pool (`readKeptRows`): nil until asked and
+    /// while the read is out, then whether it read. What Usage's kept section waits for, so it
+    /// never says nothing is kept where the file keeps some (#357).
+    var keptRowsRead: Bool?
+    /// Raised whenever every timeline is to be read afresh (`forgetCoverage`).
+    var coverageEpoch = 0
+    @ObservationIgnored var pageGenerations = 0
+    /// The oldest a post may be and be shown, as the store keeps it: the months limit
+    /// (`ItemStore.keepFrom`), which every page is cut by.
+    private(set) var keepFrom: Date?
     /// The person's page last drawn and what it was drawn from. See `heldPosts(of:)`.
     @ObservationIgnored var drawnPerson: HeldByPerson?
     /// The tag's page last drawn and what it was drawn from. See `heldPosts(under:)`.
     @ObservationIgnored var drawnTag: HeldTag?
-    /// How many times the rules ran for the stream: the test's window on `drawnTimeline`.
+    /// How many times the rules ran for the stream: the test's window on `drawnTimelines`.
     @ObservationIgnored var timelineEvaluations = 0
     /// Each tab's missing-rule mark as last worked out, so a redraw compiles no tab again.
     @ObservationIgnored var missingRules: [TimelineQuery: MissingRules] = [:]
@@ -411,6 +442,7 @@ final class ShellSession {
             textIndexIsCurrent = false
             builtReblogTargets = nil
             builtOwingRows = nil
+            builtHeldIndex = nil
             notesRevision += 1
             heldRevision += 1
         }
@@ -493,8 +525,19 @@ final class ShellSession {
     /// `held(_:)`. A forum topic's replies its forum gave no date, which are not items, are not found here.
     func heldNote(_ rowID: String) -> Note? {
         guard let key = NoteKey(rowID: rowID) else { return nil }
-        return notes.first { $0.source.host == key.host && $0.id == key.id }
+        let index: [NoteKey: Int]
+        if let builtHeldIndex {
+            index = builtHeldIndex
+        } else {
+            index = Dictionary(notes.enumerated().map { ($1.key, $0) }, uniquingKeysWith: { first, _ in first })
+            builtHeldIndex = index
+        }
+        return index[key].map { notes[$0] }
     }
+
+    /// Where each item of `notes` stands among them, by key: built the first time a row is
+    /// looked up after `notes` changes, so a press does not walk everything held.
+    @ObservationIgnored private var builtHeldIndex: [NoteKey: Int]?
 
     /// The note behind a row, wherever this run holds it: a store row, or an answer read in an
     /// open conversation this run has not adopted from the store yet.
@@ -2586,6 +2629,8 @@ final class ShellSession {
         // it, then the months limit has its turn on what was read back and writes its line as
         // at a launch.
         await replaceLimitAccount()
+        // The pool was laid in afresh: every timeline is read from its first page again.
+        forgetCoverage()
         await keep(months: prefs.keepMonths)
         await reloadFromStore()
     }
@@ -2991,6 +3036,10 @@ final class ShellSession {
     func keep(months: Int?, from now: Date = Date()) async -> Int {
         let told = await store.noticesRevision
         let went = await store.letGoBeyond(months: months, from: now)
+        // Every page is cut where the store now keeps from (#357): moved, each timeline is read
+        // afresh, as what its pages left out is no longer what they would.
+        let cut = await store.keepFrom
+        if cut != keepFrom { keepFrom = cut }
         // The notices page draws nothing past the limit from this moment (`ShellNoticeList.cut`).
         await noticeList.follow(in: self)
         guard went.posts > 0 else {
@@ -3185,7 +3234,8 @@ final class ShellSession {
     func removeQuestion(host: String, postsStay: Bool, language: DummyLanguage? = nil) -> ShellConfirmation {
         sayingOthersSignedOut(ShellQuestion.remove(
             host: host, boards: Self.boards(of: host, in: sources), postsStay: postsStay,
-            kept: holdings.kept(host: host).posts, unsent: outbox.count(host: host), language: language
+            kept: holdings.kept(host: host).posts, unsent: outbox.count(host: host), atLeast: store.heldInPart,
+            language: language
         ), host: host, language: language)
     }
 

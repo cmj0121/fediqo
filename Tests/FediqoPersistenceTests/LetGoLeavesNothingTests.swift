@@ -249,6 +249,7 @@ struct LetGoLeavesNothingTests {
         }
         if marked {
             let opened = StoreFile.open(at: dir)
+            await opened.file?.scrubIfDue()
             #expect(try await opened.file?.db.read { try Int.fetchOne($0, sql: "PRAGMA user_version") } == StoreFile.scrubbed)
             try opened.file?.db.close()
         }
@@ -287,6 +288,8 @@ struct LetGoLeavesNothingTests {
 
         let opened = StoreFile.open(at: dir)
         let file = try #require(opened.file)
+        // Asked once the timeline shows (#357, C1), and not by the open.
+        await file.scrubIfDue()
         #expect(opened.notes.count == 40 && opened.setAside == nil, "what was held is held")
         #expect(try files(in: dir, holding: "left-behind-phrase").isEmpty, "opened by this build, and still in the file")
         #expect(try await file.db.read { try Int.fetchOne($0, sql: "PRAGMA user_version") } == StoreFile.scrubbed)
@@ -316,6 +319,7 @@ struct LetGoLeavesNothingTests {
         #expect(try files(in: dir, holding: "inside-a-page-phrase") == ["index.sqlite"], "the premise: still in the file")
 
         let opened = StoreFile.open(at: dir)
+        await opened.file?.scrubIfDue()
         #expect(opened.notes.count == 399)
         #expect(try files(in: dir, holding: "inside-a-page-phrase").isEmpty)
     }
@@ -330,11 +334,13 @@ struct LetGoLeavesNothingTests {
             try file.db.close()
         }
         let first = StoreFile.open(at: dir)
+        await first.file?.scrubIfDue()
         #expect(first.notes.count == 400)
         try first.file?.db.close()
         let before = try Data(contentsOf: index)
 
         let again = StoreFile.open(at: dir)
+        await again.file?.scrubIfDue()
         #expect(again.notes.count == 400)
         try again.file?.db.close()
         #expect(try Data(contentsOf: index) == before)
@@ -354,6 +360,7 @@ struct LetGoLeavesNothingTests {
         try raw.close()
 
         let opened = StoreFile.open(at: dir)
+        await opened.file?.scrubIfDue()
         #expect(opened.notes.count == 40 && opened.setAside == nil)
         #expect(try files(in: dir, holding: "round-trip-phrase").isEmpty, "the mark was taken for the file being clean")
         #expect(try files(in: dir, holding: "stays-put-phrase") == ["index.sqlite"])
@@ -373,8 +380,9 @@ struct LetGoLeavesNothingTests {
 
         let opened = StoreFile.open(at: dir)
         let again = try #require(opened.file)
+        await again.scrubIfDue()
         #expect(opened.notes.count == 40)
-        #expect(again.bytesOnDisk() < full / 4, "an open with pages free did not rebuild")
+        #expect(again.bytesOnDisk() < full / 4, "a launch with pages free did not rebuild")
         #expect(again.bytesHeld() <= heldBytes, "and what the rows weigh did not grow")
     }
 

@@ -449,6 +449,28 @@ public actor ItemStore {
         changed(shown: true, replies: true)
     }
 
+    /// The rows of the pool past the months limit that the whole store would have let go
+    /// (`letGoBeyond`), **over a file alone** (#357, C10): there they stay, in the file and in
+    /// the pool, until the limit is kept in the file too, and are handed over by neither `all()`
+    /// nor `replies()` — as no page shows them (`PageQuery.keepFrom`). A kept row stays, and so
+    /// does what a kept or in-window row quotes, never a reblog. Nothing for a whole pool, which
+    /// lets them go, or with no limit.
+    private func pastTheLimit() -> Set<NoteKey> {
+        guard disk != nil, let retention else { return [] }
+        let within = { (note: Note) in note.kept || note.postedAt >= retention }
+        var past: Set<NoteKey> = []
+        var quoted: Set<NoteKey> = []
+        for note in notes.values {
+            if within(note) { quoted.formUnion(note.heldWith) } else { past.insert(note.key) }
+        }
+        guard !past.isEmpty else { return [] }
+        return past.filter { !quoted.contains($0) || notes[$0]?.isReblog == true }
+    }
+
+    /// The oldest a post may be posted and still be shown, or nothing for no months limit
+    /// (`letGoBeyond`): what every page of the file is cut by (`PageQuery.keepFrom`).
+    public var keepFrom: Date? { retention }
+
     /// Whether `note` is inside the reader's keep window.
     private func withinRetention(_ note: Note) -> Bool {
         retention.map { note.postedAt >= $0 } ?? true
@@ -1707,7 +1729,8 @@ public actor ItemStore {
     public func all() -> [Note] {
         let arrival = self.arrival
         let stalled = self.stalled
-        return notes.values.filter { !$0.isPartOfTopic }
+        let beyond = pastTheLimit()
+        return notes.values.filter { !$0.isPartOfTopic && (beyond.isEmpty || !beyond.contains($0.key)) }
             .map { note in
                 // Named and not held: asked of what is held now, for the few items that name
                 // anything — one lookup a name, and nothing for an item that names none.
@@ -1864,6 +1887,13 @@ public actor ItemStore {
     ///
     /// **Once a run**: a kept row that will not decode is no reason to read them again — what
     /// it reblogs is read off its references alone and spared (`keptSpared`).
+    /// Every kept row of the file laid in (`poolKept`), for a count of what is kept that must not
+    /// say none where the file keeps some (#357): one read, once a run. Whether they are all in —
+    /// true for a store held whole.
+    public func readKept() -> Bool {
+        poolKept()
+    }
+
     private func poolKept() -> Bool {
         guard let disk, !keptRead else { return true }
         guard let read = reading({ try disk.keptRows() }) else { return false }
@@ -2174,7 +2204,8 @@ public actor ItemStore {
     /// which reads its own through `held(host:idPrefix:)`.
     public func replies() -> [Note] {
         let arrival = self.arrival
-        return notes.values.filter(\.isPartOfTopic)
+        let beyond = pastTheLimit()
+        return notes.values.filter { $0.isPartOfTopic && (beyond.isEmpty || !beyond.contains($0.key)) }
             .sorted { Self.storeOrder($0, $1, arrival) }
     }
 

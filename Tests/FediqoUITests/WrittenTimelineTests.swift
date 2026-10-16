@@ -649,11 +649,12 @@ struct WrittenTimelineTests {
         #expect(session.timelineItems(latest: latest).map(\.noteID) == ["2"])
         #expect(session.timelineEvaluations == 5)
 
-        // Back to All, which it drew before but no longer holds.
+        // Back to All, which it drew a moment ago from what is still held: drawn again for
+        // nothing (#357), as a switch must never wait on the rules.
         session.timelineID = .all
         #expect(session.timelineItems(latest: latest).map(\.noteID) == ["2", "3"])
         _ = session.timelineItems(latest: latest)
-        #expect(session.timelineEvaluations == 6)
+        #expect(session.timelineEvaluations == 5)
 
         // The sources: the stream compiles without them, but which copy a post carried by two
         // is drawn as follows the hosts still here (#250), so a change to them draws again —

@@ -107,6 +107,7 @@ struct TimelinePane: View {
     /// Nothing here but a finger (#303): the list marks the post being read as it scrolls, one
     /// press opens a row, and the selection is neither drawn nor followed. See `ShellReadingMark`.
     @Environment(\.shellTouch) private var touch
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.shellLayout) private var shellLayout
     /// Counted up each time a timeline returned to has a post to put back at the top (#303).
     /// The list answers the count and not the switch: a list drawn afresh — a return through a
@@ -252,6 +253,8 @@ struct TimelinePane: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: banner)
+        // The timeline in front read from this device as it shows (#357).
+        .modifier(CoversTimeline(session: session, latest: prefs.latestDate))
         .task(id: catalogueHosts) { await waitForCatalogues() }
         .onChange(of: session.toast) { _, toast in
             if let toast { showToast(toast.text) }
@@ -293,7 +296,8 @@ struct TimelinePane: View {
                     // Under a finger the place kept is the post being read, and the one given
                     // back is marked and put at the top; nothing is selected.
                     let kept = session.timelinePlaces.switched(
-                        from: left, to: arrived, standingOn: touch ? wasReading : selectedID, among: items.map(\.id)
+                        from: left, to: arrived, standingOn: touch ? wasReading : selectedID,
+                        among: searching ? items.map(\.id) : session.timelineIDs(latest: prefs.latestDate)
                     )
                     let restored = Self.restored(kept, touch: touch)
                     if touch {
@@ -400,6 +404,13 @@ struct TimelinePane: View {
 
     /// How many rows from the end reading starts asking for more.
     static let moreAhead = 5
+
+    /// Whether the row at `index` of `count`, coming into view, reads the page below it from this
+    /// device (#357, C4): one of the last `ShellSession.readAhead`, the stretch read again on the
+    /// way. Never a search's, for `asksForMore`'s reason.
+    static func readsOn(at index: Int, of count: Int, searching: Bool) -> Bool {
+        !searching && index >= count - ShellSession.readAhead
+    }
 
     /// Where a list drawn afresh puts the reader (#110).
     enum Landing: Equatable, Sendable {
@@ -957,17 +968,35 @@ struct TimelinePane: View {
         let bands = foundBands
         // With no post found, what the sources found still stands, over the line that says so.
         if items.isEmpty, bands.isEmpty {
-            empty
+            // Its first page still being read from this device (#357, C2): rows to come, and
+            // not a notice that there are none.
+            if !searching, session.timelineLoading(latest: prefs.latestDate) {
+                TimelineReading()
+            } else {
+                empty
+            }
         } else {
             list(items, under: bands)
         }
     }
 
     private func list(_ items: [DummyItem], under bands: [SearchBands] = []) -> some View {
-        let last = items.count - 1
+        // The rows shown: the drawing's, and those that left it easing out where they stood, at
+        // or below the row being read (#357). Where motion is reduced, the drawing's alone.
+        // Read, so the list is drawn again as the rows that left have eased out.
+        _ = session.leavingEnded
+        let shown = searching ? TimelineShown(rows: items, leaving: []) : session.timelineShown(
+            latest: prefs.latestDate,
+            anchor: ShellReadingMark.heldAtTop(top: session.scrolledTop, marked: session.readingMark.id, touch: touch),
+            moving: !reduceMotion
+        )
+        let rows = shown.rows
+        let last = rows.count - 1
         // Where the timeline in front is not whole, said at its place (#201). A search's results
         // are not a timeline, and say nothing of the kind.
         let gaps = searching ? [:] : session.gapMarks(in: items)
+        // What is new to this drawing, which eases in where it stands (#357).
+        let arrived = searching ? [] : session.timelineArrived(latest: prefs.latestDate)
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -984,7 +1013,7 @@ struct TimelinePane: View {
                                 .padding(ShellSpace.pad)
                         }
                     }
-                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
                         let isLast = index == last
                         // **One view a post, the rule under it included** (#303). The list
                         // reports which of its children are wholly on screen, and a rule that
@@ -1035,11 +1064,14 @@ struct TimelinePane: View {
                         )
                         }
                         .id(item.id)
+                        .modifier(EasesIn(arrived: arrived.contains(item.id)))
+                        .modifier(EasesOut(leaving: shown.leaving.contains(item.id)))
                         // Reading toward the end asks for the next stretch (#87): a lazy row
                         // appears as it is scrolled or walked to, and nothing else asks.
                         .modifier(AsksForMore(
-                            asks: Self.asksForMore(at: index, of: items.count, searching: searching),
-                            timeline: timeline, session: session
+                            asks: Self.asksForMore(at: index, of: rows.count, searching: searching),
+                            readsOn: Self.readsOn(at: index, of: rows.count, searching: searching),
+                            row: item.id, latest: prefs.latestDate, timeline: timeline, session: session
                         ))
                         .modifier(TimelineGapMarked(marks: gaps[item.id], session: session))
                         if !isLast {
@@ -1050,6 +1082,8 @@ struct TimelinePane: View {
                     // Which sources have no more of what is rising to give (#288). A search's
                     // results are not a timeline, and end nowhere a source chose.
                     if !searching { TrendsEndFoot(timeline: timeline, session: session) }
+                    // The page below being read from this device (#357).
+                    if !searching, session.timelineLoading(latest: prefs.latestDate) { TimelineReadingOn() }
                 }
                 .scrollTargetLayout()
             }
@@ -1072,7 +1106,9 @@ struct TimelinePane: View {
             .modifier(KeepsTopRow(session: session))
             .modifier(HoldsPlace(session: session, proxy: proxy, touch: touch, first: items.first?.id))
             // The rows the mark may be among, said when they change and not on every pass (#303).
-            .onChange(of: items.map(\.id), initial: true) { _, ids in
+            // The drawn timeline's own ids, one array a drawing: compared in no time where they
+            // did not change (#357).
+            .onChange(of: searching ? items.map(\.id) : session.timelineIDs(latest: prefs.latestDate), initial: true) { _, ids in
                 session.readingMark.list(Set(ids), of: timeline.id)
             }
             .onAppear {

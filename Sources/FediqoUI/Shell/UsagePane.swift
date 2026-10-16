@@ -261,7 +261,7 @@ struct UsagePane: View {
             // Everything held (#194), and what it all weighs on disk.
             stretch(
                 Text(L10n.t("prefs.held.total")).shellFont(.name).foregroundStyle(ShellChrome.ink(colorScheme)),
-                figure: Self.totalLine(holdings.posts, onDisk: session.storeBytes)
+                figure: Self.totalLine(holdings.posts, onDisk: session.storeBytes, atLeast: session.store.heldInPart)
             )
             // What changed posts said before (#286): held with them, so counted with them.
             if let earlier = Self.earlierFigure(holdings.earlier) {
@@ -405,15 +405,22 @@ struct UsagePane: View {
         )
     }
 
-    static func postsLine(_ count: Int) -> String {
-        count == 0 ? L10n.t("prefs.held.posts.none") : L10n.count("prefs.held.posts", count)
+    /// `atLeast`: counted over what this run has read of a store held in part (#357, C11), so
+    /// said as at least so many — and as none read yet, never as none held.
+    static func postsLine(_ count: Int, atLeast: Bool = false, language: DummyLanguage? = nil) -> String {
+        if atLeast {
+            return count == 0
+                ? L10n.t("prefs.held.posts.atLeast.none", language: language)
+                : L10n.count("prefs.span.atLeast", count, language: language)
+        }
+        return count == 0 ? L10n.t("prefs.held.posts.none", language: language) : L10n.count("prefs.held.posts", count, language: language)
     }
 
     /// "12 posts · 1.2 MB on disk", with the disk half left off until the index has been measured
     /// (#194) — the same rule the pictures line keeps, for the same reason.
-    static func totalLine(_ count: Int, onDisk: Int?) -> String {
-        guard let onDisk else { return postsLine(count) }
-        return postsLine(count) + " · " + String(format: L10n.t("prefs.held.disk"), size(onDisk))
+    static func totalLine(_ count: Int, onDisk: Int?, atLeast: Bool = false) -> String {
+        guard let onDisk else { return postsLine(count, atLeast: atLeast) }
+        return postsLine(count, atLeast: atLeast) + " · " + String(format: L10n.t("prefs.held.disk"), size(onDisk))
     }
 
     /// How many earlier wordings of changed posts are held, as a figure — or nothing where none

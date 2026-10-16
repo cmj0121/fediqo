@@ -424,13 +424,25 @@ struct TrendsEndFoot: View {
 /// A row that, coming into view, asks the timeline in front for its next stretch (#87) — where
 /// `asks` says it is near enough the end to. A modifier of its own so the list's row stays one
 /// chain the type-checker reads quickly.
+///
+/// **This device first** (#357): a timeline read from the file a page at a time reads the page
+/// below from there while the file has one (`readsOn`, `ShellSession.readOn`), and only once it
+/// has none asks its sources.
 struct AsksForMore: ViewModifier {
     let asks: Bool
+    var readsOn = false
+    var row: String?
+    var latest: LatestDate?
     let timeline: TimelineQuery
     let session: ShellSession
 
     func body(content: Content) -> some View {
         content.onAppear {
+            if session.readsOnFromFile(timeline) {
+                guard readsOn else { return }
+                Task { await session.readOn(timeline, from: row, latest: latest) }
+                return
+            }
             guard asks else { return }
             Task { await session.reload.more(timeline, in: session) }
         }

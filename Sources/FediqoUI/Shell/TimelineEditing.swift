@@ -94,10 +94,38 @@ struct DrawnTimeline {
         let latest: LatestDate?
         /// The hosts still here (#250): which copy a merged row is drawn as follows them.
         let hosts: Set<String>
+        /// How far down the file it was read (#357): nothing for a store held whole.
+        let reach: TimelineCoverage.Reach?
     }
 
     let key: Key
     let items: [DummyItem]
+    /// The rows' ids, worked out once a drawing and handed out as one array, so a list comparing
+    /// what it was handed with what it had compares nothing it did not have to.
+    let ids: [String]
+    /// The rows new to this drawing of the timeline since its last (#357): what eases in. None
+    /// for a timeline drawn for the first time; every row for one drawn from none.
+    var arrived: Set<String> = []
+    /// The rows of the last drawing that this one no longer has, and that drawing's rows: what
+    /// eases out where it stood (`timelineShown`). Nothing where none left.
+    var left: Set<String> = []
+    var before: [DummyItem] = []
+    /// Which drawing this is: what a fade out that ended is told apart by.
+    var stamp = 0
+    /// The rows as shown while what left eases out, worked out once (`timelineShown`).
+    var shown: TimelineShown?
+    /// The rows that left have eased out, and are gone.
+    var leavingDone = false
+    /// `arrived` has been handed to a list once (`timelineArrived`): a row drawn again later —
+    /// scrolled to, or a switch back to this drawing — is simply there.
+    var arrivedHanded = false
+}
+
+/// The rows a timeline is shown as (#357): what it draws, and — while they ease out — the rows
+/// that left it, each where it stood.
+struct TimelineShown {
+    let rows: [DummyItem]
+    let leaving: Set<String>
 }
 
 /// One person's page as last drawn, and what it was drawn from.
@@ -193,18 +221,143 @@ extension ShellSession {
     /// Kept until the definition in front, the notes or the latest date change, because one
     /// redraw reads it several times. The stream compiles without the sources; their hosts are a
     /// key all the same, for which copy a merged row is drawn as (#250).
+    ///
+    /// **Over a file, only as far down as the timeline was read from it** (#357), and nothing
+    /// before its first page: a post held for another reason — a thread, another timeline, what
+    /// a row quotes — would otherwise stand alone below rows not yet read. Arrivals stand above
+    /// the first page, and are drawn.
     func timelineItems(latest: LatestDate?) -> [DummyItem] {
-        let definition = definition(of: currentTimeline)
+        timelineDrawn(latest: latest).items
+    }
+
+    /// The ids of the rows `timelineItems` draws, as one array a drawing.
+    func timelineIDs(latest: LatestDate?) -> [String] {
+        timelineDrawn(latest: latest).ids
+    }
+
+    /// The rows of the timeline in front as it was last drawn, drawn again for what is held now
+    /// and the latest date it was drawn with: what a check of the marks on its rows asks, which
+    /// knows no latest date of its own — asked with none, it would draw another timeline over the
+    /// one on screen.
+    ///
+    /// **Nothing where it was never drawn**: there are then no marks on screen to ask about.
+    func timelineItemsAsDrawn() -> [DummyItem] {
+        guard let drawn = drawnTimelines[currentTimeline.id] else { return [] }
+        return timelineItems(latest: drawn.key.latest)
+    }
+
+    /// How many timelines are kept drawn at once (`drawnTimelines`).
+    static let drawnKept = 4
+
+    /// How long a row that left takes to ease out: as long as one that arrived takes to ease in.
+    static let leavingFor = EasesIn.duration
+
+    /// The rows the timeline in front is shown as (#357): its drawing, and — `moving`, where
+    /// motion is not to be reduced — **the rows that left it, at or below `anchor`, where they
+    /// stood**, easing out until they are gone (`leavingFor`). A row that left above the anchor
+    /// goes at once, so the row being read is not moved by it (`HoldsPlace` holds it). Worked
+    /// out once a drawing; the ease out ends once, and the rows below close up as it does.
+    func timelineShown(latest: LatestDate?, anchor: String?, moving: Bool) -> TimelineShown {
+        let drawn = timelineDrawn(latest: latest)
+        guard moving, !drawn.left.isEmpty, !drawn.leavingDone else { return TimelineShown(rows: drawn.items, leaving: []) }
+        if let shown = drawn.shown { return shown }
+        let query = currentTimeline
+        // Not among what was drawn before, nothing is known of where the reader is: no row
+        // eases out, so none can move what is read.
+        let from = anchor.flatMap { anchor in drawn.before.firstIndex { $0.id == anchor } } ?? drawn.before.count
+        // Each row that left, filed before the next row that stays: one walk of each.
+        var leavingBefore: [String: [DummyItem]] = [:]
+        var waiting: [DummyItem] = []
+        for (at, row) in drawn.before.enumerated() {
+            if drawn.left.contains(row.id) {
+                if at >= from { waiting.append(row) }
+            } else if !waiting.isEmpty {
+                leavingBefore[row.id] = waiting
+                waiting = []
+            }
+        }
+        var rows: [DummyItem] = []
+        rows.reserveCapacity(drawn.items.count + drawn.left.count)
+        for row in drawn.items {
+            if let leaving = leavingBefore[row.id] { rows += leaving }
+            rows.append(row)
+        }
+        rows += waiting
+        let leaving = Set(rows.lazy.filter { drawn.left.contains($0.id) }.map(\.id))
+        let shown = TimelineShown(rows: rows, leaving: leaving)
+        drawnTimelines[query.id]?.shown = shown
+        guard !leaving.isEmpty else { return shown }
+        let stamp = drawn.stamp
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Self.leavingFor))
+            guard let self, self.drawnTimelines[query.id]?.stamp == stamp else { return }
+            self.drawnTimelines[query.id]?.leavingDone = true
+            // The rows below close up as the last of them goes, rather than jump.
+            withAnimation(.easeOut(duration: Self.leavingFor)) { self.leavingEnded += 1 }
+        }
+        return shown
+    }
+
+    /// The rows that ease in as the timeline in front is shown: the drawing's `arrived`, **once**
+    /// — to the first list that draws it — and none after, so a row drawn again later, scrolled
+    /// to or come back to, does not come in a second time.
+    func timelineArrived(latest: LatestDate?) -> Set<String> {
+        let drawn = timelineDrawn(latest: latest)
+        guard !drawn.arrivedHanded else { return [] }
+        drawnTimelines[currentTimeline.id]?.arrivedHanded = true
+        return drawn.arrived
+    }
+
+    func timelineDrawn(latest: LatestDate?) -> DrawnTimeline {
+        let query = currentTimeline
+        let definition = definition(of: query)
         let hosts = Set(sources.map(\.host))
-        let key = DrawnTimeline.Key(definition: definition, notesRevision: notesRevision, latest: latest, hosts: hosts)
-        if let drawnTimeline, drawnTimeline.key == key { return drawnTimeline.items }
-        let items = currentTimeline.items(
-            from: notes, among: written, index: definition.readsText ? textIndex : TextIndex([]), latest: latest,
-            here: hosts, targets: reblogTargets
+        let reach = readPage == nil ? nil : coverage[query].flatMap { $0.reach(for: coverageKey(of: query, latest: latest)) }
+        let key = DrawnTimeline.Key(
+            definition: definition, notesRevision: notesRevision, latest: latest, hosts: hosts, reach: reach
         )
-        drawnTimeline = DrawnTimeline(key: key, items: items)
-        timelineEvaluations += 1
-        return items
+        if let drawn = drawnTimelines[query.id], drawn.key == key {
+            if drawnOrder.last != query.id {
+                drawnOrder.removeAll { $0 == query.id }
+                drawnOrder.append(query.id)
+            }
+            return drawn
+        }
+        let items: [DummyItem]
+        if readPage != nil, reach == nil {
+            // Its first page not read yet: the pane says it is being read (`timelineLoading`).
+            items = []
+        } else {
+            let floor = reach?.floor
+            let held = floor.map { floor in notes.filter { $0.postedAt >= floor } } ?? notes
+            items = query.items(
+                from: held, among: written, index: definition.readsText ? textIndex : TextIndex([]), latest: latest,
+                here: hosts, targets: reblogTargets
+            )
+            timelineEvaluations += 1
+        }
+        let ids = items.map(\.id)
+        drawings += 1
+        var drawn = DrawnTimeline(key: key, items: items, ids: ids, stamp: drawings)
+        if let before = drawnTimelines[query.id], !ids.isEmpty {
+            if before.ids.isEmpty {
+                drawn.arrived = Set(ids)
+            } else if before.ids != ids {
+                // One difference each way a drawing, and only where the rows moved.
+                let had = Set(before.ids)
+                let has = Set(ids)
+                drawn.arrived = has.subtracting(had)
+                drawn.left = had.subtracting(has)
+                if !drawn.left.isEmpty { drawn.before = before.items }
+            }
+        }
+        drawnTimelines[query.id] = drawn
+        drawnOrder.removeAll { $0 == query.id }
+        drawnOrder.append(query.id)
+        while drawnOrder.count > Self.drawnKept {
+            drawnTimelines[drawnOrder.removeFirst()] = nil
+        }
+        return drawn
     }
 
     /// What this device holds under one hashtag, newest first — every item, whichever read

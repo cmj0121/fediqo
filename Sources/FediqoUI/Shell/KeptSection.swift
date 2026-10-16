@@ -26,13 +26,19 @@ struct KeptSection: View {
 
     var body: some View {
         let lines = Self.lines(session.holdings, sources: session.sources.map(\.host))
+        // Counted over what this run has read where the store is held in part (C11).
+        let atLeast = session.store.heldInPart
         Section {
             if lines.isEmpty {
-                ShellReadingLine(L10n.t("usage.kept.none"))
+                // Over a store held in part, nothing is said until the kept rows of the file are
+                // read (#357): and where they could not be, only that none is read yet.
+                if let line = Self.noneLine(read: session.keptRowsRead, heldInPart: atLeast) {
+                    ShellReadingLine(line)
+                }
             } else {
                 row(
-                    L10n.t("usage.span.every"), figure: Self.figure(session.holdings.kept),
-                    ask: KeptAsk(host: nil, posts: session.holdings.kept.posts)
+                    L10n.t("usage.span.every"), figure: Self.figure(session.holdings.kept, atLeast: atLeast),
+                    ask: KeptAsk(host: nil, posts: session.holdings.kept.posts, atLeast: atLeast)
                 ) {
                     Image(systemName: UsagePane.Purpose.source.symbol)
                         .shellFont(.name)
@@ -42,7 +48,7 @@ struct KeptSection: View {
                 // Every source a line may name, looked up once for the list and not once a line.
                 let known = Self.sources(in: session)
                 ForEach(lines) { line in
-                    row(Self.name(line), figure: Self.figure(line.kept), ask: Self.ask(line)) {
+                    row(Self.name(line), figure: Self.figure(line.kept, atLeast: atLeast), ask: Self.ask(line, atLeast: atLeast)) {
                         UsageSourceMark(source: known[line.host] ?? Source(host: line.host, kind: .unknown))
                     }
                 }
@@ -51,6 +57,8 @@ struct KeptSection: View {
         } header: {
             ShellSectionHead(title: "usage.kept", line: "usage.kept.line", help: "usage.kept.help")
         }
+        // The file's kept rows, read before the section says what is kept (#357).
+        .task { await session.readKeptRows() }
     }
 
     /// One row: the mark, the name over its figure, and the `…` that holds stopping.
@@ -134,10 +142,22 @@ struct KeptSection: View {
         return here.map { line($0, removed: false) } + removed.map { line($0, removed: true) }
     }
 
+    /// What the section says where nothing kept is held: that none is kept, where that is known
+    /// — a store held whole, or the file's kept rows read — that none is read yet where they
+    /// could not be read, and nothing while they are being read.
+    static func noneLine(read: Bool?, heldInPart: Bool, language: DummyLanguage? = nil) -> String? {
+        guard heldInPart else { return L10n.t("usage.kept.none", language: language) }
+        switch read {
+        case true?: return L10n.t("usage.kept.none", language: language)
+        case false?: return L10n.t("prefs.held.posts.atLeast.none", language: language)
+        case nil: return nil
+        }
+    }
+
     /// What one source's press asks about: the posts that would be ordinary afterwards, and
     /// beside them the ones that stay kept through another source.
-    static func ask(_ line: Line) -> KeptAsk {
-        KeptAsk(host: line.host, posts: line.kept.posts - line.elsewhere, elsewhere: line.elsewhere)
+    static func ask(_ line: Line, atLeast: Bool = false) -> KeptAsk {
+        KeptAsk(host: line.host, posts: line.kept.posts - line.elsewhere, elsewhere: line.elsewhere, atLeast: atLeast)
     }
 
     /// A source by its host, and one no longer here said to be so.
@@ -147,11 +167,11 @@ struct KeptSection: View {
             : line.host
     }
 
-    /// "3 kept · 4 KB of words".
-    static func figure(_ kept: Holdings.Kept, language: DummyLanguage? = nil) -> String {
+    /// "3 kept · 4 KB of words" — "At least 3 kept" where the store is held in part (C11).
+    static func figure(_ kept: Holdings.Kept, atLeast: Bool = false, language: DummyLanguage? = nil) -> String {
         String(
             format: L10n.t("usage.kept.figure", language: language),
-            L10n.count("usage.kept.posts", kept.posts, language: language),
+            L10n.count(atLeast ? "usage.kept.posts.atLeast" : "usage.kept.posts", kept.posts, language: language),
             UsagePane.size(kept.bytes, language: language)
         )
     }
@@ -180,4 +200,7 @@ struct KeptAsk: Equatable {
     let host: String?
     let posts: Int
     var elsewhere = 0
+    /// The counts are of what this run has read of a store held in part (#357, C11): at least
+    /// so many, never said as all.
+    var atLeast = false
 }

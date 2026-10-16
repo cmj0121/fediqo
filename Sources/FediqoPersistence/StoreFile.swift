@@ -62,6 +62,41 @@ public struct StoreFile: Sendable {
         /// how many of this one's own writes there had been, which it does not.
         private var sources: (version: Int, writes: Int, byHost: [String: Source])?
         private var writes = 0
+        private var besideQueue: DatabaseQueue?
+        private var pageIndexTask: Task<Void, any Error>?
+
+        /// The one making of the pages' index (`makePageIndex`): the one already on its way, or
+        /// `make`'s, so that every caller waits for one, and one connection reads beside it.
+        func pageIndexBuild(_ make: () -> Task<Void, any Error>) -> Task<Void, any Error> {
+            lock.lock()
+            defer { lock.unlock() }
+            if let pageIndexTask { return pageIndexTask }
+            let made = make()
+            pageIndexTask = made
+            return made
+        }
+
+        /// The making ended, made or failed: the next caller asks the file again.
+        func pageIndexEnded() {
+            lock.lock()
+            defer { lock.unlock() }
+            pageIndexTask = nil
+        }
+
+        /// A connection that reads beside this one while it is held by a long write (#357, C15):
+        /// the pages' index being made. Nothing where none is.
+        var beside: DatabaseQueue? {
+            get {
+                lock.lock()
+                defer { lock.unlock() }
+                return besideQueue
+            }
+            set {
+                lock.lock()
+                defer { lock.unlock() }
+                besideQueue = newValue
+            }
+        }
 
         /// This connection has written, or tried to: the sources it holds may have changed.
         func wrote() {
@@ -82,6 +117,31 @@ public struct StoreFile: Sendable {
             defer { lock.unlock() }
             sources = (version, writes, byHost)
         }
+    }
+
+    /// The connection reads go to beside a long write, while there is one (`Held.beside`).
+    /// **Never closed by hand**: let go here, it closes once the last read holding it is done.
+    var beside: DatabaseQueue? {
+        get { held.beside }
+        nonmutating set { held.beside = newValue }
+    }
+
+    /// The one making of the pages' index, whoever asks (`Held.pageIndexBuild`).
+    func pageIndexBuild(_ make: () -> Task<Void, any Error>) -> Task<Void, any Error> {
+        held.pageIndexBuild(make)
+    }
+
+    func pageIndexEnded() {
+        held.pageIndexEnded()
+    }
+
+    /// A connection of its own to this store's file, **for reading alone** (#357, C15), made as
+    /// every connection to it is (`configuration`). In the rollback journal the index keeps
+    /// (#292), it reads what the file held at the last commit while another connection holds a
+    /// write that has not had to touch the file yet. Throws for a store not opened on disk.
+    func readingConnection() throws -> DatabaseQueue {
+        guard let origin = held.origin else { throw Remake.notOpenedOnDisk }
+        return try DatabaseQueue(path: origin.path, configuration: Self.configuration(readOnly: true, busyWait: origin.busyWait))
     }
 
     /// `sourcesByHost`, read again only where the source table may have changed since: a
@@ -294,6 +354,38 @@ public struct StoreFile: Sendable {
         }
     }
 
+    /// `scrub()` where it is due, **on GRDB's queue and never the caller's** (#357, C1): asked once
+    /// the timeline in front shows, and no longer by every open. A file this build never rebuilt
+    /// is rebuilt whatever it holds free, once — what an older build left inside its pages is not
+    /// this one's to vouch for. After that, only past `scrubbedPast` of free pages: what this
+    /// build frees is zeroed as it goes (`secure_delete`), so a rebuild gives back room and
+    /// nothing else, and a few pages are not worth the whole file rewritten while pages wait.
+    public func scrubIfDue() async {
+        let due = (try? await db.read { db -> Bool in
+            let version = try Int.fetchOne(db, sql: "PRAGMA user_version") ?? 0
+            let free = try Int.fetchOne(db, sql: "PRAGMA freelist_count") ?? 0
+            let pages = try Int.fetchOne(db, sql: "PRAGMA page_count") ?? 0
+            let size = try Int.fetchOne(db, sql: "PRAGMA page_size") ?? 0
+            return Self.scrubDue(version: version, free: free, pages: pages, pageSize: size)
+        }) ?? false
+        guard due else { return }
+        try? await db.writeWithoutTransaction { db in
+            try db.execute(sql: "VACUUM")
+            try db.execute(sql: "PRAGMA user_version = \(Self.scrubbed)")
+        }
+    }
+
+    /// Whether a file of `pages` pages, `free` of them free, is rebuilt (`scrubIfDue`).
+    static func scrubDue(version: Int, free: Int, pages: Int, pageSize: Int) -> Bool {
+        if version < scrubbed { return true }
+        guard free > 0 else { return false }
+        return free * pageSize > scrubbedPast.bytes || free > pages / scrubbedPast.share
+    }
+
+    /// The free pages past which a file is rebuilt: more than 16 MB of them, or more than a
+    /// tenth of the file.
+    static let scrubbedPast = (bytes: 16 * 1024 * 1024, share: 10)
+
     /// The index's `user_version` once this build has rebuilt it. **A number in the file's
     /// header and not a migration**: the tables are as they were, so a build before this one
     /// still opens the store — a migration id would have made it refuse to.
@@ -398,11 +490,18 @@ public struct StoreFile: Sendable {
     /// **A read back left unsettled opens nothing** (#292): see `StorePackager.settleHalfCommits`.
     ///
     /// The decision lives here rather than in the app so it can be tested against a real file.
+    ///
+    /// **`rows: false` reads no row** (#357): the sources, what each said, the texts and the
+    /// notices — a launch's, which reads each row once it is wanted (`page`, `HeldRows`). A row
+    /// that will not decode is then never met here, and is not what sets a store aside: a page
+    /// passes it over.
     public static func open(
         at directory: URL, now: Date = Date(), busyWait: TimeInterval = StoreFile.busyWait,
-        protected: ProtectedData = .always, unlocked: Bool = false
+        protected: ProtectedData = .always, unlocked: Bool = false, rows: Bool = true
     ) -> Opened {
-        open(at: directory, now: now, protected: protected, unlocked: unlocked) { try StoreFile(at: $0, busyWait: busyWait) }
+        open(at: directory, now: now, protected: protected, unlocked: unlocked, rows: rows) {
+            try StoreFile(at: $0, busyWait: busyWait)
+        }
     }
 
     /// What `open` reads, in order, each of which may be what fails.
@@ -433,7 +532,7 @@ public struct StoreFile: Sendable {
     ///   moment. Nothing is put aside in such a launch.
     static func open(
         at directory: URL, now: Date, protected: ProtectedData = .always, unlocked: Bool = false,
-        opening: (URL) throws -> StoreFile
+        rows: Bool = true, opening: (URL) throws -> StoreFile
     ) -> Opened {
         let canary: Bool
         switch protected.canary() {
@@ -480,7 +579,12 @@ public struct StoreFile: Sendable {
             file = opened
             if first <= .items {
                 reading = .items
-                snapshot = try opened.loadRows()
+                if rows {
+                    snapshot = try opened.loadRows()
+                } else {
+                    let read = try opened.loadSources()
+                    snapshot = (read.sources, [], read.said, [])
+                }
             }
             if first <= .unsent {
                 reading = .unsent
@@ -507,8 +611,6 @@ public struct StoreFile: Sendable {
                 }
             }
             guard let file else { return Opened(file: nil, trouble: .unreachable(.outOfReach)) }
-            // Read, and so not about to be set aside: only now is it rewritten (#292).
-            file.scrub()
             // One put aside by a launch that was quit before it could say so is said now — and
             // said truly: where the other of two stores took its place, not that an empty one did.
             let untold = putAside(in: directory).filter { !$0.told }
@@ -581,8 +683,9 @@ public struct StoreFile: Sendable {
     }
 
     /// `open(at:now:)` on the index this app keeps in Application Support.
+    /// **Reading no row** (#357): every launch's, whatever the store weighs.
     public static func openApplicationSupport(protected: ProtectedData = .always, unlocked: Bool = false) -> Opened {
-        open(at: applicationSupportDirectory, protected: protected, unlocked: unlocked)
+        open(at: applicationSupportDirectory, protected: protected, unlocked: unlocked, rows: false)
     }
 
     /// Where the index this app keeps lives, and what sits beside it (the limits' account, #251).
@@ -697,9 +800,7 @@ public struct StoreFile: Sendable {
     /// host with no source row and no kind (`NoteRecord.note(from:)`).
     func loadRows() throws -> (sources: [Source], notes: [Note], said: [SourceProfile], skipped: [NoteKey]) {
         try db.read { db in
-            let records = try SourceRecord.fetchAll(db)
-            let sources = records.map(\.source)
-            let said = records.compactMap(\.saidProfile)
+            let (sources, said) = try Self.sources(db)
             let byHost = Dictionary(uniqueKeysWithValues: sources.map { ($0.host, $0) })
             // In the order they were written, which `ItemStore.snapshot` made the order they
             // arrived in: the copy of a post a merged row is drawn as is the one that came
@@ -713,6 +814,17 @@ public struct StoreFile: Sendable {
             }
             return (sources, notes, said, skipped)
         }
+    }
+
+    /// The sources and what each last said of itself, and no row (#357): what a launch reads.
+    /// Every row is read by the page, or by key, once it is wanted (`page`, `HeldRows`).
+    func loadSources() throws -> (sources: [Source], said: [SourceProfile]) {
+        try db.read(Self.sources)
+    }
+
+    private static func sources(_ db: Database) throws -> (sources: [Source], said: [SourceProfile]) {
+        let records = try SourceRecord.fetchAll(db)
+        return (records.map(\.source), records.compactMap(\.saidProfile))
     }
 
     /// **What changed, and nothing else** (#357), in one transaction on GRDB's queue: the

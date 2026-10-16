@@ -125,6 +125,9 @@ public struct FediqoRootView: View {
         measureStore: (@Sendable () async -> Int)? = nil,
         compactStore: (@Sendable () async throws -> Void)? = nil,
         weighStore: (@Sendable () async -> Int)? = nil,
+        readPage: (@Sendable (PageQuery, PageAsk, Int) async throws -> Page)? = nil,
+        readEarly: (@Sendable (PageQuery, Int) async throws -> Page?)? = nil,
+        afterFirstPage: (@Sendable () async -> Void)? = nil,
         limits: (any LimitAccountStore)? = nil,
         storeIsNewer: Bool = false,
         storeNoticeSeen: (@MainActor () -> Void)? = nil,
@@ -153,6 +156,9 @@ public struct FediqoRootView: View {
         session.measureStore = measureStore
         session.compactStore = compactStore
         session.weighStore = weighStore
+        session.readPage = readPage
+        session.readEarly = readEarly
+        session.afterFirstPage = afterFirstPage
         session.limitStore = limits
         _session = State(initialValue: session)
         _storeIsNewer = State(initialValue: storeIsNewer)
@@ -284,19 +290,22 @@ public struct FediqoRootView: View {
                 // work for an initializer that runs every time the view is made.
                 if let carrier = session.carrier { session.carry.say(leftBy: carrier) }
                 await session.loadLimitAccount()
+                // The months limit before any page: every page is cut by it (#357).
                 await session.keep(months: prefs.keepMonths)
-                await session.reloadFromStore()
-                await session.adoptUnsent()
-                // Then the room (#249), judged once what is held is known and the months limit
-                // has had its turn — the one order in which each limit acts once at a launch.
-                session.roomBytes = prefs.roomBytes
-                await session.keepWithinRoom()
-                // The store has now said what is held, which is the first moment this launch can
-                // be asked where it lands (#101). Asked here and nowhere else, so it is asked
-                // once.
+                // **Where this launch lands is the sources' answer, and nothing else's** (#101,
+                // #357): the timeline is there where a source is, whether or not a row of it has
+                // been read, and its pane reads its first page as it shows — drawn as being read
+                // until it lands. Asked here and nowhere else, so it is asked once.
+                await session.reprojectSources()
                 if let landing = launch.settle(availability, standingOn: place) {
                     place = landing
                 }
+                await session.reloadFromStore()
+                await session.adoptUnsent()
+                // Then the room (#249), judged once the months limit has had its turn — the one
+                // order in which each limit acts once at a launch.
+                session.roomBytes = prefs.roomBytes
+                await session.keepWithinRoom()
                 // Ended with this view's own task, so a window closed stops saying its notice.
                 let arriving = staged.map { staged in Task { await arrive(at: staged) } }
                 defer { arriving?.cancel() }
@@ -457,13 +466,16 @@ public struct FediqoRootView: View {
             // film behind a ground they can neither see through nor stop — the exact fault
             // `openViewer` stops playback to avoid, arriving by another route. Applied here so it
             // covers the guide as well, which the viewer is also allowed to open over.
-            .accessibilityHidden(viewedItem != nil || playsLanding)
+            .accessibilityHidden(viewedItem != nil)
             .overlay { viewer }
             // After the viewer, so the mascot is the first thing a launch draws over.
             .overlay {
+                // **Drawn over, and never in the way** (#357): a press, a key or a pointer goes to
+                // the app under it, which is there and usable from the first frame.
                 if playsLanding {
                     LandingView { showingLanding = false }
                         .id(landingTick)
+                        .allowsHitTesting(false)
                 }
             }
             .animation(.easeInOut(duration: 0.18), value: showingShortcuts)
@@ -573,10 +585,6 @@ public struct FediqoRootView: View {
         ) else {
             return false
         }
-        // The overlay is not a layer a press can leave, so dummy keys are swallowed until
-        // the jet finishes rather than driving the shell underneath. Unmapped chords —
-        // ⌘Q, ⌘C — have already returned false, so a quit still quits.
-        if playsLanding { return true }
         // The editor is a sheet and owns its keys; nothing under it moves. Nor under the record
         // of this run's requests, which is a sheet too.
         if session.editing != nil || session.activityShown { return false }
@@ -1195,14 +1203,21 @@ public struct FediqoRootView: View {
     }
 
     private var currentListIDs: [String]? {
-        Self.listIDs(on: keyedWalk, pages: people, found: foundRowIDs, items: currentListItems, in: session)
+        // The stream's own ids where the stream is what is in front (#357): no walk a body pass.
+        let stream = keyedWalk.standing == nil && searchItems == nil
+        return Self.listIDs(
+            on: keyedWalk, pages: people, found: foundRowIDs, items: currentListItems,
+            drawn: stream ? session.timelineIDs(latest: prefs.latestDate) : nil, in: session
+        )
     }
 
     /// The rows `j` and `k` walk on `walk` — the walk as the keys have it (`keyed`) — with
     /// `found` the rows of what the sources found over a search's posts and `items` the posts
-    /// of the list in front (`listItems`). Nothing where there are none.
+    /// of the list in front (`listItems`) — or `drawn`, their ids as the drawn timeline holds
+    /// them, where the stream is in front (#357). Nothing where there are none.
     static func listIDs(
-        on walk: ShellWalk, pages people: ShellPersonPages, found: [String], items: [DummyItem], in session: ShellSession
+        on walk: ShellWalk, pages people: ShellPersonPages, found: [String], items: [DummyItem],
+        drawn: [String]? = nil, in session: ShellSession
     ) -> [String]? {
         // On a list of people the rows are the people the source gave, as the page draws them;
         // on somebody's page the figures that open such a list stand over their posts (#311).
@@ -1215,7 +1230,8 @@ public struct FediqoRootView: View {
         let tagAbout = walk.openedTag.flatMap { people.tags.walkedAbout(of: $0, in: session) }
         let opened = listed ?? rising ?? foundTags ?? person ?? tagAbout
         // Over a search's posts stand the rows of what the sources found (#319).
-        let ids = opened ?? (found + items.map(\.id))
+        let posts = drawn ?? items.map(\.id)
+        let ids = opened ?? (found.isEmpty ? posts : found + posts)
         return ids.isEmpty ? nil : ids
     }
 

@@ -135,6 +135,21 @@ public struct PageCursor: Sendable, Hashable {
         self.id = id
         self.rowid = rowid
     }
+
+    /// The row's time as a moment: the file's `YYYY-MM-DD HH:MM:SS.SSS`, in UTC, to the
+    /// millisecond it holds. Nothing for a time the file did not write that way.
+    public var moment: Date? {
+        let parts = postedAt.split(whereSeparator: { "- :.".contains($0) }).map { Int($0) }
+        guard parts.count >= 6, parts.allSatisfy({ $0 != nil }) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        let fields = DateComponents(
+            year: parts[0], month: parts[1], day: parts[2], hour: parts[3], minute: parts[4], second: parts[5]
+        )
+        guard let whole = calendar.date(from: fields) else { return nil }
+        let milliseconds = parts.count > 6 ? Double(parts[6] ?? 0) : 0
+        return whole.addingTimeInterval(milliseconds / 1000)
+    }
 }
 
 /// The file's rows, read by key where the store's pool lacks them (#357): what lets `ItemStore`
@@ -238,5 +253,78 @@ struct HeldNotes: Sequence {
     mutating func owe(_ keys: some Sequence<NoteKey>, dropped gone: some Sequence<NoteKey> = []) {
         touched.formUnion(keys)
         dropped.formUnion(gone)
+    }
+}
+
+// MARK: - A timeline read a page at a time (#357)
+
+public enum PageAsk: Sendable, Hashable {
+    case newest
+    /// The rows after the cursor in the store's order: older.
+    case before(PageCursor)
+    /// The rows before it: newer.
+    case after(PageCursor)
+    /// The rows after the row under this key, wherever the file has it — a row of the pool, by
+    /// its key alone. A key the file does not hold has no place: `StoreFile.NotOnDisk`.
+    case beforeRow(NoteKey)
+    /// The rows before the row under this key, as `beforeRow`.
+    case afterRow(NoteKey)
+}
+
+/// What a page is asked for: one timeline as compiled now, and what every timeline is cut by.
+public struct PageQuery: Sendable {
+    public let timeline: TimelineID
+    /// Whose ask this is, handed back on the page so a page that came back for an ask since
+    /// replaced can be told apart.
+    public let generation: Int
+    public let compiled: CompiledTimeline
+    /// `LatestDate.end(in:)`: nothing posted at it or after it is shown. Nil for no latest date.
+    public let latestEnd: Date?
+    /// Nothing posted before it is shown but what is kept: the months a store is kept for.
+    public let keepFrom: Date?
+
+    public init(timeline: TimelineID, generation: Int, compiled: CompiledTimeline, latestEnd: Date? = nil, keepFrom: Date? = nil) {
+        self.timeline = timeline
+        self.generation = generation
+        self.compiled = compiled
+        self.latestEnd = latestEnd
+        self.keepFrom = keepFrom
+    }
+}
+
+public struct Page: Sendable {
+    public let timeline: TimelineID
+    public let generation: Int
+    /// The rows the timeline shows, in the store's order. **Copies of one post are never split**
+    /// between two pages: a page that reaches its limit inside a run of rows with one time and
+    /// one id reads the run to its end.
+    public let rows: [HeldRow]
+    /// What `rows` hold with them and are not themselves shown — the post a reblog reblogs, the
+    /// post a quote or an answer names, a forum reply's topic — and what those hold in turn,
+    /// where the file has them.
+    public let carried: [HeldRow]
+    /// The last row looked at, shown or not: where the next page in the same direction starts.
+    /// Nil only where nothing was there to look at and nothing was asked after.
+    public let next: PageCursor?
+    /// The newest and the oldest row looked at, shown or not: a page newer than this one is
+    /// asked after `newest`, an older one before `oldest`. Nil where nothing was looked at.
+    public let newest: PageCursor?
+    public let oldest: PageCursor?
+    /// Nothing further on disk in the direction asked. A page that stopped at its budget is not
+    /// exhausted, however few rows it has.
+    public let exhausted: Bool
+
+    public init(
+        timeline: TimelineID, generation: Int, rows: [HeldRow], carried: [HeldRow], next: PageCursor?,
+        newest: PageCursor?, oldest: PageCursor?, exhausted: Bool
+    ) {
+        self.timeline = timeline
+        self.generation = generation
+        self.rows = rows
+        self.carried = carried
+        self.next = next
+        self.newest = newest
+        self.oldest = oldest
+        self.exhausted = exhausted
     }
 }

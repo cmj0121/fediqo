@@ -391,7 +391,10 @@ struct StorePoolTests {
         #expect(Set(before.map(\.key.id)) == ["old", "quoted-old", "recent"])
         let went = await pool.letGoBeyond(months: 1, from: now)
         #expect(went.posts == 0)
-        #expect(await pool.all() == before)
+        // Held still, and handed over by `all()` no more (H3b): what the whole store would have
+        // let go — the post an in-window one quotes stays, as it stays there.
+        #expect(await pool.note(old.key) != nil)
+        #expect(Set(await pool.all().map(\.key.id)) == ["quoted-old", "recent"])
         let changes = await pool.takeChanges().changes
         #expect(changes.deletes.isEmpty && changes.upserts.isEmpty)
         #expect(try file.rows([old.key]).count == 1)

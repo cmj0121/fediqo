@@ -19,63 +19,6 @@ import GRDB
 // spellings of one id as equal. The two orders can differ only for an id not in NFC against
 // another of the same time — which of two posts of one moment is drawn first, nothing more.
 
-public enum PageAsk: Sendable, Hashable {
-    case newest
-    /// The rows after the cursor in the store's order: older.
-    case before(PageCursor)
-    /// The rows before it: newer.
-    case after(PageCursor)
-    /// The rows after the row under this key, wherever the file has it — a row of the pool, by
-    /// its key alone. A key the file does not hold has no place: `StoreFile.NotOnDisk`.
-    case beforeRow(NoteKey)
-    /// The rows before the row under this key, as `beforeRow`.
-    case afterRow(NoteKey)
-}
-
-/// What a page is asked for: one timeline as compiled now, and what every timeline is cut by.
-public struct PageQuery: Sendable {
-    public let timeline: TimelineID
-    /// Whose ask this is, handed back on the page so a page that came back for an ask since
-    /// replaced can be told apart.
-    public let generation: Int
-    public let compiled: CompiledTimeline
-    /// `LatestDate.end(in:)`: nothing posted at it or after it is shown. Nil for no latest date.
-    public let latestEnd: Date?
-    /// Nothing posted before it is shown but what is kept: the months a store is kept for.
-    public let keepFrom: Date?
-
-    public init(timeline: TimelineID, generation: Int, compiled: CompiledTimeline, latestEnd: Date? = nil, keepFrom: Date? = nil) {
-        self.timeline = timeline
-        self.generation = generation
-        self.compiled = compiled
-        self.latestEnd = latestEnd
-        self.keepFrom = keepFrom
-    }
-}
-
-public struct Page: Sendable {
-    public let timeline: TimelineID
-    public let generation: Int
-    /// The rows the timeline shows, in the store's order. **Copies of one post are never split**
-    /// between two pages: a page that reaches its limit inside a run of rows with one time and
-    /// one id reads the run to its end.
-    public let rows: [HeldRow]
-    /// What `rows` hold with them and are not themselves shown — the post a reblog reblogs, the
-    /// post a quote or an answer names, a forum reply's topic — and what those hold in turn,
-    /// where the file has them.
-    public let carried: [HeldRow]
-    /// The last row looked at, shown or not: where the next page in the same direction starts.
-    /// Nil only where nothing was there to look at and nothing was asked after.
-    public let next: PageCursor?
-    /// The newest and the oldest row looked at, shown or not: a page newer than this one is
-    /// asked after `newest`, an older one before `oldest`. Nil where nothing was looked at.
-    public let newest: PageCursor?
-    public let oldest: PageCursor?
-    /// Nothing further on disk in the direction asked. A page that stopped at its budget is not
-    /// exhausted, however few rows it has.
-    public let exhausted: Bool
-}
-
 extension StoreFile {
     /// The indexes the pages and the reads by key go by (#357). **Made with `IF NOT EXISTS`
     /// outside the migrator**: no migration id, so a build before this one still opens the store
@@ -97,10 +40,118 @@ extension StoreFile {
 
     /// Makes the indexes where the file lacks them, on GRDB's queue and never the caller's: on a
     /// large store it takes seconds the first time (0.3–2.9 s at 270k rows), and nothing after.
+    /// **Each a write of its own, the pages' first**: a page asked meanwhile waits for the one
+    /// being made, not for all of them.
     public func makeIndexes() async throws {
-        try await db.write { db in
-            for sql in Self.pageIndexes { try db.execute(sql: sql) }
+        for sql in Self.pageIndexes {
+            try await db.write { db in try db.execute(sql: sql) }
         }
+    }
+
+    /// The pages' own index alone, where the file lacks it: what a launch's first page waits for
+    /// on a store an older build left (#357). The rest are made once the timeline shows
+    /// (`makeIndexes`): until then a read by key or a letting go reads without them, slower.
+    ///
+    /// **Its cost is one read of every row** — the table, its words with it — so it is what the
+    /// disk gives: 0.7 s with the file in memory, 3–6 s where it is not, at 270k rows.
+    ///
+    /// **Read beside while it is made** (#357, C15): the reads by key a pool makes go to a
+    /// connection of their own for as long as it takes (`beside`), and so does a provisional
+    /// page, so that nothing waits on it but a page that needs it. Its pages are held in memory
+    /// until it commits (`cache_spill` off), so the file is not locked against them before then.
+    ///
+    /// **Made once, whoever asks** — the launch and a first page alike wait for the one making,
+    /// with the one connection beside it — and that connection is let go, never closed under a
+    /// read that still holds it.
+    public func makePageIndex() async throws {
+        let file = self
+        let build = pageIndexBuild {
+            Task {
+                defer { file.pageIndexEnded() }
+                try await file.buildPageIndex()
+            }
+        }
+        try await build.value
+    }
+
+    private func buildPageIndex() async throws {
+        guard try await !db.read(Self.hasPageIndex) else { return }
+        beside = try? readingConnection()
+        defer { beside = nil }
+        try await db.writeWithoutTransaction { db in
+            guard try !Self.hasPageIndex(db) else { return }
+            try db.execute(sql: "PRAGMA cache_spill = OFF")
+            defer { try? db.execute(sql: "PRAGMA cache_spill = ON") }
+            try db.inTransaction {
+                try db.execute(sql: Self.pageIndexes[0])
+                return .commit
+            }
+        }
+    }
+
+    /// The newest rows **by the order they arrived in** that `query`'s timeline shows (#357,
+    /// C15) — what can be drawn at once on a file whose pages' index is still being made, and
+    /// nothing where it is made: then the page itself is as quick. Read on a connection of its
+    /// own, beside the index being made, by the primary key alone, a chunk at a time, through
+    /// the same prefilter and the same rules a page has.
+    ///
+    /// **Provisional, and said to be**: nearly the newest by time, never surely so — a post that
+    /// arrived late with an older time is not among them, and a row that arrived early with a
+    /// newer one may be missed. So it carries no place to read on from (`next` and its ends are
+    /// nothing): a timeline drawn from it waits for its first true page before it reads further.
+    public func provisionalPage(_ query: PageQuery, limit: Int = 100, scanBudget: Int = 20_000) async throws -> Page? {
+        let side = try readingConnection()
+        defer { try? side.close() }
+        guard try await !side.read(Self.hasPageIndex) else { return nil }
+        let prefilter = query.compiled.prefilter
+        let (hit, hitArguments) = Self.hit(prefilter, keepFrom: query.keepFrom)
+        let sources = try await side.read(Self.sourcesByHost)
+        let index = TextIndex([])
+        var shown: [HeldRow] = []
+        var below: Int64?
+        var looked = 0
+        var chunk = 256
+        while shown.count < limit, looked < scanBudget {
+            try Task.checkCancellation()
+            var bounds = ["typeof(posted_at) = 'text'"]
+            var arguments = hitArguments
+            if let latestEnd = query.latestEnd {
+                bounds.append("posted_at < ?")
+                arguments += [latestEnd]
+            }
+            if let below {
+                bounds.append("rowid < ?")
+                arguments += [below]
+            }
+            arguments += [chunk]
+            let sql = """
+                SELECT rowid, (\(hit)) AS hit FROM note WHERE \(bounds.joined(separator: " AND "))
+                ORDER BY rowid DESC LIMIT ?
+                """
+            let asked = arguments
+            let entries = try await side.read { db in
+                try Row.fetchAll(db, sql: sql, arguments: asked).map { (rowid: $0["rowid"] as Int64, hit: $0["hit"] as Bool) }
+            }
+            let hits = entries.filter(\.hit).map(\.rowid)
+            if !hits.isEmpty {
+                let judged = try await side.read { db in try Self.judged(db, hits, query.compiled, prefilter, index, sources) }
+                shown += hits.compactMap { judged[$0] }
+            }
+            looked += entries.count
+            guard entries.count == chunk, let last = entries.last else { break }
+            below = last.rowid
+            chunk = min(chunk * 2, 4096)
+        }
+        let rows = Array(shown.prefix(limit))
+        let carried = try await side.read { db in try Self.carried(db, of: rows, sources) }
+        return Page(
+            timeline: query.timeline, generation: query.generation, rows: rows, carried: carried,
+            next: nil, newest: nil, oldest: nil, exhausted: false
+        )
+    }
+
+    static func hasPageIndex(_ db: Database) throws -> Bool {
+        try Bool.fetchOne(db, sql: "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'note_page'") ?? false
     }
 
     /// One page of `query`'s timeline: at most `limit` rows it shows — more only to finish a run
@@ -115,10 +166,7 @@ extension StoreFile {
     /// decode is passed over and logged, never a reason to set the store aside. A forum reply
     /// with no date of its own (`Note.isPartOfTopic`) is no row of any timeline.
     public func page(_ query: PageQuery, _ ask: PageAsk, limit: Int = 100, scanBudget: Int = 20_000) async throws -> Page {
-        let indexed = try await db.read { db in
-            try Bool.fetchOne(db, sql: "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'note_page'") ?? false
-        }
-        if !indexed { try await makeIndexes() }
+        if try await !db.read(Self.hasPageIndex) { try await makePageIndex() }
         let prefilter = query.compiled.prefilter
         let (hit, hitArguments) = Self.hit(prefilter, keepFrom: query.keepFrom)
         let newer: Bool
@@ -395,9 +443,33 @@ extension StoreFile {
 /// The file read by key for `ItemStore`'s pool (#357): by the primary key, a forum topic's
 /// replies by the key's prefix, and a source's own id by `note_status`, once a page has made it.
 extension StoreFile: HeldRows {
+    /// A read for the pool, on the connection beside a long write while there is one
+    /// (`makePageIndex`), and on this store's own otherwise. `beside` says which.
+    ///
+    /// **A read the connection beside could not make is made on this store's own**: SQLite's
+    /// own failure there — busy past its wait, a connection gone — is no answer about the rows,
+    /// and answering none for it would turn an arrival away for the run.
+    private func poolRead<T>(_ body: (Database, Bool) throws -> T) throws -> T {
+        if let side = beside {
+            do {
+                return try side.read { db in try body(db, true) }
+            } catch is DatabaseError {
+                return try db.read { db in try body(db, false) }
+            }
+        }
+        return try db.read { db in try body(db, false) }
+    }
+
+    /// The sources a pool read stamps its rows with: kept between reads of this store's own
+    /// connection (`sourcesByHost(cached:)`), whose `data_version` that keeps count by; read
+    /// afresh beside it.
+    private func poolSources(_ db: Database, _ beside: Bool) throws -> [String: Source] {
+        beside ? try Self.sourcesByHost(db) : try sourcesByHost(cached: db)
+    }
+
     public func rows(_ keys: [NoteKey]) throws -> [HeldRow] {
-        try db.read { db in
-            let sources = try sourcesByHost(cached: db)
+        try poolRead { db, beside in
+            let sources = try poolSources(db, beside)
             var found: [HeldRow] = []
             var unread: [NoteKey] = []
             for (host, keys) in Dictionary(grouping: keys, by: \.host).sorted(by: { $0.key < $1.key }) {
@@ -414,35 +486,35 @@ extension StoreFile: HeldRows {
     }
 
     public func rows(host: String, idPrefix: String) throws -> [HeldRow] {
-        try db.read { db in
+        try poolRead { db, beside in
             try Self.read(
                 Row.fetchAll(
                     db, sql: "SELECT rowid AS rowid, * FROM note WHERE host = ? AND substr(id, 1, length(?)) = ?",
                     arguments: [host, idPrefix, idPrefix]
                 ),
-                sourcesByHost(cached: db)
+                poolSources(db, beside)
             )
         }
     }
 
     public func rows(host: String, statusIDs: [String]) throws -> [HeldRow] {
-        try db.read { db in
-            try Self.held(db, host: host, statusIDs, by: Self.statusIDExpression, sourcesByHost(cached: db))
+        try poolRead { db, beside in
+            try Self.held(db, host: host, statusIDs, by: Self.statusIDExpression, poolSources(db, beside))
         }
     }
 
     /// By `note_kept`, where a page has made it: asked once a run, by the first letting go that
     /// must know what a kept post holds.
     public func keptRows() throws -> [HeldRow] {
-        try db.read { db in
-            try Self.read(Row.fetchAll(db, sql: "SELECT rowid AS rowid, * FROM note WHERE kept"), sourcesByHost(cached: db))
+        try poolRead { db, beside in
+            try Self.read(Row.fetchAll(db, sql: "SELECT rowid AS rowid, * FROM note WHERE kept"), poolSources(db, beside))
         }
     }
 
     /// Off `refs` alone, as `ReferenceRow` writes it, of the row's own host: nothing of a row
     /// whose references are not JSON.
     public func reblogged(by keys: [NoteKey]) throws -> [NoteKey] {
-        try db.read { db in
+        try poolRead { db, beside in
             var reblogged: [NoteKey] = []
             for (host, keys) in Dictionary(grouping: keys, by: \.host).sorted(by: { $0.key < $1.key }) {
                 let ids = keys.map(\.id)
@@ -487,14 +559,14 @@ extension StoreFile {
                 arguments = [cutoff]
             }
         }
-        return try db.read { db in
+        return try poolRead { db, beside in
             try Row.fetchAll(db, sql: sql, arguments: StatementArguments(arguments)).map { NoteKey(host: $0["host"], id: $0["id"]) }
         }
     }
 
     /// By `note_page`, sorting only the rows of one moment by when they arrived.
     public func oldest(_ limit: Int, after: PageCursor?) throws -> (rows: [HeldRow], next: PageCursor?) {
-        try db.read { db in
+        try poolRead { db, beside in
             // A range on `posted_at` alone, so `note_page` answers it; the moment it starts at is cut by rowid.
             let past = after == nil ? "" : " AND posted_at >= ? AND NOT (posted_at = ? AND rowid <= ?)"
             let arguments: StatementArguments = after.map { [$0.postedAt, $0.postedAt, $0.rowid, limit] } ?? [limit]
@@ -502,7 +574,7 @@ extension StoreFile {
                 db, sql: "SELECT rowid AS rowid, * FROM note WHERE NOT kept\(past) ORDER BY posted_at ASC, rowid ASC LIMIT ?",
                 arguments: arguments
             )
-            let sources = try sourcesByHost(cached: db)
+            let sources = try poolSources(db, beside)
             let next = found.count < limit ? nil : found.last.flatMap { row in
                 String.fromDatabaseValue(row["posted_at"] as DatabaseValue)
                     .map { PageCursor(postedAt: $0, id: row["id"], rowid: row["rowid"]) }
@@ -514,7 +586,7 @@ extension StoreFile {
     /// Off `refs` alone, as `ReferenceRow` writes it: a reference names a row of its own host.
     /// Only a cell that names an id is taken apart.
     public func referring(to keys: [NoteKey]) throws -> [Referrer] {
-        try db.read { db in
+        try poolRead { db, beside in
             var found: [Referrer] = []
             for (host, keys) in Dictionary(grouping: keys, by: \.host).sorted(by: { $0.key < $1.key }) {
                 let rows = try Row.fetchAll(db, sql: """
@@ -541,7 +613,7 @@ extension StoreFile {
 
     public func marked(_ hosts: StoreOp.Hosts) throws -> Bool {
         let (named, arguments) = try Self.rows(of: hosts)
-        return try db.read { db in
+        return try poolRead { db, beside in
             try Bool.fetchOne(
                 db, sql: "SELECT EXISTS (SELECT 1 FROM note WHERE \(named) AND \(Self.readerSaidOrOwing) AND \(Self.readerMarked))",
                 arguments: arguments
@@ -550,7 +622,7 @@ extension StoreFile {
     }
 
     public func rowCount() throws -> Int {
-        try db.read { db in try Int.fetchOne(db, sql: "SELECT count(*) FROM note") ?? 0 }
+        try poolRead { db, beside in try Int.fetchOne(db, sql: "SELECT count(*) FROM note") ?? 0 }
     }
 
     /// `op`, made on every row it names, inside the save's transaction.
