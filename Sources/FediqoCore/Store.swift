@@ -1997,6 +1997,68 @@ public actor ItemStore {
     /// How many keys the pool answers for (`looked`): for the tests.
     var lookedCount: Int { looked.count }
 
+    /// **How many entries each collection the store holds has** (#360, K-12): counts only, never
+    /// what an entry says. A collection of collections is counted by what it holds summed
+    /// (`namesAsked`, `listedLeft`, …). The pool's own books — what each row holds, the order of
+    /// sightings — are counted with their room (`.capacity`), as a dictionary or an array keeps
+    /// its room when entries leave. The turns of a letting go are made and let go within a pass,
+    /// and so held by nothing between passes.
+    func census() -> [String: Int] {
+        [
+            "pool": notes.count,
+            "pool.capacity": notes.rows.capacity,
+            "pool.touched": notes.touched.count,
+            "pool.dropped": notes.dropped.count,
+            "pool.seen": notes.seen.count,
+            "pool.seen.capacity": notes.seen.capacity,
+            "pool.holders": notes.holders.count,
+            "pool.holders.capacity": notes.holders.capacity,
+            "pool.sightings": notes.sightings.count,
+            "pool.sightings.capacity": notes.sightings.capacity,
+            "sources": sourceList.count,
+            "said": saidByHost.count,
+            "opsOwed": opsOwed.count,
+            "opsRun": opsRun.count,
+            "opsInFlight": opsInFlight.count,
+            "inFlight": inFlight.count,
+            "pins": pins?.count ?? 0,
+            "pinsBy": pinsBy.count,
+            "pinsBy.pins": pinsBy.values.reduce(0) { $0 + $1.pins.count },
+            "screensGone": screensGone.count,
+            "listedLeft": listedLeft.values.reduce(0) { $0 + $1.values.reduce(0) { $0 + $1.count } },
+            // A read back's waits and marks: those waiting for it to be put back or not, how
+            // many files it copied in, and whether it may yet be put back or is being.
+            "waitingForPutBack": waitingForPutBack.count,
+            "filesCopiedIn": filesCopiedIn,
+            "putBackMay": putBackMay ? 1 : 0,
+            "restoringFile": restoringFile ? 1 : 0,
+            "passesTook": passesTook.count,
+            "hopsTook": hopsTook.count,
+            "looked": looked.count,
+            "looked.capacity": looked.capacity,
+            "namesAsked": namesAsked.values.reduce(0) { $0 + $1.count },
+            "remainSaid": remainSaid.values.reduce(0) { $0 + $1.count },
+            "hostsOwed": hostsOwed.count,
+            "arrival": arrival.count,
+            "arrival.capacity": arrival.capacity,
+            "acted": acted.count,
+            "readAt": readAt.count,
+            "swept": swept.count,
+            "listeners": listeners.count,
+            "unsent": unsent.count,
+            "unsentGone": unsentGone.count,
+            "unsentSenders": unsentSenders.count,
+            "reaches": reaches.count,
+            "noticeEpochs": noticeEpochs.count,
+            "readPastLimit": readPastLimit.count,
+            "goneLanded": goneLanded.count,
+            "undecodable": undecodable.count,
+            "keptSpared": keptSpared.count,
+            "stalled": stalled.count,
+            "refused": refused.values.reduce(0) { $0 + $1.count },
+        ]
+    }
+
     /// `changes` no longer on their way to the file, written or handed back.
     private func landed(_ changes: RowChanges) {
         poolMoved += 1

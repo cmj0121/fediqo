@@ -3906,3 +3906,58 @@ struct SignOutAsk: Equatable {
     let host: String
     let question: ShellConfirmation
 }
+
+extension ShellSession {
+    /// **How many entries each collection the session holds has** (#360, K-12): counts only,
+    /// never what an entry says. A collection of collections is counted by what it holds summed:
+    /// the rows each timeline's coverage pins, what each drawn timeline lists and remembers.
+    /// A cache not built now counts nothing.
+    func census() -> [String: Int] {
+        let drawn = drawnTimelines.values
+        return [
+            "notes": notes.count,
+            "notes.capacity": notes.capacity,
+            "heldReplies": heldReplies.count,
+            "sources": sources.count,
+            "profiles": profiles.count,
+            "unread": unread.count,
+            "queries": queries.count,
+            "written": written.count,
+            "coverage": coverage.count,
+            "coverage.pinned": coverage.values.reduce(0) { $0 + $1.pinned.count },
+            "anchors": anchors.count,
+            "placing": placing.count,
+            "missingRules": missingRules.count,
+            "drawnTimelines": drawnTimelines.count,
+            "drawnOrder": drawnOrder.count,
+            "drawn.items": drawn.reduce(0) { $0 + $1.items.count },
+            "drawn.ids": drawn.reduce(0) { $0 + $1.ids.count },
+            "drawn.index": drawn.reduce(0) { $0 + $1.index.count },
+            "drawn.priorIndex": drawn.reduce(0) { $0 + $1.priorIndex.count },
+            "drawn.arrived": drawn.reduce(0) { $0 + $1.arrived.count },
+            "drawn.left": drawn.reduce(0) { $0 + $1.left.count },
+            "drawn.before": drawn.reduce(0) { $0 + $1.before.count },
+            "drawn.gapMarks": drawn.reduce(0) { $0 + $1.items.reduce(0) { $0 + $1.gaps.count } },
+            "textIndex": builtTextIndex?.count ?? 0,
+            "reblogTargets": builtReblogTargets?.count ?? 0,
+            "owingRows": builtOwingRows?.count ?? 0,
+            "heldIndex": builtHeldIndex?.count ?? 0,
+            "statusIndex": statusIndex?.rows.count ?? 0,
+            "pinnedDrawing": pinnedDrawing?.items.count ?? 0,
+            "pagePinsKept": pagePinsKept?.pins.count ?? 0,
+            "heldLast": heldLast?.pins.count ?? 0,
+            "openPages.steps": openPages.steps.count,
+            "slides": slides.count,
+            "removals": removals.count,
+            "removes": removes.count,
+            "noticesHeld": noticesHeld.count,
+            "noticesSaid": noticesSaid.count,
+            "rowsOnFile": rowsOnFile?.count ?? 0,
+            "lamps": readingMark.lampCount,
+            "readingMark.rows": readingMark.rows.count,
+            "refs.asking": refs.count,
+            "refs.seen": refs.seenCount,
+            "misses": acts.misses.count,
+        ]
+    }
+}

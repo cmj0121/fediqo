@@ -127,6 +127,8 @@ public struct TextIndex: Sendable {
     private let entries: [NoteKey: Entry]
     /// How many entries this build folded rather than reused.
     let folded: Int
+    /// How many rows it holds the words of: a count for a census (#360), nothing they say.
+    public var count: Int { entries.count }
 
     public init(_ notes: [Note], reusing old: TextIndex? = nil) {
         var entries: [NoteKey: Entry] = [:]
@@ -166,6 +168,8 @@ public struct TextIndex: Sendable {
 /// store.
 public struct ReblogTargets: Sendable {
     private let byKey: [NoteKey: Note]
+    /// How many posts it answers for: a count for a census (#360), nothing they say.
+    public var count: Int { byKey.count }
 
     /// Counts the lookups built over notes while it is set, on the task that set it. For a test
     /// to read: that one adopt builds one, whatever reads it. Nothing sets it otherwise.
