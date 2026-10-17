@@ -438,6 +438,14 @@ private struct Live: View {
         return { try await saver.exclusively { try await file.compact() } }
     }
 
+    /// Takes the words of the posts an act let go out of the index's words index (#360, C27),
+    /// or nothing where this run has no index. Where a save would run, as the rebuild is.
+    private var letWordsGo: (@Sendable () async throws -> Void)? {
+        guard let file = launch.file else { return nil }
+        let saver = launch.saver
+        return { _ = try await saver.exclusively { try await file.letWordsGo() } }
+    }
+
     /// One page of a timeline read from the index (#357), or nothing where this run has none: the
     /// store then holds every row there is, and nothing is paged.
     private var readPage: (@Sendable (PageQuery, PageAsk, Int) async throws -> Page)? {
@@ -468,6 +476,9 @@ private struct Live: View {
         let words = launch.words
         return {
             try? await file.makeIndexes(in: saver)
+            // The words of what was let go and not yet taken out of the words index (C27):
+            // before the scrub, which would copy them into the file it makes.
+            await file.letWordsGoIfOwed(in: saver)
             _ = try? await saver.exclusively { await file.scrubIfDue() }
             // The words index (#360), built a chunk at a time behind everything else and waited
             // for by nothing: until it is, a keyword reads as it did.
@@ -486,7 +497,7 @@ private struct Live: View {
             store: launch.store, forums: launch.forums,
             mastodon: launch.mastodon, persist: save, persistUnsent: saveUnsent,
             savesLanded: { [saver = launch.saver] in await saver.landings() },
-            measureStore: measureStore, compactStore: compactStore, weighStore: weighStore,
+            measureStore: measureStore, compactStore: compactStore, letWordsGo: letWordsGo, weighStore: weighStore,
             readPage: readPage, readEarly: readEarly, readSearch: readSearch, afterFirstPage: afterFirstPage,
             limits: launch.limits,
             storeIsNewer: launch.storeIsNewer,

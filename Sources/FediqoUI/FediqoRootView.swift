@@ -124,6 +124,7 @@ public struct FediqoRootView: View {
         savesLanded: (@Sendable () async -> AsyncStream<Void>)? = nil,
         measureStore: (@Sendable () async -> Int)? = nil,
         compactStore: (@Sendable () async throws -> Void)? = nil,
+        letWordsGo: (@Sendable () async throws -> Void)? = nil,
         weighStore: (@Sendable () async -> Int)? = nil,
         readPage: (@Sendable (PageQuery, PageAsk, Int) async throws -> Page)? = nil,
         readEarly: (@Sendable (PageQuery, Int) async throws -> Page?)? = nil,
@@ -156,6 +157,7 @@ public struct FediqoRootView: View {
         session.deviceName = deviceName
         session.measureStore = measureStore
         session.compactStore = compactStore
+        session.letWordsGo = letWordsGo
         session.weighStore = weighStore
         session.readPage = readPage
         session.readEarly = readEarly

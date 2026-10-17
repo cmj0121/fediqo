@@ -707,6 +707,19 @@ final class ShellSession {
     /// its size until it is asked again.
     @ObservationIgnored var compactStore: (@Sendable () async throws -> Void)?
 
+    /// Takes the words of the posts let go out of the index's words index (#360, C27): FTS5
+    /// keeps a deleted post's tokens until it rewrites itself, and this rewrites it — where a
+    /// save would run, and only where a save let rows go since it last ran. Set by the app
+    /// beside `compactStore`, which does it first; nil where this run has no index.
+    @ObservationIgnored var letWordsGo: (@Sendable () async throws -> Void)?
+
+    /// After an act that let posts go and is not followed by `compactStore` — a span, a source
+    /// removed, what is marked gone, a post taken back — once its save has returned: chained
+    /// after every save asked for before, so several such acts in a row rewrite the index once.
+    func wordsLetGo() async {
+        try? await letWordsGo?()
+    }
+
     /// What the rows held weigh, whatever the file does (`StoreFile.bytesHeld`): what the room
     /// check judges each round by, since `measureStore` only moves once `compactStore` has run.
     /// nil where this run has no index.
@@ -1475,7 +1488,7 @@ final class ShellSession {
                 // says it is gone — a kept copy drawn again, marked — while the file still
                 // holds its words (#292). Whatever became of the sign-in meanwhile: the source
                 // said yes, so the post is gone there. A write that did not land is said.
-                if act == .withdraw { await saveNow(.post) }
+                if act == .withdraw { await saveNow(.post) { [weak self] in await self?.wordsLetGo() } }
                 guard stands(flight, copy.id, act, door) else { break }
                 if act == .withdraw {
                     acts.landed(copy.id, act)
@@ -3658,7 +3671,8 @@ final class ShellSession {
         // kept or not, are off the disk before the rest is said to have gone (#292): removing
         // a source is the person asking for them to be gone, whatever it held.
         await store.remove(host: host, keepingPosts: keepingPosts)
-        await saveNow(.source)
+        // And their words out of the words index once that save has returned (C27).
+        await saveNow(.source) { [weak self] in await self?.wordsLetGo() }
         // What waited to be sent to it goes with it, as its question said — off the disk
         // before the rest is said to have gone (#292). A sign-out and a Clear leave them.
         await outbox.forget(host: host, in: self)

@@ -248,7 +248,11 @@ extension ShellSession {
             }
             await reloadFromStore()
             // Waited for: the count is not said while the file still holds what went (#292).
-            await saveNow(.posts) { [weak self] in await self?.readStoreBytes() }
+            await saveNow(.posts) { [weak self] in
+                // Their words out of the words index, then the index measured (C27).
+                await self?.wordsLetGo()
+                await self?.readStoreBytes()
+            }
             return went
         }
     }

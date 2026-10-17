@@ -782,7 +782,12 @@ public struct StoreFile: Sendable {
     /// two, so a page waits for one step and not for the file. A file not yet in that mode is
     /// rebuilt whole, as before, and is in it from then on (`rebuild`). The caller holds the
     /// saves' place (`StoreSaver.exclusively`) for the whole of it.
+    ///
+    /// **The tokens of what was let go first** (#360, C27, `letWordsGo`): the words index
+    /// rewritten frees its old segments, zeroed as they go, and the steps after give that room
+    /// back with the rest.
     public func compact() async throws {
+        try await letWordsGo()
         let mode = try await db.read { db in try Int.fetchOne(db, sql: "PRAGMA auto_vacuum") ?? 0 }
         guard mode == Self.incremental else {
             try await db.writeWithoutTransaction { db in try Self.rebuild(db) }
@@ -948,15 +953,18 @@ public struct StoreFile: Sendable {
             for source in changes.sources ?? [] {
                 try SourceRecord(source, said: said[source.host]).upsert(db)
             }
+            var deleted = false
             for key in changes.deletes {
                 try db.execute(sql: "DELETE FROM note WHERE host = ? AND id = ?", arguments: [key.host, key.id])
+                deleted = deleted || db.changesCount > 0
             }
             for op in changes.ops { try Self.make(op, in: db) }
             for note in changes.upserts {
                 try NoteRecord(note).upsert(db)
             }
-            // The words of what was written, where they are few (#360).
-            return Self.drainWordsInSave(db)
+            // The words of what was written, where they are few, and the tokens of what was
+            // let go owed (#360, C27).
+            return Self.drainWordsInSave(db, letGo: deleted)
         }
         if many { held.wordsLeftDue() }
         dropWhatWasReplaced()
@@ -980,7 +988,8 @@ public struct StoreFile: Sendable {
         defer { held.wrote() }
         let many = try await db.write { db -> Bool in
             if let notices { try Self.write(notices: notices, in: db) }
-            try NoteRecord.deleteAll(db)
+            // Every row goes, and every doc of the words index with them (C27).
+            if try NoteRecord.deleteAll(db) > 0 { Self.emptyWordsInSave(db) }
             try SourceRecord.deleteAll(db)
             for source in sources {
                 try SourceRecord(source, said: saidByHost[source.host]).insert(db)

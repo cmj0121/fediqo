@@ -146,13 +146,20 @@ extension StoreFile {
     /// below it is only taken off, and a new floor drops every doc — so the build only adds. A
     /// delete is no saving to pass up: it rewrites its segment's tombstones, milliseconds on a
     /// large index, where an insert costs microseconds.
+    ///
+    /// **A doc taken out for a row that is gone owes a rewrite** (`oweLetGo`), whoever deleted the
+    /// row — an older build, `sqlite3`, a save whose own marking was swallowed: its tokens stay in
+    /// the file until `letWordsGo`.
     private static func writeDocs(_ db: Database, _ docs: [(rowid: Int64, doc: String?)], replacing: Bool) throws {
         let delete = try db.cachedStatement(sql: "DELETE FROM note_words WHERE rowid = ?")
         let insert = try db.cachedStatement(sql: "INSERT INTO note_words(rowid, g) VALUES (?, ?)")
+        var gone = false
         for (rowid, doc) in docs {
             if replacing { try delete.execute(arguments: [rowid]) }
             if let doc, !doc.isEmpty { try insert.execute(arguments: [rowid, doc]) }
+            gone = gone || (replacing && doc == nil)
         }
+        if gone { try oweLetGo(db) }
     }
 
     /// The due rows at or above `floor`, newest first, as they stand.
@@ -186,9 +193,13 @@ extension StoreFile {
     ///
     /// Returns whether it left more due than it drains — an older build's rewrite, a read back —
     /// for the save to hand to the builder (`StoreFile.wordsLeftDue`).
+    ///
+    /// `letGo`: the save deleted rows, whose tokens the index keeps until it is rewritten —
+    /// owed (`oweLetGo`) in the same transaction, for `letWordsGo` to take out.
     @discardableResult
-    static func drainWordsInSave(_ db: Database) -> Bool {
+    static func drainWordsInSave(_ db: Database, letGo: Bool = false) -> Bool {
         guard wordsCapable, (try? hasWords(db)) == true else { return false }
+        if letGo { try? oweLetGo(db) }
         var many = false
         try? db.inSavepoint {
             try db.execute(sql: "DELETE FROM note_words_due WHERE rowid < ?", arguments: [floor(db)])
@@ -198,6 +209,139 @@ extension StoreFile {
             return .commit
         }
         return many
+    }
+
+    // MARK: - The words of what was let go (K-11, C27)
+
+    /// **A deleted doc's tokens stay in the file until its segment is merged.** FTS5 deletes
+    /// lazily: a delete is a tombstone, and the doc's tokens stay in the segment they were
+    /// written in — a page in use, so `secure_delete` has nothing to zero. FTS5's own
+    /// `secure-delete` needs SQLite 3.44, and the targets ship 3.43.2. So a save that deletes
+    /// rows marks the index owed (`letgo` in `note_words_state`, in the save's own transaction,
+    /// so a quit before the rewrite leaves it owed for the next), and `letWordsGo`, after the act
+    /// that let the posts go, rewrites the index whole: the old segments freed, and zeroed as
+    /// they are.
+    static func oweLetGo(_ db: Database) throws {
+        try db.execute(sql: "INSERT OR REPLACE INTO note_words_state(k, v) VALUES ('letgo', 1)")
+    }
+
+    private static func letGoOwed(_ db: Database) throws -> Bool {
+        try Int.fetchOne(db, sql: "SELECT v FROM note_words_state WHERE k = 'letgo'") != nil
+    }
+
+    /// Whether a save let rows go whose tokens `letWordsGo` has not taken out of the file yet.
+    func wordsLetGoOwed() throws -> Bool {
+        try db.read { db in try Self.hasWords(db) && Self.letGoOwed(db) }
+    }
+
+    /// What the words index is made of in the file: its segments, and the pages of tombstones —
+    /// docs deleted whose tokens a segment still holds. **Clean** is one segment at most and no
+    /// tombstone: every token in the file is a live doc's. Read off `note_words_data`'s ids,
+    /// where a segment's pages sit under its id from bit 37 up, and a tombstone page's above
+    /// 65,535.
+    struct WordsShape: Equatable, Sendable {
+        let segments: Int
+        let tombstonePages: Int
+        var isClean: Bool { segments <= 1 && tombstonePages == 0 }
+    }
+
+    static func wordsShape(_ db: Database) throws -> WordsShape {
+        WordsShape(
+            segments: try Int.fetchOne(db, sql: """
+                SELECT count(DISTINCT id >> 37) FROM note_words_data WHERE (id >> 37) BETWEEN 1 AND 65535
+                """) ?? 0,
+            tombstonePages: try Int.fetchOne(db, sql: "SELECT count(*) FROM note_words_data WHERE (id >> 37) > 65535") ?? 0
+        )
+    }
+
+    func wordsShape() throws -> WordsShape? {
+        try db.read { db in try Self.hasWords(db) ? Self.wordsShape(db) : nil }
+    }
+
+    /// One pass of the rewrite, in the caller's write: every segment merged into one (`optimize`).
+    /// **The one place a pass is made**, so bounded merge steps can take its place.
+    private static func rewriteWordsPass(_ db: Database) throws {
+        try db.execute(sql: "INSERT INTO note_words(note_words) VALUES ('optimize')")
+    }
+
+    /// The most passes one `letWordsGo` makes before it leaves the index owed for the next: one
+    /// `optimize` that finishes a merge FTS5 had begun (`deletemerge`, as a large letting go is
+    /// drained) keeps the tombstones added meanwhile, and a second clears them.
+    static let rewritePasses = 4
+
+    /// Takes the tokens of every row let go out of the file (C27 (a)): the docs of the rows still
+    /// due made first — a row let go and not drained yet still has its doc — `drainedInSave` rows
+    /// a write, then the index rewritten (`rewriteWordsPass`) a write a pass until it is clean
+    /// (`WordsShape`), at most `passes`. Every segment it leaves behind is freed, zeroed by
+    /// `secure_delete`. **The mark is taken off only once the index is clean**: one left otherwise
+    /// is the next ask's. Returns whether it rewrote.
+    ///
+    /// **Once for however many acts asked**: nothing where nothing is owed, so acts one after
+    /// another rewrite the index once. Nothing where this SQLite cannot keep the index, or the
+    /// file has none whole. **Where a save would run** (`StoreSaver.exclusively`), after the act's
+    /// save has landed, and on GRDB's queue — never the main thread: a pass holds the queue, and
+    /// pages wait for it. `compact()` runs it first, before it gives the room back, and a launch
+    /// once its first page shows where a mark was left (`letWordsGoIfOwed`).
+    @discardableResult
+    public func letWordsGo() async throws -> Bool {
+        try await letWordsGo(capable: Self.wordsCapable)
+    }
+
+    /// `letWordsGo()`, as though this SQLite could keep the index or not, with at most `passes`.
+    @discardableResult
+    func letWordsGo(capable: Bool, passes: Int = StoreFile.rewritePasses) async throws -> Bool {
+        guard capable, try await db.read({ db in try Self.hasWords(db) && Self.letGoOwed(db) }) else { return false }
+        while try await db.write({ db in
+            precondition(!Thread.isMainThread, "the words index is rewritten off the main thread")
+            guard try Self.hasWords(db) else { return false }
+            return try Self.drainWords(db, limit: Self.drainedInSave) == Self.drainedInSave
+        }) {
+            await Task.yield()
+        }
+        var rewrote = false
+        for _ in 0..<max(1, passes) {
+            let clean = try await db.write { db -> Bool? in
+                precondition(!Thread.isMainThread, "the words index is rewritten off the main thread")
+                guard try Self.hasWords(db), try Self.letGoOwed(db) else { return nil }
+                try Self.rewriteWordsPass(db)
+                guard try Self.wordsShape(db).isClean else { return false }
+                try db.execute(sql: "DELETE FROM note_words_state WHERE k = 'letgo'")
+                return true
+            }
+            guard let clean else { break }
+            rewrote = true
+            if clean { break }
+            await Task.yield()
+        }
+        return rewrote
+    }
+
+    /// `letWordsGo()` where a mark was left — a quit or a crash before the rewrite, a rewrite that
+    /// failed, the first save dropping rows nothing could draw — **asked once the first page
+    /// shows**, where a save would run, before the file is scrubbed. Nothing where none is owed.
+    public func letWordsGoIfOwed(in saver: StoreSaver?) async {
+        guard (try? wordsLetGoOwed()) == true else { return }
+        if let saver {
+            _ = try? await saver.exclusively { try await self.letWordsGo() }
+        } else {
+            _ = try? await letWordsGo()
+        }
+    }
+
+    /// Inside a save that empties `note` — a read back, or its undo: every doc goes with the rows
+    /// at once (`delete-all`, its pages freed and zeroed), and nothing deleted is left due or
+    /// owed. The rows written after are due by their triggers, or below `floor`, as any row is.
+    /// **Never the save's failure**: in a savepoint of its own — and owed first, outside it, so
+    /// one that failed leaves the old docs owed a rewrite.
+    static func emptyWordsInSave(_ db: Database) {
+        guard wordsCapable, (try? hasWords(db)) == true else { return }
+        try? oweLetGo(db)
+        try? db.inSavepoint {
+            try db.execute(sql: "INSERT INTO note_words(note_words) VALUES ('delete-all')")
+            try db.execute(sql: "DELETE FROM note_words_due")
+            try db.execute(sql: "DELETE FROM note_words_state WHERE k = 'letgo'")
+            return .commit
+        }
     }
 
     /// The rows a build makes the docs of in one write: some 50 ms holding the queue at 270,000
