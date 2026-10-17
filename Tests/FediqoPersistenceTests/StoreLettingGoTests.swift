@@ -86,6 +86,18 @@ struct StoreLettingGoTests {
         try await file.save(changes)
     }
 
+    /// What `store` owes the file, written and said to have landed, as the saver does (#359).
+    private func land(_ store: ItemStore, to file: StoreFile) async throws {
+        let (changes, _) = await store.takeChanges()
+        try await file.save(changes)
+        await store.wrote(changes)
+    }
+
+    /// `rows` as a timeline's page hands them in.
+    private static func page(_ rows: [HeldRow]) -> Page {
+        Page(timeline: UUID(), generation: 1, rows: rows, carried: [], next: nil, newest: nil, oldest: nil, exhausted: true)
+    }
+
     private func rows(_ file: StoreFile) throws -> [NoteKey: Note] {
         Dictionary(uniqueKeysWithValues: try file.load().notes.map { ($0.key, $0) })
     }
@@ -247,6 +259,77 @@ struct StoreLettingGoTests {
         await pool.oweEverything(fileHolds: before.notes.map(\.key), hosts: before.sources.map(\.host))
         try await save(pool, to: file)
         #expect(try file.rowCount() == Self.size - went)
+        #expect(try !file.marked(.allBut([])))
+    }
+
+    @Test("a page read before the marks were taken back, and out while that lands, is laid in without them")
+    func pageOutHoldsSettling() async throws {
+        let (file, _) = try await twoFiles()
+        let pool = ItemStore(sources: Self.sources, rows: file)
+        let marked = NoteKey(host: "one.example", id: Self.id(5))
+        let early = try file.rows([marked])
+        #expect(early.first?.note.favourited == true)
+        let (began, reading) = AsyncStream<Void>.makeStream()
+        let (gate, open) = AsyncStream<Void>.makeStream()
+        let out = Task {
+            try await pool.paged {
+                reading.yield()
+                for await _ in gate { break }
+                return Self.page(early)
+            }
+        }
+        for await _ in began { break }
+        #expect(await pool.forgetReaderMarks(keeping: []))
+        try await land(pool, to: file)
+        open.yield()
+        _ = try await out.value
+        #expect(await pool.note(marked)?.favourited == nil)
+    }
+
+    @Test("marks taken back and landed, then given again on the file, are kept by a row read in after")
+    func marksGivenAgainKept() async throws {
+        let (file, _) = try await twoFiles()
+        let pool = ItemStore(sources: Self.sources, rows: file)
+        #expect(await pool.forgetReaderMarks(keeping: []))
+        try await land(pool, to: file)
+        // Marked by the reader signed in since and saved, as a row the pool let go would be.
+        let paged = Self.seed()[5]
+        let byKey = Self.seed()[10]
+        try await file.save(RowChanges(upserts: [paged, byKey]))
+        let page = try await pool.paged { Self.page(try file.rows([paged.key])) }
+        #expect(page.rows.map(\.note.key) == [paged.key])
+        #expect(await pool.note(paged.key)?.favourited == true)
+        #expect(await pool.notes([byKey.key])[byKey.key]?.favourited == true)
+        #expect(await pool.takeChanges().changes.isEmpty)
+    }
+
+    @Test("a read back undone owes every change of the run again, and a row read in after is read as they leave it")
+    func undoOwesOpsAgain() async throws {
+        let (file, _) = try await twoFiles()
+        let before = try file.load()
+        let pool = ItemStore(sources: Self.sources, rows: file)
+        #expect(await pool.forgetReaderMarks(keeping: []))
+        let (made, _) = await pool.takeChanges()
+        try await file.save(made)
+        await pool.wrote(made)
+        await pool.restoring()
+        try await file.save(sources: before.sources, notes: before.notes, said: before.said)
+        // Read before the store is told what the file was put back to, and a save landing
+        // meanwhile: still read as the marks taken back leave them.
+        let marked = NoteKey(host: "one.example", id: Self.id(5))
+        let page = try await pool.paged { Self.page(try file.rows([marked])) }
+        #expect(page.rows.first?.note.favourited == true)
+        #expect(await pool.note(marked)?.favourited == nil)
+        await pool.wrote(RowChanges())
+        let byKey = NoteKey(host: "one.example", id: Self.id(10))
+        #expect(await pool.notes([byKey])[byKey]?.favourited == nil)
+        await pool.oweEverything(fileHolds: before.notes.map(\.key), hosts: before.sources.map(\.host))
+        let after = NoteKey(host: "two.example", id: Self.id(15))
+        #expect(await pool.notes([after])[after]?.favourited == nil)
+        let (owed, _) = await pool.takeChanges()
+        #expect(owed.ops == made.ops)
+        try await file.save(owed)
+        await pool.wrote(owed)
         #expect(try !file.marked(.allBut([])))
     }
 

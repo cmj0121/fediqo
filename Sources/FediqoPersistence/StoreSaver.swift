@@ -589,6 +589,7 @@ public actor StoreSaver {
         do {
             let began = ContinuousClock.now
             try await write(changes)
+            await store.wrote(changes)
             written = revision
             // Only counts and a time: what `gap` is set by.
             let took = ContinuousClock.now - began

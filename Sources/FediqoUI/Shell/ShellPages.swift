@@ -154,9 +154,9 @@ extension ShellSession {
         if let anchor, let key = NoteKey(rowID: anchor) {
             // A row not in the file yet — arrived this run, not saved — has no place there: the
             // page below is read all the same.
-            if let again = try? await readPage(Self.pageQuery(held.key, generation: held.generation), .beforeRow(key), Self.readAhead) {
-                await store.take(again.rows + again.carried)
-            }
+            let asked = Self.pageQuery(held.key, generation: held.generation)
+            let ahead = Self.readAhead
+            _ = try? await store.paged { try await readPage(asked, .beforeRow(key), ahead) }
         }
         let shown = await readDown(query, key: held.key, from: .before(next), generation: held.generation)
         if shown == 0, coverage[query]?.exhausted == true, !Task.isCancelled {
@@ -195,8 +195,10 @@ extension ShellSession {
         key: TimelineCoverage.Key, generation: Int
     ) async {
         let asked: Page?
+        let ask = Self.pageQuery(key, generation: generation)
+        let rows = Self.pageRows
         do {
-            asked = try await read(Self.pageQuery(key, generation: generation), Self.pageRows)
+            asked = try await store.pagedIfAny { try await read(ask, rows) }
         } catch {
             return
         }
@@ -206,8 +208,6 @@ extension ShellSession {
             return
         }
         guard let oldest = page.rows.map(\.note.postedAt).min() else { return }
-        guard coverage[query]?.generation == generation, coverage[query]?.landed == false else { return }
-        await store.take(page.rows + page.carried)
         guard coverage[query]?.generation == generation, coverage[query]?.landed == false else { return }
         coverage[query]?.provisional = oldest
         await reloadFromStore()
@@ -229,12 +229,14 @@ extension ShellSession {
         guard let readPage else { return 0 }
         defer { if coverage[query]?.generation == generation { coverage[query]?.reading = false } }
         let asked = Self.pageQuery(key, generation: generation)
+        let rows = Self.pageRows
         var ask = first
         var shown = 0
         while true {
             let page: Page
             do {
-                page = try await readPage(asked, ask, Self.pageRows)
+                let at = ask
+                page = try await store.paged { try await readPage(asked, at, rows) }
             } catch {
                 // Given up — a switch, a change — its first page is read again when next asked,
                 // and nothing stands in for it meanwhile; a file that would not be read draws
@@ -247,8 +249,7 @@ extension ShellSession {
                 }
                 return shown
             }
-            // Laid in whatever came of the ask since: what was read is what the file holds.
-            await store.take(page.rows + page.carried)
+            // Laid in (`paged`) whatever came of the ask since: what was read is what the file holds.
             guard coverage[query]?.generation == generation else { return shown }
             if let next = page.next {
                 coverage[query]?.next = next

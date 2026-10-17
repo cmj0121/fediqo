@@ -32,15 +32,31 @@ public actor ItemStore {
     /// The changes to rows not held here that the file has yet to make (`StoreOp`): made, and not
     /// yet taken by a save, or handed back by one that failed.
     private var opsOwed: [StoreOp] = []
-    /// Every such change made since the file was last laid in whole (`replace`). **A row read
-    /// from the file is read as every one of them leaves it** (`unlanded`), landed or not: a
-    /// read begun before a change landed may be handed in after, and a change made again
-    /// changes nothing. Few, and — round 1's pool only growing — never one too many.
+    /// Every such change made since the file was last laid in whole (`replace`): what a read
+    /// back's undo owes again (`oweEverything`). **A row read from the file is read as every one
+    /// of them above `opsSettled` leaves it** (`unlanded`): a read begun before a change landed
+    /// may be handed in after, and a change made again changes nothing.
     private var opsRun: [StoreOp] = []
     private var opsMade = 0
     /// The last change made before the file was last laid in whole: one numbered no higher,
     /// handed back by a save taken before, is of rows no longer there and is not owed again.
     private var opsFloor = 0
+    /// The last change every read of the file now begins after the landing of, and every one
+    /// before it too (#359): a row read in is the file's word on it, and is no longer read as it
+    /// leaves it. **Moved only when no page is out** (`paged`), so no read begun before a
+    /// landing is handed in after the move — otherwise a row marked again since, and read back,
+    /// would lose its new marks to a change made before them.
+    private var opsSettled = 0
+    /// The changes taken by a save that has not landed (`takeChanges`): not settled until it does.
+    private var opsInFlight: Set<Int> = []
+    /// The rows taken by a save that has not landed (#359): what a read of the file before it
+    /// lands would bring back as it was. Cleared as it lands (`wrote`) or is handed back.
+    private var inFlight: Set<NoteKey> = []
+    /// How many pages read off the actor are out (`paged`): none, and the moment is quiet.
+    private var pagesOut = 0
+    /// The file being put back to an older store (`restoring`), until `oweEverything` says it
+    /// is: nothing settles meanwhile, as the file no longer holds what landed.
+    private var restoringFile = false
     /// Every key the pool answers for (#357): each row laid in, each key asked of the file.
     /// **One among these that is not in the pool is not held**, whatever the file still says —
     /// a row let go is not read back before the save that deletes it lands.
@@ -437,6 +453,7 @@ public actor ItemStore {
             opsOwed = []
             opsRun = []
             opsFloor = opsMade
+            opsSettled = opsMade
         }
         sourcesWatcher?(sourceList.map(\.host))
         noticeEpochLast += 1
@@ -1476,17 +1493,50 @@ public actor ItemStore {
         hostsOwed = []
         changes.ops = opsOwed
         opsOwed = []
+        inFlight.formUnion(changes.upserts.map(\.key) + changes.deletes)
+        opsInFlight.formUnion(changes.ops.map(\.number))
         return (changes, revision)
+    }
+
+    /// `changes`, taken and written: the file holds them now. What a read of the file brings
+    /// in is from here on read as they left it — once no page begun before is out.
+    public func wrote(_ changes: RowChanges) {
+        landed(changes)
+        settleOps()
+    }
+
+    /// `changes` no longer on their way to the file, written or handed back.
+    private func landed(_ changes: RowChanges) {
+        inFlight.subtract(changes.upserts.map(\.key) + changes.deletes)
+        opsInFlight.subtract(changes.ops.map(\.number))
+    }
+
+    /// At a quiet moment — no page out — every change up to the first still owed or on its way
+    /// is the file's: a read from here on begins after it landed.
+    private func settleOps() {
+        guard pagesOut == 0, !restoringFile else { return }
+        let lowest = (opsOwed.map(\.number) + opsInFlight).min()
+        opsSettled = max(opsSettled, lowest.map { $0 - 1 } ?? opsMade)
     }
 
     /// `changes`, taken and not written: owed again. Each row is written as it stands at the next
     /// take, so one changed meanwhile is written with its newer word, and one let go meanwhile
     /// is deleted.
     public func putBack(_ changes: RowChanges) {
+        landed(changes)
         notes.owe(changes.upserts.map(\.key) + changes.deletes, dropped: changes.deletes)
         hostsOwed.formUnion(changes.removedHosts)
         if changes.sources != nil { sourcesWritten = nil }
         opsOwed = changes.ops.filter { $0.number > opsFloor } + opsOwed
+    }
+
+    /// The file is about to be put back to an older store (#359), before it is: every change of
+    /// the run is unsettled, so a row read from the file — by key, or on a page out across it
+    /// — is read as each leaves it, and none settles again until `oweEverything`. Where the
+    /// put back fails, none settles for the rest of the run: what the file holds is not known.
+    public func restoring() {
+        restoringFile = true
+        opsSettled = opsFloor
     }
 
     /// **The file put back to an older store behind this one** — a read back's undo writing
@@ -1503,6 +1553,9 @@ public actor ItemStore {
         let gone = keys.filter { notes[$0] == nil && (disk == nil || looked.contains($0)) }
         notes.owe(held + gone)
         opsOwed = opsRun
+        // The file knows none of them again: a row read in is read as each leaves it.
+        opsSettled = opsFloor
+        restoringFile = false
         sourcesWritten = nil
         hostsOwed.formUnion(hosts)
         changed(shown: false, replies: false)
@@ -1763,6 +1816,32 @@ public actor ItemStore {
         let before = notes.count
         pool(found: rows)
         return notes.count != before
+    }
+
+    /// Reads a page off the actor and lays it in (`take`), **counted while it is out** (#359):
+    /// the changes that land meanwhile are not settled until no page is (`settleOps`), so a page
+    /// read before one landed is laid in as that change leaves it. Every page a timeline reads
+    /// comes through here; `take(_:)` stays for tests and the read back.
+    public func paged(_ read: @Sendable () async throws -> Page) async throws -> Page {
+        pagesOut += 1
+        defer { pageBack() }
+        let page = try await read()
+        take(page.rows + page.carried)
+        return page
+    }
+
+    /// `paged(_:)` of a read that may have no page to give: a provisional one (C15).
+    public func pagedIfAny(_ read: @Sendable () async throws -> Page?) async throws -> Page? {
+        pagesOut += 1
+        defer { pageBack() }
+        guard let page = try await read() else { return nil }
+        take(page.rows + page.carried)
+        return page
+    }
+
+    private func pageBack() {
+        pagesOut -= 1
+        settleOps()
     }
 
     /// `note`'s key and what it holds with it: what reading it in reads.
@@ -2322,11 +2401,11 @@ public actor ItemStore {
         return true
     }
 
-    /// `note`, read from the file, as every change made of the file's rows this run leaves it
-    /// (`opsRun`), landed or not.
+    /// `note`, read from the file, as every change made of the file's rows this run and not
+    /// settled leaves it (`opsRun` above `opsSettled`), landed or not.
     private func unlanded(_ note: Note) -> Note {
         var note = note
-        for op in opsRun {
+        for op in opsRun where op.number > opsSettled {
             switch op.kind {
             case .forgetReaderMarks(let hosts):
                 guard hosts.contains(note.key.host) else { continue }

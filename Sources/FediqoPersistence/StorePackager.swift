@@ -1608,6 +1608,8 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             // Written through the file, past the saver: the store says what of it differs once
             // it is replaced (`ItemStore.replace`), and is owed nothing else.
             return ({ [store] in
+                // Nothing of the run is the file's while it is put back, nor after.
+                await store.restoring()
                 try await file.save(
                     sources: previous.sources, notes: previous.notes, said: previous.said, replacingNotices: told
                 )
