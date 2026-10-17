@@ -506,6 +506,8 @@ public actor ItemStore {
             opsSettled = opsMade
             listedLeft = [:]
             leftSinceReplace = []
+            goneLanded = []
+            putBackMay = false
         }
         sourcesWatcher?(sourceList.map(\.host))
         noticeEpochLast += 1
@@ -1283,6 +1285,13 @@ public actor ItemStore {
     public func letGoBeyond(_ cutoff: Date, step: Int, after: PageCursor?) -> (went: WentByLimit, next: PageCursor?) {
         guard retention == cutoff else { return (.none, nil) }
         guard let disk else { return (letGoBeyondWhole(cutoff), nil) }
+        // **None while the file is being put back, or may be**, as no hop of the room limit
+        // is (`letGoOldest`): the run of steps ends where it stands, and the next act of the
+        // limit begins it again.
+        guard !restoringFile, !putBackMay else {
+            stepping = false
+            return (.none, nil)
+        }
         if after == nil {
             stepping = true
             readPastLimit = [:]
@@ -1425,32 +1434,92 @@ public actor ItemStore {
     /// that are not kept go, and where only kept posts are left nothing goes at all.
     ///
     /// **Over a file, the oldest of the file** (#357, C9), the rows the pool holds as it holds
-    /// them: what goes is what would go were every row read.
-    public func letGoOldest(count: Int) -> WentByLimit {
+    /// them: what goes is what would go were every row read. **Read and let go a hop at a time**
+    /// (#360, C33), each of at most `roomHop` of the file's rows, and the actor free between two:
+    /// a page or a landing waits for one hop, not for the round. **And none while the file is
+    /// being put back, or may be** (`restoring`, `mayBePutBack`): a hop begun then would let go
+    /// against a file a read back is writing; the round ends where it stands.
+    public func letGoOldest(count: Int) async -> WentByLimit {
         guard count > 0, disk != nil || !notes.isEmpty else { return .none }
-        guard let going = disk == nil ? Array(mayGoForRoom().prefix(count)) : mayGoForRoomFromFile(count),
-              !going.isEmpty
-        else { return .none }
-        for note in going {
-            if notes[note.key] == nil {
-                drop([note.key])
+        guard disk != nil else {
+            return letGo(mayGoForRoom().prefix(count).map { Going(key: $0.key, partOfTopic: $0.isPartOfTopic) })
+        }
+        var went = WentByLimit.none
+        var from: RoomHop?
+        while went.posts < count, !restoringFile, !putBackMay {
+            let started = ContinuousClock.now
+            guard let hop = roomHop(count - went.posts, from: from) else { break }
+            went = went.adding(letGo(hop.chosen))
+            tookHop(ContinuousClock.now - started)
+            guard let next = hop.next else { break }
+            from = next
+            await Task.yield()
+            await betweenHops?()
+        }
+        return went
+    }
+
+    /// What a test does between two hops of a round, the actor free (`letGoOldest`).
+    private var betweenHops: (@Sendable () async -> Void)?
+
+    /// Sets what a test does between two hops of a round.
+    func doBetweenHops(_ act: (@Sendable () async -> Void)?) {
+        betweenHops = act
+    }
+
+    /// `going`, chosen by the room limit, let go: from the pool where it holds them, by key where
+    /// only the file does.
+    private func letGo(_ going: [Going]) -> WentByLimit {
+        guard !going.isEmpty else { return .none }
+        for row in going {
+            if notes[row.key] == nil {
+                drop([row.key])
             } else {
-                notes[note.key] = nil
+                notes[row.key] = nil
             }
-            self.arrival[note.key] = nil
+            self.arrival[row.key] = nil
         }
         strike(carried: Set(going.map(\.key)))
-        changed(shown: going.contains { !$0.isPartOfTopic }, replies: going.contains { $0.isPartOfTopic })
+        // One only the file held is not known to be a reply or an item: both are told.
+        changed(shown: going.contains { $0.partOfTopic != true }, replies: going.contains { $0.partOfTopic != false })
         return WentByLimit(posts: going.count, sources: Set(going.map(\.key.host)).sorted())
     }
 
     /// Whether `letGoOldest` could let anything go right now (#284): a post is held that is
     /// neither kept nor quoted by a held post. What the room check asks before it spends the
     /// picture copies — asked of the store each time, so a post un-kept, from this window or
-    /// another, is seen by the very next check.
-    public func holdsWhatRoomMayLetGo() -> Bool {
+    /// another, is seen by the very next check. **Over a file, a hop at a time** as the round is
+    /// read, the actor free between two.
+    public func holdsWhatRoomMayLetGo() async -> Bool {
         guard disk != nil else { return !mayGoForRoom().isEmpty }
-        return !(mayGoForRoomFromFile(1) ?? []).isEmpty
+        var from: RoomHop?
+        while true {
+            let started = ContinuousClock.now
+            guard let hop = roomHop(1, from: from) else { return false }
+            tookHop(ContinuousClock.now - started)
+            if !hop.chosen.isEmpty { return true }
+            guard let next = hop.next else { return false }
+            from = next
+            await Task.yield()
+        }
+    }
+
+    /// How many of the file's rows one hop of the room limit reads at most (#360, C33).
+    public static let roomHop = 2_000
+
+    /// Where a round of the room limit over a file has read to: the file's cursor, and the place
+    /// of the last row it read — the pool's rows up to there were judged with them.
+    private struct RoomHop {
+        let cursor: PageCursor
+        let last: (postedAt: Date, arrival: Int64)
+    }
+
+    /// How long each of the last hops of the room limit held this actor: for the bench.
+    private(set) var hopsTook: [Duration] = []
+
+    private func tookHop(_ took: Duration) {
+        hopsTook.append(took)
+        if hopsTook.count > Self.passesKept { hopsTook.removeFirst(hopsTook.count - Self.passesKept) }
     }
 
     /// How many rows the file holds, or nothing for a store with no file behind it — what the
@@ -1496,11 +1565,17 @@ public actor ItemStore {
         }.value
     }
 
-    /// `mayGoForRoom`, the first `count` of them, **over the file** (#357): the file's oldest
-    /// rows not kept, read a chunk at a time, each as the pool holds it where it does, merged with
-    /// the pool's own in the one order; and each spared by `mayGoForRoom`'s rule, asked of every
-    /// row of the file or the pool that refers to it. Nothing where the file would not be read.
-    private func mayGoForRoomFromFile(_ count: Int) -> [Note]? {
+    /// `mayGoForRoom`, **over the file** (#357), one hop of it (#360, C33): of the file's oldest
+    /// rows not kept past `from`, at most `roomHop` read — fewer where fewer are wanted — each as
+    /// the pool holds it where it does, merged with the pool's own of the same stretch in the one
+    /// order; and each spared by `mayGoForRoom`'s rule, asked of every row of the file or the
+    /// pool that refers to it. The first `count` that go, and where the next hop reads from, or
+    /// none where the file has no more. Nothing where the file would not be read.
+    ///
+    /// **Each hop asks the pool afresh**: between two, the actor is free and the pool moves. A
+    /// pool's row is judged by the hop whose stretch it falls in, so one judged already is not
+    /// judged again, and one laid in behind the hops waits for the next round.
+    private func roomHop(_ count: Int, from: RoomHop?) -> (chosen: [Going], next: RoomHop?)? {
         guard let disk, poolKept() else { return nil }
         let shown = shownByKept()
         let arrival = self.arrival
@@ -1509,63 +1584,64 @@ public actor ItemStore {
             a.postedAt != b.postedAt ? a.postedAt < b.postedAt : a.arrival < b.arrival
         }
         func place(_ note: Note) -> Place { (note.postedAt, Int64(arrival[note.key] ?? 0)) }
-        // The pool's rows that may go, in the order they go, and what refers to each in the pool.
-        let pooled = notes.values.filter { !$0.kept && !shown.contains($0.key) }.sorted { before(place($0), place($1)) }
-        var referred: [NoteKey: [Note]] = [:]
+        // By key and place alone, nothing decoded: what a hop of 2,000 costs is the reading.
+        let read: (rows: [OldestRow], next: PageCursor?)
+        do {
+            // The first hop no more than is wanted; every one after it as many as a hop reads.
+            read = try disk.oldestKeys(from == nil ? min(max(2 * count, 200), Self.roomHop) : Self.roomHop, after: from?.cursor)
+        } catch {
+            Self.unread(error)
+            return nil
+        }
+        // The file's rows the pool does not answer for: one it answers for is here as it
+        // holds it, or is let go already.
+        var batch: [(going: Going, reblogs: Bool, place: Place)] = read.rows
+            .filter { !looked.contains($0.key) && notes[$0.key] == nil && !shown.contains($0.key) }
+            .map { (Going(key: $0.key, partOfTopic: nil), $0.reblogs, ($0.postedAt, $0.arrival)) }
+        // The pool's rows that may go, past the last hop's stretch and up to this one's last
+        // row, or all that are left past it.
+        let last = read.rows.last.map { (postedAt: $0.postedAt, arrival: $0.arrival) }
+        for note in notes.values where !note.kept && !shown.contains(note.key) {
+            let at = place(note)
+            if let from, !before(from.last, at) { continue }
+            if read.next != nil, let last, before(last, at) { continue }
+            batch.append((Going(key: note.key, partOfTopic: note.isPartOfTopic), note.isReblog, at))
+        }
+        batch.sort { before($0.place, $1.place) }
+        let askable = batch.filter { !$0.reblogs }.map(\.going.key)
+        let fromFile: [Referrer]
+        do {
+            fromFile = askable.isEmpty ? [] : try disk.referring(to: askable)
+        } catch {
+            Self.unread(error)
+            return nil
+        }
+        var referring: [NoteKey: [(stays: Bool, place: Place)]] = [:]
+        for referrer in fromFile where !looked.contains(referrer.key) && notes[referrer.key] == nil {
+            referring[referrer.target, default: []].append(
+                (referrer.kept || shown.contains(referrer.key), (referrer.postedAt, referrer.arrival))
+            )
+        }
+        let asked = Set(askable)
         for note in notes.values {
-            for key in note.heldWith { referred[key, default: []].append(note) }
+            for key in note.heldWith where asked.contains(key) {
+                referring[key, default: []].append((note.kept || shown.contains(note.key), place(note)))
+            }
         }
-        let chunk = max(2 * count, 200)
-        var chosen: [Note] = []
-        var cursor: PageCursor?
-        var poolAt = 0
-        while chosen.count < count {
-            let read: (rows: [HeldRow], next: PageCursor?)
-            do {
-                read = try disk.oldest(chunk, after: cursor)
-            } catch {
-                Self.unread(error)
-                return nil
-            }
-            // The file's rows the pool does not answer for: one it answers for is here as it
-            // holds it, or is let go already.
-            var batch: [(note: Note, place: Place)] = read.rows
-                .filter { !looked.contains($0.note.key) && notes[$0.note.key] == nil && !shown.contains($0.note.key) }
-                .map { ($0.note, ($0.note.postedAt, $0.arrival)) }
-            // The pool's rows up to the file's last of this chunk, or all that are left past it.
-            let last = read.rows.last.map { (postedAt: $0.note.postedAt, arrival: $0.arrival) }
-            while poolAt < pooled.count, read.next == nil || last.map({ !before($0, place(pooled[poolAt])) }) ?? false {
-                batch.append((pooled[poolAt], place(pooled[poolAt])))
-                poolAt += 1
-            }
-            batch.sort { before($0.place, $1.place) }
-            let askable = batch.filter { !$0.note.isReblog }.map(\.note.key)
-            let fromFile: [Referrer]
-            do {
-                fromFile = askable.isEmpty ? [] : try disk.referring(to: askable)
-            } catch {
-                Self.unread(error)
-                return nil
-            }
-            var referring: [NoteKey: [(stays: Bool, place: Place)]] = [:]
-            for referrer in fromFile where !looked.contains(referrer.key) && notes[referrer.key] == nil {
-                referring[referrer.target, default: []].append(
-                    (referrer.kept || shown.contains(referrer.key), (referrer.postedAt, referrer.arrival))
-                )
-            }
-            for key in askable {
-                for note in referred[key] ?? [] {
-                    referring[key, default: []].append((note.kept || shown.contains(note.key), place(note)))
-                }
-            }
-            for (note, at) in batch where chosen.count < count {
-                let spared = !note.isReblog && (referring[note.key] ?? []).contains { $0.stays || before(at, $0.place) }
-                if !spared { chosen.append(note) }
-            }
-            guard let next = read.next else { break }
-            cursor = next
+        var chosen: [Going] = []
+        for (going, reblogs, at) in batch where chosen.count < count {
+            let spared = !reblogs && (referring[going.key] ?? []).contains { $0.stays || before(at, $0.place) }
+            if !spared { chosen.append(going) }
         }
-        return chosen
+        guard let cursor = read.next, let last else { return (chosen, nil) }
+        return (chosen, RoomHop(cursor: cursor, last: last))
+    }
+
+    /// A row the room limit lets go: its key, and whether it is a topic's reply — known of a
+    /// row the pool holds, not of one only the file does, which is read no further than its key.
+    private struct Going {
+        let key: NoteKey
+        let partOfTopic: Bool?
     }
 
     /// The rows `letGoOldest` chooses among, in the order they go: oldest posted first, two of
@@ -1745,9 +1821,64 @@ public actor ItemStore {
     /// in is from here on read as they left it — once no page begun before is out.
     public func wrote(_ changes: RowChanges) {
         landed(changes)
+        goneLanded.formUnion(changes.deletes)
         settleOps()
+        forgetLanded()
         letRowsLeave()
     }
+
+    /// The keys a delete that landed took from the file, still among `looked` (#360, C33): they
+    /// leave it at a quiet moment.
+    private var goneLanded: Set<NoteKey> = []
+    /// Whether a read back has the file in a state it may yet be put back from (`mayBePutBack`).
+    private var putBackMay = false
+
+    /// **A landed delete's keys leave `looked`** (#360, C33): the file no longer holds the row, so
+    /// a read of it answers "not held" by itself, and a key kept for nothing is the pool's
+    /// bookkeeping growing with what was let go. **Only at a quiet moment** — no page out, as
+    /// `settleOps` — since a page read before the delete landed may still carry the row; **only
+    /// of a key nothing has taken up since** — held again, owed again, or on its way in a later
+    /// save; **and never while a read back may still put the file back** (`mayBePutBack`): its undo
+    /// owes a delete of each row the older file holds that the run let go, known by `looked`.
+    /// A save that failed lands nothing here, so what it carried stays answered for.
+    ///
+    /// **And each leaves the rows let go of the pool** (`listedLeft`): one there and no longer
+    /// answered for would be taken for a row the file still holds, and its id for the newest a
+    /// timeline listed (#201) — of a post the file no longer has.
+    private func forgetLanded() {
+        guard !goneLanded.isEmpty, pagesOut == 0, !restoringFile, !putBackMay else { return }
+        var forgotten: [String: Set<NoteKey>] = [:]
+        for key in goneLanded where notes[key] == nil && !notes.touched.contains(key) && !inFlight.contains(key) {
+            looked.remove(key)
+            readPastLimit[key] = nil
+            forgotten[key.host, default: []].insert(key)
+        }
+        goneLanded = []
+        for (host, keys) in forgotten {
+            guard let byCategory = listedLeft[host] else { continue }
+            var kept: [Category: [(id: String, key: NoteKey)]] = [:]
+            for (category, left) in byCategory {
+                let staying = left.filter { !keys.contains($0.key) }
+                if !staying.isEmpty { kept[category] = staying }
+            }
+            listedLeft[host] = kept.isEmpty ? nil : kept
+        }
+    }
+
+    /// Whether the file may be put back to what it held before a read back (#344, `restoring`):
+    /// said before the read back writes the package into the file, and said no more by
+    /// `replace` or `oweEverything`, or by the read back where it wrote nothing. Meanwhile a
+    /// landed delete's keys stay among `looked` (`forgetLanded`).
+    public func mayBePutBack(_ may: Bool) {
+        putBackMay = may
+        if !may { forgetLanded() }
+    }
+
+    /// Whether a read back may still put the file back (`mayBePutBack`): for the tests.
+    var holdsForPutBack: Bool { putBackMay }
+
+    /// How many keys the pool answers for (`looked`): for the tests.
+    var lookedCount: Int { looked.count }
 
     /// `changes` no longer on their way to the file, written or handed back.
     private func landed(_ changes: RowChanges) {
@@ -1818,6 +1949,8 @@ public actor ItemStore {
         restoringFile = false
         sourcesWritten = nil
         hostsOwed.formUnion(hosts)
+        putBackMay = false
+        forgetLanded()
         changed(shown: false, replies: false)
     }
 
@@ -2102,6 +2235,7 @@ public actor ItemStore {
     private func pageBack() {
         pagesOut -= 1
         settleOps()
+        forgetLanded()
         letRowsLeave()
     }
 

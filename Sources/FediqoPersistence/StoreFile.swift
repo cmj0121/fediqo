@@ -371,7 +371,7 @@ public struct StoreFile: Sendable {
         }) ?? (0, 1)
         guard version < Self.scrubbed || free > 0 else { return }
         try? db.writeWithoutTransaction { db in
-            try Self.guardingRowids(db) { try db.execute(sql: "VACUUM") }
+            try Self.rebuild(db)
             try db.execute(sql: "PRAGMA user_version = \(Self.scrubbed)")
         }
     }
@@ -392,10 +392,35 @@ public struct StoreFile: Sendable {
         }) ?? false
         guard due else { return }
         try? await db.writeWithoutTransaction { db in
-            try Self.guardingRowids(db) { try db.execute(sql: "VACUUM") }
+            try Self.rebuild(db)
             try db.execute(sql: "PRAGMA user_version = \(Self.scrubbed)")
         }
     }
+
+    /// The whole file rebuilt (`VACUUM`), **and from then on able to give its room back a part at
+    /// a time** (#360, C26): `auto_vacuum = INCREMENTAL` is a mode in the file's header that only
+    /// a rebuild can change, so it is set wherever a rebuild happens anyway — the scrub, and a
+    /// `compact()` of a file not yet in that mode, which most stores the scrub already rebuilt
+    /// would otherwise never leave. It
+    /// keeps a map of where each page points — a page in some eight hundred — so the file weighs
+    /// that much more from then. A build before this one reads such a file as any other; going
+    /// back needs another rebuild. Inside the rowid guard, as every `VACUUM` is.
+    static func rebuild(_ db: Database) throws {
+        try db.execute(sql: "PRAGMA auto_vacuum = INCREMENTAL")
+        try guardingRowids(db) { try db.execute(sql: "VACUUM") }
+    }
+
+    /// The size of one page of the file (`PRAGMA page_size`), or SQLite's own where it cannot be
+    /// asked.
+    var pageSize: Int {
+        (try? db.read { db in try Int.fetchOne(db, sql: "PRAGMA page_size") }) ?? 4_096
+    }
+
+    /// `auto_vacuum`'s number for `INCREMENTAL`.
+    static let incremental = 2
+
+    /// How many free pages one step of `compact()` gives back (#360, C26).
+    public static let compactPages = 2_048
 
     /// Whether a file of `pages` pages, `free` of them free, is rebuilt (`scrubIfDue`).
     static func scrubDue(version: Int, free: Int, pages: Int, pageSize: Int) -> Bool {
@@ -736,8 +761,41 @@ public struct StoreFile: Sendable {
     /// posts it let go of. Asked only after a limit acted, never on the ordinary save: it
     /// rewrites the whole index. **Room, and nothing else**: what the rows let go said is already
     /// gone from those pages by the save that freed them (`scrub`).
+    ///
+    /// **A part at a time, once the file is able to** (#360, C26): in a file whose header says
+    /// `auto_vacuum = INCREMENTAL`, `compactPages` free pages are given back a step — the file's
+    /// last pages moved into the free ones, and its tail cut off — and the queue is free between
+    /// two, so a page waits for one step and not for the file. A file not yet in that mode is
+    /// rebuilt whole, as before, and is in it from then on (`rebuild`). The caller holds the
+    /// saves' place (`StoreSaver.exclusively`) for the whole of it.
     public func compact() async throws {
-        try await db.writeWithoutTransaction { db in try Self.guardingRowids(db) { try db.execute(sql: "VACUUM") } }
+        let mode = try await db.read { db in try Int.fetchOne(db, sql: "PRAGMA auto_vacuum") ?? 0 }
+        guard mode == Self.incremental else {
+            try await db.writeWithoutTransaction { db in try Self.rebuild(db) }
+            return
+        }
+        while try await compactStep() > 0 {
+            await Task.yield()
+        }
+    }
+
+    /// One step of `compact()` in a file able to give its room back a part at a time: at most
+    /// `pages` free pages given back, in a transaction of its own. Returns how many are free
+    /// still — none in a file not in that mode, where this gives nothing back. **Pages move and
+    /// rows do not**: no rowid changes, so the words index needs no guard here, as a `VACUUM`
+    /// does; and what moves is a page in use, while what was freed is zeroed already
+    /// (`secure_delete`) and cut off with the tail.
+    @discardableResult
+    public func compactStep(pages: Int = StoreFile.compactPages) async throws -> Int {
+        try await db.writeWithoutTransaction { db in
+            guard try Int.fetchOne(db, sql: "PRAGMA auto_vacuum") == Self.incremental else { return 0 }
+            let before = try Int.fetchOne(db, sql: "PRAGMA freelist_count") ?? 0
+            guard before > 0 else { return 0 }
+            try db.execute(sql: "PRAGMA incremental_vacuum(\(max(1, pages)))")
+            let after = try Int.fetchOne(db, sql: "PRAGMA freelist_count") ?? 0
+            // A step that gave nothing back is not asked again.
+            return after < before ? after : 0
+        }
     }
 
     /// Moves `index.sqlite` and any journal SQLite left beside it to

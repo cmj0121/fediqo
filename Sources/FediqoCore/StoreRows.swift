@@ -98,6 +98,22 @@ public struct PastLimit: Sendable, Equatable {
     }
 }
 
+/// A row of the file the room limit reads (`HeldRows.oldestKeys`): its key, where it stands in
+/// the order rows go in, and whether it is a reblog — which nothing that refers to it spares.
+public struct OldestRow: Sendable, Equatable {
+    public let key: NoteKey
+    public let postedAt: Date
+    public let arrival: Int64
+    public let reblogs: Bool
+
+    public init(key: NoteKey, postedAt: Date, arrival: Int64, reblogs: Bool) {
+        self.key = key
+        self.postedAt = postedAt
+        self.arrival = arrival
+        self.reblogs = reblogs
+    }
+}
+
 /// A row of the file that refers to another (`Note.heldWith`), as the room limit asks of it:
 /// the row, where it stands in the order rows go in, whether it is kept — and what it refers to.
 public struct Referrer: Sendable, Equatable {
@@ -206,6 +222,9 @@ public protocol HeldRows: Sendable {
     /// they arrived, from past `after` on — and where the next are asked from, or nothing where
     /// none are left. A row that will not decode is passed over.
     func oldest(_ limit: Int, after: PageCursor?) throws -> (rows: [HeldRow], next: PageCursor?)
+    /// `oldest`, by key and place alone and nothing decoded (#360, C33): what a hop of the room
+    /// limit reads. A row that would not decode is among them.
+    func oldestKeys(_ limit: Int, after: PageCursor?) throws -> (rows: [OldestRow], next: PageCursor?)
     /// Every row that refers to one of `keys` (`Note.heldWith`).
     func referring(to keys: [NoteKey]) throws -> [Referrer]
     /// At most `limit` rows not kept and posted before `cutoff`, the oldest first and two of one

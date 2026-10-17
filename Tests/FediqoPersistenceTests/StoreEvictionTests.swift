@@ -198,6 +198,25 @@ struct StoreEvictionTests {
         }
     }
 
+    @Test("a row let go of the pool, then let go of the file by the room and landed, is no newest listed id (#360)")
+    func newestListedAfterTheRoom() async throws {
+        let (pooledFile, wholeFile) = try await twoFiles()
+        let pool = ItemStore(sources: Self.sources, rows: pooledFile, cap: Self.cap)
+        await readAll(pool)
+        await pool.hold([], drawnAt: await pool.drawn)
+        #expect(await pool.pooled <= Self.cap)
+        let whole = try wholeStore(wholeFile)
+        #expect(await pool.letGoOldest(count: 230) == (await whole.letGoOldest(count: 230)))
+        try await land(pool, to: pooledFile)
+        try await save(whole, to: wholeFile)
+        for host in ["one.example", "two.example"] {
+            for category: FediqoCore.Category in [.home, .public] {
+                let pooled = await pool.newestListedID(host: host, category: category)
+                #expect(pooled == (await whole.newestListedID(host: host, category: category)), "\(host) \(category)")
+            }
+        }
+    }
+
     @Test("the newest listed row that left, read again and taken back, gives way to the next that left")
     func newestListedTakenBack() async throws {
         try await agree(targets: [1, 2]) { store, _ in

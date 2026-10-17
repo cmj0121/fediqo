@@ -401,6 +401,39 @@ struct StoreWordPagesTests {
         #expect(Set(page.rows.map(\.note.id)).count == 600)
     }
 
+    @Test(
+        "the file giving its room back between two chunks of a page — a step at a time, or rebuilt whole — leaves the rest of it whole (#360)",
+        arguments: [true, false]
+    )
+    func compactedMeanwhile(inSteps: Bool) async throws {
+        let (file, query, _) = try await fooStore()
+        // Rows that say nothing of foo, let go: the room the compaction gives back.
+        let at = Date(timeIntervalSince1970: 1_700_000_000)
+        let filler = (0..<400).map { n in
+            Note(
+                id: "f\(n)", source: Self.one, author: "A", handle: "a@one.example",
+                body: String(repeating: "bar ", count: 200), postedAt: at.addingTimeInterval(Double(n)), categories: [.home]
+            )
+        }
+        try await file.save(RowChanges(upserts: filler))
+        if inSteps { await file.scrubIfDue() }
+        try await file.save(RowChanges(deletes: filler.map(\.key)))
+        let mode = try await file.db.read { db in try Int.fetchOne(db, sql: "PRAGMA auto_vacuum") ?? 0 }
+        #expect((mode == StoreFile.incremental) == inSteps)
+        let page = try await file.page(query, .newest, limit: 1_000, scanBudget: 20_000, candidatesMost: StoreFile.wordsCandidatesMost) { chunk in
+            guard chunk == 1 else { return }
+            if inSteps {
+                // Pages move and no row: nothing for the plan to be made again for.
+                while try await file.compactStep(pages: 8) > 0 {}
+            } else {
+                try await file.compact()
+            }
+        }
+        #expect(page.rows.count == 600)
+        #expect(Set(page.rows.map(\.note.id)).count == 600)
+        #expect(try await file.db.read { db in try Int.fetchOne(db, sql: "PRAGMA freelist_count") ?? 0 } == 0)
+    }
+
     @Test("asked row by row, a reblog's post is read by its key, and the index's answer once a read")
     func rowByRowPlan() async throws {
         var random = Seeded(state: 1)

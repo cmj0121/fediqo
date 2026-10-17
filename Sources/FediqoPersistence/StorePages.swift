@@ -745,6 +745,31 @@ extension StoreFile {
     }
 
     /// By `note_page` read from its oldest end, as `oldest` reads it, and the rows' cells left
+    /// whole but for the key, the place and whether it is a reblog: all a hop of the room limit
+    /// asks (#360, C33).
+    public func oldestKeys(_ limit: Int, after: PageCursor?) throws -> (rows: [OldestRow], next: PageCursor?) {
+        try poolRead { db, _ in
+            let past = after == nil ? "" : " AND posted_at >= ? AND NOT (posted_at = ? AND rowid <= ?)"
+            var arguments: [any DatabaseValueConvertible] = []
+            if let after { arguments += [after.postedAt, after.postedAt, after.rowid] }
+            arguments.append(limit)
+            let found = try Row.fetchAll(db, sql: """
+                SELECT rowid AS rowid, host, id, posted_at,
+                (instr(refs, 'reblogs') > 0 AND EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(refs) THEN refs ELSE '[]' END) r
+                 WHERE r.type = 'object' AND json_extract(r.value, '$.kind') = 'reblogs')) AS reblogs
+                FROM note WHERE NOT kept\(past) ORDER BY posted_at ASC, rowid ASC LIMIT ?
+                """, arguments: StatementArguments(arguments))
+            let next = found.count < limit ? nil : found.last.flatMap { row in
+                String.fromDatabaseValue(row["posted_at"] as DatabaseValue)
+                    .map { PageCursor(postedAt: $0, id: row["id"], rowid: row["rowid"]) }
+            }
+            return (found.map {
+                OldestRow(key: NoteKey(host: $0["host"], id: $0["id"]), postedAt: $0["posted_at"], arrival: $0["rowid"], reblogs: $0["reblogs"])
+            }, next)
+        }
+    }
+
+    /// By `note_page` read from its oldest end, as `oldest` reads it, and the rows' cells left
     /// whole: a key and a reblog's one reference are all a step of the months limit asks (#360).
     public func beyond(_ cutoff: Date, limit: Int, after: PageCursor?) throws -> (rows: [PastLimit], next: PageCursor?) {
         try poolRead { db, _ in

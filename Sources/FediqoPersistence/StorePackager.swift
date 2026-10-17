@@ -1581,6 +1581,10 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
                 for step in refused where !kept.contains(step.name) { _ = Self.unsay(step.name, in: directory) }
                 owed.saidHere(kept)
                 flight.end(keepingName: !kept.isEmpty)
+                // Nothing of the index is put back later in this run, whether it was put back
+                // now or refused for good: the store's landed deletes are no longer held for
+                // an undo (#360). One a lock refused is owed, and they stay held until it runs.
+                await store.mayBePutBack(false)
             }
             if refused.isEmpty { throw error }
             throw PackageFault.unwound(steps: refused.map(\.name))
@@ -1602,9 +1606,17 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             // the sign-ins a read back leaves may be somebody else's (#292). In the one
             // transaction that writes the new items: both, or neither.
             let told = try file.loadNotices(of: previous.sources)
-            try await file.save(
-                sources: contents.sources, notes: contents.notes, said: contents.said, replacingNotices: []
-            )
+            // From here the file may be put back, until the store is replaced or owes what
+            // the putting back undid: what it let go stays answered for meanwhile (#360).
+            await store.mayBePutBack(true)
+            do {
+                try await file.save(
+                    sources: contents.sources, notes: contents.notes, said: contents.said, replacingNotices: []
+                )
+            } catch {
+                await store.mayBePutBack(false)
+                throw error
+            }
             // Written through the file, past the saver: the store says what of it differs once
             // it is replaced (`ItemStore.replace`), and is owed nothing else.
             return ({ [store] in

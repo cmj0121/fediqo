@@ -383,7 +383,10 @@ struct LetGoLeavesNothingTests {
         await again.scrubIfDue()
         #expect(opened.notes.count == 40)
         #expect(again.bytesOnDisk() < full / 4, "a launch with pages free did not rebuild")
-        #expect(again.bytesHeld() <= heldBytes, "and what the rows weigh did not grow")
+        // But for the map of pages the rebuilt file keeps from then on, to give its room back a
+        // part at a time (#360, C26): a page, and one in some eight hundred.
+        let page = try await again.db.read { db in try Int.fetchOne(db, sql: "PRAGMA page_size") ?? 0 }
+        #expect(again.bytesHeld() <= heldBytes + heldBytes / 800 + page, "and what the rows weigh did not grow")
     }
 
     @Test("A store that cannot be read is set aside byte for byte as it was found: nothing rebuilds it first")

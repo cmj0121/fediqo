@@ -30,6 +30,9 @@ struct LimitRoom {
     /// What the index weighs now, as the app measures it.
     var index: Int { file.bytesOnDisk() }
 
+    /// The size of one page of the index.
+    var pageSize: Int { file.pageSize }
+
     static func scratch() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     }

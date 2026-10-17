@@ -246,7 +246,9 @@ struct KeptRowTests {
         #expect(act.copies > 0, "posts went while picture copies that go first were still on disk")
         #expect(act.posts > 0 && act.posts <= alone, "\(act.posts) posts went where the index alone asked for \(alone)")
         #expect(!room.session.roomHeldByKept)
-        #expect(room.index <= limit, "the index still weighs more than the room")
+        // But for the map of pages the first rebuild adds, once, so the file can give its room
+        // back a part at a time from then on (#360, C26): a page, and one in some eight hundred.
+        #expect(room.index <= limit + limit / 800 + room.pageSize, "the index still weighs more than the room")
         #expect(room.session.notes.count == 40 - act.posts)
     }
 

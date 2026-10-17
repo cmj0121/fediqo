@@ -281,6 +281,9 @@ struct StorePoolTests {
         func oldest(_ limit: Int, after: PageCursor?) throws -> (rows: [HeldRow], next: PageCursor?) {
             try call { try file.oldest(limit, after: after) }
         }
+        func oldestKeys(_ limit: Int, after: PageCursor?) throws -> (rows: [OldestRow], next: PageCursor?) {
+            try call { try file.oldestKeys(limit, after: after) }
+        }
         func referring(to keys: [NoteKey]) throws -> [Referrer] { try call { try file.referring(to: keys) } }
         func beyond(_ cutoff: Date, limit: Int, after: PageCursor?) throws -> (rows: [PastLimit], next: PageCursor?) {
             try call { try file.beyond(cutoff, limit: limit, after: after) }
