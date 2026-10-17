@@ -116,7 +116,10 @@ extension StoreFile {
         defer { try? side.close() }
         guard try await !side.read(Self.hasPageIndex) else { return nil }
         let prefilter = query.compiled.prefilter
-        let (hit, hitArguments) = Self.hit(prefilter, keepFrom: query.keepFrom)
+        // Row by row, never by the index's answer: a file still making its pages' index is one
+        // whose words are not built either.
+        let words = try await side.read { db in try Self.wordsAsk(db, prefilter, most: 0) }
+        let (hit, hitArguments) = Self.hit(prefilter, keepFrom: query.keepFrom, words: words)
         let sources = try await side.read(Self.sourcesByHost)
         let index = TextIndex([])
         var shown: [HeldRow] = []
@@ -152,7 +155,7 @@ extension StoreFile {
             looked += entries.count
             guard entries.count == chunk, let last = entries.last else { break }
             below = last.rowid
-            chunk = min(chunk * 2, 4096)
+            chunk = min(chunk * 2, Self.largestChunk)
         }
         let rows = Array(shown.prefix(limit))
         let carried = try await side.read { db in try Self.carried(db, of: rows, sources) }
@@ -161,6 +164,13 @@ extension StoreFile {
             next: nil, newest: nil, oldest: nil, exhausted: false
         )
     }
+
+    /// The most rows of the index one read of a page looks at.
+    static let largestChunk = 4096
+
+    /// The rows of the index one read looks at where a keyword is asked of the words index row
+    /// by row: some 20 ms holding the queue at 270,000 rows.
+    static let wordsChunkRead = 8192
 
     static func hasPageIndex(_ db: Database) throws -> Bool {
         try Bool.fetchOne(db, sql: "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'note_page'") ?? false
@@ -177,10 +187,75 @@ extension StoreFile {
     /// A row that holds no item is passed over, as `load` passed it over; one that will not
     /// decode is passed over and logged, never a reason to set the store aside. A forum reply
     /// with no date of its own (`Note.isPartOfTopic`) is no row of any timeline.
+    ///
+    /// **A timeline with keywords is read by the words index** (#360, K-4): where the index is
+    /// whole and its keywords find few rows (`wordsCandidatesMost`), only those rows — with the
+    /// reblogs of them, and the rows due — are read, in the same order and by the same cursor;
+    /// otherwise each row is asked of the index as it is read, a row not built yet or due let
+    /// through. The rules judge every row either way.
     public func page(_ query: PageQuery, _ ask: PageAsk, limit: Int = 100, scanBudget: Int = 20_000) async throws -> Page {
+        try await page(query, ask, limit: limit, scanBudget: scanBudget, candidatesMost: Self.wordsCandidatesMost)
+    }
+
+    /// How a page reads the file: its keywords' plan (`wordsAsk`), the prefilter as SQL, the
+    /// rows it reads only, where it reads only some — and where the file stood when it was made
+    /// (`Stamp`). **Made again for the next chunk once that moves**: a save, a build's step, the
+    /// rowid guard after a `VACUUM` that renumbered, another copy of the app saving into the
+    /// same file, the connection made again — any may have made a row hold a keyword, or a
+    /// rowid name another row, so rows read by an older plan could be missed for good.
+    private struct PagePlan: Sendable {
+        /// Where the file stood: which connection read it, that connection's own count of
+        /// changes, and the file's count of changes made through any other (`data_version`).
+        struct Stamp: Equatable, Sendable {
+            let connection: Int
+            let changes: Int
+            let others: Int
+
+            init(_ db: Database) throws {
+                connection = db.sqliteConnection.map { Int(bitPattern: $0) } ?? 0
+                changes = db.totalChangesCount
+                others = try Int.fetchOne(db, sql: "PRAGMA data_version") ?? 0
+            }
+        }
+
+        let words: WordsAsk
+        let hit: String
+        let hitArguments: StatementArguments
+        let within: String?
+        let stamp: Stamp
+        /// Whether rows the index has not reached yet are asked of their bodies here: only while
+        /// it is being built, since a due row is one of few.
+        let unbuilt: Bool
+
+        init(_ db: Database, _ prefilter: CompiledTimeline.Prefilter, keepFrom: Date?, most: Int, at stamp: Stamp) throws {
+            self.stamp = stamp
+            words = try StoreFile.wordsAsk(db, prefilter, most: most)
+            unbuilt = try words == .index && !StoreFile.keywords(prefilter).isEmpty
+                && (Int64.fetchOne(db, sql: "SELECT v FROM note_words_state WHERE k = 'floor'") ?? 0) > 0
+            (hit, hitArguments) = StoreFile.hit(prefilter, keepFrom: keepFrom, words: words)
+            within = if case .candidates(let rowids) = words {
+                String(decoding: try JSONEncoder().encode(rowids), as: UTF8.self)
+            } else {
+                nil
+            }
+        }
+    }
+
+    /// `page`, with the most rows a timeline's keywords may find for it to read only those, and
+    /// `betweenChunks` run after each chunk is read, given its number: for a test, the writes
+    /// another may make meanwhile.
+    func page(
+        _ query: PageQuery, _ ask: PageAsk, limit: Int, scanBudget: Int, candidatesMost: Int,
+        betweenChunks: (@Sendable (Int) async throws -> Void)? = nil
+    ) async throws -> Page {
         if try await !db.read(Self.hasPageIndex) { try await makePageIndex() }
         let prefilter = query.compiled.prefilter
-        let (hit, hitArguments) = Self.hit(prefilter, keepFrom: query.keepFrom)
+        var plan = try await db.read { db in
+            try PagePlan(db, prefilter, keepFrom: query.keepFrom, most: candidatesMost, at: PagePlan.Stamp(db))
+        }
+        // A row not built yet passes the index, and is then asked of its body here before it is
+        // decoded: a keyword timeline read while the index is built decodes what may be shown.
+        let keywords = Self.keywords(prefilter)
         let newer: Bool
         var cursor: PageCursor?
         switch ask {
@@ -194,10 +269,15 @@ extension StoreFile {
         let sources = try await db.read(Self.sourcesByHost)
         let index = TextIndex([])
         var shown: [HeldRow] = []
+        var held: Set<NoteKey> = []
         var looked = 0
         var closing: (String, String)?
         var exhausted = false
-        var chunk = 256
+        // **Asked of the index row by row, in large chunks from the first**: each read asks the
+        // index for the keyword's rows once, some milliseconds for a keyword found in tens of
+        // thousands, so fewer reads are what make the page quick (70 ms against 45, measured).
+        var chunk = plan.words == .index ? Self.wordsChunkRead : 256
+        var chunks = 0
         // **Each chunk is a read of its own**, and so is each decode: a save between two may
         // move a row whose time changed past the cursor — read twice, or not this time. Pages
         // land in a pool that holds a row once by its key, and a moved row is read again where
@@ -206,10 +286,23 @@ extension StoreFile {
             try Task.checkCancellation()
             let asked = chunk
             let from = cursor
-            let entries = try await db.read { db in
-                try Self.entries(db, after: from, newer: newer, latestEnd: query.latestEnd, hit: hit, hitArguments, limit: asked)
+            let planned = plan
+            let (read, replanned) = try await db.read { db -> ([Entry], PagePlan?) in
+                let stamp = try PagePlan.Stamp(db)
+                let moved = stamp != planned.stamp
+                let now = moved ? try PagePlan(db, prefilter, keepFrom: query.keepFrom, most: candidatesMost, at: stamp) : planned
+                let entries = try Self.entries(
+                    db, after: from, newer: newer, latestEnd: query.latestEnd, within: now.within,
+                    unbuilt: now.unbuilt, hit: now.hit, now.hitArguments, limit: asked
+                )
+                return (entries, moved ? now : nil)
             }
-            chunk = min(chunk * 2, 4096)
+            if let replanned { plan = replanned }
+            let entries = read.map { entry in
+                entry.hit && !Self.mayHold(entry, keywords) ? entry.missed : entry
+            }
+            chunk = min(chunk * 2, plan.words == .index ? Self.wordsChunkRead : Self.largestChunk)
+            chunks += 1
             var at = 0
             while at < entries.count {
                 // The rows to decode next: as many hits as could still be shown, and a few
@@ -230,7 +323,8 @@ extension StoreFile {
                     looked += 1
                     cursor = PageCursor(postedAt: entry.postedAt, id: entry.id, rowid: entry.rowid)
                     if first == nil { first = cursor }
-                    if let row = judged[entry.rowid] { shown.append(row) }
+                    // Once by its key: a row renumbered under the cursor (`PagePlan`) is met again.
+                    if let row = judged[entry.rowid], held.insert(row.note.key).inserted { shown.append(row) }
                     if closing == nil, shown.count >= limit || looked >= scanBudget {
                         closing = (entry.postedAt, entry.id)
                     }
@@ -241,6 +335,7 @@ extension StoreFile {
                 exhausted = true
                 break
             }
+            try await betweenChunks?(chunks)
         }
         if newer { shown.reverse() }
         let rows = shown
@@ -267,25 +362,47 @@ extension StoreFile {
         return found
     }
 
-    /// One row of the index as a page looks at it: its place, and whether SQL let it through.
+    /// One row of the index as a page looks at it: its place, and whether SQL let it through —
+    /// and, where it is not in the words index yet and no reblog, its host and body.
     private struct Entry {
         let rowid: Int64
         let postedAt: String
         let id: String
         let hit: Bool
+        var host: String? = nil
+        var body: String? = nil
+
+        var missed: Entry { Entry(rowid: rowid, postedAt: postedAt, id: id, hit: false) }
     }
 
-    /// The next `limit` rows of the index past `cursor` — older, or `newer` — below `latestEnd`.
+    /// Whether a row SQL let through may hold one of `keywords`: always, unless it is one the
+    /// index has no words of yet (it carries its body then), which is asked here as `verdict`
+    /// asks a post — the body folded, a keyword within it, of the keyword's own source.
+    private static func mayHold(_ entry: Entry, _ keywords: [(folded: String, host: String?)]) -> Bool {
+        guard let body = entry.body else { return true }
+        let text = Fold.key(body)
+        return keywords.contains { keyword in
+            (keyword.host == nil || keyword.host == entry.host) && (keyword.folded.isEmpty || Fold.contains(text, keyword.folded))
+        }
+    }
+
+    /// The next `limit` rows of the index past `cursor` — older, or `newer` — below `latestEnd`,
+    /// and only those of `within` (a JSON array of rowids) where it is given.
     /// **By `note_page`, named**: left to choose, SQLite takes the primary key's prefix on host
     /// for a timeline of one source and sorts the whole of it (96 ms against 8 ms, measured).
+    /// **By rowid among `within`**, which is few, sorted here: never a walk of `note_page`.
     private static func entries(
-        _ db: Database, after cursor: PageCursor?, newer: Bool, latestEnd: Date?,
+        _ db: Database, after cursor: PageCursor?, newer: Bool, latestEnd: Date?, within: String?, unbuilt: Bool,
         hit: String, _ hitArguments: StatementArguments, limit: Int
     ) throws -> [Entry] {
         // A time the file holds as anything but text is none GRDB wrote, and no row of a page:
         // SQLite orders it apart from every text, where no cursor of text could step past it.
         var bounds = ["typeof(posted_at) = 'text'"]
         var arguments = hitArguments
+        if let within {
+            bounds.append("rowid IN (SELECT value FROM json_each(?))")
+            arguments += [within]
+        }
         if let latestEnd {
             bounds.append("posted_at < ?")
             arguments += [latestEnd]
@@ -299,15 +416,34 @@ extension StoreFile {
         }
         arguments += [limit]
         let order = newer ? "posted_at ASC, id DESC, rowid DESC" : "posted_at DESC, id ASC, rowid ASC"
-        let sql = """
-            SELECT rowid, posted_at, id, (\(hit)) AS hit FROM note INDEXED BY note_page
+        var sql = """
+            SELECT rowid, posted_at, id, (\(hit)) AS hit\(unbuilt ? ", host, \(Self.unbuilt) AS unbuilt" : "")
+            FROM note \(within == nil ? "INDEXED BY note_page" : "NOT INDEXED")
             WHERE \(bounds.joined(separator: " AND "))
             ORDER BY \(order) LIMIT ?
             """
+        if unbuilt {
+            // The body of a row let through with no words in the index yet, and no reblog: read
+            // only for those.
+            sql = """
+                SELECT s.*, CASE WHEN s.hit AND s.unbuilt THEN (SELECT CASE WHEN instr(n.refs, '"reblogs"') = 0 \
+                AND json_valid(n.facts) AND json_type(n.facts, '$.body') = 'text' THEN json_extract(n.facts, '$.body') END \
+                FROM note n WHERE n.rowid = s.rowid) END AS body
+                FROM (\(sql)) s ORDER BY \(order.split(separator: ",").map { "s." + $0.trimmingCharacters(in: .whitespaces) }.joined(separator: ", "))
+                """
+        }
         return try Row.fetchAll(db, sql: sql, arguments: arguments).map { row in
-            Entry(rowid: row["rowid"], postedAt: row["posted_at"], id: row["id"], hit: row["hit"])
+            Entry(
+                rowid: row["rowid"], postedAt: row["posted_at"], id: row["id"], hit: row["hit"],
+                host: unbuilt ? row["host"] : nil, body: unbuilt ? row["body"] : nil
+            )
         }
     }
+
+    /// Whether a row has no words in the index to go by: below `floor`, or due.
+    private static let unbuilt = """
+        COALESCE(rowid < (SELECT v FROM note_words_state WHERE k = 'floor') OR rowid IN (SELECT rowid FROM note_words_due), 1)
+        """
 
     /// The rows of `rowids` the timeline shows, by rowid: decoded, and asked of `verdict` — a
     /// reblog with the post it reblogs, read by its key, where a rule asks of that post.
@@ -397,7 +533,10 @@ extension StoreFile {
     /// `prefilter` as an SQL expression over a row of `note`, and its arguments: true for every
     /// row the timeline may show. **A cell that is not JSON is let through**, for the decode to
     /// judge, and never hidden by a rule that cannot be asked of it.
-    static func hit(_ prefilter: CompiledTimeline.Prefilter, keepFrom: Date?) -> (String, StatementArguments) {
+    ///
+    /// A keyword is asked as `words` says (`wordsAsk`): of the words index row by row, or of
+    /// nothing — where there is no index, or the page reads only the rows the index gave.
+    static func hit(_ prefilter: CompiledTimeline.Prefilter, keepFrom: Date?, words: WordsAsk = .open) -> (String, StatementArguments) {
         var terms: [String] = []
         var arguments = StatementArguments()
         func member(_ member: CompiledTimeline.Prefilter.Member, certain: Bool) -> String {
@@ -408,9 +547,19 @@ extension StoreFile {
                 return [row.kind] + (row.id.map { [$0] } ?? [])
             }())
             case .handle(let handle, let host): (host, Self.handle(certain: certain), [handle])
+            // **Never certain**, so never a hide (a prefilter holds none): as one, it hides nothing.
+            case .words(let folded, let host):
+                if certain {
+                    (host, "0", [])
+                } else if words == .index, let tokens = WordGrams.asked(folded) {
+                    (host, Self.mayHold, [WordGrams.match(tokens), WordGrams.match(tokens)])
+                } else {
+                    (host, nil, [])
+                }
             }
             arguments += StatementArguments((host.map { [$0] } ?? []) + values)
-            return "(" + ([host.map { _ in "host = ?" }, own].compactMap { $0 }.joined(separator: " AND ")) + ")"
+            let said = [host.map { _ in "host = ?" }, own].compactMap { $0 }
+            return said.isEmpty ? "1" : "(" + said.joined(separator: " AND ") + ")"
         }
         if !prefilter.excludes.isEmpty {
             terms.append("NOT (" + prefilter.excludes.map { member($0, certain: true) }.joined(separator: " OR ") + ")")

@@ -218,6 +218,18 @@ extension StoreFile {
         WHERE instr(refs, '"reblogs"') > 0
         """
 
+    /// The rows that say they reblog and whose first reference is not the reblog — or whose
+    /// references are not JSON — word for word as `oddReblogsIndex` holds them. `note_reblogs`
+    /// finds a reblog by its first reference, and `Note.reblogKey` reads the first that reblogs,
+    /// so where these differ a page reads every such row rather than miss one. None that this
+    /// build writes (`Note.init` keeps a reblog's one reference); an older build's may be.
+    static let oddReblog = """
+        instr(refs, '"reblogs"') > 0 AND (CASE WHEN json_valid(refs) THEN json_extract(refs, '$[0].kind') END) IS NOT 'reblogs'
+        """
+
+    /// The rows of `oddReblog`: few or none, so a page asks for them at the cost of a lookup.
+    static let oddReblogsIndex = "CREATE INDEX IF NOT EXISTS note_reblogs_odd ON note(host) WHERE \(oddReblog)"
+
     /// Builds the words index (K-3), making it first where the file lacks it — or where it is not
     /// whole — and `note_reblogs`: the due rows, then the rows below `floor`, newest arrivals
     /// first, `chunk` a write transaction, a pause after each — then its segments merged, in
@@ -228,6 +240,7 @@ extension StoreFile {
     func buildWords(chunk: Int, capable: Bool, pause: Duration = .zero) async throws {
         guard try await db.write({ db in try Self.makeWords(db, capable: capable) }) else { return }
         try await db.write { db in try db.execute(sql: Self.reblogsIndex) }
+        try await db.write { db in try db.execute(sql: Self.oddReblogsIndex) }
         while !Task.isCancelled, try await buildWordsStep(chunk: chunk) {
             if pause > .zero { try await Task.sleep(for: pause) }
         }
@@ -336,6 +349,106 @@ extension StoreFile {
                 OR rowid IN (SELECT rowid FROM note_words WHERE note_words MATCH ?)
                 """, arguments: [WordGrams.match(tokens)]))
         }
+    }
+
+    // MARK: - A keyword's page (K-4)
+
+    /// How a page asks a timeline's keywords (`Prefilter.Member.words`) of the file.
+    enum WordsAsk: Equatable, Sendable {
+        /// Of nothing: every row may hold them — the feature is off, the file has no index whole,
+        /// or a keyword is one every row holds.
+        case open
+        /// Of the index, row by row as the page reads them (`mayHold`): a row not built yet or
+        /// due passes, and a reblog passes by the post it reblogs.
+        case index
+        /// Only these rows may hold them: the posts the index finds, the rows due, and the
+        /// reblogs of either — read by rowid, and sorted, rather than walking the timeline.
+        case candidates([Int64])
+    }
+
+    /// The most posts a timeline's keywords may find for a page to read only them (K-4): more,
+    /// and the page walks the timeline asking each row of the index, which a keyword found that
+    /// often makes quick. **Counted capped**, so asking costs at most this many.
+    static let wordsCandidatesMost = 5_000
+
+    /// Whether a row is one the index gives for a keyword or may not have built yet — `r` the
+    /// row's table, one argument: the keyword's tokens (`WordGrams.match`).
+    private static func mayHoldOwn(_ r: String) -> String {
+        """
+        (\(r).rowid < (SELECT v FROM note_words_state WHERE k = 'floor') OR \(r).rowid IN (SELECT rowid FROM note_words_due) \
+        OR \(r).rowid IN (SELECT rowid FROM note_words WHERE note_words MATCH ?))
+        """
+    }
+
+    /// Whether a row of `note` may hold a keyword, as `verdict` reads one: in its own body, or —
+    /// a reblog — in the body of the post it reblogs, looked up by key within its own host as
+    /// `Note.reblogKey` looks it up. Two arguments, the keyword's tokens twice. **A reblog
+    /// whose references are not JSON passes**, for the decode to judge.
+    ///
+    /// **The reference first, then the post by its key** (`CROSS JOIN`): left to choose, SQLite
+    /// walks every row of the host for each reblog — seconds a chunk, measured.
+    static let mayHold = """
+        (\(mayHoldOwn("note")) OR (instr(note.refs, '"reblogs"') > 0 AND (CASE WHEN json_valid(note.refs) THEN EXISTS (\
+        SELECT 1 FROM json_each(note.refs) r CROSS JOIN note t WHERE r.type = 'object' AND json_extract(r.value, '$.kind') = 'reblogs' \
+        AND t.host = note.host AND t.id = json_extract(r.value, '$.id') AND \(mayHoldOwn("t"))) ELSE 1 END)))
+        """
+
+    /// Whether this file has the indexes a page's reblogs of the posts it found are read by,
+    /// `note_reblogs` and `note_reblogs_odd`: made by the build, and by nothing else.
+    private static func hasReblogsIndexes(_ db: Database) throws -> Bool {
+        try Int.fetchOne(db, sql: """
+            SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name IN ('note_reblogs', 'note_reblogs_odd')
+            """) == 2
+    }
+
+    /// The keywords of `prefilter`'s keyword group, folded: rules of one kind are one group, so
+    /// there is one at most.
+    static func keywords(_ prefilter: CompiledTimeline.Prefilter) -> [(folded: String, host: String?)] {
+        prefilter.groups.first { group in
+            group.allSatisfy { if case .words = $0 { true } else { false } }
+        }?.compactMap { member -> (String, String?)? in if case .words(let folded, let host) = member { (folded, host) } else { nil } } ?? []
+    }
+
+    /// How a page asks `prefilter`'s keywords (K-4): `candidates` where the index is whole —
+    /// built to the bottom, `note_reblogs` and `note_reblogs_odd` there — and its keywords, the
+    /// rows due and the odd reblogs come to at most `most` rows, **counted as fetched**, before
+    /// one found twice is set aside: a fetch cut at its limit is never taken for all there is;
+    /// `index` where it is there but not so; `open` where there is none, or no keyword to ask.
+    static func wordsAsk(_ db: Database, _ prefilter: CompiledTimeline.Prefilter, most: Int, capable: Bool = wordsCapable) throws -> WordsAsk {
+        let keywords = keywords(prefilter).map(\.folded)
+        guard !keywords.isEmpty, capable, try hasWords(db) else { return .open }
+        let asked = keywords.map { WordGrams.asked($0) }
+        guard most > 0, try floor(db) <= 0, try hasReblogsIndexes(db) else { return .index }
+        // An empty keyword: every row holds it.
+        guard !asked.contains(where: { $0 == nil }) else { return .open }
+        var found: [Int64] = []
+        var seen = Set<Int64>()
+        var fetched = 0
+        func add(_ rowids: [Int64]) {
+            for rowid in rowids where seen.insert(rowid).inserted { found.append(rowid) }
+        }
+        /// Adds what `sql` gives, one argument and the limit, and says whether it all fits.
+        func fetch(_ sql: String, _ arguments: StatementArguments = []) throws -> Bool {
+            let rows = try Int64.fetchAll(db, sql: sql + " LIMIT ?", arguments: arguments + [most + 1 - fetched])
+            fetched += rows.count
+            add(rows)
+            return fetched <= most
+        }
+        guard try fetch("SELECT rowid FROM note_words_due") else { return .index }
+        guard try fetch("SELECT rowid FROM note INDEXED BY note_reblogs_odd WHERE \(oddReblog)") else { return .index }
+        for tokens in asked.compactMap({ $0 }) {
+            guard try fetch("SELECT rowid FROM note_words WHERE note_words MATCH ?", [WordGrams.match(tokens)]) else { return .index }
+        }
+        // Their reblogs, by `note_reblogs`: by the first reference, which for every reblog but
+        // the odd ones — all here already — is the one `Note.reblogKey` reads.
+        // Counted toward the cap as every fetch is.
+        let posts = String(decoding: try JSONEncoder().encode(found), as: UTF8.self)
+        guard try fetch("""
+            SELECT r.rowid FROM note t, note r INDEXED BY note_reblogs
+            WHERE t.rowid IN (SELECT value FROM json_each(?)) AND r.host = t.host
+            AND (CASE WHEN json_valid(r.refs) THEN json_extract(r.refs, '$[0].id') END) = t.id AND instr(r.refs, '"reblogs"') > 0
+            """, [posts]) else { return .index }
+        return .candidates(found)
     }
 
     // MARK: - The rowid guard
