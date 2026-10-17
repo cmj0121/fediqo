@@ -95,6 +95,9 @@ public actor ItemStore {
     private var leftNoneAt: Int?
     /// How many passes were made, whether or not they let a row go: for the tests.
     private(set) var evictionPasses = 0
+    /// How long each of the last passes took, on this actor: for the bench.
+    private(set) var passesTook: [Duration] = []
+    private static let passesKept = 1_000
     /// Every key the pool answers for (#357): each row laid in, each key asked of the file.
     /// **One among these that is not in the pool is not held**, whatever the file still says —
     /// a row let go is not read back before the save that deletes it lands.
@@ -383,6 +386,7 @@ public actor ItemStore {
             row.brought = []
             return (row.key, row)
         }, uniquingKeysWith: { _, new in new }), owed: !readFromDisk)
+        if disk != nil { notes.track() }
         var unheld: [NoteKey] = []
         for key in skipped where notes[key] == nil { unheld.append(key) }
         notes.owe(unheld)
@@ -471,6 +475,7 @@ public actor ItemStore {
             uniquingKeysWith: { _, new in new }
         ))
         notes.drawing = drawn
+        if disk != nil { notes.track() }
         // Newer than any drawing made before: none leaves before the screens draw them.
         notes.stampAll()
         // The file holds the package's rows as they came (`StorePackager`): what differs here —
@@ -2012,55 +2017,90 @@ public actor ItemStore {
         guard disk != nil, let pins, pagesOut == 0, !restoringFile, notes.count > cap, leftNoneAt != poolMoved
         else { return }
         evictionPasses += 1
-        let goal = notes.count - cap * 9 / 10
-        // How many rows of the pool hold each key.
-        var holders: [NoteKey: Int] = [:]
-        for note in notes.values {
-            for key in Self.holds(note) { holders[key, default: 0] += 1 }
+        let started = ContinuousClock.now
+        defer {
+            passesTook.append(ContinuousClock.now - started)
+            if passesTook.count > Self.passesKept { passesTook.removeFirst(passesTook.count - Self.passesKept) }
         }
+        let goal = notes.count - cap * 9 / 10
         let since = pinsDrawnAt
-        let candidates = notes.values.filter { note in
+        /// Whether `note`, last seen under the drawing `drawn`, may go whatever holds it.
+        func free(_ note: Note, drawn: Int) -> Bool {
             let key = note.key
-            if notes.touched.contains(key) || inFlight.contains(key) || note.kept || pins.contains(key) { return false }
-            if (notes.seen[key]?.drawn ?? -1) >= since { return false }
+            if note.kept || drawn >= since || notes.touched.contains(key) || inFlight.contains(key) || pins.contains(key) {
+                return false
+            }
             if note.refsDue && !stalled.contains(key) { return false }
             if let said = remainSaid[key.host], !note.gaps.isDisjoint(with: said) { return false }
             return true
         }
-        .map { (key: $0.key, tick: notes.seen[$0.key]?.tick ?? 0) }
-        .sorted { $0.tick != $1.tick ? $0.tick < $1.tick : ($0.key.host, $0.key.id) < ($1.key.host, $1.key.id) }
-        // Each candidate's turn, and the turns of those no row holds, the earliest out first.
-        var turn: [NoteKey: Int] = [:]
-        for (place, candidate) in candidates.enumerated() { turn[candidate.key] = place }
-        var ready = Turns(candidates.indices.filter { (holders[candidates[$0].key] ?? 0) == 0 })
-        var leaving: [Note] = []
-        while leaving.count < goal, let next = ready.pop() {
-            guard let note = notes[candidates[next].key] else { continue }
-            leaving.append(note)
-            letGo(note)
-            for held in Self.holds(note) {
-                holders[held, default: 1] -= 1
-                guard holders[held] == 0, let place = turn[held], notes[held] != nil else { continue }
-                // Freed: its turn among the rest.
-                ready.push(place)
+        // The rows in the order last seen, the least lately first (`HeldNotes.sightings`): each
+        // free to go and held by no row that stays goes in its turn. One a row let go frees,
+        // whose turn has passed, goes before the next in order; one whose turn is to come is
+        // met in it.
+        let order = notes.sightings
+        var at = 0
+        var freed = Turns([])
+        var freedRows: [Int: Note] = [:]
+        /// The next in order free to go and held by none, and its row; nothing once it is done.
+        func nextInOrder() -> (tick: Int, note: Note)? {
+            while at < order.count {
+                let sighting = order[at]
+                at += 1
+                guard let seen = notes.seen[sighting.key], seen.tick == sighting.tick, notes.holders[sighting.key] == nil,
+                      let note = notes[sighting.key], free(note, drawn: seen.drawn)
+                else { continue }
+                return (sighting.tick, note)
+            }
+            return nil
+        }
+        var walked = nextInOrder()
+        var left = 0
+        var shown = false
+        var replies = false
+        while left < goal {
+            let note: Note
+            if let first = freed.first, walked.map({ first < $0.tick }) ?? true {
+                _ = freed.pop()
+                // Read again since it was put in its turn: still here, and held by none.
+                guard let row = freedRows.removeValue(forKey: first), notes.holders[row.key] == nil, notes[row.key] != nil
+                else { continue }
+                note = row
+            } else if let next = walked {
+                // Met in order a moment ago, and nothing let go since holds anything more.
+                note = next.note
+                walked = nextInOrder()
+            } else {
+                break
+            }
+            left += 1
+            if note.isPartOfTopic { replies = true } else { shown = true }
+            let holding = HeldNotes.holds(note)
+            letGo(note, holding: holding)
+            for held in holding where notes.holders[held] == nil {
+                guard let seen = notes.seen[held], let row = notes[held], free(row, drawn: seen.drawn) else { continue }
+                // Freed, with its turn passed: before the next in order. One to come is met there.
+                if let walked, seen.tick > walked.tick { continue }
+                freed.push(seen.tick)
+                freedRows[seen.tick] = row
             }
         }
         if notes.count > cap, !overCapSaid {
             overCapSaid = true
             NetLog.index.notice("Rows the pool must keep are over its cap: \(self.notes.count, privacy: .public)")
         }
-        guard !leaving.isEmpty else {
+        guard left > 0 else {
             leftNoneAt = poolMoved
             return
         }
         // Drawn nowhere, so nothing on screen moves: what `all()` hands over is only smaller.
-        changed(shown: leaving.contains { !$0.isPartOfTopic }, replies: leaving.contains(where: \.isPartOfTopic), kept: false)
+        changed(shown: shown, replies: replies, kept: false)
     }
 
     /// `note` let go of the pool and not of the file: read again once it is wanted.
-    private func letGo(_ note: Note) {
+    private func letGo(_ note: Note, holding: [NoteKey]? = nil) {
         let key = note.key
-        notes.evict(key)
+        notes.evict(key, holding: holding)
         looked.remove(key)
         // A row that arrived this run keeps its place among the run's: read back, the file's
         // `rowid` would put it before a copy that arrived ahead of it and is still held.
@@ -2069,19 +2109,27 @@ public actor ItemStore {
         if let statusID = note.statusID { namesAsked[key.host]?.remove(statusID) }
         if note.goneSince == nil {
             for (category, id) in note.listed {
-                var left = (listedLeft[key.host]?[category] ?? []).filter { $0.key != key }
-                let at = left.firstIndex { StatusID.later(id, than: $0.id) } ?? left.endIndex
+                // Where it goes among the rest, newest first, found by halves: a letting go
+                // files hundreds of rows, and each list is read in place, not copied.
+                let (was, at) = Self.place(id, of: key, among: listedLeft[key.host]?[category] ?? [])
                 guard at < Self.listedLeftKept else { continue }
-                left.insert((id, key), at: at)
-                listedLeft[key.host, default: [:]][category] = Array(left.prefix(Self.listedLeftKept))
+                listedLeft[key.host, default: [:]][category, default: []].file((id, key), at: at, was: was, most: Self.listedLeftKept)
             }
         }
         leftSinceReplace?.insert(key)
     }
 
-    /// What `note` holds with it, but itself: what its staying keeps in the pool.
-    private static func holds(_ note: Note) -> Set<NoteKey> {
-        Set(note.heldWith + [note.topicKey].compactMap { $0 }).subtracting([note.key])
+    /// Where the row under `key`, listed under `id`, stands among `left` (newest first) — found
+    /// by halves — and where it stood, if it was there.
+    private static func place(_ id: String, of key: NoteKey, among left: [(id: String, key: NoteKey)]) -> (was: Int?, at: Int) {
+        let was = left.firstIndex { $0.key == key }
+        var low = 0
+        var high = left.count
+        while low < high {
+            let mid = (low + high) / 2
+            if StatusID.later(id, than: left[mid].id) { high = mid } else { low = mid + 1 }
+        }
+        return (was, was.map { $0 < low ? low - 1 : low } ?? low)
     }
 
     /// `note`'s key and what it holds with it: what reading it in reads.
@@ -2867,6 +2915,8 @@ public actor ItemStore {
 private struct Turns {
     private var heap: [Int] = []
 
+    var first: Int? { heap.first }
+
     init(_ turns: [Int]) {
         for turn in turns { push(turn) }
     }
@@ -2898,5 +2948,14 @@ private struct Turns {
             heap.swapAt(parent, least)
             parent = least
         }
+    }
+}
+
+extension Array {
+    /// `entry` put at `at`, where it stood before taken out first, and the list kept to `most`.
+    fileprivate mutating func file(_ entry: Element, at: Int, was: Int?, most: Int) {
+        if let was { remove(at: was) }
+        insert(entry, at: at)
+        if count > most { removeLast(count - most) }
     }
 }

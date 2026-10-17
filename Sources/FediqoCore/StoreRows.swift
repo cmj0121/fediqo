@@ -271,10 +271,61 @@ struct HeldNotes: Sequence {
         let drawn: Int
     }
 
+    /// For a pool that lets rows go (#359): **how many rows held hold each key with them**
+    /// (`holds`), and every sighting in the order made — a tick and its key, ticks only going
+    /// up, one whose tick is no longer its key's being stale. Kept as rows come, change and go,
+    /// so a letting go reads them in order and pops, and works out neither afresh. Nothing for
+    /// a store held whole, which never lets a row go.
+    private(set) var tracking = false
+    private(set) var holders: [NoteKey: Int] = [:]
+    private(set) var sightings: [Sighting] = []
+
+    struct Sighting {
+        let tick: Int
+        let key: NoteKey
+    }
+
     /// `rows` as they are on disk — nothing owed — or, `owed`, every one of them owed a write.
     init(_ rows: [NoteKey: Note] = [:], owed: Bool = false) {
         self.rows = rows
         if owed { touched = Set(rows.keys) }
+    }
+
+    /// What a pool that lets rows go keeps of its rows (`holders`, `sightings`), from now on.
+    mutating func track() {
+        tracking = true
+        holders = [:]
+        for note in rows.values { hold(Self.holds(note), by: 1) }
+        sightings = seen.map { Sighting(tick: $0.value.tick, key: $0.key) }.sorted { $0.tick < $1.tick }
+    }
+
+    /// What `note` holds with it, but itself: what its staying keeps in the pool.
+    /// Each once, and never the note's own key: what a pool lets go of hundreds of a pass, so
+    /// no set is made where there is one key or none.
+    static func holds(_ note: Note) -> [NoteKey] {
+        let topic = note.topicKey
+        guard !note.refs.isEmpty || topic != nil else { return [] }
+        var keys = note.heldWith
+        if let topic { keys.append(topic) }
+        keys.removeAll { $0 == note.key }
+        guard keys.count > 1 else { return keys }
+        var once = Set<NoteKey>()
+        return keys.filter { once.insert($0).inserted }
+    }
+
+    private mutating func hold(_ keys: [NoteKey], by step: Int) {
+        for key in keys {
+            let count = (holders[key] ?? 0) + step
+            holders[key] = count > 0 ? count : nil
+        }
+    }
+
+    /// The row under `key` replaced by `note`: what each holds counted again — the old row's
+    /// as `holding` says, where the caller worked it out already.
+    private mutating func set(_ key: NoteKey, to note: Note?, holding: [NoteKey]? = nil) {
+        if tracking, let old = rows[key] { hold(holding ?? Self.holds(old), by: -1) }
+        rows[key] = note
+        if tracking, let note { hold(Self.holds(note), by: 1) }
     }
 
     subscript(key: NoteKey) -> Note? {
@@ -282,7 +333,7 @@ struct HeldNotes: Sequence {
         set {
             guard rows[key] != newValue else { return }
             if newValue == nil { dropped.insert(key) }
-            rows[key] = newValue
+            set(key, to: newValue)
             touched.insert(key)
             if newValue == nil { seen[key] = nil } else { stamp(key) }
         }
@@ -291,13 +342,24 @@ struct HeldNotes: Sequence {
     /// `note` as the file holds it, laid in under a key that holds nothing: read, and so owed
     /// no write.
     mutating func lay(_ note: Note) {
-        rows[note.key] = note
+        set(note.key, to: note)
         stamp(note.key)
     }
 
     private mutating func stamp(_ key: NoteKey) {
         clock += 1
         seen[key] = Seen(tick: clock, drawn: drawing)
+        sighted(key)
+    }
+
+    /// The sighting just made of `key` kept in order; the stale ones let go once they are as
+    /// many as the rest, so the order stays within twice the pool.
+    private mutating func sighted(_ key: NoteKey) {
+        guard tracking else { return }
+        sightings.append(Sighting(tick: clock, key: key))
+        if sightings.count > 2 * rows.count + 4_096 {
+            sightings.removeAll { seen[$0.key]?.tick != $0.tick }
+        }
     }
 
     /// The rows under `keys` drawn now: seen, and changed no more than they were.
@@ -305,6 +367,7 @@ struct HeldNotes: Sequence {
         for key in keys where rows[key] != nil {
             clock += 1
             seen[key] = Seen(tick: clock, drawn: seen[key]?.drawn ?? -1)
+            sighted(key)
         }
     }
 
@@ -323,9 +386,9 @@ struct HeldNotes: Sequence {
 
     /// The row under `key` let go of the pool and not of the file (#359): owed nothing, as it
     /// is the file's. Only of a row no take is owed — the file would not have it otherwise.
-    mutating func evict(_ key: NoteKey) {
+    mutating func evict(_ key: NoteKey, holding: [NoteKey]? = nil) {
         assert(!touched.contains(key), "a row let go of the pool before a save took it")
-        rows[key] = nil
+        set(key, to: nil, holding: holding)
         seen[key] = nil
     }
 
