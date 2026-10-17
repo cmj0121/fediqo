@@ -98,6 +98,23 @@ public struct StoreFile: Sendable {
             }
         }
 
+        /// Who builds the words index this run (`WordsBuilder`), told when a save left more due
+        /// than it makes the docs of itself.
+        private var wordsDue: (@Sendable () -> Void)?
+
+        func onWordsLeftDue(_ tell: (@Sendable () -> Void)?) {
+            lock.lock()
+            defer { lock.unlock() }
+            wordsDue = tell
+        }
+
+        func wordsLeftDue() {
+            lock.lock()
+            let tell = wordsDue
+            lock.unlock()
+            tell?()
+        }
+
         /// This connection has written, or tried to: the sources it holds may have changed.
         func wrote() {
             lock.lock()
@@ -124,6 +141,11 @@ public struct StoreFile: Sendable {
     var beside: DatabaseQueue? {
         get { held.beside }
         nonmutating set { held.beside = newValue }
+    }
+
+    /// Tells `tell` whenever a save leaves more of the words index due than it drains (#360).
+    func onWordsLeftDue(_ tell: (@Sendable () -> Void)?) {
+        held.onWordsLeftDue(tell)
     }
 
     /// The one making of the pages' index, whoever asks (`Held.pageIndexBuild`).
@@ -349,7 +371,7 @@ public struct StoreFile: Sendable {
         }) ?? (0, 1)
         guard version < Self.scrubbed || free > 0 else { return }
         try? db.writeWithoutTransaction { db in
-            try db.execute(sql: "VACUUM")
+            try Self.guardingRowids(db) { try db.execute(sql: "VACUUM") }
             try db.execute(sql: "PRAGMA user_version = \(Self.scrubbed)")
         }
     }
@@ -370,7 +392,7 @@ public struct StoreFile: Sendable {
         }) ?? false
         guard due else { return }
         try? await db.writeWithoutTransaction { db in
-            try db.execute(sql: "VACUUM")
+            try Self.guardingRowids(db) { try db.execute(sql: "VACUUM") }
             try db.execute(sql: "PRAGMA user_version = \(Self.scrubbed)")
         }
     }
@@ -715,7 +737,7 @@ public struct StoreFile: Sendable {
     /// rewrites the whole index. **Room, and nothing else**: what the rows let go said is already
     /// gone from those pages by the save that freed them (`scrub`).
     public func compact() async throws {
-        try await db.writeWithoutTransaction { db in try db.execute(sql: "VACUUM") }
+        try await db.writeWithoutTransaction { db in try Self.guardingRowids(db) { try db.execute(sql: "VACUUM") } }
     }
 
     /// Moves `index.sqlite` and any journal SQLite left beside it to
@@ -847,7 +869,7 @@ public struct StoreFile: Sendable {
     public func save(_ changes: RowChanges) async throws {
         let said = Dictionary(changes.said.map { ($0.host, $0) }, uniquingKeysWith: { a, _ in a })
         defer { held.wrote() }
-        try await db.write { db in
+        let many = try await db.write { db -> Bool in
             for host in changes.removedHosts {
                 try db.execute(sql: "DELETE FROM source WHERE host = ?", arguments: [host])
             }
@@ -861,7 +883,10 @@ public struct StoreFile: Sendable {
             for note in changes.upserts {
                 try NoteRecord(note).upsert(db)
             }
+            // The words of what was written, where they are few (#360).
+            return Self.drainWordsInSave(db)
         }
+        if many { held.wordsLeftDue() }
         dropWhatWasReplaced()
     }
 
@@ -881,7 +906,7 @@ public struct StoreFile: Sendable {
     ) async throws {
         let saidByHost = Dictionary(said.map { ($0.host, $0) }, uniquingKeysWith: { a, _ in a })
         defer { held.wrote() }
-        try await db.write { db in
+        let many = try await db.write { db -> Bool in
             if let notices { try Self.write(notices: notices, in: db) }
             try NoteRecord.deleteAll(db)
             try SourceRecord.deleteAll(db)
@@ -891,7 +916,9 @@ public struct StoreFile: Sendable {
             for note in notes {
                 try NoteRecord(note).insert(db)
             }
+            return Self.drainWordsInSave(db)
         }
+        if many { held.wordsLeftDue() }
         // Only here, the write having returned: a save that threw has replaced nothing.
         dropWhatWasReplaced()
     }

@@ -89,6 +89,9 @@ final class Launch {
     private let protected: ProtectedData
     /// The index on disk, measured for Usage (#194); nil where this run has none.
     let file: StoreFile?
+    /// The words index's build (#360), begun once the timeline shows; nil where this run has no
+    /// index.
+    let words: WordsBuilder?
     /// The limits' account beside the index (#251); nil where the folder could not be made.
     let limits: LimitAccountFile?
     /// The person's own lists beside the index (#344): what may be reached beyond a source,
@@ -128,6 +131,7 @@ final class Launch {
         // It is also `nil` when the index was written by a newer build, which is left as found.
         saver = StoreSaver(store: store, file: opened.file, protected: protected)
         file = opened.file
+        words = opened.file.map { WordsBuilder(file: $0, saver: saver, protected: protected) }
         // Only beside an index this run writes: a run that must not write the index (a newer
         // build's, or one that could not be set aside) writes no lines about it either.
         limits = opened.file == nil ? nil : try? LimitAccountFile(directory: StoreFile.applicationSupportDirectory)
@@ -219,6 +223,8 @@ final class Launch {
     func end() async {
         await forgetChangedReaders()
         _ = await saver.flush()
+        // The words' build stood down for good: a write of it left is one chunk, where a save would run.
+        await words?.end()
         let hosts = await store.sources().map(\.host)
         // Nothing where this run never read the store: `ForumSessions.sourcesRead`.
         await forums.leaveNothing(keeping: hosts, within: StoreSaver.deadline)
@@ -452,9 +458,13 @@ private struct Live: View {
     private var afterFirstPage: (@Sendable () async -> Void)? {
         guard let file = launch.file else { return nil }
         let saver = launch.saver
+        let words = launch.words
         return {
             try? await file.makeIndexes()
             _ = try? await saver.exclusively { await file.scrubIfDue() }
+            // The words index (#360), built a chunk at a time behind everything else and waited
+            // for by nothing: until it is, a keyword reads as it did.
+            await words?.begin()
         }
     }
 
