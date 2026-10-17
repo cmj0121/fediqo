@@ -127,13 +127,15 @@ struct SpanSection: View {
         }
     }
 
-    private var hosts: [String] { Self.hosts(session.holdings) }
+    private var hosts: [String] { Self.hosts(session.holdings, onFile: session.hostsHeld) }
 
     private var span: Range<Date> { Self.span(from: from, to: to) }
 
     /// The hosts a post is held from, sorted — a removed source's among them.
-    static func hosts(_ holdings: Holdings) -> [String] {
-        holdings.bySource.keys.sorted()
+    /// And those the file holds a post from where it was counted (#359): the pool holds only
+    /// the rows lately seen.
+    static func hosts(_ holdings: Holdings, onFile: Set<String> = []) -> [String] {
+        Set(holdings.bySource.keys).union(onFile).sorted()
     }
 
     /// The whole days from `from` to `to`, both inside, in this device's calendar: the moments

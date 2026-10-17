@@ -207,6 +207,10 @@ struct ShellWalk: Hashable, Sendable {
 
     var isEmpty: Bool { taken.isEmpty }
 
+    /// Every step taken, the first walked first: in front, and under another (#359) — each a
+    /// page whose rows are drawn again as it is come back to.
+    var steps: [ShellStep] { taken.map(\.step) }
+
     /// What Tab turns with the step in front (`ShellStep.tabKey`): nothing on the stream.
     var tabKey: StepTabKey? { standing?.tabKey }
 

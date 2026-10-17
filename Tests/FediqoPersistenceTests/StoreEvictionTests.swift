@@ -328,6 +328,52 @@ struct StoreEvictionTests {
         #expect(await whole.pooled == Self.size)
     }
 
+    @Test("what each screen draws stays beside what another draws, and goes once that screen is gone")
+    func screensHoldTheirOwn() async throws {
+        let (file, _) = try await twoFiles()
+        let pool = ItemStore(sources: Self.sources, rows: file, cap: Self.cap)
+        let one = UUID()
+        let two = UUID()
+        let first = Self.key(1)
+        let second = Self.key(2)
+        // Each screen says it draws before anything is read: what is read since stays, until
+        // both have said what they draw of it.
+        var at = await pool.drawn
+        await pool.hold([first], drawnAt: at, by: one)
+        await pool.hold([second], drawnAt: at, by: two)
+        await readAll(pool)
+        at = await pool.drawn
+        await pool.hold([first], drawnAt: at, by: one)
+        #expect(await pool.pooled > Self.cap, "the other screen's drawing is older than what was read")
+        await pool.hold([first], drawnAt: at, by: one)
+        await pool.hold([second], drawnAt: at, by: two)
+        #expect(await pool.pooled <= Self.cap)
+        #expect(await pooledKeys(pool).isSuperset(of: [first, second]))
+        // The second says it draws nothing now: what the first draws stays all the same.
+        await readAll(pool)
+        at = await pool.drawn
+        await pool.hold([first], drawnAt: at, by: one)
+        await pool.hold([], drawnAt: at, by: two)
+        #expect(await pooledKeys(pool).contains(first))
+        #expect(!(await pooledKeys(pool)).contains(second))
+        // The first gone: what it drew goes as any row.
+        await readAll(pool)
+        at = await pool.drawn
+        await pool.hold([], drawnAt: at, by: two)
+        #expect(await pooledKeys(pool).contains(first))
+        await pool.letGoOfPins(by: one)
+        #expect(!(await pooledKeys(pool)).contains(first))
+        #expect(await pool.pooled <= Self.cap)
+        // What the screen gone says after — a saying on its way as it went — is not heard.
+        await readAll(pool)
+        _ = await pool.notes([first])
+        await pool.hold([first], drawnAt: 0, by: one)
+        at = await pool.drawn
+        await pool.hold([], drawnAt: at, by: two)
+        #expect(!(await pooledKeys(pool)).contains(first))
+        #expect(await pool.pooled <= Self.cap)
+    }
+
     @Test("a copy that arrived this run, let go and read again, stays after the copy that arrived before it")
     func arrivalKept() async throws {
         let (file, _) = try await twoFiles()

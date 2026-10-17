@@ -404,6 +404,44 @@ final class ShellSession {
     /// How many window moves (`placed`) each timeline has running, begun from the scroll: none
     /// more is begun for a short list while one is (`scrolled`, `footReached`).
     @ObservationIgnored var placing: [TimelineQuery: Int] = [:]
+    /// The pages open over the timeline, as the root has them (#359, G-4): what each draws is
+    /// said to the store with the rest of what the screens draw (`pins`). Handed in by the root
+    /// as its walk or its search moves (`pagesOpened`).
+    @ObservationIgnored var openPages = OpenPages()
+    /// The search the root holds, whose results are drawn while it is open; and the person
+    /// pages it holds, whose posts read from a source are drawn from the store where it holds
+    /// them. Set once by the root; nothing in a session drawn without one.
+    @ObservationIgnored weak var openSearch: ShellSearch?
+    @ObservationIgnored weak var personPages: ShellPersonPages?
+    /// The store's `drawn` as `notes` was last read from it (`ItemStore.all()`), read before it:
+    /// what the keys the screens draw from `notes` are made from (`ItemStore.hold`). Nothing
+    /// before the first read, and nothing is said to the store before then.
+    @ObservationIgnored private(set) var notesDrawnAt: Int?
+    /// What was last said to the store as drawn, and the `drawn` it was made from: said again
+    /// only where either moved.
+    @ObservationIgnored var heldLast: (pins: Set<NoteKey>, at: Int)?
+    /// The last saying of it on its way: each waits for the one before, so the store hears them
+    /// in the order they were made.
+    @ObservationIgnored var pinsOnTheirWay: Task<Void, Never>?
+    /// Who this session is to the store as it says what it draws: one window among the windows
+    /// over the one store, each saying its own (`ItemStore.hold(_:drawnAt:by:)`).
+    @ObservationIgnored var screen = UUID()
+    /// The window's following of the store ended (`screenGone`): nothing more is said to it
+    /// under `screen`, until the window follows it again (`screenOpened`).
+    @ObservationIgnored var screenClosed = false
+    /// The rows the timeline in front is about to draw, worked out as what it draws was said to
+    /// the store, and taken as they are by the drawing that follows (`timelineItemsKept`).
+    @ObservationIgnored var pinnedDrawing: (key: DrawnTimeline.Key, items: [DummyItem])?
+    /// What the pages that walk the pool draw, and what it was worked out from (`pagePins`).
+    @ObservationIgnored var pagePinsKept: (key: PagePinsKey, pins: Set<NoteKey>)?
+    /// Each held row by its host and its source's id, made once as `notes` changes (`heldRow`).
+    @ObservationIgnored var statusIndex: (revision: Int, rows: [String: NoteKey])?
+    /// How many rows the file holds of each host, as last counted (#359, C23): what Usage says
+    /// of the posts held, as many as there are rather than at least those read. Nothing until
+    /// counted, and where there is no file.
+    private(set) var rowsOnFile: [String: HostRows]?
+    /// How many saves landed this run (`landed()`): what Usage counts the file again on.
+    var writesLanded = 0
     /// Whether every kept row of the file is in the pool (`readKeptRows`): nil until asked and
     /// while the read is out, then whether it read. What Usage's kept section waits for, so it
     /// never says nothing is kept where the file keeps some (#357).
@@ -581,11 +619,17 @@ final class ShellSession {
     /// it is left out of what every page draws, over a store that still holds it. Its copies'
     /// own rows, and no more: a reblog of it, or a post that quotes it, still draws it inside
     /// its own row until the source answers — the post is held until then.
-    private func adoptHeld(notes items: [Note]?, replies: [Note]?) {
+    ///
+    /// `drawnAt` is the store's `drawn` read before `items` was (#359): what is drawn from them
+    /// is made from that.
+    private func adoptHeld(notes items: [Note]?, replies: [Note]?, drawnAt: Int?) {
         guard items != nil || replies != nil else { return }
         recountHeld = true
         let leaving = acts.leaving
-        if let items { notes = leaving.isEmpty ? items : items.filter { !leaving.contains($0.key.rowID) } }
+        if let items {
+            notes = leaving.isEmpty ? items : items.filter { !leaving.contains($0.key.rowID) }
+            notesDrawnAt = drawnAt
+        }
         if let replies { heldReplies = replies }
         recountHeld = false
         recount()
@@ -605,8 +649,16 @@ final class ShellSession {
     /// whenever Usage asks. **The one call a limit on the store makes too**, so what it is held
     /// to is what is shown.
     func readStoreBytes() async {
+        await readRowCounts()
         guard let measureStore else { return }
         storeBytes = await measureStore()
+    }
+
+    /// Counts again how many rows the file holds of each host (#359, C23), off the main actor:
+    /// where `readStoreBytes` measures it, so after every drop written and whenever Usage asks.
+    func readRowCounts() async {
+        guard let counted = await store.rowsByHost(), counted != rowsOnFile else { return }
+        rowsOnFile = counted
     }
 
     /// Gives the index back the room that rows let go of left in it, so `measureStore` sees them
@@ -692,7 +744,7 @@ final class ShellSession {
     /// removed source nothing is held from, is not shown.
     var usageDetailShown: Bool {
         guard usagePurpose == .source, let host = usageOpened else { return false }
-        return sources.contains { $0.host == host } || holdings.posts(host: host) > 0
+        return sources.contains { $0.host == host } || postsHeld(host: host).count > 0
     }
 
     /// Escape on Usage: back from a source's detail to the list. Only a detail on screen is closed,
@@ -1482,7 +1534,10 @@ final class ShellSession {
     ///
     /// **Observed, and the sheet is presented from it**, so a key and a press on the mark open
     /// the one surface by writing the one value.
-    var answering: AnswerTarget?
+    var answering: AnswerTarget? {
+        // The post answered, and the one the thread is about, are drawn while it is written.
+        didSet { if answering != oldValue { pinsMoved() } }
+    }
     /// What has been written to each post and not yet sent, by row. Kept when the sheet closes
     /// unsent. A send takes the text at the press and holds it, on disk, until it lands or the
     /// person discards it (`ShellOutbox`).
@@ -2650,6 +2705,7 @@ final class ShellSession {
     /// their ids across an adopt, which is what keeps the selected post selected.
     func followStore() async {
         // Listening before the first adopt, so a landing between the two is not missed.
+        screenOpened()
         let changes = await store.changes()
         await adopt()
         for await _ in changes {
@@ -2657,6 +2713,8 @@ final class ShellSession {
             // A landing may have taken the store past its room (#249): asked, not measured, here.
             roomMayBeReached()
         }
+        // The window is gone: what it drew is drawn nowhere now (#359).
+        await screenGone()
     }
 
     /// Only the sources, projected again through what each server has just said it is — for a
@@ -2713,7 +2771,7 @@ final class ShellSession {
         // nothing else: nothing but the moment each was read could place it (#297). A reply the
         // forum dated is an item, and is among `all`.
         let replies = adoptedReplies != repliesRevision ? await store.replies() : nil
-        adoptHeld(notes: all, replies: replies)
+        adoptHeld(notes: all, replies: replies, drawnAt: drawn)
         if all != nil { adopted = (store: drawn, notes: notesRevision) }
         // A text that may have been posted is let go where its post is now among what is held.
         if all != nil { outbox.reconcile(in: self) }
@@ -2733,6 +2791,9 @@ final class ShellSession {
         // for**: adopting is what every landing and every press waits on, and asking a source's
         // line for a load is not part of having adopted.
         if all != nil { refs.landing(in: self) }
+        // What the screens draw of what was just adopted, said to the store (#359): the rows
+        // it may then let go are drawn nowhere.
+        await holdDrawn()
     }
 
     /// `heldRevision` as the open conversations last drew from what is held.
@@ -3055,9 +3116,10 @@ final class ShellSession {
             return 0
         }
         // The window cuts a topic's kept replies too, and the count says so at once (#194).
+        let drawnAt = await store.drawn
         let all = await store.all()
         let replies = await store.replies()
-        adoptHeld(notes: all, replies: replies)
+        adoptHeld(notes: all, replies: replies, drawnAt: drawnAt)
         adoptedReplies = await store.repliesRevision
         // Waited for: what the window dropped is not said to be gone while the file still holds
         // it (#292). Giving the file back its room, and measuring it, follow and are not.

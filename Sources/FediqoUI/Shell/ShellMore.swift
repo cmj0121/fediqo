@@ -171,7 +171,8 @@ extension ShellReload {
     func more(_ query: TimelineQuery, in session: ShellSession) async {
         guard !asking.contains(.more), session.editing == nil else { return }
         let readingNewest = !asking.isDisjoint(with: [.timeline, .held, .renew])
-        let due = Self.due(query, in: session, stretches: stretches)
+        let onFile = await Self.oldestOnFile(query, in: session)
+        let due = Self.due(query, in: session, stretches: stretches, onFile: onFile)
             .filter { !readingNewest || $0.source.kind == .mastodon }
         guard !due.isEmpty else { return }
         let hosts = due.map(\.stretch.host).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
@@ -217,8 +218,35 @@ extension ShellReload {
         )
     }
 
-    /// Every stretch of `query` there is a next of now.
-    static func due(_ query: TimelineQuery, in session: ShellSession, stretches: ShellStretches) -> [Due] {
+    /// The oldest post the file holds of each stretch of `query` a Mastodon reads on through time
+    /// (#201, #359), read off the main actor: the pool holds only the rows lately seen, and a
+    /// stretch asked from the oldest of those would ask its source again for what the device
+    /// holds. Nothing where there is no file.
+    static func oldestOnFile(_ query: TimelineQuery, in session: ShellSession) async -> [Stretch: String] {
+        guard session.store.heldInPart else { return [:] }
+        let sources = session.sources
+        let asks = CompiledTimeline(query.definition(among: session.written), sources: sources).sourcesToAsk()
+        var oldest: [Stretch: String] = [:]
+        for ask in asks {
+            guard let source = sources.first(where: { $0.host == ask.host }) else { continue }
+            // Every stretch it could read, signed in or not: one not read is never asked from.
+            for stretch in stretches(of: source, for: ask.categories, signedIn: true) {
+                // A board's stretches are asked by page, and what is rising by how far in.
+                if case .board = stretch.category { continue }
+                guard let category = stretch.category, category != .trends, oldest[stretch] == nil,
+                      let id = await session.store.oldestStatusID(host: source.host, category: category)
+                else { continue }
+                oldest[stretch] = id
+            }
+        }
+        return oldest
+    }
+
+    /// Every stretch of `query` there is a next of now. `onFile` is the oldest post the file
+    /// holds of each (`oldestOnFile`), asked before where it is older than what is held.
+    static func due(
+        _ query: TimelineQuery, in session: ShellSession, stretches: ShellStretches, onFile: [Stretch: String] = [:]
+    ) -> [Due] {
         let sources = session.sources
         let asks = CompiledTimeline(query.definition(among: session.written), sources: sources).sourcesToAsk()
         return asks.flatMap { ask -> [Due] in
@@ -235,7 +263,7 @@ extension ShellReload {
                         return stretches.nextTrends(stretch).map { Due(stretch: stretch, source: source, cursor: .offset($0)) }
                     }
                     guard let category = stretch.category,
-                          let oldest = Self.oldest(category, of: source.host, in: session.notes),
+                          let oldest = Self.older(Self.oldest(category, of: source.host, in: session.notes), onFile[stretch]),
                           !stretches.hasAsked(stretch, before: oldest)
                     else { return nil }
                     return Due(stretch: stretch, source: source, cursor: .before(oldest))
@@ -280,6 +308,12 @@ extension ShellReload {
         notes.filter { $0.source.host == host && $0.categories.contains(category) }
             .compactMap(\.statusID)
             .min { $0.count != $1.count ? $0.count < $1.count : $0 < $1 }
+    }
+
+    /// The older of two server ids, or whichever there is.
+    static func older(_ one: String?, _ two: String?) -> String? {
+        guard let one, let two else { return one ?? two }
+        return (two.count != one.count ? two.count < one.count : two < one) ? two : one
     }
 
     /// What asking a source for its stretches came to: whether every one came back, and whether

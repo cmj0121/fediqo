@@ -67,6 +67,16 @@ public actor ItemStore {
     /// with no word on what is drawn holds every row it read, as round 1's did.
     private var pins: Set<NoteKey>?
     private var pinsDrawnAt = 0
+    /// What each screen said it draws (`hold(_:drawnAt:by:)`) — every window of the app over
+    /// this one store says its own — and `pins` is all of it, as of the oldest `drawn` any was
+    /// made from. A screen gone says so (`letGoOfPins(by:)`), and what it drew goes as any row.
+    private var pinsBy: [UUID: (pins: Set<NoteKey>, at: Int)] = [:]
+    /// The screens that said they are gone (`letGoOfPins(by:)`): what one of them says after —
+    /// a saying already on its way as its window closed — is not heard, or its drawing, old,
+    /// would keep every row read since.
+    private var screensGone: Set<UUID> = []
+    /// The screen `hold(_:drawnAt:)` says for: one, where nothing names another.
+    private static let oneScreen = UUID()
     /// The newest ids each timeline listed a row under, of the rows let go of the pool, newest
     /// first, and each one's row (`newestListedID`): one read again or let go answers for
     /// itself, and the next stands in. The newest `listedLeftKept` of each.
@@ -1302,6 +1312,37 @@ public actor ItemStore {
         }
     }
 
+    /// How many rows the file holds of each host, or nothing for a store with no file behind it,
+    /// or one that would not be read (#359, C23): what Usage counts once the pool holds only the
+    /// rows lately seen. **Read off this actor**, beside it, so a count over a large file holds
+    /// back no page and no landing. What a save has yet to write is not among them.
+    public nonisolated func rowsByHost() async -> [String: HostRows]? {
+        guard let disk else { return nil }
+        return await Task.detached(priority: .utility) {
+            do {
+                return try disk.rowCounts()
+            } catch {
+                Self.unread(error)
+                return nil
+            }
+        }.value
+    }
+
+    /// The source's own id of the oldest post of `host` the file holds through `category`, or
+    /// nothing where there is no file or it would not be read (`HeldRows.oldestStatusID`).
+    /// **Read off this actor**, as `rowsByHost` is: what a timeline's next stretch is asked from.
+    public nonisolated func oldestStatusID(host: String, category: Category) async -> String? {
+        guard let disk else { return nil }
+        return await Task.detached(priority: .utility) {
+            do {
+                return try disk.oldestStatusID(host: host.lowercased(), category: category)
+            } catch {
+                Self.unread(error)
+                return nil
+            }
+        }.value
+    }
+
     /// `mayGoForRoom`, the first `count` of them, **over the file** (#357): the file's oldest
     /// rows not kept, read a chunk at a time, each as the pool holds it where it does, merged with
     /// the pool's own in the one order; and each spared by `mayGoForRoom`'s rule, asked of every
@@ -1921,11 +1962,37 @@ public actor ItemStore {
     /// rows leave the pool at all** — none does before the screens say what they draw. Rows
     /// leave at once where the pool is over its cap and no page is out; otherwise once none is.
     public func hold(_ drawnNow: Set<NoteKey>, drawnAt: Int) {
-        if pins != drawnNow || pinsDrawnAt != drawnAt { poolMoved += 1 }
-        pins = drawnNow
-        pinsDrawnAt = drawnAt
+        hold(drawnNow, drawnAt: drawnAt, by: Self.oneScreen)
+    }
+
+    /// The keys the screen `screen` draws now, as `hold(_:drawnAt:)` — **in place of what that
+    /// screen said last, and beside what every other said** (#359, G-4): a window's drawing
+    /// replaces nothing another window draws.
+    public func hold(_ drawnNow: Set<NoteKey>, drawnAt: Int, by screen: UUID) {
+        guard !screensGone.contains(screen) else { return }
+        pinsBy[screen] = (drawnNow, drawnAt)
+        pinsSaid()
         notes.saw(drawnNow)
         letRowsLeave()
+    }
+
+    /// The screen `screen` draws nothing any more — a window closed: what only it drew goes as
+    /// any row drawn nowhere, **and nothing it says after is heard**. Once every screen said so,
+    /// nothing is drawn, and none is kept for it.
+    public func letGoOfPins(by screen: UUID) {
+        screensGone.insert(screen)
+        guard pinsBy.removeValue(forKey: screen) != nil else { return }
+        pinsSaid()
+        letRowsLeave()
+    }
+
+    /// `pins` as every screen says them now.
+    private func pinsSaid() {
+        let all = pinsBy.values.reduce(into: Set<NoteKey>()) { $0.formUnion($1.pins) }
+        let at = pinsBy.values.map(\.at).min() ?? drawn
+        if pins != all || pinsDrawnAt != at { poolMoved += 1 }
+        pins = all
+        pinsDrawnAt = at
     }
 
     /// **Lets the least lately seen rows go of the pool, not of the file**, where it holds more

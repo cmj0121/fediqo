@@ -40,6 +40,7 @@ extension ShellSession {
     func landed() {
         said.written()
         outbox.written()
+        writesLanded += 1
     }
 
     /// The saver, followed: each save that writes every part after a write had failed

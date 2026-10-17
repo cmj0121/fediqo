@@ -57,7 +57,7 @@ struct UsageSourceList: View {
     /// detail would say first — the posts held and the pictures, or, of a source removed, that it
     /// was and the posts that stayed.
     static func spoken(_ source: Source, in session: ShellSession, onDisk: [String: Int]?, removed: Bool) -> String {
-        let posts = UsagePane.postsLine(session.holdings.posts(host: source.host), atLeast: session.store.heldInPart)
+        let posts = UsagePane.postsLine(session.postsHeld(host: source.host))
         let rest = removed
             ? [L10n.t("item.left"), posts]
             : [posts, UsagePane.picturesLine(source, in: session, onDisk: onDisk)]
@@ -65,7 +65,7 @@ struct UsageSourceList: View {
     }
 
     /// The sources no longer here that this device still holds posts from (#250), by host: the
-    /// hosts the count knows (`holdings.bySource`, #194) that are not
+    /// hosts the count knows (`hostsHeld` — the pool's and the file's, #194, #359) that are not
     /// among the sources, each with the kind its notes were stamped with — nothing else
     /// remembers a removed source. Sorted by host, since nothing else orders them.
     static func removed(_ session: ShellSession) -> [Source] {
@@ -74,10 +74,10 @@ struct UsageSourceList: View {
             (session.notes + session.heldReplies).map { ($0.source.host, $0.source.kind) },
             uniquingKeysWith: { first, _ in first }
         )
-        return session.holdings.bySource.keys
+        return session.hostsHeld
             .filter { !here.contains($0) }
             .sorted()
-            .map { Source(host: $0, kind: kinds[$0] ?? .unknown) }
+            .map { Source(host: $0, kind: kinds[$0] ?? session.keptSource(of: $0)?.kind ?? .unknown) }
     }
 
     /// The source `host` names on this list: one here, or one removed whose posts stayed.
@@ -108,7 +108,7 @@ struct UsageRemovedSourceDetail: View {
             }
         }
         Section {
-            ShellReadingLine(Text(UsagePane.postsLine(session.holdings.posts(host: source.host), atLeast: session.store.heldInPart)))
+            ShellReadingLine(Text(UsagePane.postsLine(session.postsHeld(host: source.host))))
             ShellReadingLine(Text(L10n.t("usage.removed.line")))
         } header: {
             ShellSectionHead(title: "prefs.cache", line: "item.left", help: "usage.removed.help")
@@ -141,7 +141,7 @@ struct UsageSourceDetail: View {
         Section { masthead }
         Section {
             if cataloguesRead { catalogueLine }
-            ShellReadingLine(Text(UsagePane.postsLine(session.holdings.posts(host: source.host), atLeast: session.store.heldInPart)))
+            ShellReadingLine(Text(UsagePane.postsLine(session.postsHeld(host: source.host))))
             ShellReadingLine(Text(UsagePane.picturesLine(source, in: session, onDisk: onDisk)))
             postLine
             noticesLine

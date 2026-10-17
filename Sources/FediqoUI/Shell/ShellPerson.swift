@@ -515,6 +515,15 @@ final class ShellPersonPages {
         return nil
     }
 
+    /// The posts a page of `who` read for its tabs, and what they boost (#359): drawn from the
+    /// store's copy where it holds one (`PageRows`), so kept in its pool while the page is open.
+    func postKeys(of who: DummyPerson, in session: ShellSession) -> [NoteKey] {
+        let pinned = tabs.pinnedRead(of: who, beside: said(of: who, in: session), in: session)
+        return [pages[who.id]?.read, pinned].compactMap { $0 }.flatMap { read in
+            read.posts.map(\.key) + read.carried.map(\.key)
+        }
+    }
+
     /// Whether `rowID` is a post on the page of `who` that this device does not hold.
     func isOnlyOnPage(_ rowID: String, of who: DummyPerson, in session: ShellSession) -> Bool {
         session.heldNote(rowID) == nil && note(rowID, of: who, in: session) != nil

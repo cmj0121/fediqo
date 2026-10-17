@@ -336,14 +336,37 @@ extension ShellSession {
         drawnTimelines[currentTimeline.id]?.movedAbove(row) ?? false
     }
 
+    /// What the timeline in front, drawn now up to `latest`, is drawn from: a drawing of it under
+    /// another key is of something else.
+    func timelineDrawingKey(latest: LatestDate?) -> DrawnTimeline.Key {
+        let query = currentTimeline
+        let reach = readPage == nil ? nil : coverage[query].flatMap { $0.reach(for: coverageKey(of: query, latest: latest)) }
+        return DrawnTimeline.Key(
+            definition: definition(of: query), notesRevision: notesRevision, latest: latest,
+            hosts: Set(sources.map(\.host)), reach: reach
+        )
+    }
+
+    /// The rows the timeline in front draws under `key`, worked out afresh and kept nowhere.
+    func timelineItems(under key: DrawnTimeline.Key) -> [DummyItem] {
+        let reach = key.reach
+        // Its first page not read yet: the pane says it is being read (`timelineLoading`).
+        if readPage != nil, reach == nil { return [] }
+        let definition = key.definition
+        // Between its edges, in the store's order (#359): merged from what stands near them,
+        // and drawn where a copy stands inside, so no post is split at an edge.
+        let clipped = reach.map { $0.floor != nil || $0.ceiling != nil } ?? false
+        let held = clipped ? notes.filter { reach?.nears($0) ?? true } : notes
+        let merged = currentTimeline.items(
+            from: held, among: written, index: definition.readsText ? textIndex : TextIndex([]), latest: key.latest,
+            here: key.hosts, targets: reblogTargets
+        )
+        return clipped ? merged.filter { reach?.holds($0, held: heldNote) ?? true } : merged
+    }
+
     func timelineDrawn(latest: LatestDate?) -> DrawnTimeline {
         let query = currentTimeline
-        let definition = definition(of: query)
-        let hosts = Set(sources.map(\.host))
-        let reach = readPage == nil ? nil : coverage[query].flatMap { $0.reach(for: coverageKey(of: query, latest: latest)) }
-        let key = DrawnTimeline.Key(
-            definition: definition, notesRevision: notesRevision, latest: latest, hosts: hosts, reach: reach
-        )
+        let key = timelineDrawingKey(latest: latest)
         if let drawn = drawnTimelines[query.id], drawn.key == key {
             if drawnOrder.last != query.id {
                 drawnOrder.removeAll { $0 == query.id }
@@ -351,22 +374,11 @@ extension ShellSession {
             }
             return drawn
         }
-        let items: [DummyItem]
-        if readPage != nil, reach == nil {
-            // Its first page not read yet: the pane says it is being read (`timelineLoading`).
-            items = []
-        } else {
-            // Between its edges, in the store's order (#359): merged from what stands near them,
-            // and drawn where a copy stands inside, so no post is split at an edge.
-            let clipped = reach.map { $0.floor != nil || $0.ceiling != nil } ?? false
-            let held = clipped ? notes.filter { reach?.nears($0) ?? true } : notes
-            let merged = query.items(
-                from: held, among: written, index: definition.readsText ? textIndex : TextIndex([]), latest: latest,
-                here: hosts, targets: reblogTargets
-            )
-            items = clipped ? merged.filter { reach?.holds($0, held: heldNote) ?? true } : merged
-            timelineEvaluations += 1
-        }
+        // Worked out already where what is drawn was just said to the store (#359).
+        let kept = pinnedDrawing?.key == key ? pinnedDrawing?.items : nil
+        pinnedDrawing = nil
+        let items = kept ?? timelineItems(under: key)
+        if kept == nil, readPage == nil || key.reach != nil { timelineEvaluations += 1 }
         let ids = items.map(\.id)
         drawings += 1
         var drawn = DrawnTimeline(key: key, items: items, ids: ids, stamp: drawings)
@@ -389,6 +401,8 @@ extension ShellSession {
         while drawnOrder.count > Self.drawnKept {
             drawnTimelines[drawnOrder.removeFirst()] = nil
         }
+        // What it draws now said to the store, once this pass is drawn (#359).
+        pinsMoved()
         return drawn
     }
 

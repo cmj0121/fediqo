@@ -625,6 +625,35 @@ extension StoreFile {
         try poolRead { db, beside in try Int.fetchOne(db, sql: "SELECT count(*) FROM note") ?? 0 }
     }
 
+    public func rowCounts() throws -> [String: HostRows] {
+        try poolRead { db, beside in
+            var counts: [String: HostRows] = [:]
+            for row in try Row.fetchAll(db, sql: "SELECT host, count(*) AS rows FROM note GROUP BY host") {
+                let host: String = row["host"]
+                // One row's word on its source's kind, by the host's index: a source removed is
+                // named by what its posts wrote down (`formerSource`).
+                let kind = try String.fetchOne(db, sql: """
+                    SELECT kind FROM (SELECT CASE WHEN json_valid(facts) THEN json_extract(facts, '$.kind') END AS kind
+                    FROM note WHERE host = ?) WHERE kind IS NOT NULL LIMIT 1
+                    """, arguments: [host])
+                counts[host] = HostRows(count: row["rows"], kind: kind.flatMap(ProtocolKind.init(rawValue:)))
+            }
+            return counts
+        }
+    }
+
+    public func oldestStatusID(host: String, category: FediqoCore.Category) throws -> String? {
+        let row = CategoryRow(category)
+        let status = Self.statusIDExpression
+        return try poolRead { db, beside in
+            try String.fetchOne(db, sql: """
+                SELECT \(status) FROM note
+                WHERE host = ? AND \(status) IS NOT NULL AND \(Self.category(category, certain: true))
+                ORDER BY length(\(status)), \(status) LIMIT 1
+                """, arguments: StatementArguments([host, row.kind] + (row.id.map { [$0] } ?? [])))
+        }
+    }
+
     /// `op`, made on every row it names, inside the save's transaction.
     static func make(_ op: StoreOp, in db: Database) throws {
         switch op.kind {

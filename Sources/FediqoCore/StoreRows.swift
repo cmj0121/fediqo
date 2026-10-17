@@ -201,6 +201,26 @@ public protocol HeldRows: Sendable {
     func marked(_ hosts: StoreOp.Hosts) throws -> Bool
     /// How many rows the file holds.
     func rowCount() throws -> Int
+    /// How many rows the file holds of each host, by host as the rows are keyed, and the kind of
+    /// source a row of it wrote down: what Usage counts once the pool holds only part of them
+    /// (#359, C23), and names a source removed whose posts stayed by.
+    func rowCounts() throws -> [String: HostRows]
+    /// The source's own id of the oldest post of `host` the file holds through `category` — a
+    /// Mastodon id grows with time, and a longer one is a later one: where a timeline's next
+    /// stretch is asked from once the pool holds only part of what the file does (#201, #359).
+    func oldestStatusID(host: String, category: Category) throws -> String?
+}
+
+/// What the file holds of one host (`HeldRows.rowCounts`): how many rows, and the kind of source
+/// one of them wrote down, or nothing where none did.
+public struct HostRows: Equatable, Sendable {
+    public let count: Int
+    public let kind: ProtocolKind?
+
+    public init(count: Int, kind: ProtocolKind?) {
+        self.count = count
+        self.kind = kind
+    }
 }
 
 /// What a `HeldRows` read throws where some rows it found will not decode: those, by key, and

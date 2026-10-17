@@ -534,6 +534,8 @@
 "prefs.held.earlier" = "What changed posts said before";
 "prefs.held.earlier.count" = "%d wordings";
 "prefs.held.earlier.count.one" = "%d wording";
+"prefs.held.earlier.count.atLeast" = "At least %d wordings";
+"prefs.held.earlier.count.atLeast.one" = "At least %d wording";
 "prefs.held.memory" = "%@ in memory";
 "prefs.held.disk" = "%@ on disk";
 "prefs.held.breakdown" = "By week or month";

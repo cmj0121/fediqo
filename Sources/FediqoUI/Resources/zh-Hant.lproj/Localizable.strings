@@ -528,6 +528,7 @@
 "prefs.held.total" = "所有來源";
 "prefs.held.earlier" = "修改過的貼文之前說的";
 "prefs.held.earlier.count" = "%d 個版本";
+"prefs.held.earlier.count.atLeast" = "至少 %d 個版本";
 "prefs.held.memory" = "記憶體中 %@";
 "prefs.held.disk" = "磁碟上 %@";
 "prefs.held.breakdown" = "依週或月";

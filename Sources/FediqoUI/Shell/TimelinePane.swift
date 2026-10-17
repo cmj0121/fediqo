@@ -118,6 +118,9 @@ struct TimelinePane: View {
     private var slide: PageSlide { session.slide("timeline") }
     /// When the reload mark was last pressed to begin a reload (#307). See `reloadMark`.
     @State private var reloadPressed: Date?
+    /// A jump to the top read the newest page afresh (#359, C22): the list is put at its head
+    /// once that page is drawn, from the change of what it draws (`listedNewest`).
+    @State private var toNewest = false
 
     private var timeline: TimelineQuery { session.currentTimeline }
 
@@ -1112,6 +1115,7 @@ struct TimelinePane: View {
             // did not change (#357).
             .onChange(of: searching ? items.map(\.id) : session.timelineIDs(latest: prefs.latestDate), initial: true) { _, ids in
                 session.readingMark.list(Set(ids), of: timeline.id)
+                listedNewest(ids, proxy: proxy)
             }
             .onAppear {
                 // A tick later: a lazy stack just built has not laid out the row to scroll to.
@@ -1196,13 +1200,34 @@ struct TimelinePane: View {
                 if !now { mark.handed = next }
                 selectedID = next
             }
-            .onChange(of: jumpToTop) { _, _ in
-                guard let first = items.first else { return }
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    proxy.scrollTo(first.id, anchor: .top)
-                }
-            }
+            .onChange(of: jumpToTop) { _, _ in jumpedToTop(first: items.first?.id, proxy: proxy) }
         }
+    }
+
+    /// `g`, or the tab pressed again: the list at its first row. **Where the rows above where
+    /// it is read were let go** (#359, C22), the timeline's newest page is read afresh and the
+    /// list put at its head once it is drawn — the newest, and not the highest row still held.
+    private func jumpedToTop(first: String?, proxy: ScrollViewProxy) {
+        let latest = prefs.latestDate
+        guard standing == nil, search?.isOpen != true, session.timelineReadsAbove(latest: latest) else {
+            guard let first else { return }
+            withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(first, anchor: .top) }
+            return
+        }
+        let query = timeline
+        // Set before the read: its page may be drawn before the read is heard to end.
+        toNewest = true
+        Task {
+            if await !session.readNewest(query) { toNewest = false }
+        }
+    }
+
+    /// What the list draws changed: where a jump to the top read the newest page afresh, the
+    /// list is put at its head as that page is drawn — not before, while it is being read.
+    private func listedNewest(_ ids: [String], proxy: ScrollViewProxy) {
+        guard toNewest, let first = ids.first, session.coverage[timeline]?.landed == true else { return }
+        toNewest = false
+        proxy.scrollTo(first, anchor: .top)
     }
 
     /// One row's share of #54's acts (#106).

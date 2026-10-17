@@ -285,6 +285,10 @@ public struct FediqoRootView: View {
                 tags.placing = { tag, row in openTag(tag, from: row) }
                 placeMentions()
                 placeQuotes()
+                // What the search and the person pages draw is said to the store with the rest
+                // of what is drawn (#359).
+                session.openSearch = search
+                session.personPages = people
                 // What an earlier run could not put back and did not live to (#344): said once,
                 // as the launch begins, and from here — a listing of the store's folder is no
                 // work for an initializer that runs every time the view is made.
@@ -324,6 +328,8 @@ public struct FediqoRootView: View {
             .modifier(KeepingWithinRoom(session: session))
             .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes))
             .modifier(AnnouncementsAsk(session: session, announcements: people.announcements))
+            // The pages open over the timeline, whose rows the store keeps while they are (#359).
+            .modifier(PinsPages(session: session, pages: openPages))
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }
@@ -1972,6 +1978,15 @@ public struct FediqoRootView: View {
         guard let who = DummyPerson(handle: handle, host: host), walk.walk(to: .person(who), from: row)
         else { return nil }
         return (row, who)
+    }
+
+    /// The pages open over the timeline as the session is handed them (#359): every step of
+    /// the walk, the search, and the latest date the timeline is drawn to.
+    private var openPages: OpenPages {
+        OpenPages(
+            steps: walk.steps, searching: search.isOpen, pattern: search.pattern, indexed: search.isIndexed,
+            latest: prefs.latestDate
+        )
     }
 
     // MARK: - A quoted post — #214

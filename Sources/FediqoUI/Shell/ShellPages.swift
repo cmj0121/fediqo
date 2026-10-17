@@ -353,6 +353,23 @@ extension ShellSession {
         }
     }
 
+    /// To the newest of `query`, where the rows above where it is read were let go (C22, the
+    /// person's (a)): **its newest page read afresh and the timeline drawn there**, as it is
+    /// the first time it is opened — the place left, and every page of the old window out
+    /// disowned. What a jump to the top and a pull mean: the newest, now, and not a read up a
+    /// page at a time from deep down. Says whether it went; nothing where the timeline is drawn
+    /// to its newest already, which a jump or a pull reaches as before.
+    @discardableResult
+    func readNewest(_ query: TimelineQuery) async -> Bool {
+        guard readPage != nil, let held = coverage[query], held.landed, held.ceiling != nil else { return false }
+        pageGenerations += 1
+        let generation = pageGenerations
+        coverage[query] = TimelineCoverage(key: held.key, generation: generation, reading: true)
+        anchors[query] = nil
+        await readDown(query, key: held.key, from: .newest, generation: generation, moved: 0)
+        return coverage[query]?.generation == generation && coverage[query]?.landed == true
+    }
+
     /// `query` put behind another (G-3): **its edges drawn in to `keptAway` rows each side of
     /// `row`** — the post it was left at — or of its last anchor, in one step and with nothing
     /// read, and what those rows draw kept as what it holds (`pinned`). A page out past either

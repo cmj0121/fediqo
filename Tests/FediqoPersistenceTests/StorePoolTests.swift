@@ -284,6 +284,10 @@ struct StorePoolTests {
         func referring(to keys: [NoteKey]) throws -> [Referrer] { try call { try file.referring(to: keys) } }
         func marked(_ hosts: StoreOp.Hosts) throws -> Bool { try call { try file.marked(hosts) } }
         func rowCount() throws -> Int { try call { try file.rowCount() } }
+        func rowCounts() throws -> [String: HostRows] { try call { try file.rowCounts() } }
+        func oldestStatusID(host: String, category: FediqoCore.Category) throws -> String? {
+            try call { try file.oldestStatusID(host: host, category: category) }
+        }
 
         /// How many times the kept rows were asked for.
         var keptAsked: Int { lock.withLock { keptReads } }
