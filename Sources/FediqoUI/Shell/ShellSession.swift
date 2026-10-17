@@ -391,6 +391,11 @@ final class ShellSession {
     /// A provisional first page (C15), read beside the file's pages' index while it is being
     /// made, and nothing once it is: set by the app beside `readPage`.
     @ObservationIgnored var readEarly: (@Sendable (PageQuery, Int) async throws -> Page?)?
+    /// Reads one page of what a search finds in a timeline from the file (#360, C25), or nothing
+    /// for a pattern the file cannot narrow: set by the app beside `readPage`, and nil where it is.
+    @ObservationIgnored var readSearch: (@Sendable (PageQuery, NoteSearch, PageAsk, Int) async throws -> Page?)?
+    /// How far the open search has been read from the file (`coverSearch`); nothing while none is.
+    var searchReading: SearchReading?
     /// Run once, after the first page of the timeline in front is drawn: what waits for the
     /// timeline to show (C1).
     @ObservationIgnored var afterFirstPage: (@Sendable () async -> Void)?

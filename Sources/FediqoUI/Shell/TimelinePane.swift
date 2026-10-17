@@ -1078,6 +1078,8 @@ struct TimelinePane: View {
                             asks: Self.asksForMore(at: index, of: rows.count, searching: searching),
                             timeline: timeline, session: session, latest: prefs.latestDate
                         ))
+                        // And a search's, its next pages from the file (#360).
+                        .modifier(SearchReadsOn(asks: searching && index >= rows.count - Self.moreAhead, session: session))
                         .modifier(TimelineGapMarked(marks: gaps[item.id], session: session))
                         if !isLast {
                             ShellRule()

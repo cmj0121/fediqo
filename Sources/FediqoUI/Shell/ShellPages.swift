@@ -498,7 +498,7 @@ extension ShellSession {
         await reloadFromStore()
     }
 
-    private static func pageQuery(_ key: TimelineCoverage.Key, generation: Int) -> PageQuery {
+    static func pageQuery(_ key: TimelineCoverage.Key, generation: Int) -> PageQuery {
         PageQuery(
             timeline: key.definition.id, generation: generation, compiled: CompiledTimeline(key.definition, sources: []),
             latestEnd: key.latestEnd, keepFrom: key.keepFrom

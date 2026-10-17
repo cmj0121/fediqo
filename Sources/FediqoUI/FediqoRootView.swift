@@ -127,6 +127,7 @@ public struct FediqoRootView: View {
         weighStore: (@Sendable () async -> Int)? = nil,
         readPage: (@Sendable (PageQuery, PageAsk, Int) async throws -> Page)? = nil,
         readEarly: (@Sendable (PageQuery, Int) async throws -> Page?)? = nil,
+        readSearch: (@Sendable (PageQuery, NoteSearch, PageAsk, Int) async throws -> Page?)? = nil,
         afterFirstPage: (@Sendable () async -> Void)? = nil,
         limits: (any LimitAccountStore)? = nil,
         storeIsNewer: Bool = false,
@@ -158,6 +159,7 @@ public struct FediqoRootView: View {
         session.weighStore = weighStore
         session.readPage = readPage
         session.readEarly = readEarly
+        session.readSearch = readSearch
         session.afterFirstPage = afterFirstPage
         session.limitStore = limits
         _session = State(initialValue: session)
@@ -334,6 +336,8 @@ public struct FediqoRootView: View {
             .modifier(AnnouncementsAsk(session: session, announcements: people.announcements))
             // The pages open over the timeline, whose rows the store keeps while they are (#359).
             .modifier(PinsPages(session: session, pages: openPages))
+            // And the open search read from the file, past what is held (#360).
+            .modifier(CoversSearch(session: session, ask: session.searchAsk(search, latest: prefs.latestDate)))
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }
@@ -2691,6 +2695,7 @@ public struct FediqoRootView: View {
                         search: search,
                         timeline: session.name(of: session.currentTimeline),
                         found: search.isIndexed ? searchItems?.count : nil,
+                        counted: session.searchCount(found: searchItems?.count ?? 0, searched: search.searchedCount),
                         reach: session.reload.reach?.sentence,
                         lookUp: people.found.line(typed: search.text, in: session),
                         onLookUp: lookUpPressed,

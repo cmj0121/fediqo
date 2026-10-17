@@ -266,6 +266,8 @@
 "search.empty.line" = "試著少打幾個字，或用 * 代表任意多字。";
 "search.indexing.title" = "搜尋中…";
 "search.indexing.detail" = "正在讀一次這台裝置上的貼文，之後每打一個字只需比對。";
+"search.atLeast" = "至少找到 %d 則";
+"search.readSoFar" = "只搜尋了目前讀進來的 %d 則貼文。";
 
 "item.replies" = "則回覆";
 "item.board.dev" = "dev";

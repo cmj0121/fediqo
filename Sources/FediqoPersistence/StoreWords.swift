@@ -416,11 +416,27 @@ extension StoreFile {
     /// `index` where it is there but not so; `open` where there is none, or no keyword to ask.
     static func wordsAsk(_ db: Database, _ prefilter: CompiledTimeline.Prefilter, most: Int, capable: Bool = wordsCapable) throws -> WordsAsk {
         let keywords = keywords(prefilter).map(\.folded)
-        guard !keywords.isEmpty, capable, try hasWords(db) else { return .open }
+        guard !keywords.isEmpty else { return .open }
         let asked = keywords.map { WordGrams.asked($0) }
-        guard most > 0, try floor(db) <= 0, try hasReblogsIndexes(db) else { return .index }
         // An empty keyword: every row holds it.
-        guard !asked.contains(where: { $0 == nil }) else { return .open }
+        let matches = asked.contains { $0 == nil } ? nil : asked.compactMap { $0.map(WordGrams.match) }
+        return try wordsAsk(db, matches: matches, most: most, capable: capable)
+    }
+
+    /// How a page asks the index for the rows any of `matches` — FTS5 queries of tokens — may
+    /// find, as `wordsAsk(_:_:most:capable:)` says; `matches` nothing where one is a query every
+    /// row answers. What a keyword timeline and a search (`searchMatch`) both ask by.
+    ///
+    /// `also`: rows found by their own cells besides — a search's categories — each a condition
+    /// on a row of `note` and its arguments, fetched capped and counted toward `most` as the
+    /// index's answers are.
+    static func wordsAsk(
+        _ db: Database, matches: [String]?, also: [(sql: String, arguments: StatementArguments)] = [], most: Int,
+        capable: Bool = wordsCapable
+    ) throws -> WordsAsk {
+        guard capable, try hasWords(db) else { return .open }
+        guard most > 0, try floor(db) <= 0, try hasReblogsIndexes(db) else { return .index }
+        guard let matches else { return .open }
         var found: [Int64] = []
         var seen = Set<Int64>()
         var fetched = 0
@@ -436,8 +452,11 @@ extension StoreFile {
         }
         guard try fetch("SELECT rowid FROM note_words_due") else { return .index }
         guard try fetch("SELECT rowid FROM note INDEXED BY note_reblogs_odd WHERE \(oddReblog)") else { return .index }
-        for tokens in asked.compactMap({ $0 }) {
-            guard try fetch("SELECT rowid FROM note_words WHERE note_words MATCH ?", [WordGrams.match(tokens)]) else { return .index }
+        for match in matches {
+            guard try fetch("SELECT rowid FROM note_words WHERE note_words MATCH ?", [match]) else { return .index }
+        }
+        for (condition, arguments) in also {
+            guard try fetch("SELECT rowid FROM note WHERE \(condition)", arguments) else { return .index }
         }
         // Their reblogs, by `note_reblogs`: by the first reference, which for every reblog but
         // the odd ones — all here already — is the one `Note.reblogKey` reads.
@@ -449,6 +468,24 @@ extension StoreFile {
             AND (CASE WHEN json_valid(r.refs) THEN json_extract(r.refs, '$[0].id') END) = t.id AND instr(r.refs, '"reblogs"') > 0
             """, [posts]) else { return .index }
         return .candidates(found)
+    }
+
+    // MARK: - A search's page (K-5, C25)
+
+    /// What a search for a pattern of `literals` (`WildcardPattern.literals`) asks the index, as
+    /// one FTS5 query: **every run in one field**, as the pattern matches one field whole — the
+    /// body's tokens (`b`), or those of the names beside it (`o`), which are cut of several fields
+    /// and so only ever let more through. Nothing for a pattern of wildcards alone, which no
+    /// index narrows.
+    static func searchMatch(_ literals: [String]) -> String? {
+        let runs = literals.filter { !$0.isEmpty }
+        guard !runs.isEmpty else { return nil }
+        let sides = [WordGrams.Field.body, .other].map { field -> String in
+            var seen = Set<String>()
+            let tokens = runs.flatMap { WordGrams.asked($0, in: field) ?? [] }.filter { seen.insert($0).inserted }
+            return "(" + WordGrams.match(tokens) + ")"
+        }
+        return sides.joined(separator: " OR ")
     }
 
     // MARK: - The rowid guard

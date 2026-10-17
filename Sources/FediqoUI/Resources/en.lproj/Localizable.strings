@@ -267,6 +267,9 @@
 "search.empty.line" = "Try fewer characters, or * for any run of them.";
 "search.indexing.title" = "Searching…";
 "search.indexing.detail" = "Reading the posts this device holds, once, so each key only matches.";
+"search.atLeast" = "At least %d found";
+"search.readSoFar" = "Searched only the %d posts read so far.";
+"search.readSoFar.one" = "Searched only the %d post read so far.";
 
 "item.replies" = "replies";
 "item.board.dev" = "dev";

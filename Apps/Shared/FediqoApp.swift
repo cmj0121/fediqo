@@ -445,6 +445,13 @@ private struct Live: View {
         return { query, ask, limit in try await file.page(query, ask, limit: limit) }
     }
 
+    /// One page of what a search finds in a timeline, read from the index (#360), or nothing where
+    /// this run has none: the search then reads what is held, which is everything.
+    private var readSearch: (@Sendable (PageQuery, NoteSearch, PageAsk, Int) async throws -> Page?)? {
+        guard let file = launch.file else { return nil }
+        return { query, search, ask, limit in try await file.search(query, search, ask, limit: limit) }
+    }
+
     /// A provisional first page (C15), read beside the index's pages' index while a first launch
     /// after an older build makes it, and nothing once it is made.
     private var readEarly: (@Sendable (PageQuery, Int) async throws -> Page?)? {
@@ -480,7 +487,7 @@ private struct Live: View {
             mastodon: launch.mastodon, persist: save, persistUnsent: saveUnsent,
             savesLanded: { [saver = launch.saver] in await saver.landings() },
             measureStore: measureStore, compactStore: compactStore, weighStore: weighStore,
-            readPage: readPage, readEarly: readEarly, afterFirstPage: afterFirstPage,
+            readPage: readPage, readEarly: readEarly, readSearch: readSearch, afterFirstPage: afterFirstPage,
             limits: launch.limits,
             storeIsNewer: launch.storeIsNewer,
             storeNoticeSeen: { launch.storeIsNewer = false },

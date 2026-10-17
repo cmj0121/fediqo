@@ -9,6 +9,7 @@ import Observation
 /// opened. So does emptying the field. It reads the notes the session holds;
 /// Return also asks the sources of the timeline in front that can be searched
 /// (`ShellReload.search`), and what they send back is held, an item like any other, and found here (#176, #296).
+/// Over a store held in part, the file is asked too, and what it finds laid in (`ShellSearchPages`, #360).
 ///
 /// **Asked of the timeline in front** (#145). What it finds is what that timeline lets through —
 /// its sources, its categories, its rules, and the latest date — matched against the pattern
@@ -40,7 +41,19 @@ final class ShellSearch {
 
     @ObservationIgnored private var index = SearchIndex([])
     @ObservationIgnored private var indexing: Task<Void, Never>?
-    @ObservationIgnored private var cached: (key: Key, items: [DummyItem])?
+    @ObservationIgnored private var cached: (key: Key, items: [DummyItem], searched: Int)?
+
+    /// What the last `items` was asked for, whether or not it could answer yet.
+    @ObservationIgnored private var asked: Key?
+
+    /// How many posts the answer now in hand searched: what the timeline lets through of what is
+    /// held, up to its latest date, a forum topic's parts not among them (#360). **Nothing until
+    /// an answer for what was last asked is in hand** — before the index lands, or while one for
+    /// an earlier pattern or timeline is all there is — so no line names a stale count.
+    var searchedCount: Int? {
+        guard isIndexed, let cached, cached.key == asked else { return nil }
+        return cached.searched
+    }
 
     private struct Key: Equatable {
         let pattern: String
@@ -269,8 +282,9 @@ final class ShellSearch {
         guard isOpen, let search = NoteSearch(pattern, sources: sources, labels: Self.labels) else {
             return nil
         }
-        guard isIndexed else { return [] }
         let key = Key(pattern: pattern, timeline: timeline, revision: revision, sources: sources, latest: latest)
+        asked = key
+        guard isIndexed else { return [] }
         if let cached, cached.key == key { return cached.items }
         let held = notes()
         // What each reblog reblogs (#290): the session's lookup, or one built here, once for the
@@ -283,7 +297,8 @@ final class ShellSearch {
         // One post is one row here as it is on the timeline (#114): a search that drew a merged
         // row twice would be the complaint #10 left for later, arriving through the search field.
         let items = DummyItem.merged(latest?.shown(found) ?? found, here: Set(sources.map(\.host)), targets: targets)
-        cached = (key, items)
+        let searched = (latest?.shown(shown) ?? shown).count { !$0.isPartOfTopic }
+        cached = (key, items, searched)
         return items
     }
 }
