@@ -157,7 +157,7 @@ struct StorePagesBenchTests {
     /// A copy of the given store made afresh by SQLite's own backup, the given one opened read
     /// only, and the indexes this build makes dropped from the copy: an older build's file, as a
     /// first launch of this one meets it.
-    private static func freshCopy() throws -> URL {
+    static func freshCopy() throws -> URL {
         let given = URL(fileURLWithPath: try #require(environment["FEDIQO_BENCH_STORE"]))
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
