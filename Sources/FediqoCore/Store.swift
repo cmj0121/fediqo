@@ -2104,7 +2104,15 @@ public actor ItemStore {
     @discardableResult
     private func pool(found: [HeldRow]) -> Set<NoteKey> {
         guard disk != nil else { return [] }
-        return lay([], found: found.filter { looked.insert($0.note.key).inserted })
+        // What the pool holds already stays as it has it, and is seen now: the window the page
+        // was read for draws it once the screens next say so, and until then it is as new to
+        // them as a row laid in — let go first, it would be a hole in a stretch read.
+        let fresh = found.filter { looked.insert($0.note.key).inserted }
+        if fresh.count != found.count {
+            let laid = Set(fresh.map(\.note.key))
+            notes.readAgain(found.lazy.map(\.note.key).filter { !laid.contains($0) })
+        }
+        return lay([], found: fresh)
     }
 
     /// `read`, the rows it could and, where some would not decode, the keys of those — which

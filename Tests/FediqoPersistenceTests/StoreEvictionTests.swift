@@ -321,6 +321,28 @@ struct StoreEvictionTests {
         try await heldWhole(pool, file)
     }
 
+    @Test("rows a page reads again while the pool holds them stay through the letting go after it, as rows it laid in do")
+    func pageReadsHeldRowsAgain() async throws {
+        let (file, _) = try await twoFiles()
+        let pool = ItemStore(sources: Self.sources, rows: file, cap: Self.cap)
+        await readAll(pool)
+        await pool.hold([], drawnAt: await pool.drawn)
+        // Drawn since, as nothing: what stayed is older than the drawing, and the least lately
+        // seen once the rest is read in again past the cap.
+        await pool.hold([], drawnAt: await pool.drawn)
+        let stayed = Array(await pooledKeys(pool))
+        await readAll(pool, except: Set(stayed))
+        #expect(await pool.pooled > Self.cap)
+        let again = try file.rows(stayed)
+        _ = try await pool.paged {
+            Page(timeline: UUID(), generation: 1, rows: again, carried: [], next: nil, newest: nil, oldest: nil, exhausted: false)
+        }
+        // The page's window draws them once the screens next say so: none was a hole in it.
+        let left = Set(stayed).subtracting(await pooledKeys(pool))
+        #expect(left.isEmpty, "\(left.count) rows the page read again were let go after it")
+        try await heldWhole(pool, file)
+    }
+
     @Test("a store held whole never lets a row go")
     func wholeNeverLeaves() async {
         let whole = ItemStore(sources: Self.sources, notes: Self.seed())

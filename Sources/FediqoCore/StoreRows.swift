@@ -308,6 +308,13 @@ struct HeldNotes: Sequence {
         }
     }
 
+    /// The rows under `keys` a page read again while they were held (#359): seen as if laid in
+    /// now, under the drawing in hand — the page's window is about to draw them, and no screen
+    /// has said so yet.
+    mutating func readAgain(_ keys: some Sequence<NoteKey>) {
+        for key in keys where rows[key] != nil { stamp(key) }
+    }
+
     /// Every row laid in now, as `lay` stamps one: what a pool laid in whole (`replace`) is
     /// newer than any drawing made before it, and none of it leaves before the next is made.
     mutating func stampAll() {
