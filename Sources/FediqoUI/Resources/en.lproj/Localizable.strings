@@ -1066,6 +1066,9 @@
 "person.through" = "Read through %@";
 "person.held" = "%d posts here";
 "person.held.one" = "%d post here";
+"person.held.atLeast" = "At least %d posts here";
+"person.held.atLeast.one" = "At least %d post here";
+"tag.held.figure.atLeast" = "%@+";
 "person.none" = "Nothing of theirs has reached this device yet.";
 "tag.asking" = "Asking %1$@ for %2$@…";
 "tag.failed" = "Could not ask %1$@ for %2$@.";

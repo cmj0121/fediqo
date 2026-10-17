@@ -26,13 +26,14 @@ struct KeptSection: View {
 
     var body: some View {
         let lines = Self.lines(session.holdings, sources: session.sources.map(\.host))
-        // Counted over what this run has read where the store is held in part (C11).
-        let atLeast = session.store.heldInPart
+        // Counted over what this run has read where the store is held in part (C11), until
+        // every kept row of the file is: then exactly (#360, C31).
+        let atLeast = session.keptAtLeast
         Section {
             if lines.isEmpty {
                 // Over a store held in part, nothing is said until the kept rows of the file are
                 // read (#357): and where they could not be, only that none is read yet.
-                if let line = Self.noneLine(read: session.keptRowsRead, heldInPart: atLeast) {
+                if let line = Self.noneLine(read: session.keptRowsRead, heldInPart: session.store.heldInPart) {
                     ShellReadingLine(line)
                 }
             } else {

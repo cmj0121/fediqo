@@ -1550,6 +1550,37 @@ public actor ItemStore {
         }.value
     }
 
+    /// The revision every change to a row is written at, or nothing while one is not (#360,
+    /// C31): a change owed a save or on its way in one, a source's rows owed a delete, or a
+    /// file being put back. What the file counts is then what the store holds, as of that
+    /// revision, and no row of the pool is missing from it.
+    public func rowsWritten() -> Int? {
+        guard notes.touched.isEmpty, notes.dropped.isEmpty, inFlight.isEmpty, opsOwed.isEmpty, opsInFlight.isEmpty,
+              hostsOwed.isEmpty, !restoringFile else { return nil }
+        return revision
+    }
+
+    /// How many rows the file holds of each week and of each month of `calendar`, the `most`
+    /// newest of each, or nothing for a store with no file behind it, or one that would not be
+    /// read (#360, C31): Usage's breakdown, as `rowsByHost` is its count by source. **Read off
+    /// this actor**, beside it, as `rowsByHost` is. What a save has yet to write is not among
+    /// them: `rowsWritten` says whether anything is.
+    public nonisolated func rowsByPeriod(calendar: Calendar = .current, most: Int = .max) async -> [HeldPeriod: [Holdings.Bucket]]? {
+        guard let disk else { return nil }
+        return await Task.detached(priority: .utility) {
+            do {
+                var counted: [HeldPeriod: [Holdings.Bucket]] = [:]
+                for period in HeldPeriod.allCases {
+                    counted[period] = try disk.rowsByPeriod(period, calendar: calendar, most: most)
+                }
+                return counted
+            } catch {
+                Self.unread(error)
+                return nil
+            }
+        }.value
+    }
+
     /// The source's own id of the oldest post of `host` the file holds through `category`, or
     /// nothing where there is no file or it would not be read (`HeldRows.oldestStatusID`).
     /// **Read off this actor**, as `rowsByHost` is: what a timeline's next stretch is asked from.

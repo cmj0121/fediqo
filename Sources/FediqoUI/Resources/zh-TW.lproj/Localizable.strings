@@ -1040,6 +1040,8 @@
 "person.leaveHint" = "Esc 或 q";
 "person.through" = "從 %@ 讀到的";
 "person.held" = "這裡有 %d 則";
+"person.held.atLeast" = "這裡至少有 %d 則";
+"tag.held.figure.atLeast" = "%@+";
 "person.none" = "這台裝置上還沒有他們的貼文。";
 "tag.asking" = "正在向 %1$@ 詢問 %2$@…";
 "tag.failed" = "無法向 %1$@ 詢問 %2$@。";

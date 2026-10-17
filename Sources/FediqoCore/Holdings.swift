@@ -5,7 +5,7 @@ public enum HeldPeriod: String, CaseIterable, Sendable {
     case week
     case month
 
-    var component: Calendar.Component {
+    public var component: Calendar.Component {
         switch self {
         case .week: .weekOfYear
         case .month: .month
@@ -27,6 +27,11 @@ public struct Holdings: Equatable, Sendable {
     public struct Bucket: Equatable, Sendable {
         public let start: Date
         public let posts: Int
+
+        public init(start: Date, posts: Int) {
+            self.start = start
+            self.posts = posts
+        }
     }
 
     /// Every post held.

@@ -445,6 +445,14 @@ final class ShellSession {
     /// of the posts held, as many as there are rather than at least those read. Nothing until
     /// counted, and where there is no file.
     private(set) var rowsOnFile: [String: HostRows]?
+    /// How many rows the file holds of each week and each month, as last counted beside
+    /// `rowsOnFile` (#360, C31): what Usage's breakdown says, as many as there are. Nothing until
+    /// counted, and where there is no file.
+    private(set) var periodsOnFile: PeriodsCounted?
+    /// The store's revision while every change to a row was written, as last asked
+    /// (`ItemStore.rowsWritten`): asked at every adopt and every count, so the breakdown is
+    /// said exactly only while the file holds what the pool does.
+    private(set) var rowsWrittenAt: Int?
     /// How many saves landed this run (`landed()`): what Usage counts the file again on.
     var writesLanded = 0
     /// Whether every kept row of the file is in the pool (`readKeptRows`): nil until asked and
@@ -676,9 +684,21 @@ final class ShellSession {
 
     /// Counts again how many rows the file holds of each host (#359, C23), off the main actor:
     /// where `readStoreBytes` measures it, so after every drop written and whenever Usage asks.
-    func readRowCounts() async {
-        guard let counted = await store.rowsByHost(), counted != rowsOnFile else { return }
-        rowsOnFile = counted
+    /// The breakdown by week and month is counted beside it, the same way (#360, C31), in
+    /// `calendar`'s weeks and months and only as many of each as Usage shows — and written down
+    /// with whether every change was in the file from before the count to after it.
+    func readRowCounts(calendar: Calendar = .current) async {
+        let before = await store.rowsWritten()
+        async let byHost = store.rowsByHost()
+        async let byPeriod = store.rowsByPeriod(calendar: calendar, most: UsagePane.stretchesShown)
+        let (hosts, periods) = await (byHost, byPeriod)
+        let after = await store.rowsWritten()
+        if after != rowsWrittenAt { rowsWrittenAt = after }
+        if let hosts, hosts != rowsOnFile { rowsOnFile = hosts }
+        if let periods {
+            let counted = PeriodsCounted(buckets: periods, calendar: calendar, written: before == after ? after : nil)
+            if counted != periodsOnFile { periodsOnFile = counted }
+        }
     }
 
     /// Gives the index back the room that rows let go of left in it, so `measureStore` sees them
@@ -2793,6 +2813,11 @@ final class ShellSession {
         let replies = adoptedReplies != repliesRevision ? await store.replies() : nil
         adoptHeld(notes: all, replies: replies, drawnAt: drawn)
         if all != nil { adopted = (store: drawn, notes: notesRevision) }
+        // Whether the file holds every change, for the breakdown it counts (#360, C31).
+        if store.heldInPart {
+            let written = await store.rowsWritten()
+            if written != rowsWrittenAt { rowsWrittenAt = written }
+        }
         // A text that may have been posted is let go where its post is now among what is held.
         if all != nil { outbox.reconcile(in: self) }
         // The misses as they stand with what was just assigned: only these are settled, by
@@ -3383,7 +3408,7 @@ final class ShellSession {
     func removeQuestion(host: String, postsStay: Bool, language: DummyLanguage? = nil) -> ShellConfirmation {
         sayingOthersSignedOut(ShellQuestion.remove(
             host: host, boards: Self.boards(of: host, in: sources), postsStay: postsStay,
-            kept: holdings.kept(host: host).posts, unsent: outbox.count(host: host), atLeast: store.heldInPart,
+            kept: holdings.kept(host: host).posts, unsent: outbox.count(host: host), atLeast: keptAtLeast,
             language: language
         ), host: host, language: language)
     }

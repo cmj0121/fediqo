@@ -227,6 +227,40 @@ extension ShellSession {
         return (hosts.reduce(0) { $0 + postsHeld(host: $1).count }, false)
     }
 
+    /// The breakdown by `heldPeriod`, newest first, and whether its figures are only at least so
+    /// many (#360, C31): **as the file counts each stretch** (`periodsOnFile`), exactly, where it
+    /// was counted in `calendar`'s weeks and months while every change was written, and nothing
+    /// has been changed since (`rowsWrittenAt`). Otherwise what the pool holds of each, at least
+    /// so many — a change not written may be a post the file does not hold, or one it holds and
+    /// the store no longer does.
+    func heldByPeriod(calendar: Calendar = .current) -> (buckets: [Holdings.Bucket], atLeast: Bool) {
+        guard let counted = periodsOnFile, periodsExact(calendar: calendar), let onFile = counted.buckets[heldPeriod] else {
+            return (holdings.byPeriod, store.heldInPart)
+        }
+        return (onFile, false)
+    }
+
+    /// Whether the file's count of the breakdown is what the store holds now, in `calendar`:
+    /// counted in its weeks and months, with every change written, and none made since.
+    func periodsExact(calendar: Calendar = .current) -> Bool {
+        guard let counted = periodsOnFile, let written = counted.written else { return false }
+        return written == rowsWrittenAt && PeriodsCounted.same(counted.calendar, calendar)
+    }
+
+    /// Whether what is kept is counted only at least (#357, C11): over a store held in part
+    /// until every kept row of the file is read (`keptRowsRead`) — then the pool holds every one
+    /// of them, never let go of it, and its kept counts are exact (#360, C31): the kept figures,
+    /// and what stays kept on a remove or a stop keeping.
+    var keptAtLeast: Bool {
+        store.heldInPart && keptRowsRead != true
+    }
+
+    /// Whether what is held under a person or a hashtag is counted only at least (#360, C31):
+    /// over a store held in part, the pool's posts of them are only those read.
+    var heldAtLeast: Bool {
+        store.heldInPart
+    }
+
     /// Every host this device holds posts of: the pool's, and the file's where it was counted.
     var hostsHeld: Set<String> {
         Set(holdings.bySource.keys).union(rowsOnFile.map { Set($0.filter { $0.value.count > 0 }.keys) } ?? [])
@@ -248,5 +282,21 @@ struct PinsPages: ViewModifier {
 
     func body(content: Content) -> some View {
         content.onChange(of: pages, initial: true) { _, now in session.pagesOpened(now) }
+    }
+}
+
+/// The file's breakdown as last counted (#360, C31): the newest weeks and months it holds, the
+/// calendar they are of, and the store's revision while every change was written from before
+/// the count to after it — nothing where one was not.
+struct PeriodsCounted: Equatable {
+    let buckets: [HeldPeriod: [Holdings.Bucket]]
+    let calendar: Calendar
+    let written: Int?
+
+    /// Whether two calendars name the same weeks and months: the kind, the zone, the first
+    /// weekday and the first week's least days.
+    static func same(_ one: Calendar, _ other: Calendar) -> Bool {
+        one.identifier == other.identifier && one.timeZone == other.timeZone
+            && one.firstWeekday == other.firstWeekday && one.minimumDaysInFirstWeek == other.minimumDaysInFirstWeek
     }
 }

@@ -35,14 +35,14 @@ struct PersonHeadSaid: Equatable {
     /// source has said who they are, and its word from then on — the name, the handle and the
     /// face the answer carried, so an answer about somebody else shows as somebody else.
     static func made(
-        of person: DummyPerson, said: PersonSaid?, tabs: [PersonTab], held: Int, standing: PersonActing?,
-        language: DummyLanguage? = nil
+        of person: DummyPerson, said: PersonSaid?, tabs: [PersonTab], held: Int, heldAtLeast: Bool = false,
+        standing: PersonActing?, language: DummyLanguage? = nil
     ) -> PersonHeadSaid {
         guard let said else {
             return PersonHeadSaid(
                 name: person.name, handle: person.handle, emojis: person.emojis, host: person.host, face: person.avatarURL,
                 through: String(format: L10n.t("person.through", language: language), person.host),
-                held: heldLine(held)
+                held: heldLine(held, atLeast: heldAtLeast, language: language)
             )
         }
         var head = PersonHeadSaid(
@@ -62,7 +62,11 @@ struct PersonHeadSaid: Equatable {
 
     /// How much of theirs is here. **A count of what this device holds and never of what they
     /// have written** — the second is a figure only their server could give.
-    static func heldLine(_ count: Int) -> String { L10n.count("person.held", count) }
+    /// `atLeast`: counted over what this run has read of a store held in part (#360, C31) —
+    /// at least so many, never how many.
+    static func heldLine(_ count: Int, atLeast: Bool = false, language: DummyLanguage? = nil) -> String {
+        L10n.count(atLeast ? "person.held.atLeast" : "person.held", count, language: language)
+    }
 
     /// What a listener is read of who they are, as one element: the name, the handle, whose
     /// view the page is, and each mark of the account in words.

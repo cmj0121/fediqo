@@ -244,6 +244,11 @@ public protocol HeldRows: Sendable {
     /// source a row of it wrote down: what Usage counts once the pool holds only part of them
     /// (#359, C23), and names a source removed whose posts stayed by.
     func rowCounts() throws -> [String: HostRows]
+    /// How many rows the file holds of each `period` of `calendar` that holds one, newest first,
+    /// a period by the moment it starts as `Holdings.byPeriod` names it: what Usage's breakdown
+    /// says once the pool holds only part of them (#360, C31) — exact, as `rowCounts` is. At
+    /// most `most` of them, the newest.
+    func rowsByPeriod(_ period: HeldPeriod, calendar: Calendar, most: Int) throws -> [Holdings.Bucket]
     /// The source's own id of the oldest post of `host` the file holds through `category` — a
     /// Mastodon id grows with time, and a longer one is a later one: where a timeline's next
     /// stretch is asked from once the pool holds only part of what the file does (#201, #359).

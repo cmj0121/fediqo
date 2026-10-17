@@ -82,6 +82,9 @@ struct UsagePane: View {
         let lines: Int
         /// The saves landed this run (#359): what the file counts of each source moved with them.
         let written: Int
+        /// Whether the file's breakdown is no longer what is held, or of another calendar's weeks
+        /// (#360, C31): counted again, so a change of zone or first weekday is followed.
+        let periodsStale: Bool
     }
 
     private var sources: [Source] { session?.sources ?? [] }
@@ -165,7 +168,8 @@ struct UsagePane: View {
         .task(id: Probe(
             hosts: sources.map(\.host), cleared: session?.cleared ?? 0,
             acted: session?.limitAccount.first?.id, lines: session?.limitAccount.count ?? 0,
-            written: session?.writesLanded ?? 0
+            written: session?.writesLanded ?? 0,
+            periodsStale: session.map { $0.periodsOnFile != nil && !$0.periodsExact() } ?? false
         )) {
             await readCatalogues()
             await readDisk()
@@ -270,9 +274,11 @@ struct UsagePane: View {
             if let earlier = Self.earlierFigure(holdings.earlier, atLeast: session.store.heldInPart) {
                 stretch(ShellReadingLine(Text(L10n.t("prefs.held.earlier"))), figure: earlier)
             }
-            ForEach(holdings.byPeriod.prefix(Self.stretchesShown), id: \.start) { bucket in
+            // As the file counts each stretch once it has been (#360, C31), and so exact.
+            let periods = session.heldByPeriod()
+            ForEach(periods.buckets.prefix(Self.stretchesShown), id: \.start) { bucket in
                 stretch(ShellReadingLine(Text(Self.stretchLabel(bucket.start, period: session.heldPeriod))),
-                        figure: Self.postsLine(bucket.posts, atLeast: session.store.heldInPart))
+                        figure: Self.postsLine(bucket.posts, atLeast: periods.atLeast))
             }
         } header: {
             ShellSectionHead(title: "prefs.held.breakdown")

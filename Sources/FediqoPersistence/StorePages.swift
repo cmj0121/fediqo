@@ -1022,6 +1022,52 @@ extension StoreFile {
         }
     }
 
+    /// By `note_page` from its newest end, a period at a time: the newest row below the last
+    /// period counted names the next, and the rows inside it are counted by a range of the
+    /// index — so a period holding no row costs nothing, and the calendar's own weeks and
+    /// months (its first weekday, its time zone and every change of clock) are the ones
+    /// counted, as `Holdings` groups the pool's rows. Index only: no row is read whole. At
+    /// most `most` periods, the newest: what Usage shows of them.
+    ///
+    /// **A time the file holds as anything but text is no row of any period**, as it is no
+    /// row of a page (`entries`): GRDB writes text, and SQLite orders every other kind apart
+    /// from all text, where no bound of text could step past it. Nor is text that names no
+    /// moment: it is stepped past.
+    public func rowsByPeriod(_ period: HeldPeriod, calendar: Calendar, most: Int = .max) throws -> [Holdings.Bucket] {
+        try poolRead { db, _ in
+            var buckets: [Holdings.Bucket] = []
+            // Where the next period is looked for below, as the file holds it.
+            var below: String?
+            while buckets.count < most {
+                let text = try below.map {
+                    try String.fetchOne(db, sql: """
+                        SELECT posted_at FROM note WHERE typeof(posted_at) = 'text' AND posted_at < ?
+                        ORDER BY posted_at DESC LIMIT 1
+                        """, arguments: [$0])
+                } ?? String.fetchOne(db, sql: """
+                    SELECT posted_at FROM note WHERE typeof(posted_at) = 'text' ORDER BY posted_at DESC LIMIT 1
+                    """)
+                guard let text else { break }
+                below = text
+                guard let newest = Date.fromDatabaseValue(text.databaseValue) else { continue }
+                guard let stretch = calendar.dateInterval(of: period.component, for: newest) else {
+                    // A moment the calendar names no period for, counted alone as `Holdings` does.
+                    let alone = try Int.fetchOne(
+                        db, sql: "SELECT count(*) FROM note WHERE typeof(posted_at) = 'text' AND posted_at = ?", arguments: [text]
+                    ) ?? 0
+                    buckets.append(Holdings.Bucket(start: newest, posts: alone))
+                    continue
+                }
+                let posts = try Int.fetchOne(db, sql: """
+                    SELECT count(*) FROM note WHERE typeof(posted_at) = 'text' AND posted_at >= ? AND posted_at < ?
+                    """, arguments: [stretch.start, stretch.end]) ?? 0
+                buckets.append(Holdings.Bucket(start: stretch.start, posts: posts))
+                below = String.fromDatabaseValue(stretch.start.databaseValue)
+            }
+            return buckets
+        }
+    }
+
     public func oldestStatusID(host: String, category: FediqoCore.Category) throws -> String? {
         let row = CategoryRow(category)
         let status = Self.statusIDExpression

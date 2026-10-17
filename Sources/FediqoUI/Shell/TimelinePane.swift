@@ -546,7 +546,7 @@ struct TimelinePane: View {
             tabs: tabs,
             front: front,
             head: people?.head(of: person, in: session)
-                ?? PersonHeadSaid.made(of: person, said: nil, tabs: tabs, held: held.count, standing: nil),
+                ?? PersonHeadSaid.made(of: person, said: nil, tabs: tabs, held: held.count, heldAtLeast: session.heldAtLeast, standing: nil),
             // What their source says of them, where it says who people are; nothing for
             // anybody else, and then this is the page it always was.
             said: said,
