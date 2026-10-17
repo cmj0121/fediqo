@@ -63,12 +63,19 @@ struct NearbyMoveTests {
     /// is put away, and a pool too busy to run the move on time can never let it fire.
     static let never: @Sendable () async throws -> Void = { try await TurnedClock().sleep(for: .seconds(1800)) }
 
-    /// The device holding on `link`, once a sender can see it.
+    /// The device holding on `link`, once a sender can see it — under `sessionID` where it is
+    /// given, **and then never one an earlier hold left behind**: a receiver stopped only
+    /// cancels, and its last advertisement goes some moments later, so a peer is known by the
+    /// session its code came with. With none, the first seen, on a link only one ever held.
     private static func peer(
-        on link: PipeNearbyLink, heldBy held: Watch, sourceLocation: SourceLocation = #_sourceLocation
+        on link: PipeNearbyLink, session sessionID: String? = nil, heldBy held: Watch,
+        sourceLocation: SourceLocation = #_sourceLocation
     ) async -> NearbyPeer? {
-        await met("the receiver is listening, and seen nearby", by: held.work, sourceLocation: sourceLocation) { !link.peers.isEmpty }
-        return link.peers.first
+        let ours = { (peer: NearbyPeer) in sessionID.map { peer.sessionID == $0 } ?? true }
+        await met("the receiver is listening, and seen nearby", by: held.work, sourceLocation: sourceLocation) {
+            link.peers.contains(where: ours)
+        }
+        return link.peers.first(where: ours)
     }
 
     /// Lets a sender that is waiting to try a dropped link again go on, once the receiver is
@@ -121,10 +128,10 @@ struct NearbyMoveTests {
         func hold(sourceLocation: SourceLocation = #_sourceLocation) async -> (Watch, String, NearbyPeer) {
             let held = Watch(await receiver.hold())
             let isCode: (Event) -> Bool = { if case .code = $0 { true } else { false } }
-            guard case .code(let code, _)? = await held.until("a code", isCode, sourceLocation: sourceLocation) else {
+            guard case .code(let code, let sessionID)? = await held.until("a code", isCode, sourceLocation: sourceLocation) else {
                 return (held, "", NearbyPeer(id: "", name: "", sessionID: ""))
             }
-            guard let peer = await NearbyMoveTests.peer(on: link, heldBy: held, sourceLocation: sourceLocation) else {
+            guard let peer = await NearbyMoveTests.peer(on: link, session: sessionID, heldBy: held, sourceLocation: sourceLocation) else {
                 return (held, code, NearbyPeer(id: "", name: "", sessionID: ""))
             }
             return (held, code, peer)
