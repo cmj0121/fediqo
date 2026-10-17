@@ -54,9 +54,18 @@ extension StoreFile {
     /// large store it takes seconds the first time (0.3–2.9 s at 270k rows), and nothing after.
     /// **Each a write of its own, the pages' first**: a page asked meanwhile waits for the one
     /// being made, not for all of them.
-    public func makeIndexes() async throws {
+    ///
+    /// **Each where a save would run, where there is a saver** (#360): a write beside the saver
+    /// would wait on a take-away's copy for its lock — the pages queued behind it with it — and
+    /// fail as busy, leaving the rest unmade for the run.
+    public func makeIndexes(in saver: StoreSaver? = nil) async throws {
         for sql in Self.pageIndexes {
-            try await db.write { db in try db.execute(sql: sql) }
+            if let saver {
+                let file = self
+                try await saver.exclusively { try await file.db.write { db in try db.execute(sql: sql) } }
+            } else {
+                try await db.write { db in try db.execute(sql: sql) }
+            }
         }
     }
 

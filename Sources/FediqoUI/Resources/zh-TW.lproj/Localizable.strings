@@ -2059,6 +2059,4 @@
 "tag.feature.unfeature.spoken" = "在 %2$@ 把 %1$@ 從你的個人檔案上拿掉";
 "tag.feature.failed.feature" = "無法在 %2$@ 把 %1$@ 推薦到你的個人檔案上。";
 "tag.feature.failed.unfeature" = "無法在 %2$@ 把 %1$@ 從你的個人檔案上拿掉。";
-"carry.refused.heldInPart.title" = "現在還不能帶走";
-"carry.refused.heldInPart.line" = "現在只會帶走已讀進的貼文，不會是全部。沒有任何改變。";
 "prefs.span.atLeast" = "至少 %d 則貼文";

@@ -467,7 +467,7 @@ private struct Live: View {
         let saver = launch.saver
         let words = launch.words
         return {
-            try? await file.makeIndexes()
+            try? await file.makeIndexes(in: saver)
             _ = try? await saver.exclusively { await file.scrubIfDue() }
             // The words index (#360), built a chunk at a time behind everything else and waited
             // for by nothing: until it is, a keyword reads as it did.

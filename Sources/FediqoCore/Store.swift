@@ -27,7 +27,7 @@ public actor ItemStore {
     ///   it is about to merge with first. So a reference not held here is not held at all.
     private let disk: (any HeldRows)?
     /// Whether rows of this store may be in the file and not here (#357): what it counts of them
-    /// is then at least what there is, never all of it (C11), and it cannot be taken away whole.
+    /// is then at least what there is, never all of it (C11), and a take-away copies the file (#360).
     public nonisolated var heldInPart: Bool { disk != nil }
     /// The changes to rows not held here that the file has yet to make (`StoreOp`): made, and not
     /// yet taken by a save, or handed back by one that failed.

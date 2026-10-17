@@ -87,8 +87,6 @@ public enum NearbyRefusal: Error, Sendable, Equatable {
     case storeNotOpened
     /// This device's store did not open in this run, so it has nothing to move.
     case nothingToTake
-    /// This run holds only the part of the store it has read, and would move only that (#357).
-    case heldInPart
     /// This device is locked, and nothing of its store can be read or written (#344).
     case locked
     /// Something else refused, said as itself.
@@ -101,7 +99,6 @@ public enum NearbyRefusal: Error, Sendable, Equatable {
         case PackageFault.noRoom(let needed, let free): self = .noRoom(needed: needed, free: free)
         case PackageFault.storeNotOpened: self = .storeNotOpened
         case PackageFault.nothingToTake: self = .nothingToTake
-        case PackageFault.heldInPart: self = .heldInPart
         case PackageFault.locked: self = .locked
         case is CancellationError: self = .lost
         default: self = .other(error.localizedDescription)

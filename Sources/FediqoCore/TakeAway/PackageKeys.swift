@@ -92,9 +92,6 @@ public enum PackageFault: Error, Sendable, Equatable {
     /// This run holds none of what this device holds — its store did not open, or is a newer
     /// build's — so there is nothing to take away, and an empty package is not written.
     case nothingToTake
-    /// This run holds only the part of the store it has read (#357), so a take-away of the
-    /// whole would carry only that part: refused until the whole can be taken from the file.
-    case heldInPart
     /// The device is locked (#344): what it keeps cannot be read or written until it is
     /// unlocked, so a take-away or a read back does not begin. Nothing changed.
     case locked

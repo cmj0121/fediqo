@@ -374,24 +374,4 @@ struct StoreLettingGoTests {
         failing.fail(from: nil)
         #expect(await pool.letGo(span: span) > 0)
     }
-
-    // MARK: - Taking away
-
-    @Test("a take-away of a store held in part is refused with its own reason, and writes no file")
-    func takeAwayRefused() async throws {
-        let device = try await PackagerFixture.PackagerDevice(sources: Self.sources, notes: Array(Self.seed().prefix(20)))
-        let package = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).fediqo")
-        defer { device.remove(); try? FileManager.default.removeItem(at: package) }
-        let file = try #require(device.file)
-        let packager = StorePackager(
-            directory: device.directory, file: file, store: ItemStore(sources: Self.sources, rows: file),
-            media: device.media, tokens: device.tokens, credentials: device.credentials, defaults: device.defaults,
-            device: "a test", appVersion: "0.7.0", freeSpace: { _ in .max }, rounds: 1000
-        )
-        await #expect(throws: PackageFault.heldInPart) {
-            try await packager.takeAway(to: package, key: .password("password"), pictures: false) { _ in }
-        }
-        #expect(!FileManager.default.fileExists(atPath: package.path))
-        #expect(NearbyRefusal(PackageFault.heldInPart) == .heldInPart)
-    }
 }

@@ -5,11 +5,12 @@ import GRDB
 /// The real `StoreCarrier` (#247): what this device holds, taken away as one `FDQ1` package and
 /// read back from one.
 ///
-/// **What rides.** The index as one SQLite file, written fresh from the store's snapshot into a
-/// scratch folder so the live file is never read raw; every `fediqo.` default as a plist; what
-/// signs in — tokens, app registrations, forum credentials — as JSON, the only place they ride;
-/// and, where the person chose, every picture copy on disk. Each is one entry of the package,
-/// and adding a kind is one line in `pieces(pictures:)`.
+/// **What rides.** The index as one SQLite file, made in a scratch folder so the live file is
+/// never read raw — copied of the file at one moment where the store is held in part (#360),
+/// written fresh from the store's snapshot where it is held whole; every `fediqo.` default as a
+/// plist; what signs in — tokens, app registrations, forum credentials — as JSON, the only place
+/// they ride; and, where the person chose, every picture copy on disk. Each is one entry of the
+/// package, and adding a kind is one line in `pieces(pictures:)`.
 ///
 /// **Read back is staged, then committed.** Every entry is decrypted into
 /// `incoming-<uuid>/` under the store's own folder with its tags checked and the footer seen,
@@ -64,6 +65,9 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// Told as a read back's commit passes each point a run killed there would leave on disk.
     /// Nothing in the app sets it: a test does, to copy the folder as it stands at that point.
     var witness: (@Sendable (CommitPoint) -> Void)?
+    /// Where a take-away makes its scratch folder: the temporary directory, the app's alone. A
+    /// test hands in a folder of its own, to see that nothing is left in it.
+    var scratchRoot = FileManager.default.temporaryDirectory
 
     /// Where a read back that moves its index into place can be stopped, and what is then on
     /// disk (`settleHalfCommits`).
@@ -606,46 +610,78 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         // A run that did not open this device's store holds none of it: what it would take away
         // is an empty store under this device's name, which is not what the person asked for.
         if storeNotOpened || storeIsNewer { throw PackageFault.nothingToTake }
-        // A store that holds only what was read of the file would carry only that (#357).
-        if contents == .whole, store.heldInPart { throw PackageFault.heldInPart }
         try await unlocked()
         if case .password(let password) = key {
             if password.isEmpty { throw PackageFault.emptyPassword }
             if password.count < PackageFormat.minPasswordCount { throw PackageFault.shortPassword }
         }
-        let scratch = FileManager.default.temporaryDirectory
-            .appendingPathComponent("takeaway-\(UUID().uuidString)", isDirectory: true)
+        // A store that holds only what was read of the file is taken away from the file (#360).
+        // Such a store is made only over a file this run opened, which the app hands here as
+        // `file` — so this is a carrier made by hand with a store over rows it was not given, and
+        // what it would carry is the part read: refused as nothing to take, never sent as a part.
+        let fromFile = contents == .whole && store.heldInPart ? file : nil
+        if contents == .whole, store.heldInPart, fromFile == nil { throw PackageFault.nothingToTake }
+        if let fromFile {
+            // At most twice the file at once, and what else rides: the copy (no larger than the
+            // file) and its rebuild's temporary copy, with no journal (`takenCopy`); then the
+            // rebuilt copy and the package written of it.
+            let index = fromFile.bytesOnDisk()
+            let others = ((try? settingsPlist().count) ?? 0) + (pictures ? media?.totalBytes() ?? 0 : 0)
+            let needed = index > (Int.max - others) / 2 ? Int.max : index * 2 + others
+            let free = freeSpace(directory)
+            if free < needed { throw PackageFault.noRoom(needed: needed, free: free) }
+        }
+        let scratch = scratchRoot.appendingPathComponent("takeaway-\(UUID().uuidString)", isDirectory: true)
         try Guarded.makeFolder(scratch)
         defer { try? FileManager.default.removeItem(at: scratch) }
-        let snapshot = await store.snapshot()
         let pieces: [Piece]
         let sources: [PackageSummary.SourceLine]
+        var posts = 0
+        var kept: Int?
         switch contents {
         case .whole:
-            let staged = try StoreFile(at: scratch)
-            try await staged.save(sources: snapshot.sources, notes: snapshot.notes, said: snapshot.said)
+            let (held, said): ([Source], [SourceProfile])
+            if let fromFile {
+                // One moment of the file, every owed save written into it first and nothing
+                // written while it is copied (`snapshot`); the saves held for that alone, and
+                // the copy made into a package's store after, beside them (`takenCopy`).
+                if let saver {
+                    try await saver.afterSaving { try await fromFile.snapshot(into: scratch) }
+                } else {
+                    try await fromFile.snapshot(into: scratch)
+                }
+                try Task.checkCancellation()
+                let copy = try await StoreFile.takenCopy(in: scratch)
+                (held, said, posts, kept) = (copy.sources, copy.said, copy.posts, copy.kept)
+            } else {
+                let snapshot = await store.snapshot()
+                let staged = try StoreFile(at: scratch)
+                try await staged.save(sources: snapshot.sources, notes: snapshot.notes, said: snapshot.said)
+                (held, said, posts, kept) = (snapshot.sources, snapshot.said, snapshot.notes.count, snapshot.notes.filter(\.kept).count)
+            }
             pieces = try self.pieces(
-                index: scratch.appendingPathComponent(Self.indexName), sources: snapshot.sources.map(\.host),
-                said: snapshot.said, pictures: pictures
+                index: scratch.appendingPathComponent(Self.indexName), sources: held.map(\.host),
+                said: said, pictures: pictures
             )
-            sources = snapshot.sources.map { .init(host: $0.host, kind: $0.kind) }
+            sources = held.map { .init(host: $0.host, kind: $0.kind) }
         case .signInsOnly:
             // Only what signs in (#6): the one entry, and the header names the sources it
             // signs in to and nothing else.
-            let held = try secrets(sources: snapshot.sources.map(\.host), taking: true)
-            pieces = [Piece(.secrets, name: "secrets", data: held.isEmpty ? Data() : try JSONEncoder().encode(held))]
-            let hosts = Set(held.mastodon.map(\.host) + held.apps.map(\.host) + held.forums.map(\.host))
-            sources = snapshot.sources.filter { hosts.contains($0.host) }.map { .init(host: $0.host, kind: $0.kind) }
+            let held = await store.sources()
+            let signing = try secrets(sources: held.map(\.host), taking: true)
+            pieces = [Piece(.secrets, name: "secrets", data: signing.isEmpty ? Data() : try JSONEncoder().encode(signing))]
+            let hosts = Set(signing.mastodon.map(\.host) + signing.apps.map(\.host) + signing.forums.map(\.host))
+            sources = held.filter { hosts.contains($0.host) }.map { .init(host: $0.host, kind: $0.kind) }
         }
         let total = pieces.reduce(0) { $0 + $1.bytes }
         let summary = PackageSummary(
             contents: contents, sources: sources,
-            posts: contents == .whole ? snapshot.notes.count : 0,
+            posts: posts,
             timelines: contents == .whole ? timelinesKept() : 0, takenAt: Date(),
             withPictures: pictures && contents == .whole,
             bytes: total, hasSecrets: pieces.contains { $0.kind == .secrets && $0.bytes > 0 },
             device: device, appVersion: appVersion, entryCount: pieces.count,
-            kept: contents == .whole ? snapshot.notes.filter(\.kept).count : nil
+            kept: kept
         )
         try? FileManager.default.removeItem(at: url)
         let writer = try PackageWriter(to: url, key: key, summary: summary, rounds: rounds)

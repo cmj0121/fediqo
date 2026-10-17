@@ -55,9 +55,6 @@ final class ShellCarry {
         case storeNotOpened
         /// This run did not open this device's store, so there is nothing to take away.
         case nothingToTake
-        /// This run holds only the part of the store it has read, and a take-away would carry
-        /// only that (#357).
-        case heldInPart
         /// The device is locked: nothing of its store can be read or written until it is unlocked.
         case locked
         /// A step refused and an earlier one could not be put back: neither as it was nor as
@@ -75,7 +72,6 @@ final class ShellCarry {
             case PackageFault.indexIsNewer: self = .indexIsNewer
             case PackageFault.storeNotOpened: self = .storeNotOpened
             case PackageFault.nothingToTake: self = .nothingToTake
-            case PackageFault.heldInPart: self = .heldInPart
             case PackageFault.locked: self = .locked
             case PackageFault.unwound(let steps): self = .unwound(steps)
             default: self = .other(error.localizedDescription)

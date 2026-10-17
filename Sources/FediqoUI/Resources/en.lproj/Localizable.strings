@@ -2112,7 +2112,5 @@
 "tag.feature.unfeature.spoken" = "Take %1$@ off your profile at %2$@";
 "tag.feature.failed.feature" = "Could not feature %1$@ on your profile at %2$@.";
 "tag.feature.failed.unfeature" = "Could not take %1$@ off your profile at %2$@.";
-"carry.refused.heldInPart.title" = "Not ready to take away yet";
-"carry.refused.heldInPart.line" = "It would carry only the posts read so far. Nothing changed.";
 "prefs.span.atLeast" = "At least %d posts";
 "prefs.span.atLeast.one" = "At least %d post";

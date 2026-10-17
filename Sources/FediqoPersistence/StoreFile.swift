@@ -76,6 +76,14 @@ public struct StoreFile: Sendable {
             return made
         }
 
+        /// The making of the pages' index on its way, where one is: what a take-away's copy waits
+        /// for, so the making's commit is not left waiting on the copy's read (#360).
+        var pageIndexInFlight: Task<Void, any Error>? {
+            lock.lock()
+            defer { lock.unlock() }
+            return pageIndexTask
+        }
+
         /// The making ended, made or failed: the next caller asks the file again.
         func pageIndexEnded() {
             lock.lock()
@@ -155,6 +163,12 @@ public struct StoreFile: Sendable {
 
     func pageIndexEnded() {
         held.pageIndexEnded()
+    }
+
+    /// Waits for the making of the pages' index on its way, where one is, made or failed; never
+    /// starts one.
+    func pageIndexSettled() async {
+        _ = await held.pageIndexInFlight?.result
     }
 
     /// A connection of its own to this store's file, **for reading alone** (#357, C15), made as
@@ -902,7 +916,7 @@ public struct StoreFile: Sendable {
         try db.read(Self.sources)
     }
 
-    private static func sources(_ db: Database) throws -> (sources: [Source], said: [SourceProfile]) {
+    static func sources(_ db: Database) throws -> (sources: [Source], said: [SourceProfile]) {
         let records = try SourceRecord.fetchAll(db)
         return (records.map(\.source), records.compactMap(\.saidProfile))
     }
