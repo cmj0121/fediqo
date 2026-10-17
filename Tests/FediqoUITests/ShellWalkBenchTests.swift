@@ -16,8 +16,8 @@ import Testing
 ///
 /// What is measured: the process's footprint (`phys_footprint`) after the first page and every
 /// 5,000 rows, free memory given back first; how long the main actor is held at a stretch,
-/// by a probe that waits on it without pause; how long a page takes; the pool's size; and a
-/// pass of the letting go over the pool as the walk leaves it.
+/// by a probe that waits on it without pause; how long a page takes; the pool's size; and
+/// how long each pass of the letting go took on the store's actor.
 @Suite("A long walk through a large store, measured", .serialized)
 @MainActor
 struct ShellWalkBenchTests {
@@ -44,6 +44,14 @@ struct ShellWalkBenchTests {
             pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(getpid(), RUSAGE_INFO_V4, $0) }
         }
         return result == 0 ? Int(usage.ri_phys_footprint) : 0
+    }
+
+    /// The bytes the heap holds in use now: what the footprint is less what was freed and not
+    /// yet given back.
+    private static func heapInUse() -> Int {
+        var stats = malloc_statistics_t()
+        malloc_zone_statistics(nil, &stats)
+        return Int(stats.size_in_use)
     }
 
     private static func percentile(_ values: [Double], _ p: Double) -> Double {
@@ -77,6 +85,18 @@ struct ShellWalkBenchTests {
         /// The stretches the main actor was held for: every wait longer than a tenth of a
         /// millisecond, the rest being a main actor with nothing to do.
         var stretches: [Double] { waits.withLock { $0 } }
+    }
+
+    /// No network: every ask fails at once, and only how many were asked is kept — a fixture
+    /// that keeps every address asked would be the footprint's growth itself.
+    final class Unreachable: HTTPClient {
+        private let asked = OSAllocatedUnfairLock(initialState: 0)
+        var count: Int { asked.withLock { $0 } }
+
+        func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+            asked.withLock { $0 += 1 }
+            throw URLError(.notConnectedToInternet)
+        }
     }
 
     /// How long each page took, read off the main actor.
@@ -132,7 +152,8 @@ struct ShellWalkBenchTests {
         try await file.makeIndexes()
         let rows = try file.rowCount()
         let store = ItemStore(sources: opened.sources, said: opened.said, rows: file)
-        let session = ShellSession(http: FixtureHTTP(), store: store)
+        let network = Unreachable()
+        let session = ShellSession(http: network, store: store)
         let times = PageTimes()
         session.readPage = { query, ask, limit in
             let clock = ContinuousClock()
@@ -178,10 +199,11 @@ struct ShellWalkBenchTests {
         _ = session.timelineItems(latest: nil)
         await session.holdDrawn()
         let first = Self.footprint()
+        // `heapInUse` beside: what of the footprint is rows and lookups held now.
         print("[walk \(label)] after the first page: footprint \(Self.mb(first)), pool \(await store.pooled)")
         var footprints: [(rows: Int, bytes: Int)] = [(0, first)]
+        var heap: [(rows: Int, bytes: Int)] = [(0, Self.heapInUse())]
         var pools: [Int] = []
-        var evictions: [Double] = []
         var drawings: [Double] = []
         var merges: [Double] = []
         let clock = ContinuousClock()
@@ -208,19 +230,6 @@ struct ShellWalkBenchTests {
             return next
         }
 
-        /// A pass of the letting go over the pool as the walk left it: the file's oldest rows
-        /// read in past the cap, and what the screens draw said again.
-        func evictionPass() async throws {
-            _ = await store.take(try file.oldest(600, after: nil).rows)
-            guard let now = session.drawnNow() else { return }
-            let before = await store.evictionPasses
-            let begun = clock.now
-            await store.hold(now.pins, drawnAt: now.at, by: session.screen)
-            let took = Self.milliseconds(clock.now - begun)
-            if await store.evictionPasses > before { evictions.append(took) }
-            await session.reloadFromStore()
-        }
-
         func switchTo(_ query: TimelineQuery, leaving row: String) async -> String {
             session.timelineLeft(session.currentTimeline, at: row)
             session.timelineID = query
@@ -232,6 +241,16 @@ struct ShellWalkBenchTests {
             return place ?? session.timelineIDs(latest: nil).first ?? ""
         }
 
+        /// Measured at the next step after the next pass of the letting go, from `rows`: the
+        /// pool then let down to the same size each time, so what it holds moves no figure.
+        var due: (rows: Int, passes: Int)?
+        func sample() async {
+            guard let asked = due, await store.evictionPasses > asked.passes else { return }
+            due = nil
+            footprints.append((asked.rows, Self.footprint()))
+            heap.append((asked.rows, Self.heapInUse()))
+        }
+
         var row = session.timelineIDs(latest: nil).first ?? ""
         var walked = 0
         var asideRow: String?
@@ -240,9 +259,9 @@ struct ShellWalkBenchTests {
             let before = row
             row = await step(row, by: ShellSession.readAhead)
             walked += ShellSession.readAhead
+            await sample()
             if walked % Self.leg == 0 {
-                footprints.append((walked, Self.footprint()))
-                try await evictionPass()
+                due = (walked, await store.evictionPasses)
                 // The source's timeline beside All, read a stretch down and left.
                 var stretch = await switchTo(.written(aside.id), leaving: row)
                 if let asideRow, session.timelineDrawn(latest: nil).index[asideRow] != nil { stretch = asideRow }
@@ -256,13 +275,15 @@ struct ShellWalkBenchTests {
             }
         }
         var climbed = 0
+        due = nil
         while climbed < Self.up {
             row = await step(row, by: -ShellSession.readAhead)
             climbed += ShellSession.readAhead
+            await sample()
+            if climbed == Self.up / 2 { due = (walked + climbed, await store.evictionPasses) }
         }
         let elapsed = Self.milliseconds(clock.now - begun) / 1000
-        footprints.append((walked + climbed, Self.footprint()))
-        try await evictionPass()
+        let evictions = await store.passesTook.map(Self.milliseconds)
         probe.stop()
         await probing.value
 
@@ -274,13 +295,15 @@ struct ShellWalkBenchTests {
         let trend = (footprints.last?.bytes ?? first) - tenth
         print("[walk \(label)] walked \(walked) down, \(climbed) up in \(String(format: "%.0f s", elapsed)); \(pages.count) pages, \(await store.evictionPasses) passes of the letting go")
         print("[walk \(label)] footprint: " + footprints.map { "\($0.rows): \(Self.mb($0.bytes))" }.joined(separator: ", "))
+        print("[walk \(label)] heap in use: " + heap.map { "\($0.rows): \(Self.mb($0.bytes))" }.joined(separator: ", "))
         print("[walk \(label)] footprint growth after the first page \(Self.mb(growth)) (peak), from 10,000 rows to the end \(Self.mb(trend))")
+        print("[walk \(label)] asks of the network, none answered: \(network.count)")
         print("[walk \(label)] pool: max \(pools.max() ?? 0), median \(Int(Self.percentile(pools.map(Double.init), 0.5))), at the end \(await store.pooled)")
         print("[walk \(label)] main actor held: \(stretches.count) stretches over 0.1 ms, 95th \(Self.ms(Self.percentile(stretches, 0.95))), 99th \(Self.ms(Self.percentile(stretches, 0.99))), max \(Self.ms(stretches.max() ?? 0)); over 16 ms: \(stretches.filter { $0 >= 16 }.count)")
         print("[walk \(label)] drawing a step: 95th \(Self.ms(Self.percentile(drawings, 0.95))), max \(Self.ms(drawings.max() ?? 0))")
         print("[walk \(label)] the drawing worked out afresh: 95th \(Self.ms(Self.percentile(merges, 0.95))), max \(Self.ms(merges.max() ?? 0))")
         print("[walk \(label)] pages: median \(Self.ms(Self.percentile(pages, 0.5))), 95th \(Self.ms(Self.percentile(pages, 0.95))), max \(Self.ms(pages.max() ?? 0))")
-        print("[walk \(label)] a pass of the letting go: \(evictions.count) timed, median \(Self.ms(Self.percentile(evictions, 0.5))), max \(Self.ms(evictions.max() ?? 0))")
+        print("[walk \(label)] a pass of the letting go: \(evictions.count) passes, median \(Self.ms(Self.percentile(evictions, 0.5))), 95th \(Self.ms(Self.percentile(evictions, 0.95))), max \(Self.ms(evictions.max() ?? 0))")
         try file.db.close()
         return (growth, Self.percentile(stretches, 0.95), evictions.max() ?? 0)
     }
