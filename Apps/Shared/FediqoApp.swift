@@ -434,16 +434,20 @@ private struct Live: View {
         guard let file = launch.file else { return nil }
         let saver = launch.saver
         // Where a save would run: after every save asked for before it and before any after,
-        // and never inside a read back's commit, which holds the same place (#247).
-        return { try await saver.exclusively { try await file.compact() } }
+        // and never inside a read back's commit, which holds the same place (#247). The words of
+        // what was let go first (C27), a step at a time with saves between, then the room.
+        return {
+            try await file.letWordsGo(in: saver)
+            try await saver.exclusively { try await file.compact() }
+        }
     }
 
     /// Takes the words of the posts an act let go out of the index's words index (#360, C27),
-    /// or nothing where this run has no index. Where a save would run, as the rebuild is.
+    /// or nothing where this run has no index. Each step where a save would run, on its own.
     private var letWordsGo: (@Sendable () async throws -> Void)? {
         guard let file = launch.file else { return nil }
         let saver = launch.saver
-        return { _ = try await saver.exclusively { try await file.letWordsGo() } }
+        return { _ = try await file.letWordsGo(in: saver) }
     }
 
     /// One page of a timeline read from the index (#357), or nothing where this run has none: the

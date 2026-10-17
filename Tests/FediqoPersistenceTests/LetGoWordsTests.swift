@@ -201,21 +201,15 @@ struct LetGoWordsTests {
         let (going, staying) = Self.notes(.cjk, going: 1_500, staying: 3_500)
         let needles = LetGoGrams.needles(going, besides: staying)
         for folder in [dir, once] {
-            // Small pages, so the merge FTS5 starts of itself spans many writes, as it does on a
-            // store of hundreds of thousands of rows.
-            let file = try StoreFile(at: folder)
-            try await file.save(RowChanges(upserts: staying + going, sources: Self.sources))
-            try await file.db.write { db in
-                _ = try StoreFile.makeWords(db, capable: true)
-                try db.execute(sql: "INSERT INTO note_words(note_words, rank) VALUES ('pgsz', 64)")
-            }
-            try await file.buildWords(chunk: 250, capable: true)
+            let file = try await Self.smallPaged(in: folder, staying + going)
             try await file.save(RowChanges(deletes: going.map(\.key)))
             #expect(try #require(try file.wordsState()).due == going.count, "the premise: left due, drained in parts")
-            #expect(try await file.letWordsGo(capable: true, passes: folder == once ? 1 : StoreFile.rewritePasses))
+            #expect(try await file.letWordsGo(
+                capable: true, passes: folder == once ? 1 : StoreFile.rewritePasses, steps: folder != once, pause: .zero
+            ))
             let shape = try #require(try file.wordsShape())
             if folder == once {
-                // The premise: one pass is not enough here.
+                // The premise: one optimize alone is not enough here.
                 #expect(!shape.isClean, "one optimize left the index clean: \(shape)")
                 #expect(try file.wordsLetGoOwed(), "the mark taken off an index that is not clean")
             } else {
@@ -224,6 +218,50 @@ struct LetGoWordsTests {
                 #expect(try LetGoGrams.found(needles, in: folder).isEmpty)
             }
         }
+    }
+
+    /// A file holding `notes`, its words index built with small pages, so the merge FTS5 starts
+    /// of itself spans many writes, as it does on a store of hundreds of thousands of rows.
+    private static func smallPaged(in folder: URL, _ notes: [Note]) async throws -> StoreFile {
+        let file = try StoreFile(at: folder)
+        try await file.save(RowChanges(upserts: notes, sources: sources))
+        try await file.db.write { db in
+            _ = try StoreFile.makeWords(db, capable: true)
+            try db.execute(sql: "INSERT INTO note_words(note_words, rank) VALUES ('pgsz', 64)")
+        }
+        try await file.buildWords(chunk: 250, capable: true)
+        return file
+    }
+
+    @Test("Saves land between two merge steps — one letting more go, one writing — and the rewrite still ends clean, each step where a save would run")
+    func savesBetweenSteps() async throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (going, staying) = Self.notes(.cjk, going: 1_500, staying: 3_500)
+        // The last staying posts go too, by a save made between two steps.
+        let late = Array(staying.suffix(200))
+        let stays = Array(staying.dropLast(200))
+        let needles = LetGoGrams.needles(going + late, besides: stays)
+        let file = try await Self.smallPaged(in: dir, stays + late + going)
+        let saver = StoreSaver(store: ItemStore(), file: file)
+        try await file.save(RowChanges(deletes: going.map(\.key)))
+        final class Seen: @unchecked Sendable { var shape: StoreFile.WordsShape?; var owed = false }
+        let seen = Seen()
+        #expect(try await file.letWordsGo(capable: true, in: saver, pause: .zero, meanwhile: {
+            // Between two steps nothing holds the saver: a save runs where it would.
+            try await saver.exclusively {
+                try await file.save(RowChanges(upserts: [Self.note(80_000, body: LetGoGrams.ordinary(1))], deletes: late.map(\.key)))
+            }
+            seen.shape = try file.wordsShape()
+            seen.owed = try file.wordsLetGoOwed()
+        }))
+        #expect(seen.owed, "the mark off before the last write")
+        #expect(seen.shape?.isClean == false, "the premise: the save landed mid-way through the rewrite")
+        #expect(try file.wordsShape() == .init(segments: 1, tombstonePages: 0))
+        #expect(try !file.wordsLetGoOwed())
+        #expect(try file.wordsState() == .init(floor: 0, due: 0))
+        #expect(try LetGoGrams.found(needles, in: dir).isEmpty)
+        #expect(try file.wordCandidates(Fold.key("ordinary words"))?.count == stays.count + 1)
     }
 
     @Test("A doc taken out for a row deleted by something else — an older build, sqlite3 — owes a rewrite, whether a save or the builder drains it")

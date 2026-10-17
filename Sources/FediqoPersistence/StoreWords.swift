@@ -258,74 +258,132 @@ extension StoreFile {
         try db.read { db in try Self.hasWords(db) ? Self.wordsShape(db) : nil }
     }
 
-    /// One pass of the rewrite, in the caller's write: every segment merged into one (`optimize`).
-    /// **The one place a pass is made**, so bounded merge steps can take its place.
-    private static func rewriteWordsPass(_ db: Database) throws {
-        try db.execute(sql: "INSERT INTO note_words(note_words) VALUES ('optimize')")
+    /// One merge step of the rewrite, in the caller's write: at most `mergedPages` of the index's
+    /// pages written (`merge`, negative so segments merge whatever their level). Whether it
+    /// changed anything — false once there is nothing left to merge.
+    private static func mergeWordsPages(_ db: Database, pages: Int) throws -> Bool {
+        let before = db.totalChangesCount
+        try db.execute(sql: "INSERT INTO note_words(note_words, rank) VALUES ('merge', ?)", arguments: [-pages])
+        return db.totalChangesCount - before >= 2
     }
 
-    /// The most passes one `letWordsGo` makes before it leaves the index owed for the next: one
-    /// `optimize` that finishes a merge FTS5 had begun (`deletemerge`, as a large letting go is
-    /// drained) keeps the tombstones added meanwhile, and a second clears them.
+    /// The last of a pass, in the caller's write: what the merge steps left merged into one
+    /// (`optimize`) — nothing to do where they left one segment with no tombstone — and the
+    /// shape read in the same write.
+    private static func finishWordsPass(_ db: Database) throws -> WordsShape {
+        try db.execute(sql: "INSERT INTO note_words(note_words) VALUES ('optimize')")
+        return try wordsShape(db)
+    }
+
+    /// The most passes one `letWordsGo` makes before it leaves the index owed for the next: a
+    /// pass's last `optimize` may finish a merge FTS5 had begun (`deletemerge`, as a large
+    /// letting go is drained) and keep the tombstones added meanwhile, and another clears them.
     static let rewritePasses = 4
 
-    /// Takes the tokens of every row let go out of the file (C27 (a)): the docs of the rows still
-    /// due made first — a row let go and not drained yet still has its doc — `drainedInSave` rows
-    /// a write, then the index rewritten (`rewriteWordsPass`) a write a pass until it is clean
-    /// (`WordsShape`), at most `passes`. Every segment it leaves behind is freed, zeroed by
-    /// `secure_delete`. **The mark is taken off only once the index is clean**: one left otherwise
-    /// is the next ask's. Returns whether it rewrote.
+    /// The most merge steps one pass makes before its `optimize`: a bound, never met in practice.
+    static let mergeStepsMost = 10_000
+
+    /// The due rows a write of `letWordsGo` makes the docs of: fewer than a save drains, so a page
+    /// waits for one write of them and not for a long one.
+    static let drainedWhileLetGo = 100
+
+    /// Runs one write of the rewrite where a save would run, where there is a saver — **each step
+    /// on its own**, so the saves asked meanwhile go between two — and in the caller's place
+    /// otherwise (`compact()`, which holds the saver already).
+    private func step<T: Sendable>(_ saver: StoreSaver?, _ body: @escaping @Sendable () async throws -> T) async throws -> T {
+        guard let saver else { return try await body() }
+        return try await saver.exclusively(body)
+    }
+
+    /// Takes the tokens of every row let go out of the file (C27, in steps): the docs of the rows
+    /// still due made first — a row let go and not drained yet still has its doc —
+    /// `drainedWhileLetGo` rows a write; then the index merged a step a write (`merge`,
+    /// `mergedPages` pages), `wordsPause` between two, until a step changes nothing; then, in one
+    /// last write, what is left merged into one (`optimize`) and its shape read (`WordsShape`). A
+    /// pass not clean is made again, at most `rewritePasses`. Every segment the rewrite leaves
+    /// behind is freed, zeroed by `secure_delete`. Returns whether it rewrote.
+    ///
+    /// **The mark comes off in the last write, and only where the index is clean**: a quit, an
+    /// interruption or a failure on the way leaves it owed, and the next launch takes it up again
+    /// (`letWordsGoIfOwed`); a step done is never done again.
+    ///
+    /// **Each write where a save would run, on its own** (`saver`, `StoreSaver.exclusively`):
+    /// saves asked meanwhile go between two, and a page waits for one step and not for the
+    /// rewrite. Without a saver, in the caller's place — `compact()`, which holds it already.
+    /// Never on the main thread.
     ///
     /// **Once for however many acts asked**: nothing where nothing is owed, so acts one after
     /// another rewrite the index once. Nothing where this SQLite cannot keep the index, or the
-    /// file has none whole. **Where a save would run** (`StoreSaver.exclusively`), after the act's
-    /// save has landed, and on GRDB's queue — never the main thread: a pass holds the queue, and
-    /// pages wait for it. `compact()` runs it first, before it gives the room back, and a launch
-    /// once its first page shows where a mark was left (`letWordsGoIfOwed`).
+    /// file has none whole. `compact()` runs it first, before it gives the room back.
     @discardableResult
-    public func letWordsGo() async throws -> Bool {
-        try await letWordsGo(capable: Self.wordsCapable)
+    public func letWordsGo(in saver: StoreSaver? = nil) async throws -> Bool {
+        try await letWordsGo(capable: Self.wordsCapable, in: saver)
     }
 
-    /// `letWordsGo()`, as though this SQLite could keep the index or not, with at most `passes`.
+    /// `letWordsGo(in:)`, as though this SQLite could keep the index or not, with at most
+    /// `passes`, `pause` between two writes, and `meanwhile` run once between the first two merge
+    /// steps — for a test, the writes another may make. `steps: false` is no merge step, only
+    /// the `optimize` of each pass.
     @discardableResult
-    func letWordsGo(capable: Bool, passes: Int = StoreFile.rewritePasses) async throws -> Bool {
+    func letWordsGo(
+        capable: Bool, in saver: StoreSaver? = nil, passes: Int = StoreFile.rewritePasses, steps: Bool = true,
+        pause: Duration = StoreFile.wordsPause, meanwhile: (@Sendable () async throws -> Void)? = nil
+    ) async throws -> Bool {
         guard capable, try await db.read({ db in try Self.hasWords(db) && Self.letGoOwed(db) }) else { return false }
-        while try await db.write({ db in
-            precondition(!Thread.isMainThread, "the words index is rewritten off the main thread")
-            guard try Self.hasWords(db) else { return false }
-            return try Self.drainWords(db, limit: Self.drainedInSave) == Self.drainedInSave
+        let db = self.db
+        while try await step(saver, {
+            try await db.write { db in
+                precondition(!Thread.isMainThread, "the words index is rewritten off the main thread")
+                guard try Self.hasWords(db) else { return false }
+                return try Self.drainWords(db, limit: Self.drainedWhileLetGo) == Self.drainedWhileLetGo
+            }
         }) {
-            await Task.yield()
+            if pause > .zero { try await Task.sleep(for: pause) }
         }
         var rewrote = false
+        var meanwhile = meanwhile
         for _ in 0..<max(1, passes) {
-            let clean = try await db.write { db -> Bool? in
-                precondition(!Thread.isMainThread, "the words index is rewritten off the main thread")
-                guard try Self.hasWords(db), try Self.letGoOwed(db) else { return nil }
-                try Self.rewriteWordsPass(db)
-                guard try Self.wordsShape(db).isClean else { return false }
-                try db.execute(sql: "DELETE FROM note_words_state WHERE k = 'letgo'")
-                return true
+            for _ in 0..<(steps ? Self.mergeStepsMost : 0) {
+                let merged = try await step(saver, {
+                    try await db.write { db -> Bool? in
+                        precondition(!Thread.isMainThread, "the words index is rewritten off the main thread")
+                        guard try Self.hasWords(db), try Self.letGoOwed(db) else { return nil }
+                        return try Self.mergeWordsPages(db, pages: Self.mergedPages)
+                    }
+                })
+                guard let merged else { return rewrote }
+                rewrote = true
+                guard merged else { break }
+                if pause > .zero { try await Task.sleep(for: pause) }
+                if let asked = meanwhile {
+                    meanwhile = nil
+                    try await asked()
+                }
             }
+            let clean = try await step(saver, {
+                try await db.write { db -> Bool? in
+                    precondition(!Thread.isMainThread, "the words index is rewritten off the main thread")
+                    guard try Self.hasWords(db), try Self.letGoOwed(db) else { return nil }
+                    guard try Self.finishWordsPass(db).isClean else { return false }
+                    try db.execute(sql: "DELETE FROM note_words_state WHERE k = 'letgo'")
+                    return true
+                }
+            })
             guard let clean else { break }
             rewrote = true
             if clean { break }
-            await Task.yield()
+            if pause > .zero { try await Task.sleep(for: pause) }
         }
         return rewrote
     }
 
-    /// `letWordsGo()` where a mark was left — a quit or a crash before the rewrite, a rewrite that
-    /// failed, the first save dropping rows nothing could draw — **asked once the first page
-    /// shows**, where a save would run, before the file is scrubbed. Nothing where none is owed.
+    /// `letWordsGo(in:)` where a mark was left — a quit or a crash before the rewrite ended, a
+    /// rewrite that failed, the first save dropping rows nothing could draw — **asked once the
+    /// first page shows**, each step where a save would run, before the file is scrubbed.
+    /// Nothing where none is owed.
     public func letWordsGoIfOwed(in saver: StoreSaver?) async {
         guard (try? wordsLetGoOwed()) == true else { return }
-        if let saver {
-            _ = try? await saver.exclusively { try await self.letWordsGo() }
-        } else {
-            _ = try? await letWordsGo()
-        }
+        _ = try? await letWordsGo(in: saver)
     }
 
     /// Inside a save that empties `note` — a read back, or its undo: every doc goes with the rows

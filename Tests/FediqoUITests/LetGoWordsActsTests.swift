@@ -70,11 +70,12 @@ struct LetGoWordsActsTests {
         session.measureStore = { file.bytesOnDisk() }
         session.weighStore = { file.bytesHeld() }
         session.compactStore = {
+            try await file.letWordsGo(in: saver)
             try await saver.exclusively { try await file.compact() }
             runs.compactions += 1
         }
         session.letWordsGo = {
-            if try await saver.exclusively({ try await file.letWordsGo() }) { runs.wordsRewrites += 1 }
+            if try await file.letWordsGo(in: saver) { runs.wordsRewrites += 1 }
         }
         session.limitStore = try LimitAccountFile(directory: dir)
         await session.loadLimitAccount()

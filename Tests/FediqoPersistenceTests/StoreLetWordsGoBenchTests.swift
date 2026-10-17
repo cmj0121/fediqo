@@ -72,7 +72,9 @@ struct StoreLetWordsGoBenchTests {
         let idle = try await file.letWordsGo()
         print(String(format: "[let go words] %@: asked with nothing let go: %.2f ms (rewrote %@)", label, milliseconds(clock.now - nothing), idle ? "yes" : "no"))
 
-        print("[let go words] \(label): | let go | save | left due | drain + optimize | optimize alone | pages beside: n, p50, p95, max | index after |")
+        // Each write where a save would run, on its own, as the app's.
+        let saver = StoreSaver(store: ItemStore(), file: file)
+        print("[let go words] \(label): | let go | save | left due | drain writes of 500 / of 100, longest | rewrite in steps | pages beside: n, p50, p95, max | clean | index after |")
         for count in counts {
             let keys = try await file.db.read { db in
                 try Row.fetchAll(db, sql: "SELECT host, id FROM note ORDER BY posted_at LIMIT ?", arguments: [count])
@@ -82,26 +84,34 @@ struct StoreLetWordsGoBenchTests {
             try await file.save(RowChanges(deletes: keys))
             let saved = milliseconds(clock.now - saving)
             let due = try file.wordsState()?.due ?? 0
+            // What one drain write holds the queue for, by its size: three of each, where as many
+            // are due.
+            var drains: [Int: Double] = [:]
+            for size in [500, 100] where (try file.wordsState()?.due ?? 0) >= 3 * size {
+                for _ in 0..<3 {
+                    let began = clock.now
+                    _ = try await file.db.write { db in try StoreFile.drainWords(db, limit: size) }
+                    drains[size] = max(drains[size] ?? 0, milliseconds(clock.now - began))
+                }
+            }
             let beside = Self.reading(file, queries)
             try await Task.sleep(for: .milliseconds(200))
             let start = clock.now
-            _ = try await file.letWordsGo()
+            _ = try await file.letWordsGo(in: saver)
             let whole = milliseconds(clock.now - start)
             let shape = try file.wordsShape()
-            print("[let go words] \(label): after \(keys.count): \(shape.map { "\($0.segments) segment(s), \($0.tombstonePages) tombstone page(s)" } ?? "no index"), owed \(try file.wordsLetGoOwed())")
             try await Task.sleep(for: .milliseconds(200))
             beside.cancel()
             let pages = await beside.value
-            // The rewrite alone, again, on the index as it now stands.
-            let optimizing = clock.now
-            try await file.db.write { db in try db.execute(sql: "INSERT INTO note_words(note_words) VALUES ('optimize')") }
-            let optimize = milliseconds(clock.now - optimizing)
             let after = try await file.db.read { db in
                 try Int.fetchOne(db, sql: "SELECT sum(pgsize) FROM dbstat WHERE name LIKE 'note_words%'")
             } ?? 0
+            let clean = "\(shape?.isClean == true ? "yes" : "no") (\(shape?.segments ?? -1) seg, \(shape?.tombstonePages ?? -1) tomb, owed \(try file.wordsLetGoOwed()))"
             print(String(
-                format: "[let go words] %@: | %d | %.0f ms | %d | %.0f ms | %.0f ms | %d, %.1f, %.1f, %.0f ms | %@ |",
-                label, keys.count, saved, due, whole, optimize, pages.count, p(0.5, pages), p(0.95, pages), pages.max() ?? 0, megabytes(after)
+                format: "[let go words] %@: | %d | %.0f ms | %d | %@ / %@ ms | %.0f ms | %d, %.1f, %.1f, %.0f ms | %@ | %@ |",
+                label, keys.count, saved, due,
+                drains[500].map { String(format: "%.0f", $0) } ?? "-", drains[100].map { String(format: "%.0f", $0) } ?? "-",
+                whole, pages.count, p(0.5, pages), p(0.95, pages), pages.max() ?? 0, clean, megabytes(after)
             ))
         }
         let compacting = clock.now
@@ -131,6 +141,6 @@ struct StoreLetWordsGoBenchTests {
         let file = try StoreFile(at: dir)
         try await file.makeIndexes()
         let rows = try file.rowCount()
-        try await Self.walk(file, counts: [100, 400, max(1, rows / 100), max(1, rows / 10)], label: "copy")
+        try await Self.walk(file, counts: [100, 400, 2_000, 10_000, 27_000].filter { $0 < rows / 2 }, label: "copy")
     }
 }
