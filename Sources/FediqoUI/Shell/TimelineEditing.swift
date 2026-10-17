@@ -357,9 +357,12 @@ extension ShellSession {
         // and drawn where a copy stands inside, so no post is split at an edge.
         let clipped = reach.map { $0.floor != nil || $0.ceiling != nil } ?? false
         let held = clipped ? notes.filter { reach?.nears($0) ?? true } : notes
+        // A stretch of a large pool finds what its own rows reblog and quote, and builds no
+        // lookup over the whole pool at each landing.
+        let targets = clipped ? ReblogTargets(naming: held, among: heldNote(key:)) : reblogTargets
         let merged = currentTimeline.items(
             from: held, among: written, index: definition.readsText ? textIndex : TextIndex([]), latest: key.latest,
-            here: key.hosts, targets: reblogTargets
+            here: key.hosts, targets: targets
         )
         return clipped ? merged.filter { reach?.holds($0, held: heldNote) ?? true } : merged
     }

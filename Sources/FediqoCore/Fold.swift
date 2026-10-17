@@ -202,6 +202,20 @@ public struct ReblogTargets: Sendable {
         self.byKey = byKey
     }
 
+    /// What `notes` reblog and quote, each found by `held` among every note held (#359): what
+    /// a stretch of a timeline drawn from a few rows of a large pool asks — two lookups a name
+    /// it holds, and no walk of the pool. The same answers as the lookup built over every note
+    /// held, for every note of `notes`.
+    public init(naming notes: [Note], among held: (NoteKey) -> Note?) {
+        var byKey: [NoteKey: Note] = [:]
+        for note in notes {
+            for key in [note.reblogKey, note.quotedKey].compactMap({ $0 }) where byKey[key] == nil {
+                if let target = held(key), !target.isReblog { byKey[key] = target }
+            }
+        }
+        self.byKey = byKey
+    }
+
     /// The post `note` reblogs, where it is a reblog and that post is among the notes.
     public func target(of note: Note) -> Note? {
         note.reblogKey.flatMap { byKey[$0] }

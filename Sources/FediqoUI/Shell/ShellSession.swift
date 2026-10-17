@@ -568,7 +568,11 @@ final class ShellSession {
     /// The item one row id stands for, among every item this device holds (`notes`). See
     /// `held(_:)`. A forum topic's replies its forum gave no date, which are not items, are not found here.
     func heldNote(_ rowID: String) -> Note? {
-        guard let key = NoteKey(rowID: rowID) else { return nil }
+        NoteKey(rowID: rowID).flatMap(heldNote(key:))
+    }
+
+    /// The note held under `key`, as `heldNote(_:)` finds it.
+    func heldNote(key: NoteKey) -> Note? {
         let index: [NoteKey: Int]
         if let builtHeldIndex {
             index = builtHeldIndex
@@ -591,8 +595,19 @@ final class ShellSession {
 
     /// Everything this device holds, counted (#7): `notes` and `heldReplies` together (#194), so the
     /// figure is the store's and not a timeline's. Rebuilt where either is assigned or the
-    /// breakdown switches between week and month, never on a redraw.
-    private(set) var holdings = Holdings(notes: [], per: .month)
+    /// breakdown switches between week and month, never on a redraw — **and only once it is
+    /// read** (#359): a pool over the file is assigned at every landing, and the count walks
+    /// every row of it, which only Usage and a limit ask for. A screen drawing it follows what
+    /// it is counted from.
+    var holdings: Holdings {
+        let (notes, replies, period) = (self.notes, heldReplies, heldPeriod)
+        if let holdingsKept { return holdingsKept }
+        let counted = Holdings(notes: notes + replies, per: period)
+        holdingsKept = counted
+        return counted
+    }
+
+    @ObservationIgnored private var holdingsKept: Holdings?
     /// How many notices the store holds of each source, by host (#323): what Usage says.
     /// Counted off the store and not off what the notices page draws, which is empty while
     /// who is signed in cannot be read and the disk still holds them.
@@ -608,7 +623,7 @@ final class ShellSession {
 
     private func recount() {
         guard !recountHeld else { return }
-        holdings = Holdings(notes: notes + heldReplies, per: heldPeriod)
+        holdingsKept = nil
     }
 
     /// Both halves of what is held assigned in one breath, nil where one did not move, and the
