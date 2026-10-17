@@ -266,6 +266,24 @@ struct StoreWordsTests {
         WordsBuilder(file: file, exclusively: exclusively, protected: protected, chunk: 50, pause: .zero, capable: true)
     }
 
+    @Test("the builder makes both indexes of what reblogs, as a build of the words does: a file that came with neither — a read back's — has both after it")
+    func builderMakesBothReblogIndexes() async throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = try StoreFile(at: dir)
+        try await file.save(RowChanges(upserts: (0..<20).map { Self.note($0, body: "r\($0)") }, sources: Self.sources))
+        try file.dropDerivedObjects()
+        let names = { try await file.db.read { db in
+            try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'note_reblogs%' ORDER BY name")
+        } }
+        #expect(try await names().isEmpty, "the premise: a read back's file has neither")
+        let builder = Self.builder(file)
+        await builder.start()
+        await builder.idle()
+        #expect(try await names() == ["note_reblogs", "note_reblogs_odd"])
+        await builder.end()
+    }
+
     @Test("the builder stands down while the device is locked, and a wake-up sets it going again from where it stood")
     func builderStandsDown() async throws {
         let dir = try scratch()

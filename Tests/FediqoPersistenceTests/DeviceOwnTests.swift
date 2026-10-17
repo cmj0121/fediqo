@@ -273,18 +273,25 @@ struct DeviceOwnTests {
     }
 
     /// The index undo of a read back, as `StorePackager.commitIndex` makes it, where a lock held
-    /// it past a save: the package's store written through the file, a save landing into it,
-    /// then the file put back to what it held when the read back began.
+    /// it past a save: the file set aside, the package's store copied into it, a save landing
+    /// into that, then the aside copied back (#360).
     @Test("An index undo done after a save landed into the package's store leaves nothing that save wrote off disk, and nothing let go on it")
     func anUndoAfterASave() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let (store, saver, file) = try await launched(in: dir, Record())
         try await saver.save()
-        let previous = try file.load()
-        let told = try file.loadNotices(of: previous.sources)
+        let aside = dir.appendingPathComponent("undo-aside-test", isDirectory: true)
+        try FileManager.default.createDirectory(at: aside, withIntermediateDirectories: true)
+        try await file.snapshot(into: aside)
+        let hosts = try file.sourceHosts()
         let theirs = (20...23).map { Self.note($0, from: Self.alpha) }
-        try await file.save(sources: [Self.alpha], notes: theirs, said: [], replacingNotices: [])
+        let package = scratch()
+        defer { try? FileManager.default.removeItem(at: package) }
+        let staged = try StoreFile(at: package)
+        try await staged.save(sources: [Self.alpha], notes: theirs)
+        try await file.copy(from: staged.db)
+        #expect(try file.loadUnsent().map(\.text) == ["words"], "the texts waiting stay the file's")
         // Meanwhile, the session goes on and its save lands in the package's file.
         let arrived = Self.note(9, from: Self.alpha)
         #expect(await store.setKept(true, for: Self.notes[2].key))
@@ -292,8 +299,9 @@ struct DeviceOwnTests {
         await letGo(Self.notes[1], in: store)
         try await saver.save()
         // The undo, done at last; then the packager's own resave.
-        try await file.save(sources: previous.sources, notes: previous.notes, said: previous.said, replacingNotices: told)
-        await store.oweEverything(fileHolds: previous.notes.map(\.key), hosts: previous.sources.map(\.host))
+        await store.restoring()
+        try await file.putBack(from: aside)
+        await store.oweEverything(hosts: hosts, fileHolds: try file.noteKeys())
         try await saver.resave()
         try file.db.close()
         let whole = StoreFile.open(at: dir)
@@ -305,8 +313,8 @@ struct DeviceOwnTests {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let packager = try String(contentsOf: root.appendingPathComponent("Sources/FediqoPersistence/StorePackager.swift"), encoding: .utf8)
-        #expect(packager.contains("replacingNotices: told\n                )\n                // Put back as it was"))
-        #expect(packager.contains("await store.oweEverything(\n                    fileHolds: previous.notes.map(\\.key), hosts: previous.sources.map(\\.host)\n                )"))
+        #expect(packager.contains("try await file.putBack(from: aside)\n                // Read before the aside goes"))
+        #expect(packager.contains("await store.oweEverything(hosts: hosts, fileHolds: keys)"))
     }
 
     @Test("A save with nothing new takes nothing out of the store to find that out — and neither does leaving")

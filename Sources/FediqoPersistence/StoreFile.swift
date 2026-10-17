@@ -156,6 +156,18 @@ public struct StoreFile: Sendable {
         held.onWordsLeftDue(tell)
     }
 
+    /// Tells the words builder there is more to do (`onWordsLeftDue`): a read back left none of
+    /// the index (#360).
+    func wordsLeftDue() {
+        held.wordsLeftDue()
+    }
+
+    /// This connection wrote the file whole, past `save` (#360, `copy(from:)`): the sources it
+    /// read before are no longer the file's.
+    func wroteWhole() {
+        held.wrote()
+    }
+
     /// The one making of the pages' index, whoever asks (`Held.pageIndexBuild`).
     func pageIndexBuild(_ make: () -> Task<Void, any Error>) -> Task<Void, any Error> {
         held.pageIndexBuild(make)

@@ -280,16 +280,6 @@ public struct RowsUnread: Error {
     }
 }
 
-/// What `ItemStore.restoring()` throws where rows let go of the pool since a read back could
-/// not be read in again (#359): the file is not to be put back, or they would be lost to it.
-public struct RowsNotReadBack: Error, Equatable {
-    public let count: Int
-
-    public init(count: Int) {
-        self.count = count
-    }
-}
-
 /// The store's rows, **with every key a change reached remembered until a save takes it**
 /// (`ItemStore.takeChanges`). Read as the dictionary it wraps; a row set to what it already
 /// was is no change, and a row set to nothing is a row to delete.

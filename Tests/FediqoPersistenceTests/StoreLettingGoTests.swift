@@ -256,7 +256,7 @@ struct StoreLettingGoTests {
         try await save(pool, to: file)
         // The undo writes the store back as it was when the read back began.
         try await file.save(sources: before.sources, notes: before.notes, said: before.said)
-        await pool.oweEverything(fileHolds: before.notes.map(\.key), hosts: before.sources.map(\.host))
+        await pool.oweEverything(hosts: before.sources.map(\.host))
         try await save(pool, to: file)
         #expect(try file.rowCount() == Self.size - went)
         #expect(try !file.marked(.allBut([])))
@@ -312,7 +312,7 @@ struct StoreLettingGoTests {
         let (made, _) = await pool.takeChanges()
         try await file.save(made)
         await pool.wrote(made)
-        try await pool.restoring()
+        await pool.restoring()
         try await file.save(sources: before.sources, notes: before.notes, said: before.said)
         // Read before the store is told what the file was put back to, and a save landing
         // meanwhile: still read as the marks taken back leave them.
@@ -323,7 +323,7 @@ struct StoreLettingGoTests {
         await pool.wrote(RowChanges())
         let byKey = NoteKey(host: "one.example", id: Self.id(10))
         #expect(await pool.notes([byKey])[byKey]?.favourited == nil)
-        await pool.oweEverything(fileHolds: before.notes.map(\.key), hosts: before.sources.map(\.host))
+        await pool.oweEverything(hosts: before.sources.map(\.host))
         let after = NoteKey(host: "two.example", id: Self.id(15))
         #expect(await pool.notes([after])[after]?.favourited == nil)
         let (owed, _) = await pool.takeChanges()

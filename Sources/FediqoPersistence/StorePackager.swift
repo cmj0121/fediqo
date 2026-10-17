@@ -65,6 +65,9 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// Told as a read back's commit passes each point a run killed there would leave on disk.
     /// Nothing in the app sets it: a test does, to copy the folder as it stands at that point.
     var witness: (@Sendable (CommitPoint) -> Void)?
+    /// Told where a read back into an open file set what it held aside (#360), once it has.
+    /// Nothing in the app sets it: a test does, to take the aside away and see the undo refused.
+    var setAside: (@Sendable (URL) -> Void)?
     /// Where a take-away makes its scratch folder: the temporary directory, the app's alone. A
     /// test hands in a folder of its own, to see that nothing is left in it.
     var scratchRoot = FileManager.default.temporaryDirectory
@@ -173,12 +176,19 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         // the step is done or settled, or when the person has been told it never will be —
         // `toldLeftOwed`.)
         sweep(temporary, prefix: "takeaway-")
+        // What a read back into an open file set aside for its undo, its own commit held by no
+        // run that lives (#360): copied back where the index's undo is still named and that
+        // commit did not say every step held — the store this device held, put back — and
+        // gone either way, a store's every byte.
+        let restored = settleUndoAsides(in: directory)
         // A read back killed midway is settled first, one way or the other, so that the index
         // this run opens is either the one this device held or the one the package brought —
         // never an empty one made in the gap between them. Only then does what is left of a
         // staging go: by now nothing under `incoming-` without a marker is the only copy of
         // anything.
-        let settled = settleHalfCommits(in: directory)
+        var settled = settleHalfCommits(in: directory)
+        settled.putBack += restored.putBack
+        settled.unsettled += restored.unsettled
         if !flights.live {
             // An old index this launch has just put back as it was is put back: that step
             // is no longer one to say.
@@ -205,6 +215,44 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// the package's index is moved in, `replacedMark` once it is in place, and `undoingMark`
     /// once a later step refused and the commit is being taken back.
     static let committingMarker = ".committing"
+
+    /// What begins the name of the folder a read back into an open file sets that file aside in
+    /// (#360, `commitIndex`): kept while its undo may run — the commit's own name held meanwhile
+    /// (`Flight`) — and swept by a launch only where no commit's name is held by a run that
+    /// lives. Not `incoming-`: another copy of the app launching meanwhile sweeps those.
+    static let undoAsidePrefix = "undo-aside-"
+
+    /// Settles each aside a read back into an open file left (`undoAsidePrefix`) whose commit's
+    /// own name no run that lives holds — the aside is named after it (`Flight.id`): where that
+    /// commit ended cut short and its index's undo is still named, the aside is copied back into
+    /// the index (`StoreFile.putBack(from:into:)`), the step said no more; then it goes. One that
+    /// will not be copied back is kept, and counted unsettled: the step stays named, and is said.
+    static func settleUndoAsides(in directory: URL) -> (putBack: Int, unsettled: Int) {
+        let manager = FileManager.default
+        var putBack = 0
+        var unsettled = 0
+        let names = ((try? manager.contentsOfDirectory(atPath: directory.path)) ?? []).sorted()
+        for name in names where name.hasPrefix(undoAsidePrefix) {
+            let id = String(name.dropFirst(undoAsidePrefix.count))
+            let cutShort = directory.appendingPathComponent(Flight.prefix + id)
+            let held = directory.appendingPathComponent(Flight.heldPrefix + id)
+            if Flight.isHeld(cutShort) == true || Flight.isHeld(held) == true { continue }
+            let aside = directory.appendingPathComponent(name)
+            if manager.fileExists(atPath: cutShort.path), owedNames(in: directory).contains("index") {
+                do {
+                    try StoreFile.putBack(from: aside, into: directory)
+                } catch {
+                    unsettled += 1
+                    continue
+                }
+                _ = unsay("index", in: directory)
+                putBack += 1
+            }
+            try? manager.removeItem(at: aside)
+        }
+        return (putBack, unsettled)
+    }
+
     /// What the marker holds from just before the new index is moved to where the old one was,
     /// until it says `replacedMark`: an index in place, if there is one, is the package's, and
     /// the commit did not get as far as saying so.
@@ -1118,6 +1166,16 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
 
     static let limitsName = "limits"
 
+    /// The store a whole package brought, staged and proven (#360): its file, open, and what the
+    /// store in memory is given of it — the sources and what each said, read by SQL, and the rows
+    /// only for a store held whole, which holds every one of them.
+    private struct Arrived: @unchecked Sendable {
+        let index: StoreFile
+        let sources: [Source]
+        let said: [SourceProfile]
+        let notes: [Note]?
+    }
+
     /// The limits' account beside the index (#251) as it is, or an empty account where there is
     /// none: it rides with the store it is about, so the lines still say what went from it.
     ///
@@ -1161,10 +1219,20 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         if storeNotOpened, summary.contents == .whole { throw PackageFault.storeNotOpened }
         let held = await holdsStore()
         if held, !replacing, summary.contents == .whole { throw PackageFault.alreadyHeld }
-        // Twice the package: the staging, and what is moved into place beside what was there
-        // until the last step holds.
+        // Twice the package where this run has no file: the staging, and what is moved into
+        // place beside what was there until the last step holds. **Into an open file** (#360):
+        // the staging, the file set aside, and the file's journal, as large as the file —
+        // and what the file grows by where the package's store is the larger, at most the
+        // package.
         let free = freeSpace(directory)
-        let needed = reader.prelude.bytes * 2
+        let package = reader.prelude.bytes
+        let needed: Int
+        if let file, summary.contents == .whole {
+            let held = file.bytesOnDisk()
+            needed = package + 2 * held + max(0, package - held)
+        } else {
+            needed = package * 2
+        }
         if free < needed { throw PackageFault.noRoom(needed: needed, free: free) }
 
         let manager = FileManager.default
@@ -1225,30 +1293,35 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         }
         // Every tag has held and the footer was seen. Now: is the staged store one this build
         // can read? Opened before a byte here changes.
-        var contents: (sources: [Source], notes: [Note], said: [SourceProfile])?
+        var arrived: Arrived?
         var kept: Int?
         if summary.contents == .whole {
             guard staged.index != nil, staged.settings != nil, staged.secrets != nil else { throw PackageRefusal.altered }
             do {
                 let index = try StoreFile(at: incoming)
                 // No row of a store read back still owes a load (`ItemStore.replace`): taken off
-                // in the staged file, which may be moved into place as it stands, and so off
-                // what is read out of it for the store in memory and the index this run holds.
+                // in the staged file, which becomes this device's as it stands — copied into the
+                // file this run holds, or moved into place.
                 try index.settleReferences()
                 // And it brings no text waiting to be sent: a take-away writes none, and one
                 // that came all the same would be sent from this device as well as its own.
                 try index.dropUnsent()
                 // Nor what a source said happened to whoever was signed in where it was made.
                 try index.dropNotices()
-                contents = try index.load()
+                // Nor anything made beside the tables (#360): this device makes its own.
+                try index.dropDerivedObjects()
+                // Read by SQL, and no row (#360): the rows are the file's, read as they are
+                // wanted — but for a store held whole, which holds them all.
+                let (sources, said) = try index.loadSources()
+                let notes = file == nil || !store.heldInPart ? try index.load().notes : nil
                 kept = try index.keptCount()
-                // Read, and so one this build may write: where this run has no file of its own
-                // the staged index is moved in as it stands, and it is not left holding words a
-                // build before this one freed without zeroing (#292).
+                // Read, and so one this build may write: the staged index becomes this device's
+                // as it stands, and it is not left holding words a build before this one freed
+                // without zeroing (#292).
                 index.scrub()
                 // The profile entries are the words as taken away; the index's rows are the same
                 // words, and where a package carried entries they are what is read back.
-                if !staged.said.isEmpty { contents?.said = staged.said }
+                arrived = Arrived(index: index, sources: sources, said: staged.said.isEmpty ? said : staged.said, notes: notes)
             } catch is StoreFile.Newer {
                 throw PackageRefusal.newer
             } catch {
@@ -1267,19 +1340,31 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             if let said = summary.kept, said != kept { throw PackageRefusal.altered }
         } else {
             guard staged.secrets != nil else { throw PackageRefusal.altered }
-            contents = nil
+            arrived = nil
         }
-        try await commit(staged, contents: contents, summary: summary)
+        defer { try? arrived?.index.db.close() }
+        try await commit(staged, arrived: arrived, summary: summary)
     }
 
     /// The commit, whole or not at all: every step reads what it replaces first, and a step that
     /// refuses undoes every step before it, newest first. The Keychain goes first, being the
     /// step most likely to refuse; the store in memory goes last, and nothing follows it.
-    private func commit(
-        _ staged: Staged, contents: (sources: [Source], notes: [Note], said: [SourceProfile])?, summary: PackageSummary
-    ) async throws {
-        guard let saver else { return try await commitNow(staged, contents: contents) }
-        try await saver.exclusively { try await commitNow(staged, contents: contents) }
+    ///
+    /// **Once a store has been copied into the file this run holds** (#360), what a launch makes
+    /// beside the tables is made again before this returns, as at a launch: the pages' index —
+    /// a page asked meanwhile waits for it, a provisional one drawn — then the rest where a save
+    /// would run, saves going between; and the words index is its builder's, set going. The
+    /// read back has held by then: what fails here is made by the next asking.
+    private func commit(_ staged: Staged, arrived: Arrived?, summary: PackageSummary) async throws {
+        if let saver {
+            try await saver.exclusively { try await commitNow(staged, arrived: arrived) }
+        } else {
+            try await commitNow(staged, arrived: arrived)
+        }
+        guard arrived != nil, let file else { return }
+        try? await file.makePageIndex()
+        try? await file.makeIndexes(in: saver)
+        file.wordsLeftDue()
     }
 
     /// One step of the commit that can be put back: its name, for the sentence that says it
@@ -1297,6 +1382,15 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         private var steps: [Undo] = []
         private var spent: [String] = []
         private var flights: [Flight] = []
+        /// Commits whose index's undo was refused for good with what it set aside still there:
+        /// held, never ended, until the run ends.
+        private var heldForTheRun: [Flight] = []
+
+        func holdForTheRun(_ flight: Flight) {
+            lock.lock()
+            defer { lock.unlock() }
+            heldForTheRun.append(flight)
+        }
         private var said: Set<String> = []
         private var saidWhatWasLeft = false
 
@@ -1510,15 +1604,15 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         }
     }
 
-    private func commitNow(
-        _ staged: Staged, contents: (sources: [Source], notes: [Note], said: [SourceProfile])?
-    ) async throws {
+    private func commitNow(_ staged: Staged, arrived: Arrived?) async throws {
         // The commit's own name first (`Flight`), held from here until nothing of this is
         // owed: while it is, no other copy of the app settles a list this has aside or says
         // a step this has named.
         let flight = try Flight(in: directory)
         var undo: [Undo] = []
         var settle: [() -> Void] = []
+        // Where the index's step set the file aside, while that is there to put back.
+        var asideOfIndex: URL?
         // **Each step is named beside the index before it runs** (#344), while the device
         // can still be written: a phone that has locked takes no new file, so a name made
         // only once an undo had been refused could never be made there. The name goes when
@@ -1549,16 +1643,17 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         do {
             if let secrets = staged.secrets {
                 try naming("secrets")
-                let previous = try refile(secrets, onlyTheirs: contents == nil)
+                let previous = try refile(secrets, onlyTheirs: arrived == nil)
                 undo.append(Undo(name: "secrets") { try unfile(secrets, previous: previous) })
                 settle.append { hold(previous) }
             }
-            guard let contents else { return allHeld() }
+            guard let arrived else { return allHeld() }
             witness?(.staged)
             try naming("index")
-            let index = try await commitIndex(contents, staged: staged)
+            let index = try await commitIndex(arrived, staged: staged, flight: flight)
             undo.append(Undo(name: "index", run: index.undo))
             settle.append(index.settle)
+            asideOfIndex = index.aside
             if let media {
                 // The copies kept here were for posts that are no longer here: replaced by the
                 // package's where it carried any, and dropped where it did not.
@@ -1571,7 +1666,11 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             try await commitDefaults(staged, into: &undo, settle: &settle)
             if staged.limits != nil { try naming("limits") }
             try commitLimits(staged, into: &undo)
-            await store.replace(sources: contents.sources, notes: contents.notes, said: contents.said)
+            if let notes = arrived.notes {
+                await store.replace(sources: arrived.sources, notes: notes, said: arrived.said)
+            } else {
+                await store.replace(sources: arrived.sources, said: arrived.said)
+            }
         } catch {
             // Newest first, every one tried, and the ones that refused named: the device is
             // then neither as it was nor as the package says, and the sentence must say so.
@@ -1613,10 +1712,25 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
                 // that aside for what a read back replaced and delete it where the
                 // package's landed; with it, the launch puts the list back, and says once
                 // more what was not. Not said again by this run (`Owed.saidHere`).
-                let kept = refused.map(\.name).filter { $0 == "settings" && Self.listAside(in: directory) }
+                // **And for the index, where what it held is still aside** (#360): that is the
+                // only copy of the person's store, kept with its step's name for the next
+                // launch to put back (`settleUndoAsides`), and never deleted here.
+                let asideKept = asideOfIndex.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+                let kept = refused.map(\.name).filter {
+                    ($0 == "settings" && Self.listAside(in: directory)) || ($0 == "index" && asideKept)
+                }
                 for step in refused where !kept.contains(step.name) { _ = Self.unsay(step.name, in: directory) }
                 owed.saidHere(kept)
-                flight.end(keepingName: !kept.isEmpty)
+                if kept.contains("index") {
+                    // **Held for as long as this run lives** (#360): the store set aside is the
+                    // person's, and its undo this run's to have tried. Another copy of the app
+                    // launching meanwhile sees the commit held, and leaves the aside; the next
+                    // launch of this one, finding it let go, puts the store back from it
+                    // (`settleUndoAsides`).
+                    owed.holdForTheRun(flight)
+                } else {
+                    flight.end(keepingName: !kept.isEmpty)
+                }
                 // Nothing of the index is put back later in this run, whether it was put back
                 // now or refused for good: the store's landed deletes are no longer held for
                 // an undo (#360). One a lock refused is owed, and they stay held until it runs.
@@ -1630,46 +1744,64 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     }
 
     /// The index replaced, and how to put it back: through the open file where this run has one,
-    /// which reads what it held first; by a move where it has none, with what was there — the
-    /// index and what SQLite keeps beside it — put aside first.
+    /// by a move where it has none, with what was there — the index and what SQLite keeps beside
+    /// it — put aside first. `aside` is where the open file was set aside, while it is there.
+    ///
+    /// **Through the open file** (#360, K-10): what it holds is set aside first by `VACUUM INTO`
+    /// (`snapshot(into:)`), into a folder of its own beside the index — made as the index's
+    /// folder is, and swept by a launch where no run holds the commit (`undoAsidePrefix`) — and the
+    /// staged file is copied into it page by page (`copy(from:)`); the undo copies the aside
+    /// back the same way. No row is read into memory, either way.
     private func commitIndex(
-        _ contents: (sources: [Source], notes: [Note], said: [SourceProfile]), staged: Staged
-    ) async throws -> (undo: () async throws -> Void, settle: () -> Void) {
+        _ arrived: Arrived, staged: Staged, flight: Flight
+    ) async throws -> (undo: () async throws -> Void, settle: () -> Void, aside: URL?) {
         if let file {
-            let previous = try file.load()
-            // What each source said happened to whoever was signed in here goes from the file
-            // with the store it was read beside (`ItemStore.replace` lets it go from memory):
-            // the sign-ins a read back leaves may be somebody else's (#292). In the one
-            // transaction that writes the new items: both, or neither.
-            let told = try file.loadNotices(of: previous.sources)
+            let manager = FileManager.default
+            // Named after the commit's own name: swept only once no run holds that.
+            let aside = directory.appendingPathComponent("\(Self.undoAsidePrefix)\(flight.id)", isDirectory: true)
+            try Guarded.makeFolder(aside)
+            let drop: () -> Void = { try? manager.removeItem(at: aside) }
+            let hosts: [String]
+            do {
+                try await file.snapshot(into: aside)
+                hosts = try file.sourceHosts()
+            } catch {
+                drop()
+                throw error
+            }
+            setAside?(aside)
             // From here the file may be put back, until the store is replaced or owes what
             // the putting back undid: what it let go stays answered for meanwhile (#360).
             await store.mayBePutBack(true)
             do {
-                try await file.save(
-                    sources: contents.sources, notes: contents.notes, said: contents.said, replacingNotices: []
-                )
+                // What each source said happened to whoever was signed in here goes from the
+                // file with the store it was read beside: the package's file holds none (#292).
+                try await file.copy(from: arrived.index.db)
             } catch {
                 await store.mayBePutBack(false)
+                drop()
                 throw error
             }
-            // Written through the file, past the saver: the store says what of it differs once
-            // it is replaced (`ItemStore.replace`), and is owed nothing else.
+            // Written through the file, past the saver: the store is replaced at the end of the
+            // commit (`ItemStore.replace(sources:said:)`), and owed nothing of it.
+            let whole = !store.heldInPart
             return ({ [store] in
                 // Nothing of the run is the file's while it is put back, nor after.
-                try await store.restoring()
-                try await file.save(
-                    sources: previous.sources, notes: previous.notes, said: previous.said, replacingNotices: told
-                )
+                await store.restoring()
+                try await file.putBack(from: aside)
+                // Read before the aside goes: a read that fails refuses the undo, which is
+                // asked again with the aside still there — never taken for "owe no delete".
+                let keys = whole ? try file.noteKeys() : nil
+                drop()
                 // Put back as it was when the read back began — and an undo a lock held may
                 // come after saves that wrote into the package's store: what they wrote is
                 // owed again, and what the file was put back to that is let go since is too.
-                await store.oweEverything(
-                    fileHolds: previous.notes.map(\.key), hosts: previous.sources.map(\.host)
-                )
-            }, {})
+                await store.oweEverything(hosts: hosts, fileHolds: keys)
+            }, drop, aside)
         }
-        guard let index = staged.index else { return ({}, {}) }
+        guard let index = staged.index else { return ({}, {}, nil) }
+        // The staged file is moved as it stands, its connection closed first.
+        try arrived.index.db.close()
         let manager = FileManager.default
         let target = directory.appendingPathComponent(Self.indexName)
         let aside = directory.appendingPathComponent("\(StoreFile.readBackAsidePrefix)\(UUID().uuidString)", isDirectory: true)
@@ -1730,7 +1862,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             witness?(.replaced)
             try? manager.removeItem(at: aside)
         }
-        return (undo, settle)
+        return (undo, settle, nil)
     }
 
     /// The defaults replaced, with what they held read first and how to set it back — **and

@@ -434,59 +434,6 @@ struct StoreEvictionTests {
         #expect(firstAt < secondAt)
     }
 
-    @Test("the rows let go since a read back are read in again before the file is put back")
-    func restoringReadsBack() async throws {
-        let (pooledFile, wholeFile) = try await twoFiles()
-        let previous = try pooledFile.load()
-        let pool = ItemStore(sources: Self.sources, rows: pooledFile, cap: Self.cap)
-        let whole = try wholeStore(wholeFile)
-        await readAll(pool)
-        await pool.hold([], drawnAt: await pool.drawn)
-        let package = Self.seed().map { note in
-            var read = note
-            if !note.isReblog { read.counts = Counts(replies: 7) }
-            return read
-        }
-        for (store, file) in [(pool, pooledFile), (whole, wholeFile)] {
-            try await file.save(sources: Self.sources, notes: package)
-            await store.replace(sources: Self.sources, notes: package)
-        }
-        // Laid in whole after the last drawing: nothing leaves before the next.
-        await pool.wrote(RowChanges())
-        #expect(await pool.pooled == Self.size)
-        await pool.hold([], drawnAt: await pool.drawn)
-        #expect(await pool.pooled <= Self.cap)
-        // The undo: what left is read in again, the file put back, every row held owed again.
-        for (store, file) in [(pool, pooledFile), (whole, wholeFile)] {
-            try await store.restoring()
-            try await file.save(sources: previous.sources, notes: previous.notes, said: previous.said)
-            await store.oweEverything(fileHolds: previous.notes.map(\.key), hosts: previous.sources.map(\.host))
-            try await save(store, to: file)
-        }
-        #expect(await pool.pooled == Self.size)
-        let onPooled = try rows(pooledFile)
-        let onWhole = try rows(wholeFile)
-        #expect(onPooled == onWhole)
-        #expect(onWhole[Self.key(1)]?.counts.replies == 7)
-    }
-
-    @Test("where what left will not be read in again, the undo is refused before the file is put back")
-    func restoringRefused() async throws {
-        let (file, _) = try await twoFiles()
-        let failing = StorePoolTests.Failing(file, failingFrom: nil)
-        let pool = ItemStore(sources: Self.sources, rows: failing, cap: Self.cap)
-        await pool.replace(sources: Self.sources, notes: Self.seed())
-        await pool.hold([], drawnAt: await pool.drawn)
-        let left = Self.size - (await pool.pooled)
-        #expect(left > 0)
-        failing.fail(from: 1)
-        await #expect(throws: RowsNotReadBack(count: left)) { try await pool.restoring() }
-        // Asked again once the file reads: every one of them is read in.
-        failing.fail(from: nil)
-        try await pool.restoring()
-        #expect(await pool.pooled == Self.size)
-    }
-
     @Test("a pass over five thousand rows that can let none go is not made again until something moves")
     func passTakesLittle() async throws {
         let count = 5_500

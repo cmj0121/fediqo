@@ -107,7 +107,12 @@ public actor WordsBuilder {
                 try await file.db.write { db in try StoreFile.makeWords(db, capable: capable) }
             }) else { return finished() }
             _ = try await exclusively {
-                try await file.db.write { db in try db.execute(sql: StoreFile.reblogsIndex) }
+                try await file.db.write { db in
+                    // Both, as `buildWords` makes them: a read back's file comes with neither
+                    // (`dropDerived`), and a keyword page without the odd ones reads slowly.
+                    try db.execute(sql: StoreFile.reblogsIndex)
+                    try db.execute(sql: StoreFile.oddReblogsIndex)
+                }
                 return true
             }
             for step in [{ try await file.buildWordsStep(chunk: chunk) }, { try await file.mergeWordsStep() }] as [@Sendable () async throws -> Bool] {

@@ -334,9 +334,9 @@ struct StoreRoomInPartsTests {
         try await land(pool, to: file)
         #expect(await pool.lookedCount >= 300)
         // The undo puts the file back as it was, and owes each row the run let go a delete again.
-        try await pool.restoring()
+        await pool.restoring()
         try await file.save(sources: before.sources, notes: before.notes, said: before.said)
-        await pool.oweEverything(fileHolds: before.notes.map(\.key), hosts: before.sources.map(\.host))
+        await pool.oweEverything(hosts: before.sources.map(\.host))
         try await land(pool, to: file)
         #expect(try file.rowCount() == 500)
         #expect(await pool.lookedCount < 300, "the deletes landed again and still answered for")
@@ -357,27 +357,24 @@ struct StoreRoomInPartsTests {
         }
         try await from.packager().takeAway(to: url, key: .password("password"), pictures: false) { _ in }
         let file = try #require(onto.file)
-        // A store over the file that laid it in whole once this run and let most of it leave
-        // the pool since: what the undo must read back first, and here cannot.
-        let failing = StorePoolTests.Failing(file, failingFrom: nil)
-        let pool = ItemStore(sources: [source], rows: failing, cap: 20)
-        await pool.replace(sources: [source], notes: held)
-        await pool.hold([], drawnAt: await pool.drawn)
-        let packager = StorePackager(
+        let pool = ItemStore(sources: [source], rows: file, cap: 20)
+        var packager = StorePackager(
             directory: onto.directory, file: file, store: pool, media: onto.media, tokens: onto.tokens,
             credentials: onto.credentials, defaults: onto.defaults, device: "a test", appVersion: "0.7.0",
             protected: .always, freeSpace: { _ in .max }, rounds: 1000
         )
-        // The step after the index refuses, and the index's undo is refused for want of a read.
+        // The step after the index refuses, and the index's undo is refused: what it was to
+        // copy back from is gone (#360) — and the file is not copied over by an empty store.
+        packager.setAside = { aside in try? FileManager.default.removeItem(at: aside) }
         let blocking = onto.directory.appendingPathComponent(LimitAccountFile.name, isDirectory: true)
         try FileManager.default.createDirectory(at: blocking, withIntermediateDirectories: true)
         try Data().write(to: blocking.appendingPathComponent("in the way"))
-        failing.fail(from: 1)
         await #expect(throws: PackageFault.unwound(steps: ["index"])) {
             try await packager.readBack(url, key: .password("password"), replacing: true) { _ in }
         }
         #expect(!packager.owesUndo, "refused by no lock, and still owed")
         #expect(await !pool.holdsForPutBack, "the landed deletes are held for an undo that will not come")
+        #expect(try file.rowCount() == 3, "the package's store stays where its undo was refused, never an empty one")
     }
 
     @Test("Said no more, the hold lets the landed keys go")

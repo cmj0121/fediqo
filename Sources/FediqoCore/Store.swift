@@ -82,10 +82,6 @@ public actor ItemStore {
     /// itself, and the next stands in. The newest `listedLeftKept` of each.
     private var listedLeft: [String: [Category: [(id: String, key: NoteKey)]]] = [:]
     private static let listedLeftKept = 64
-    /// The rows let go of the pool since the file was last laid in whole (`replace`) and not
-    /// read in again, nothing before one: read back in before the file is put back
-    /// (`restoring`), so a read back's undo owes them again as it owes every row held.
-    private var leftSinceReplace: Set<NoteKey>?
     /// Whether the pool was told once it could not come under its cap: said once a run.
     private var overCapSaid = false
     /// Counts what may let a row leave that could not before — a row changed, laid in, taken
@@ -505,10 +501,65 @@ public actor ItemStore {
             opsFloor = opsMade
             opsSettled = opsMade
             listedLeft = [:]
-            leftSinceReplace = []
             goneLanded = []
             putBackMay = false
         }
+        sourcesWatcher?(sourceList.map(\.host))
+        noticeEpochLast += 1
+        noticeEpochBase = noticeEpochLast
+        noticeEpochs = [:]
+        if !reaches.isEmpty {
+            reaches = [:]
+            noticesChanged()
+        }
+        changed(shown: true, replies: true)
+    }
+
+    /// Everything here replaced by what a read back copied into the file this store is over
+    /// (#360, K-10) — `sources` and what each `said` — **and no row laid in**: the file *is* the
+    /// package's store now, and its rows are read as they are wanted, by the pages and by key, as
+    /// at a launch. The pool and every key it answered for go, and with them every coverage, so
+    /// pages read afresh; every change the run made of the file before is the older file's and
+    /// is owed no more. What the whole store's `replace` lets go past the months limit is the
+    /// limit's steps' after this (`letGoBeyond(_:step:after:)`), and meanwhile not drawn
+    /// (`pastTheLimit`); what owed a load was settled in the file before it was copied in.
+    ///
+    /// **Every notice held goes**, as `replace(sources:notes:said:)` lets them go, and every
+    /// source is written by the next save, said as the package said it. The texts waiting to be
+    /// sent stay, the file's own. **Only over a file**: a store held whole is given its rows.
+    public func replace(sources: [Source], said: [SourceProfile]) {
+        guard disk != nil else { return replace(sources: sources, notes: [], said: said) }
+        filesCopiedIn += 1
+        sourceList = []
+        for source in sources where !sourceList.contains(where: { $0.host == source.host }) {
+            sourceList.append(source)
+        }
+        let hosts = Set(sourceList.map(\.host))
+        saidByHost = [:]
+        for profile in said where Self.isWord(profile) && hosts.contains(profile.host) {
+            saidByHost[profile.host] = profile
+        }
+        notes = HeldNotes([:], owed: false)
+        notes.drawing = drawn
+        notes.track()
+        sourcesWritten = nil
+        hostsOwed = []
+        arrival = [:]
+        arrivals = Self.arrivingAfterTheFile
+        looked = []
+        namesAsked = [:]
+        remainSaid = [:]
+        undecodable = []
+        keptSpared = []
+        keptRead = false
+        readPastLimit = [:]
+        opsOwed = []
+        opsRun = []
+        opsFloor = opsMade
+        opsSettled = opsMade
+        listedLeft = [:]
+        goneLanded = []
+        putBackMay = false
         sourcesWatcher?(sourceList.map(\.host))
         noticeEpochLast += 1
         noticeEpochBase = noticeEpochLast
@@ -1146,7 +1197,8 @@ public actor ItemStore {
     /// nothing reads it once its source is not here. Returns whether any did, so a caller
     /// that must have them off the disk before it goes on knows to wait for the write.
     @discardableResult
-    public func remove(host raw: String, keepingPosts: Bool = false) -> Bool {
+    public func remove(host raw: String, keepingPosts: Bool = false) async -> Bool {
+        await untilNoPutBack()
         let host = raw.lowercased()
         sourceList.removeAll { $0.host == host }
         saidByHost[host] = nil
@@ -1749,7 +1801,8 @@ public actor ItemStore {
     /// **Never a post the person keeps** (#284): keep is their word too, and the later one to
     /// undo. A post a kept post quotes is not spared for that, as above.
     @discardableResult
-    public func letGo(span: Range<Date>, host raw: String? = nil) -> Int {
+    public func letGo(span: Range<Date>, host raw: String? = nil) async -> Int {
+        await untilNoPutBack()
         let host = raw?.lowercased()
         // Over a file, its rows of those days the pool does not hold go by key with the rest —
         // or, where the file would not say which they are, nothing goes.
@@ -1862,7 +1915,30 @@ public actor ItemStore {
     /// leave it at a quiet moment.
     private var goneLanded: Set<NoteKey> = []
     /// Whether a read back has the file in a state it may yet be put back from (`mayBePutBack`).
-    private var putBackMay = false
+    /// Said no more, whatever waits for that goes on (`untilNoPutBack`).
+    private var putBackMay = false {
+        didSet {
+            guard !putBackMay, !waitingForPutBack.isEmpty else { return }
+            let waiting = waitingForPutBack
+            waitingForPutBack = []
+            for one in waiting { one.resume() }
+        }
+    }
+    /// The acts that let posts go asked while a read back may put the file back, waiting.
+    private var waitingForPutBack: [CheckedContinuation<Void, Never>] = []
+    /// How many acts wait so: for the tests.
+    var waitingForUndo: Int { waitingForPutBack.count }
+
+    /// **An act that lets posts go waits while a read back may put the file back** (#360): the
+    /// file then holds the package's store, or is about to, and what it names of the file's rows
+    /// would be the package's — a key the package and the store put back share, let go now, would
+    /// be deleted from the store put back by the undo (`oweEverything`). It goes on once the store
+    /// is replaced or the undo has run, then reading the file as it is.
+    private func untilNoPutBack() async {
+        while putBackMay {
+            await withCheckedContinuation { waitingForPutBack.append($0) }
+        }
+    }
 
     /// **A landed delete's keys leave `looked`** (#360, C33): the file no longer holds the row, so
     /// a read of it answers "not held" by itself, and a key kept for nothing is the pool's
@@ -1902,8 +1978,18 @@ public actor ItemStore {
     /// landed delete's keys stay among `looked` (`forgetLanded`).
     public func mayBePutBack(_ may: Bool) {
         putBackMay = may
+        // A page read before is of the file as it was (`passingThrough`).
+        if may { filesCopiedIn += 1 }
         if !may { forgetLanded() }
     }
+
+    /// Whether the file may hold, or be about to hold, another store than the pool's (#360): a
+    /// read back's copy in, until the store is replaced or owes what an undo put back. **Nothing
+    /// read of the file meanwhile is laid in or answered for** — a row of the package laid into
+    /// the store it replaces, or a key it lacks taken for one let go, would be written over the
+    /// file put back, or deleted from it, by the undo's `oweEverything`. A read by key is passed
+    /// through (`note`, `notes`); every other way in takes no copy over a key it did not find.
+    private var passingThrough: Bool { putBackMay || restoringFile }
 
     /// Whether a read back may still put the file back (`mayBePutBack`): for the tests.
     var holdsForPutBack: Bool { putBackMay }
@@ -1941,39 +2027,46 @@ public actor ItemStore {
     /// the run is unsettled, so a row read from the file — by key, or on a page out across it
     /// — is read as each leaves it, and none settles again until `oweEverything`. Where the
     /// put back fails, none settles for the rest of the run: what the file holds is not known.
-    ///
-    /// **What left the pool since the file was laid in whole is read back first**, a chunk at a
-    /// time, while the file still holds it as the run left it, and is owed again with every
-    /// row held (`oweEverything`). Where any of it will not be read, this throws before
-    /// anything is unsettled, and the file is not to be put back: those rows would be lost.
-    public func restoring() throws {
-        if let left = leftSinceReplace?.sorted(by: { ($0.host, $0.id) < ($1.host, $1.id) }) {
-            var unread = 0
-            for start in stride(from: 0, to: left.count, by: 500) {
-                unread += pool(left[start..<min(start + 500, left.count)]).count
-            }
-            // Read in, a row is no longer among them (`lay`); one not read still is.
-            guard unread == 0 else { throw RowsNotReadBack(count: unread) }
-            // Every one held again, or let go since: none is the file's alone.
-            leftSinceReplace = []
-        }
+    public func restoring() {
         restoringFile = true
         opsSettled = opsFloor
+        filesCopiedIn += 1
     }
 
-    /// **The file put back to an older store behind this one** — a read back's undo writing
-    /// back what the index held when it began, which a save may have written over since
-    /// (#344): every row and source held is owed a write, and of `fileHolds`, what the file now
-    /// holds, every row this store does not hold is owed a delete. So whatever was saved in
-    /// between is written again, and nothing the file was put back to that was let go stays.
+    /// **The file put back to an older store behind this one** — a read back's undo copying back
+    /// what the index held when it began, which a save may have written over since (#344): every
+    /// row and source held is owed a write, and every row the file now holds that this store
+    /// does not is owed a delete. So whatever was saved in between is written again, and nothing
+    /// the file was put back to that was let go stays. `hosts` are the sources the file was put
+    /// back to, owed their removal before every source held is written again.
     ///
-    /// **Over a file, a row not held is one the pool answers for and lacks** (#357): a row
-    /// never read is the file's, not let go. And every change the file was to make of the rows
-    /// not held is owed again, the older store knowing none of them.
-    public func oweEverything(fileHolds keys: [NoteKey], hosts: [String]) {
+    /// **Over a file, a row not held is one the pool answers for and lacks** (#357, #360): a row
+    /// never read is the file's, not let go. So no list of what the file holds is asked for:
+    /// what is owed a delete is what the pool answers for and lacks, asked of the file put back
+    /// by key, a chunk at a time — a chunk that will not be read owed whole, a delete of a row
+    /// the file lacks being nothing. And every change the file was to make of the rows not held
+    /// is owed again, the older store knowing none of them.
+    ///
+    /// `fileHolds` is for a store held whole, which answers for nothing it lacks: every row of
+    /// the file put back, of which it owes a delete of each it does not hold.
+    public func oweEverything(hosts: [String], fileHolds keys: [NoteKey]? = nil) {
         let held = Array(notes.keys)
-        let gone = keys.filter { notes[$0] == nil && (disk == nil || looked.contains($0)) }
+        var gone: [NoteKey] = []
+        if let disk {
+            let lacking = looked.filter { notes[$0] == nil }.sorted { ($0.host, $0.id) < ($1.host, $1.id) }
+            for start in stride(from: 0, to: lacking.count, by: Self.restoredChunk) {
+                let chunk = Array(lacking[start..<min(start + Self.restoredChunk, lacking.count)])
+                if let found = try? disk.rows(chunk) {
+                    gone += found.map(\.note.key)
+                } else {
+                    gone += chunk
+                }
+            }
+        } else {
+            gone = (keys ?? []).filter { notes[$0] == nil }
+        }
         notes.owe(held + gone)
+        filesCopiedIn += 1
         opsOwed = opsRun
         // The file knows none of them again: a row read in is read as each leaves it.
         opsSettled = opsFloor
@@ -1984,6 +2077,9 @@ public actor ItemStore {
         forgetLanded()
         changed(shown: false, replies: false)
     }
+
+    /// How many keys one read of the file put back asks at once (`oweEverything`).
+    static let restoredChunk = 500
 
     /// Holds a text pressed to send, or what is now known of one already held — in its place.
     ///
@@ -2249,8 +2345,11 @@ public actor ItemStore {
     public func paged(_ read: @Sendable () async throws -> Page) async throws -> Page {
         pagesOut += 1
         defer { pageBack() }
+        let copied = filesCopiedIn
         let page = try await read()
-        take(page.rows + page.carried)
+        // Read of a file a read back has since copied over (`replace(sources:said:)`): its rows
+        // are no longer the file's, and none is laid in.
+        if copied == filesCopiedIn { take(page.rows + page.carried) }
         return page
     }
 
@@ -2258,10 +2357,15 @@ public actor ItemStore {
     public func pagedIfAny(_ read: @Sendable () async throws -> Page?) async throws -> Page? {
         pagesOut += 1
         defer { pageBack() }
+        let copied = filesCopiedIn
         guard let page = try await read() else { return nil }
-        take(page.rows + page.carried)
+        if copied == filesCopiedIn { take(page.rows + page.carried) }
         return page
     }
+
+    /// How many times a read back copied another store into the file (`replace(sources:said:)`):
+    /// a page read before the latest is of the file as it was, and is not laid in.
+    private var filesCopiedIn = 0
 
     private func pageBack() {
         pagesOut -= 1
@@ -2429,7 +2533,6 @@ public actor ItemStore {
                 listedLeft[key.host, default: [:]][category, default: []].file((id, key), at: at, was: was, most: Self.listedLeftKept)
             }
         }
-        leftSinceReplace?.insert(key)
     }
 
     /// Where the row under `key`, listed under `id`, stands among `left` (newest first) — found
@@ -2458,13 +2561,26 @@ public actor ItemStore {
     @discardableResult
     private func pool(_ keys: some Sequence<NoteKey>) -> Set<NoteKey> {
         guard disk != nil else { return [] }
+        if passingThrough { return Set(keys).filter { notes[$0] == nil } }
         return lay(Set(keys).subtracting(looked), found: [])
+    }
+
+    /// The rows under `keys`, the pool's where it holds them and **the file's, passed through
+    /// and not laid in**, while it may hold another store (`passingThrough`).
+    private func passed(_ keys: [NoteKey]) -> [NoteKey: Note] {
+        var found: [NoteKey: Note] = [:]
+        for key in keys { found[key] = notes[key] }
+        let missing = keys.filter { found[$0] == nil }
+        guard let disk, !missing.isEmpty, let read = reading({ try disk.rows(missing) }) else { return found }
+        for row in read.rows where found[row.note.key] == nil { found[row.note.key] = unlanded(row.note) }
+        return found
     }
 
     /// Lays `found` in, where the pool does not answer for its rows: the keys not answered for.
     @discardableResult
     private func pool(found: [HeldRow]) -> Set<NoteKey> {
         guard disk != nil else { return [] }
+        if passingThrough { return Set(found.map(\.note.key).filter { self.notes[$0] == nil }) }
         // What the pool holds already stays as it has it, and is seen now: the window the page
         // was read for draws it once the screens next say so, and until then it is as new to
         // them as a row laid in — let go first, it would be a hole in a stretch read.
@@ -2554,7 +2670,6 @@ public actor ItemStore {
             }
             // One that arrived this run and left the pool keeps its place among the run's.
             arrival[key] = arrival[key] ?? Int(row.arrival)
-            leftSinceReplace?.remove(key)
             laid.append(key)
         }
         guard !laid.isEmpty else { return unread }
@@ -3124,7 +3239,8 @@ public actor ItemStore {
     /// so no wait and no press here can reach it. **And never a kept one** (#284): it stays,
     /// still marked, for as long as it is kept.
     @discardableResult
-    public func letGoneGo(markedBy cutoff: Date? = nil) -> Int {
+    public func letGoneGo(markedBy cutoff: Date? = nil) async -> Int {
+        await untilNoPutBack()
         // Over a file, its marked rows the pool does not hold go by key with the rest — or,
         // where the file would not say which they are, nothing goes.
         guard poolKept(), let unpooled = unpooled(.gone(markedBy: cutoff)) else { return 0 }
@@ -3183,6 +3299,7 @@ public actor ItemStore {
     /// decode back would be holding a note that disagrees with the store about the categories the
     /// row arrived through and about who boosted it.
     public func note(_ key: NoteKey) -> Note? {
+        if passingThrough { return passed([key])[key] }
         pool([key])
         return notes[key]
     }
@@ -3190,6 +3307,7 @@ public actor ItemStore {
     /// The rows held among `keys`, by key — one hop for a caller that just landed a read and
     /// draws what the store made of it (#284), rather than what the wire said.
     public func notes(_ keys: [NoteKey]) -> [NoteKey: Note] {
+        if passingThrough { return passed(keys) }
         pool(keys)
         var found: [NoteKey: Note] = [:]
         for key in keys { found[key] = notes[key] }
