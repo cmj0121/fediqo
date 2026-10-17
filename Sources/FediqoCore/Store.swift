@@ -57,6 +57,34 @@ public actor ItemStore {
     /// The file being put back to an older store (`restoring`), until `oweEverything` says it
     /// is: nothing settles meanwhile, as the file no longer holds what landed.
     private var restoringFile = false
+    /// How many rows the pool holds before it lets the least lately seen go (#359, C7, C21): a
+    /// soft cap — what must stay, stays — let down to nine tenths of it, so one page landing
+    /// does not let rows go each time.
+    public static let poolCap = 5_000
+    private let cap: Int
+    /// The keys the screens draw, as handed in last (`hold`), and the `drawn` they were drawn
+    /// from — **nothing until the screens first say**, and no row leaves the pool before: a pool
+    /// with no word on what is drawn holds every row it read, as round 1's did.
+    private var pins: Set<NoteKey>?
+    private var pinsDrawnAt = 0
+    /// The newest ids each timeline listed a row under, of the rows let go of the pool, newest
+    /// first, and each one's row (`newestListedID`): one read again or let go answers for
+    /// itself, and the next stands in. The newest `listedLeftKept` of each.
+    private var listedLeft: [String: [Category: [(id: String, key: NoteKey)]]] = [:]
+    private static let listedLeftKept = 64
+    /// The rows let go of the pool since the file was last laid in whole (`replace`) and not
+    /// read in again, nothing before one: read back in before the file is put back
+    /// (`restoring`), so a read back's undo owes them again as it owes every row held.
+    private var leftSinceReplace: Set<NoteKey>?
+    /// Whether the pool was told once it could not come under its cap: said once a run.
+    private var overCapSaid = false
+    /// Counts what may let a row leave that could not before — a row changed, laid in, taken
+    /// or landed, what is drawn said again — and the count at the last pass that let none go:
+    /// at the same count, the pass is not made again.
+    private var poolMoved = 0
+    private var leftNoneAt: Int?
+    /// How many passes were made, whether or not they let a row go: for the tests.
+    private(set) var evictionPasses = 0
     /// Every key the pool answers for (#357): each row laid in, each key asked of the file.
     /// **One among these that is not in the pool is not held**, whatever the file still says —
     /// a row let go is not read back before the save that deletes it lands.
@@ -216,6 +244,7 @@ public actor ItemStore {
 
     public init() {
         disk = nil
+        cap = Self.poolCap
     }
 
     /// The revision, each time something here really changed — so a screen reading this store
@@ -256,6 +285,8 @@ public actor ItemStore {
     private func changed(shown: Bool, replies: Bool, kept: Bool = true) {
         if kept { revision += 1 }
         if shown { drawn += 1 }
+        notes.drawing = drawn
+        poolMoved += 1
         if replies { repliesRevision += 1 }
         // Only a held row's read is noted (`read`), so more entries than rows means some went.
         if readAt.count > notes.count { readAt = readAt.filter { notes[$0.key] != nil } }
@@ -296,7 +327,7 @@ public actor ItemStore {
     ) {
         self.init(
             sources: sources, notes: incoming, said: said, notices: notices, unsent: unsent,
-            readFromDisk: readFromDisk, skipped: skipped, disk: nil
+            readFromDisk: readFromDisk, skipped: skipped, disk: nil, cap: Self.poolCap
         )
     }
 
@@ -305,19 +336,20 @@ public actor ItemStore {
     /// or laid in from a page (`take`). Nothing is owed a write until it changes.
     public init(
         sources: [Source], said: [SourceProfile] = [], notices: [NoticeReach] = [], unsent: [Unsent] = [],
-        rows: any HeldRows
+        rows: any HeldRows, cap: Int = ItemStore.poolCap
     ) {
         self.init(
             sources: sources, notes: [], said: said, notices: notices, unsent: unsent, readFromDisk: true,
-            skipped: [], disk: rows
+            skipped: [], disk: rows, cap: cap
         )
     }
 
     private init(
         sources: [Source], notes incoming: [Note], said: [SourceProfile], notices: [NoticeReach],
-        unsent: [Unsent], readFromDisk: Bool, skipped: [NoteKey], disk: (any HeldRows)?
+        unsent: [Unsent], readFromDisk: Bool, skipped: [NoteKey], disk: (any HeldRows)?, cap: Int
     ) {
         self.disk = disk
+        self.cap = cap
         if disk != nil { arrivals = Self.arrivingAfterTheFile }
         for text in unsent where !self.unsent.contains(where: { $0.id == text.id }) {
             self.unsent.append(text)
@@ -428,6 +460,9 @@ public actor ItemStore {
             incoming.filter { $0.kept || withinRetention($0) || shown.contains($0.key) }.map { ($0.key, $0) },
             uniquingKeysWith: { _, new in new }
         ))
+        notes.drawing = drawn
+        // Newer than any drawing made before: none leaves before the screens draw them.
+        notes.stampAll()
         // The file holds the package's rows as they came (`StorePackager`): what differs here —
         // a row past the window, one that owed a load — is owed a write; so is every source.
         let owedLoad = Set(arriving.lazy.filter(\.refsDue).map(\.key))
@@ -454,6 +489,8 @@ public actor ItemStore {
             opsRun = []
             opsFloor = opsMade
             opsSettled = opsMade
+            listedLeft = [:]
+            leftSinceReplace = []
         }
         sourcesWatcher?(sourceList.map(\.host))
         noticeEpochLast += 1
@@ -922,10 +959,20 @@ public actor ItemStore {
     /// wrote, or one a search or a thread brought, was listed by no read, and is never it.
     public func newestListedID(host raw: String, category: Category) -> String? {
         let host = raw.lowercased()
-        return notes.values
+        let held = notes.values
             .filter { $0.source.host == host && $0.goneSince == nil }
             .compactMap { $0.listed[category] }
             .max { StatusID.later($1, than: $0) }
+        // Of the rows let go of the pool, the newest not answered for again: read back, one
+        // says for itself; let go of the file, it says nothing, as in the whole store.
+        if let left = listedLeft[host]?[category], let first = left.firstIndex(where: { !looked.contains($0.key) }) {
+            if first > 0 { listedLeft[host]?[category] = Array(left[first...]) }
+        } else {
+            listedLeft[host]?[category] = nil
+        }
+        guard let left = listedLeft[host]?[category]?.first else { return held }
+        guard let held else { return left.id }
+        return StatusID.later(left.id, than: held) ? left.id : held
     }
 
     /// The posts held of `category` from `host` that a timeline brought (#201): what a read with
@@ -1085,6 +1132,7 @@ public actor ItemStore {
         // Deleted by the next save whether or not this store knows the file to hold it.
         hostsOwed.insert(host)
         let told = letNoticesGo(host: host)
+        listedLeft[host] = nil
         sourcesWatcher?(sourceList.map(\.host))
         // Over a file, its rows of the host the pool does not hold go by key with the rest — or,
         // where the file would not say which they are, no post goes, as where they stay.
@@ -1495,6 +1543,7 @@ public actor ItemStore {
         opsOwed = []
         inFlight.formUnion(changes.upserts.map(\.key) + changes.deletes)
         opsInFlight.formUnion(changes.ops.map(\.number))
+        poolMoved += 1
         return (changes, revision)
     }
 
@@ -1503,10 +1552,12 @@ public actor ItemStore {
     public func wrote(_ changes: RowChanges) {
         landed(changes)
         settleOps()
+        letRowsLeave()
     }
 
     /// `changes` no longer on their way to the file, written or handed back.
     private func landed(_ changes: RowChanges) {
+        poolMoved += 1
         inFlight.subtract(changes.upserts.map(\.key) + changes.deletes)
         opsInFlight.subtract(changes.ops.map(\.number))
     }
@@ -1534,7 +1585,22 @@ public actor ItemStore {
     /// the run is unsettled, so a row read from the file — by key, or on a page out across it
     /// — is read as each leaves it, and none settles again until `oweEverything`. Where the
     /// put back fails, none settles for the rest of the run: what the file holds is not known.
-    public func restoring() {
+    ///
+    /// **What left the pool since the file was laid in whole is read back first**, a chunk at a
+    /// time, while the file still holds it as the run left it, and is owed again with every
+    /// row held (`oweEverything`). Where any of it will not be read, this throws before
+    /// anything is unsettled, and the file is not to be put back: those rows would be lost.
+    public func restoring() throws {
+        if let left = leftSinceReplace?.sorted(by: { ($0.host, $0.id) < ($1.host, $1.id) }) {
+            var unread = 0
+            for start in stride(from: 0, to: left.count, by: 500) {
+                unread += pool(left[start..<min(start + 500, left.count)]).count
+            }
+            // Read in, a row is no longer among them (`lay`); one not read still is.
+            guard unread == 0 else { throw RowsNotReadBack(count: unread) }
+            // Every one held again, or let go since: none is the file's alone.
+            leftSinceReplace = []
+        }
         restoringFile = true
         opsSettled = opsFloor
     }
@@ -1842,6 +1908,113 @@ public actor ItemStore {
     private func pageBack() {
         pagesOut -= 1
         settleOps()
+        letRowsLeave()
+    }
+
+    // MARK: - Rows let go of the pool, least lately seen first (#359)
+
+    /// How many rows the pool holds: at least so many are held, never how many.
+    public var pooled: Int { notes.count }
+
+    /// The keys the screens draw now, made from what `all()` handed over at the `drawn`
+    /// revision `drawnAt`: in place of the last set, each seen now. **The first call is what lets
+    /// rows leave the pool at all** — none does before the screens say what they draw. Rows
+    /// leave at once where the pool is over its cap and no page is out; otherwise once none is.
+    public func hold(_ drawnNow: Set<NoteKey>, drawnAt: Int) {
+        if pins != drawnNow || pinsDrawnAt != drawnAt { poolMoved += 1 }
+        pins = drawnNow
+        pinsDrawnAt = drawnAt
+        notes.saw(drawnNow)
+        letRowsLeave()
+    }
+
+    /// **Lets the least lately seen rows go of the pool, not of the file**, where it holds more
+    /// than its cap: down to nine tenths of it, so the next page read in does not let rows go
+    /// again. Never in a whole store, never before the screens first say what they draw
+    /// (`hold`), and only at a quiet moment — no page out, the file not being put back — so a
+    /// page laid in after began after every row it might bring back older had left (C17).
+    ///
+    /// **What stays, whatever its turn**: a row changed and not taken by a save, or taken by
+    /// one that has not landed (the file would bring it back older); a kept row; one drawn
+    /// (`pins`), or laid in or changed since what is drawn was made; one owing a load not given
+    /// up (`owed(host:)` asks the pool alone); one carrying a mark a read on said again
+    /// (`remainSaid`: read back, it would lose it); and **what a row that stays holds with
+    /// it** (`Note.heldWith`, `Note.topicKey`), so a reference not in the pool still means not
+    /// held. A row let go frees what it held, which may then go in the same pass, in its turn.
+    private func letRowsLeave() {
+        guard disk != nil, let pins, pagesOut == 0, !restoringFile, notes.count > cap, leftNoneAt != poolMoved
+        else { return }
+        evictionPasses += 1
+        let goal = notes.count - cap * 9 / 10
+        // How many rows of the pool hold each key.
+        var holders: [NoteKey: Int] = [:]
+        for note in notes.values {
+            for key in Self.holds(note) { holders[key, default: 0] += 1 }
+        }
+        let since = pinsDrawnAt
+        let candidates = notes.values.filter { note in
+            let key = note.key
+            if notes.touched.contains(key) || inFlight.contains(key) || note.kept || pins.contains(key) { return false }
+            if (notes.seen[key]?.drawn ?? -1) >= since { return false }
+            if note.refsDue && !stalled.contains(key) { return false }
+            if let said = remainSaid[key.host], !note.gaps.isDisjoint(with: said) { return false }
+            return true
+        }
+        .map { (key: $0.key, tick: notes.seen[$0.key]?.tick ?? 0) }
+        .sorted { $0.tick != $1.tick ? $0.tick < $1.tick : ($0.key.host, $0.key.id) < ($1.key.host, $1.key.id) }
+        // Each candidate's turn, and the turns of those no row holds, the earliest out first.
+        var turn: [NoteKey: Int] = [:]
+        for (place, candidate) in candidates.enumerated() { turn[candidate.key] = place }
+        var ready = Turns(candidates.indices.filter { (holders[candidates[$0].key] ?? 0) == 0 })
+        var leaving: [Note] = []
+        while leaving.count < goal, let next = ready.pop() {
+            guard let note = notes[candidates[next].key] else { continue }
+            leaving.append(note)
+            letGo(note)
+            for held in Self.holds(note) {
+                holders[held, default: 1] -= 1
+                guard holders[held] == 0, let place = turn[held], notes[held] != nil else { continue }
+                // Freed: its turn among the rest.
+                ready.push(place)
+            }
+        }
+        if notes.count > cap, !overCapSaid {
+            overCapSaid = true
+            NetLog.index.notice("Rows the pool must keep are over its cap: \(self.notes.count, privacy: .public)")
+        }
+        guard !leaving.isEmpty else {
+            leftNoneAt = poolMoved
+            return
+        }
+        // Drawn nowhere, so nothing on screen moves: what `all()` hands over is only smaller.
+        changed(shown: leaving.contains { !$0.isPartOfTopic }, replies: leaving.contains(where: \.isPartOfTopic), kept: false)
+    }
+
+    /// `note` let go of the pool and not of the file: read again once it is wanted.
+    private func letGo(_ note: Note) {
+        let key = note.key
+        notes.evict(key)
+        looked.remove(key)
+        // A row that arrived this run keeps its place among the run's: read back, the file's
+        // `rowid` would put it before a copy that arrived ahead of it and is still held.
+        if (arrival[key] ?? 0) < Self.arrivingAfterTheFile { arrival[key] = nil }
+        // A reference by its source's id asks the file again, rather than take it for not held.
+        if let statusID = note.statusID { namesAsked[key.host]?.remove(statusID) }
+        if note.goneSince == nil {
+            for (category, id) in note.listed {
+                var left = (listedLeft[key.host]?[category] ?? []).filter { $0.key != key }
+                let at = left.firstIndex { StatusID.later(id, than: $0.id) } ?? left.endIndex
+                guard at < Self.listedLeftKept else { continue }
+                left.insert((id, key), at: at)
+                listedLeft[key.host, default: [:]][category] = Array(left.prefix(Self.listedLeftKept))
+            }
+        }
+        leftSinceReplace?.insert(key)
+    }
+
+    /// What `note` holds with it, but itself: what its staying keeps in the pool.
+    private static func holds(_ note: Note) -> Set<NoteKey> {
+        Set(note.heldWith + [note.topicKey].compactMap { $0 }).subtracting([note.key])
     }
 
     /// `note`'s key and what it holds with it: what reading it in reads.
@@ -1940,7 +2113,9 @@ public actor ItemStore {
             if let said = remainSaid[key.host], !row.note.gaps.isDisjoint(with: said) {
                 notes[key]?.gaps.subtract(said)
             }
-            arrival[key] = Int(row.arrival)
+            // One that arrived this run and left the pool keeps its place among the run's.
+            arrival[key] = arrival[key] ?? Int(row.arrival)
+            leftSinceReplace?.remove(key)
             laid.append(key)
         }
         guard !laid.isEmpty else { return unread }
@@ -2609,5 +2784,44 @@ public actor ItemStore {
         let theirs = arrival[b.key] ?? 0
         if mine != theirs { return mine < theirs }
         return a.source.host < b.source.host
+    }
+}
+
+/// The turns of the rows free to leave the pool, the earliest out first: a binary heap, so a
+/// row freed by one that left takes its turn without the rest being moved (`letRowsLeave`).
+private struct Turns {
+    private var heap: [Int] = []
+
+    init(_ turns: [Int]) {
+        for turn in turns { push(turn) }
+    }
+
+    mutating func push(_ turn: Int) {
+        heap.append(turn)
+        var child = heap.count - 1
+        while child > 0 {
+            let parent = (child - 1) / 2
+            guard heap[child] < heap[parent] else { break }
+            heap.swapAt(child, parent)
+            child = parent
+        }
+    }
+
+    mutating func pop() -> Int? {
+        guard let first = heap.first else { return nil }
+        let last = heap.removeLast()
+        guard !heap.isEmpty else { return first }
+        heap[0] = last
+        var parent = 0
+        while true {
+            let left = 2 * parent + 1
+            let right = left + 1
+            var least = parent
+            if left < heap.count, heap[left] < heap[least] { least = left }
+            if right < heap.count, heap[right] < heap[least] { least = right }
+            guard least != parent else { return first }
+            heap.swapAt(parent, least)
+            parent = least
+        }
     }
 }

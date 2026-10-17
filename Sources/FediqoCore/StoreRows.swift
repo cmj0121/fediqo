@@ -197,6 +197,16 @@ public struct RowsUnread: Error {
     }
 }
 
+/// What `ItemStore.restoring()` throws where rows let go of the pool since a read back could
+/// not be read in again (#359): the file is not to be put back, or they would be lost to it.
+public struct RowsNotReadBack: Error, Equatable {
+    public let count: Int
+
+    public init(count: Int) {
+        self.count = count
+    }
+}
+
 /// The store's rows, **with every key a change reached remembered until a save takes it**
 /// (`ItemStore.takeChanges`). Read as the dictionary it wraps; a row set to what it already
 /// was is no change, and a row set to nothing is a row to delete.
@@ -209,6 +219,18 @@ struct HeldNotes: Sequence {
     /// The keys let go since the last take, whether or not taken in again since: one held
     /// again is deleted and then written, so it is added where it arrived the second time.
     private(set) var dropped: Set<NoteKey> = []
+    /// When each row was last seen (#359) — laid in, changed, or drawn (`saw`) — as a tick that
+    /// only goes up, and the `drawing` it was last laid in or changed under: what a pool over
+    /// the file lets go of first, and what it keeps for screens drawn before it came.
+    private(set) var seen: [NoteKey: Seen] = [:]
+    private var clock = 0
+    /// The store's `drawn` now: what a row laid in or changed is stamped with.
+    var drawing = 0
+
+    struct Seen {
+        let tick: Int
+        let drawn: Int
+    }
 
     /// `rows` as they are on disk — nothing owed — or, `owed`, every one of them owed a write.
     init(_ rows: [NoteKey: Note] = [:], owed: Bool = false) {
@@ -223,6 +245,7 @@ struct HeldNotes: Sequence {
             if newValue == nil { dropped.insert(key) }
             rows[key] = newValue
             touched.insert(key)
+            if newValue == nil { seen[key] = nil } else { stamp(key) }
         }
     }
 
@@ -230,6 +253,34 @@ struct HeldNotes: Sequence {
     /// no write.
     mutating func lay(_ note: Note) {
         rows[note.key] = note
+        stamp(note.key)
+    }
+
+    private mutating func stamp(_ key: NoteKey) {
+        clock += 1
+        seen[key] = Seen(tick: clock, drawn: drawing)
+    }
+
+    /// The rows under `keys` drawn now: seen, and changed no more than they were.
+    mutating func saw(_ keys: some Sequence<NoteKey>) {
+        for key in keys where rows[key] != nil {
+            clock += 1
+            seen[key] = Seen(tick: clock, drawn: seen[key]?.drawn ?? -1)
+        }
+    }
+
+    /// Every row laid in now, as `lay` stamps one: what a pool laid in whole (`replace`) is
+    /// newer than any drawing made before it, and none of it leaves before the next is made.
+    mutating func stampAll() {
+        for key in rows.keys { stamp(key) }
+    }
+
+    /// The row under `key` let go of the pool and not of the file (#359): owed nothing, as it
+    /// is the file's. Only of a row no take is owed — the file would not have it otherwise.
+    mutating func evict(_ key: NoteKey) {
+        assert(!touched.contains(key), "a row let go of the pool before a save took it")
+        rows[key] = nil
+        seen[key] = nil
     }
 
     var values: Dictionary<NoteKey, Note>.Values { rows.values }

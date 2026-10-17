@@ -312,7 +312,7 @@ struct StoreLettingGoTests {
         let (made, _) = await pool.takeChanges()
         try await file.save(made)
         await pool.wrote(made)
-        await pool.restoring()
+        try await pool.restoring()
         try await file.save(sources: before.sources, notes: before.notes, said: before.said)
         // Read before the store is told what the file was put back to, and a save landing
         // meanwhile: still read as the marks taken back leave them.
