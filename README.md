@@ -490,7 +490,7 @@ on Preferences, and the question before removing says which it will do.
 | --- | --------------------------------------------------------------- |
 | `r` | reload the selected timeline, or ask the page in front again    |
 | `e` | write or change the selected timeline                           |
-| `/` | search the posts this device has read so far                    |
+| `/` | search the posts this device has read lately                    |
 | `l` | follow whoever's page, or the hashtag whose page, is in front   |
 | `h` | on Trends, open what is rising on your sources                  |
 | Tab | on an opened page, the tab beside; ⇧Tab the one before         |
@@ -528,8 +528,9 @@ who wrote it, who boosted it, its text, its hashtags, its source, and its catego
 their English or translated names and by list and board names. `*` stands for any run of
 characters, including none, and `?` for exactly one. Every other character stands for itself:
 there is no regex, operator, field prefix, or quoting. Case, and full-width against
-half-width, do not change what is found. As you type, the posts this device has read so far
-are searched: a post still in the store that no timeline has reached yet is not found.
+half-width, do not change what is found. As you type, the posts this device has read lately
+are searched — those round where each timeline is read, and those on the pages open: a post
+still in the store that no screen has reached lately is not found.
 Return also asks the sources of the timeline in front that can be searched. What is found
 is in time order. Clearing the field returns to the timeline. While an opened page is in front
 the field stands aside; leaving the page brings it back as it was.
@@ -796,7 +797,7 @@ says so. Newer posts stay on this device; turning the date off shows them again 
 fetch. The date survives a relaunch.
 
 With no network, everything this device holds still reads: timelines, threads already read,
-and pictures already brought. Rules are written and applied, and a search finds what has been read.
+and pictures already brought. Rules are written and applied, and a search finds what was read lately.
 What needs a network — asking a source, signing in, posting — says it could not reach the
 source, rather than hanging. When the network returns, what was left unasked is asked again,
 with no relaunch.
@@ -942,19 +943,21 @@ The Usage page is tabbed by purpose: Sources, Time, Keep, and Copies. Tab rotate
 Sources holds the totals and a row for each source: its mark, its hostname and the way in to
 its detail, which holds its figures — how many notices are held of it among them, where any
 are — and its Clear behind three dots. There is one figure of posts for each
-source, counting everything read from it so far, a forum topic's replies included. Time holds the week or month
+source, counting everything held from it, a forum topic's replies included. Time holds the week or month
 breakdown. Keep holds the two limits, Posts you keep, Let go by dates, and What the limits let go. Copies
 holds the pictures this device is keeping, and the drop that takes them. Clear takes a
 server's cached copies and its sign-in, and keeps its posts. Preferences keeps what you
 choose: language, theme, type, the latest date, what becomes of a removed source's posts,
 and the two ways the store leaves — Take away and Move nearby.
 
-A timeline reads the store a page at a time, so a count of posts is of the posts read so far,
-and the store may hold more. Where that is so, the count says "at least" so many: Usage's
-posts, its totals and what you keep, the figure beside Let go by dates, and the questions
-that remove a source or stop keeping. A source none of whose posts has been read says "None
-read yet" rather than none, and Posts you keep reads in what is kept before it says nothing
-is. The question Let go by dates asks names exactly how many go, read or not.
+Usage counts each source's posts, and all of them, from the store itself, so those figures
+are exact however little of it has been read. What is counted over the posts read lately may
+fall short of what the store holds, and says "at least" so many: the week or month breakdown,
+what changed posts said before, what you keep, the figure beside Let go by dates, and the
+questions that remove a source or stop keeping. Posts you keep says "None read yet" rather
+than none, and reads in what is kept before it says nothing is. The question Let go by dates
+asks names exactly how many go, read or not, and it offers every source the store holds posts
+from.
 
 What a source says about itself — its name, its figures, how long a post may be — stays on
 this device with the source. After a relaunch, with or without a network, its page shows what
@@ -1132,7 +1135,7 @@ nothing reaches it again.
 
 #### Take away
 
-In this build Take away says it is not ready yet: it would carry only the posts read so far,
+In this build Take away says it is not ready yet: it would carry only the posts read lately,
 and nothing changes. A later version brings it back as written here.
 
 In Preferences. Take away writes what this device holds — posts, timelines,
@@ -1212,6 +1215,16 @@ Opening reads none of the store's posts. Fediqo lands where your sources place i
 timeline is there to use from the first moment: it says it is being read from this device
 until its first page lands, and the launch's octopus is drawn over it without standing in the
 way of a press or a key. Each timeline then reads a page at a time, as far as you read.
+
+A timeline holds only a stretch round where you read: it reads ahead as you go and lets the
+far side go, so however long you read, what Fediqo holds in hand stays about the same. One you
+switch away from keeps a short stretch round your place; come back and it is drawn at once,
+then that stretch is read again, so a post that arrived meanwhile shows. An opened page — a
+thread, a person, a hashtag, a search — keeps its posts while it is open, and so do an answer
+being written and a post waiting to be sent. Posts no screen shows leave what is in hand once
+there are many, those seen least lately first, and never one still being saved or one you
+keep; they stay in the store and are read again when wanted. Going to the top of a timeline
+read so far down that its newest posts were let go reads its newest page afresh.
 
 The first launch after an upgrade from a build that did not read this way first arranges the
 store to be read by pages, which on a large store takes a few seconds. Meanwhile the timeline

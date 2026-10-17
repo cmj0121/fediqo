@@ -181,7 +181,8 @@ devices when both agree, and it passes through nowhere of ours. Limits you set l
 go, and say which limit did.
 
 What is held is read a page at a time, as far as a timeline is read; nothing waits for all of
-it to be read at once.
+it to be read at once. Only what is near where you read, and what an open page shows, is kept
+in hand; the rest stays held and is read again when wanted.
 
 ## Later
 
