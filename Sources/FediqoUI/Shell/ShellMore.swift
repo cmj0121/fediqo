@@ -426,24 +426,22 @@ struct TrendsEndFoot: View {
 /// chain the type-checker reads quickly.
 ///
 /// **This device first** (#357): a timeline read from the file a page at a time reads the page
-/// below from there while the file has one (`readsOn`, `ShellSession.readOn`), and only once it
-/// has none asks its sources.
+/// below from there while the file has one — as the reader's place moves (`ShellSession.placed`,
+/// #359), and from its foot only where the place has read nothing on (`footReached`) — and only
+/// once it has none asks its sources.
 struct AsksForMore: ViewModifier {
     let asks: Bool
-    var readsOn = false
-    var row: String?
-    var latest: LatestDate?
     let timeline: TimelineQuery
     let session: ShellSession
+    var latest: LatestDate?
 
     func body(content: Content) -> some View {
         content.onAppear {
-            if session.readsOnFromFile(timeline) {
-                guard readsOn else { return }
-                Task { await session.readOn(timeline, from: row, latest: latest) }
+            guard asks else { return }
+            guard !session.readsOnFromFile(timeline) else {
+                session.footReached(timeline, latest: latest)
                 return
             }
-            guard asks else { return }
             Task { await session.reload.more(timeline, in: session) }
         }
     }

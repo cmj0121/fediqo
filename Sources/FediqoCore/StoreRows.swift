@@ -136,6 +136,25 @@ public struct PageCursor: Sendable, Hashable {
         self.rowid = rowid
     }
 
+    /// A place in the file's order at a moment and an id, the moment written as the file writes
+    /// one (#359): where an edge drawn onto a row is read past from, **whether or not the file
+    /// still holds that row**. `rowid` steps past every copy under the id that way: the greatest
+    /// there is going older, the least going newer.
+    package init(millisecond: Int64, id: String, rowid: Int64) {
+        let seconds = millisecond >= 0 ? millisecond / 1000 : (millisecond - 999) / 1000
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        let at = calendar.dateComponents(
+            [.year, .month, .day, .hour, .minute, .second], from: Date(timeIntervalSince1970: TimeInterval(seconds))
+        )
+        postedAt = String(
+            format: "%04d-%02d-%02d %02d:%02d:%02d.%03d", at.year ?? 0, at.month ?? 0, at.day ?? 0, at.hour ?? 0,
+            at.minute ?? 0, at.second ?? 0, Int(millisecond - seconds * 1000)
+        )
+        self.id = id
+        self.rowid = rowid
+    }
+
     /// The row's time as a moment: the file's `YYYY-MM-DD HH:MM:SS.SSS`, in UTC, to the
     /// millisecond it holds. Nothing for a time the file did not write that way.
     public var moment: Date? {

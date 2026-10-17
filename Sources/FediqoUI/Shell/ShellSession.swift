@@ -395,9 +395,15 @@ final class ShellSession {
     /// timeline to show (C1).
     @ObservationIgnored var afterFirstPage: (@Sendable () async -> Void)?
     @ObservationIgnored var firstPageDrawn = false
-    /// Where each timeline has been read down to in the file, by query (#357). Nothing for one
+    /// Which stretch of the file each timeline has read and draws, by query (#357). Nothing for one
     /// not read yet, which waits for its first page.
     var coverage: [TimelineQuery: TimelineCoverage] = [:]
+    /// The row each timeline's window was last moved round (#359, C19): its last anchor, or
+    /// where it was left. Past observation, as `scrolledTop` is — written from the scroll.
+    @ObservationIgnored var anchors: [TimelineQuery: String] = [:]
+    /// How many window moves (`placed`) each timeline has running, begun from the scroll: none
+    /// more is begun for a short list while one is (`scrolled`, `footReached`).
+    @ObservationIgnored var placing: [TimelineQuery: Int] = [:]
     /// Whether every kept row of the file is in the pool (`readKeptRows`): nil until asked and
     /// while the read is out, then whether it read. What Usage's kept section waits for, so it
     /// never says nothing is kept where the file keeps some (#357).

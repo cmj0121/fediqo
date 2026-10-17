@@ -282,6 +282,7 @@ struct TimelinePane: View {
         // parked instead — among the posts that timeline shows, not among the results — so
         // closing the search gives back the post of the timeline the reader is in.
         .onChange(of: session.timelineID) { left, arrived in
+            let top = session.scrolledTop
             // Another list, so the row the last one had at the top means nothing here.
             session.scrolledTop = nil
             // A tag's page stays over the switch, and its lamp and the place under it are
@@ -291,6 +292,9 @@ struct TimelinePane: View {
             let mark = session.readingMark
             let wasReading = mark.left()
             mark.forget(for: arrived?.id ?? TimelineQuery.all.id)
+            // The one left keeps the stretch round the post it was left at, drawn at once on the
+            // way back (#359).
+            session.timelineLeft(left ?? .all, at: (touch ? wasReading : selectedID) ?? top)
             if !searching {
                 if !onTag {
                     // Under a finger the place kept is the post being read, and the one given
@@ -404,13 +408,6 @@ struct TimelinePane: View {
 
     /// How many rows from the end reading starts asking for more.
     static let moreAhead = 5
-
-    /// Whether the row at `index` of `count`, coming into view, reads the page below it from this
-    /// device (#357, C4): one of the last `ShellSession.readAhead`, the stretch read again on the
-    /// way. Never a search's, for `asksForMore`'s reason.
-    static func readsOn(at index: Int, of count: Int, searching: Bool) -> Bool {
-        !searching && index >= count - ShellSession.readAhead
-    }
 
     /// Where a list drawn afresh puts the reader (#110).
     enum Landing: Equatable, Sendable {
@@ -997,6 +994,10 @@ struct TimelinePane: View {
         let gaps = searching ? [:] : session.gapMarks(in: items)
         // What is new to this drawing, which eases in where it stands (#357).
         let arrived = searching ? [] : session.timelineArrived(latest: prefs.latestDate)
+        // Which drawing this is, for the place to be held across one that moved the rows above
+        // it (#359): none for a search's results.
+        let stamp = searching ? 0 : session.timelineDrawn(latest: prefs.latestDate).stamp
+        let above = !searching && session.timelineReadsAbove(latest: prefs.latestDate)
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -1013,6 +1014,8 @@ struct TimelinePane: View {
                                 .padding(ShellSpace.pad)
                         }
                     }
+                    // Rows above the head still to be read from this device (#359).
+                    if above { TimelineReadingOn() }
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
                         let isLast = index == last
                         // **One view a post, the rule under it included** (#303). The list
@@ -1070,8 +1073,7 @@ struct TimelinePane: View {
                         // appears as it is scrolled or walked to, and nothing else asks.
                         .modifier(AsksForMore(
                             asks: Self.asksForMore(at: index, of: rows.count, searching: searching),
-                            readsOn: Self.readsOn(at: index, of: rows.count, searching: searching),
-                            row: item.id, latest: prefs.latestDate, timeline: timeline, session: session
+                            timeline: timeline, session: session, latest: prefs.latestDate
                         ))
                         .modifier(TimelineGapMarked(marks: gaps[item.id], session: session))
                         if !isLast {
@@ -1103,8 +1105,8 @@ struct TimelinePane: View {
             ))
             // The end of the list stops short of whatever floats over the page (#112).
             .clearsFloatingCorner()
-            .modifier(KeepsTopRow(session: session))
-            .modifier(HoldsPlace(session: session, proxy: proxy, touch: touch, first: items.first?.id))
+            .modifier(KeepsTopRow(session: session, placing: searching ? nil : timeline, latest: prefs.latestDate))
+            .modifier(HoldsPlace(session: session, proxy: proxy, touch: touch, first: items.first?.id, stamp: stamp))
             // The rows the mark may be among, said when they change and not on every pass (#303).
             // The drawn timeline's own ids, one array a drawing: compared in no time where they
             // did not change (#357).
@@ -1476,10 +1478,15 @@ struct TimelinePane: View {
 /// for the compiler the CI builds with.
 struct KeepsTopRow: ViewModifier {
     let session: ShellSession
+    /// The timeline whose place the top row is (#359): nothing for a search's results.
+    var placing: TimelineQuery?
+    var latest: LatestDate?
 
     func body(content: Content) -> some View {
         content.onScrollTargetVisibilityChange(idType: String.self) { visible in
             session.scrolledTop = visible.first
+            // The reader's place, which moves the timeline's window every twenty rows (C19).
+            if let placing, let top = visible.first { session.scrolled(to: top, of: placing, latest: latest) }
             // The reading mark is worked out from the same report (#303), and from the rows
             // wholly on screen, said below. Kept whether or not a finger is all there is, so a
             // keyboard taken away finds the mark where the list is; nothing reads it till then.
@@ -1520,9 +1527,27 @@ struct HoldsPlace: ViewModifier {
     var touch = false
     /// The newest post of the list in front: what a pull's landing puts at the top (#307).
     var first: String?
+    /// The drawing of the timeline in front (`DrawnTimeline.stamp`), none for a search's.
+    var stamp = 0
+
+    /// What moves the list under the reader: what is held, or the drawing alone.
+    struct Moved: Equatable {
+        let notes: Int
+        let stamp: Int
+    }
 
     func body(content: Content) -> some View {
-        content.onChange(of: session.notesRevision) { _, _ in
+        content.onChange(of: Moved(notes: session.notesRevision, stamp: stamp)) { was, now in
+            let held = ShellReadingMark.heldAtTop(
+                top: session.scrolledTop, marked: session.readingMark.id, touch: touch
+            )
+            guard was.notes != now.notes else {
+                // **The drawing alone moved** (#359): an edge let go, a page read above. Held
+                // only where the rows above the one read are not what they were, so a stretch
+                // let go below moves nothing.
+                if let top = held, session.timelineDrawnMovedAbove(top) { proxy.scrollTo(top, anchor: .top) }
+                return
+            }
             // **What a pull brought is shown** — the list was at rest at its top, and holding
             // the post that was first would leave the new ones out of sight above it, a pull
             // that looked as though it did nothing. Any other landing holds the place.
@@ -1530,9 +1555,6 @@ struct HoldsPlace: ViewModifier {
                 if let first { proxy.scrollTo(first, anchor: .top) }
                 return
             }
-            let held = ShellReadingMark.heldAtTop(
-                top: session.scrolledTop, marked: session.readingMark.id, touch: touch
-            )
             guard let top = held else { return }
             proxy.scrollTo(top, anchor: .top)
         }
