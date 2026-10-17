@@ -519,11 +519,15 @@ public actor ItemStore {
     }
 
     /// The rows of the pool past the months limit that the whole store would have let go
-    /// (`letGoBeyond`), **over a file alone** (#357, C10): there they stay, in the file and in
-    /// the pool, until the limit is kept in the file too, and are handed over by neither `all()`
-    /// nor `replies()` — as no page shows them (`PageQuery.keepFrom`). A kept row stays, and so
+    /// (`letGoBeyond`), **over a file alone** (#357, C10): handed over by neither `all()` nor
+    /// `replies()` — as no page shows them (`PageQuery.keepFrom`). A kept row stays, and so
     /// does what a kept or in-window row quotes, never a reblog. Nothing for a whole pool, which
     /// lets them go, or with no limit.
+    ///
+    /// **Still asked once the limit is kept in the file a step at a time** (#360): between two
+    /// steps a row past it is held still, a row ages past it while the run goes on, and a read
+    /// of the file — a thread, a person — can bring in an old one. Each is let go by the next act
+    /// of the limit, and none is drawn before.
     private func pastTheLimit() -> Set<NoteKey> {
         guard disk != nil, let retention else { return [] }
         let within = { (note: Note) in note.kept || note.postedAt >= retention }
@@ -1227,9 +1231,151 @@ public actor ItemStore {
     /// `setRetention`, saying which sources the posts went from as well as how many (#251) — what
     /// the months limit writes into its account. **A kept post stays whatever its age** (#284),
     /// and is counted in nothing that went.
+    ///
+    /// **Over a file, every step of it at once** (`letGoBeyond(months:from:calendar:step:after:)`):
+    /// what the whole store would let go, read a step at a time and let go in one call — for a
+    /// caller with nothing to save between. The months limit itself saves after each step.
     public func letGoBeyond(months: Int?, from now: Date = Date(), calendar: Calendar = .current) -> WentByLimit {
+        let cutoff = limit(months: months, from: now, calendar: calendar)
+        guard disk != nil else { return letGoBeyondWhole(cutoff) }
+        guard let cutoff else { return .none }
+        var went = WentByLimit.none
+        var after: PageCursor?
+        repeat {
+            let step = letGoBeyond(cutoff, step: Self.beyondStep, after: after)
+            went = went.adding(step.went)
+            after = step.next
+        } while after != nil
+        return went
+    }
+
+    /// The months limit set as of `now`, and nothing let go but the notices older than it: what
+    /// every page is cut by from here (`keepFrom`), before a step of it has run (#360). Returns
+    /// the cutoff, or nothing for no limit.
+    @discardableResult
+    public func setLimit(months: Int?, from now: Date = Date(), calendar: Calendar = .current) -> Date? {
+        limit(months: months, from: now, calendar: calendar)
+    }
+
+    /// How many rows of the file one step of the months limit reads at most (#360, C32).
+    public static let beyondStep = 2_000
+
+    /// **One step of the months limit** (#360, C32), under the limit `setLimit` set at `cutoff`
+    /// — **and nothing where the limit is no longer that**: a run of steps begun under a limit the
+    /// person has since moved lets nothing go under the old one. Of the rows past it, the
+    /// next `step` of the file's from past `after` on — the oldest first — let go where the whole
+    /// store would let them go (`letGoBeyondWhole`), with every row the pool holds past it. Says
+    /// what went, and where the next step starts, or nothing once the file has no more past the
+    /// limit — or would not be read, and then nothing more goes this time.
+    ///
+    /// **Spared as the whole store spares**: a kept row; a row posted inside the limit; a post (not
+    /// a reblog) that a kept or in-limit row of the file or the pool refers to — a quote, a reblog's
+    /// post, a topic answered; what a kept reblog shows (`shownByKept`). A row past the limit
+    /// spares nothing. **What the screens draw is no reason to stay** (pins), nor a change on its
+    /// way to the file: a pooled row goes from the pool, the file's own by key (`drop`), and the
+    /// next save deletes both. A row spared is passed over, and is not asked about again by the
+    /// steps after: the cursor is past it. **A row of the file read in while the steps run** — a
+    /// thread, a person — is judged by the next step whether or not it is still in the pool
+    /// (`readPastLimit`): one the cursor passed while it was spared, and that left the pool
+    /// since, would otherwise stay in the file.
+    ///
+    /// A store with no file lets go of everything at once, and says no next step.
+    public func letGoBeyond(_ cutoff: Date, step: Int, after: PageCursor?) -> (went: WentByLimit, next: PageCursor?) {
+        guard retention == cutoff else { return (.none, nil) }
+        guard let disk else { return (letGoBeyondWhole(cutoff), nil) }
+        if after == nil {
+            stepping = true
+            readPastLimit = [:]
+        }
+        guard step > 0, poolKept() else {
+            stepping = false
+            return (.none, nil)
+        }
+        let read: (rows: [PastLimit], next: PageCursor?)
+        do {
+            read = try disk.beyond(cutoff, limit: step, after: after)
+        } catch {
+            Self.unread(error)
+            stepping = false
+            return (.none, nil)
+        }
+        let shown = shownByKept()
+        // What the pool's rows that stay refer to, and the pool's own rows past the limit: every
+        // one each step, so one read in or aged past it since the last is not missed.
+        var referred: Set<NoteKey> = []
+        var past: [(key: NoteKey, reblogs: Bool)] = []
+        for note in notes.values {
+            if note.kept || note.postedAt >= cutoff {
+                referred.formUnion(note.heldWith)
+            } else {
+                past.append((note.key, note.isReblog))
+            }
+        }
+        let pooled = past.count
+        // The file's rows the pool does not answer for: one it answers for is judged as it holds
+        // it, among its own, or is let go already.
+        // And those read in since the last step that left the pool again: the file's alone now.
+        let readIn = readPastLimit
+        readPastLimit = [:]
+        var fromFile = Set<NoteKey>()
+        for (key, reblogs) in readIn where !looked.contains(key) && notes[key] == nil && fromFile.insert(key).inserted {
+            past.append((key, reblogs))
+        }
+        for row in read.rows where !looked.contains(row.key) && notes[row.key] == nil && fromFile.insert(row.key).inserted {
+            past.append((row.key, row.reblogs))
+        }
+        let asked = past.filter { !$0.reblogs && !shown.contains($0.key) && !referred.contains($0.key) }.map(\.key)
+        if !asked.isEmpty {
+            do {
+                for referrer in try disk.referring(to: asked, stayingFrom: cutoff) where !looked.contains(referrer.key) {
+                    referred.insert(referrer.target)
+                }
+            } catch {
+                Self.unread(error)
+                stepping = false
+                return (.none, nil)
+            }
+        }
+        var gone: Set<String> = []
+        var unpooled: [NoteKey] = []
+        var shownMoved = false
+        var repliesMoved = false
+        var count = 0
+        for (index, row) in past.enumerated()
+        where !(shown.contains(row.key) || (!row.reblogs && referred.contains(row.key))) {
+            if index < pooled {
+                let part = notes[row.key]?.isPartOfTopic ?? false
+                shownMoved = shownMoved || !part
+                repliesMoved = repliesMoved || part
+                notes[row.key] = nil
+            } else {
+                // Not read, so not known to be a topic's reply or an item: both are told.
+                shownMoved = true
+                repliesMoved = true
+                unpooled.append(row.key)
+            }
+            arrival[row.key] = nil
+            gone.insert(row.key.host)
+            count += 1
+        }
+        drop(unpooled)
+        if count > 0 { changed(shown: shownMoved, replies: repliesMoved) }
+        if read.next == nil { stepping = false }
+        return (WentByLimit(posts: count, sources: gone.sorted()), read.next)
+    }
+
+    /// Whether a run of the months limit's steps is under way (`letGoBeyond(_:step:after:)`):
+    /// begun by its first step, ended by its last.
+    private var stepping = false
+    /// The rows of the file laid in while the steps run that are past the limit and not kept, by
+    /// key, and whether each is a reblog: judged by the next step, in the pool or not.
+    private var readPastLimit: [NoteKey: Bool] = [:]
+
+    /// The months limit set as of `now` (`KeepPolicy.cutoff`), and every notice older than it let
+    /// go: the cutoff, or nothing for no limit.
+    private func limit(months: Int?, from now: Date, calendar: Calendar) -> Date? {
         retention = KeepPolicy.cutoff(keepingMonths: months, from: now, calendar: calendar)
-        guard let retention else { return .none }
+        guard let retention else { return nil }
         // A notice older than the limit goes as a post does, and so does the copy of a post that
         // old a newer notice carries: left, they would be words older than the limit on disk.
         var noticed = false
@@ -1240,11 +1386,13 @@ public actor ItemStore {
             noticed = true
         }
         if noticed { noticesChanged() }
-        // **Over a file nothing goes, from it or from the pool** (#357): the rows past the limit
-        // stay on disk until the limit is kept there too, and no page shows one
-        // (`PageQuery.keepFrom`). Round 1's pool only grows, so no row in it can be owed a
-        // delete it was never let go for.
-        if disk != nil { return .none }
+        return retention
+    }
+
+    /// The months limit over a store held whole: every row past `cutoff` that nothing spares,
+    /// let go at once — the rule each step over a file keeps.
+    private func letGoBeyondWhole(_ cutoff: Date?) -> WentByLimit {
+        guard let retention = cutoff else { return .none }
         let before = notes.count
         // A quoted post a kept post quotes stays, as `ingest` keeps it (#214): the window's reach
         // has passed it, the quote's has not.
@@ -2232,6 +2380,9 @@ public actor ItemStore {
         var laid: [NoteKey] = []
         for row in read {
             let key = row.note.key
+            if stepping, let retention, !row.note.kept, row.note.postedAt < retention {
+                readPastLimit[key] = row.note.isReblog
+            }
             notes.lay(unlanded(row.note))
             if let said = remainSaid[key.host], !row.note.gaps.isDisjoint(with: said) {
                 notes[key]?.gaps.subtract(said)

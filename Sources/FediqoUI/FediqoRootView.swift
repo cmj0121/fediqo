@@ -294,8 +294,9 @@ public struct FediqoRootView: View {
                 // work for an initializer that runs every time the view is made.
                 if let carrier = session.carrier { session.carry.say(leftBy: carrier) }
                 await session.loadLimitAccount()
-                // The months limit before any page: every page is cut by it (#357).
-                await session.keep(months: prefs.keepMonths)
+                // The months limit before any page: every page is cut by it (#357). What it lets
+                // go is let go a step at a time once the first page is in (below, #360).
+                await session.cut(months: prefs.keepMonths)
                 // **Where this launch lands is the sources' answer, and nothing else's** (#101,
                 // #357): the timeline is there where a source is, whether or not a row of it has
                 // been read, and its pane reads its first page as it shows — drawn as being read
@@ -306,10 +307,13 @@ public struct FediqoRootView: View {
                 }
                 await session.reloadFromStore()
                 await session.adoptUnsent()
-                // Then the room (#249), judged once the months limit has had its turn — the one
-                // order in which each limit acts once at a launch.
+                // The room as set (#249), then the months limit kept in the file, in a task of its
+                // own so no page waits for more than one step of it (#360), and the launch's room
+                // check once it has had its turn.
                 session.roomBytes = prefs.roomBytes
-                await session.keepWithinRoom()
+                let months = prefs.keepMonths
+                let keeping = Task { await session.keepAtLaunch(months: months) }
+                defer { keeping.cancel() }
                 // Ended with this view's own task, so a window closed stops saying its notice.
                 let arriving = staged.map { staged in Task { await arrive(at: staged) } }
                 defer { arriving?.cancel() }

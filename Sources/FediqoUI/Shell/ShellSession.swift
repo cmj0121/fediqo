@@ -3112,39 +3112,100 @@ final class ShellSession {
     /// relaunch; where it dropped nothing — forever, a wider window, a launch with nothing old —
     /// neither happens. Returns how many notes went.
     ///
+    /// **A step at a time over a file** (#360, C32): at most `step` of the file's rows past the
+    /// limit are read and let go at once (`ItemStore.letGoBeyond(months:from:calendar:step:after:)`),
+    /// what is held read again and the step written before the next — so a landing saved between
+    /// two steps is written as it comes, and a page asked meanwhile waits for one step, never the
+    /// lot. **A limit set again meanwhile ends this one**, as does its task cancelled: the steps
+    /// left are the newer limit's, or the next launch's.
+    ///
     /// **What went is written into the limits' account** (#251): the months limit acted, when,
-    /// how many posts and from which sources — the one thing that can still be said of them.
+    /// how many posts and from which sources — the one thing that can still be said of them —
+    /// one line for the act, its steps summed.
     @discardableResult
-    func keep(months: Int?, from now: Date = Date()) async -> Int {
+    func keep(months: Int?, from now: Date = Date(), step: Int = ItemStore.beyondStep) async -> Int {
+        await keepRun(months: months, from: now, step: step).posts
+    }
+
+    /// `keep(months:)`, saying too whether its steps ran to the end — not ended by a newer limit
+    /// or by its task cancelled. **Notices older than the limit** go as the limit is set, once a
+    /// run, and are written by the first save after: a step's that let posts go, or the one
+    /// below where none went.
+    func keepRun(months: Int?, from now: Date = Date(), step: Int = ItemStore.beyondStep) async -> (posts: Int, ended: Bool) {
+        keeping &+= 1
+        let run = keeping
         let told = await store.noticesRevision
-        let went = await store.letGoBeyond(months: months, from: now)
-        // Every page is cut where the store now keeps from (#357): moved, each timeline is read
-        // afresh, as what its pages left out is no longer what they would.
-        let cut = await store.keepFrom
-        if cut != keepFrom { keepFrom = cut }
-        // The notices page draws nothing past the limit from this moment (`ShellNoticeList.cut`).
-        await noticeList.follow(in: self)
+        // The limit set once, for every step of this run: a step under a limit moved since lets
+        // nothing go (`ItemStore.letGoBeyond(_:step:after:)`).
+        let cutoff = await store.setLimit(months: months, from: now)
+        await followCut()
+        var went = WentByLimit.none
+        var next: PageCursor?
+        repeat {
+            guard let cutoff else { break }
+            let made = await store.letGoBeyond(cutoff, step: step, after: next)
+            next = made.next
+            went = went.adding(made.went)
+            guard made.went.posts > 0 else { continue }
+            // What is drawn follows each step — a row an open page drew among what went, with it
+            // — and what the screens draw is said to the store again (`reloadFromStore`).
+            await reloadFromStore()
+            // Waited for: what the window dropped is not said to be gone while the file still
+            // holds it (#292), and the next step is not read before this one is written.
+            await saveNow(.posts)
+            await Task.yield()
+        } while next != nil && run == keeping && !Task.isCancelled
+        let ended = next == nil && run == keeping
         guard went.posts > 0 else {
             // Only notices older than the limit went, or the copy of a post that old one
             // carried: waited for all the same, and counted nowhere — a notice is not a post.
             if await store.noticesRevision != told { await saveNow(.posts) }
-            return 0
+            return (0, ended)
         }
-        // The window cuts a topic's kept replies too, and the count says so at once (#194).
-        let drawnAt = await store.drawn
-        let all = await store.all()
-        let replies = await store.replies()
-        adoptHeld(notes: all, replies: replies, drawnAt: drawnAt)
-        adoptedReplies = await store.repliesRevision
-        // Waited for: what the window dropped is not said to be gone while the file still holds
-        // it (#292). Giving the file back its room, and measuring it, follow and are not.
-        await saveNow(.posts) { [weak self] in
+        // Giving the file back its room, and measuring it, follow the last step's save and are
+        // not waited for. **A run ended early writes its own line**, of what its steps let go —
+        // true of what went, as the newer run's line is of what it let go after.
+        let before = saving
+        saving = Task { [weak self] in
+            await before?.value
             try? await self?.compactStore?()
             await self?.readStoreBytes()
         }
         await record(LimitAct(limit: .months, at: now, posts: went.posts, sources: went.sources))
-        return went.posts
+        return (went.posts, ended)
     }
+
+    /// A launch's months limit kept in the file, then its one room check (#249) — the one order
+    /// in which each limit acts once at a launch — **and no room check where the months run did
+    /// not end**: a newer limit's run, or none at all for a task cancelled. The room itself is
+    /// set before this, so a landing meanwhile is judged by it as ever.
+    func keepAtLaunch(months: Int?) async {
+        let run = await keepRun(months: months)
+        guard run.ended, !Task.isCancelled else { return }
+        await keepWithinRoom()
+    }
+
+    /// The months limit set and nothing let go by it but the notices older than it (#360): what a
+    /// launch asks before its first page, every page being cut by it (#357). The rows past it
+    /// are let go by `keep(months:)`, which follows.
+    func cut(months: Int?, from now: Date = Date()) async {
+        let told = await store.noticesRevision
+        await store.setLimit(months: months, from: now)
+        await followCut()
+        if await store.noticesRevision != told { saveSoon() }
+    }
+
+    /// Every page cut where the store now keeps from (#357): moved, each timeline is read afresh,
+    /// as what its pages left out is no longer what they would. The notices page draws nothing
+    /// past the limit from this moment (`ShellNoticeList.cut`).
+    private func followCut() async {
+        let cut = await store.keepFrom
+        if cut != keepFrom { keepFrom = cut }
+        await noticeList.follow(in: self)
+    }
+
+    /// Counts the months limit's acts begun (`keep(months:)`): one begun since ends the one before.
+    @ObservationIgnored private var keeping = 0
 
     /// An opening post just read, kept with its row in the store and saved (#154).
     ///

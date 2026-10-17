@@ -86,6 +86,18 @@ public enum RowSelection: Sendable, Equatable {
     case gone(markedBy: Date?)
 }
 
+/// A row of the file past the months limit (`HeldRows.beyond`): its key, and whether it is a
+/// reblog — which nothing that refers to it spares.
+public struct PastLimit: Sendable, Equatable {
+    public let key: NoteKey
+    public let reblogs: Bool
+
+    public init(key: NoteKey, reblogs: Bool) {
+        self.key = key
+        self.reblogs = reblogs
+    }
+}
+
 /// A row of the file that refers to another (`Note.heldWith`), as the room limit asks of it:
 /// the row, where it stands in the order rows go in, whether it is kept — and what it refers to.
 public struct Referrer: Sendable, Equatable {
@@ -196,6 +208,14 @@ public protocol HeldRows: Sendable {
     func oldest(_ limit: Int, after: PageCursor?) throws -> (rows: [HeldRow], next: PageCursor?)
     /// Every row that refers to one of `keys` (`Note.heldWith`).
     func referring(to keys: [NoteKey]) throws -> [Referrer]
+    /// At most `limit` rows not kept and posted before `cutoff`, the oldest first and two of one
+    /// moment in the order they arrived, from past `after` on — by key, with whether each is a
+    /// reblog, and nothing decoded — and where the next are asked from, or nothing where none
+    /// are left (#360): what the months limit lets go a step at a time.
+    func beyond(_ cutoff: Date, limit: Int, after: PageCursor?) throws -> (rows: [PastLimit], next: PageCursor?)
+    /// Every row that refers to one of `keys` and stays by the months limit — kept, or posted at
+    /// or after `cutoff` (#360): what spares a row past it.
+    func referring(to keys: [NoteKey], stayingFrom cutoff: Date) throws -> [Referrer]
     /// Whether a row of `hosts` says what a reader did, or owes a load as one
     /// (`StoreOp.Kind.forgetReaderMarks`).
     func marked(_ hosts: StoreOp.Hosts) throws -> Bool

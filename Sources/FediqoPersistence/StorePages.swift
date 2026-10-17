@@ -29,9 +29,21 @@ extension StoreFile {
         "CREATE INDEX IF NOT EXISTS note_owing ON note(host) WHERE refs_due",
         "CREATE INDEX IF NOT EXISTS note_kept ON note(kept) WHERE kept",
         "CREATE INDEX IF NOT EXISTS note_gone ON note(gone_at) WHERE gone_at IS NOT NULL",
-        "CREATE INDEX IF NOT EXISTS note_refers ON note(host) WHERE instr(refs, '\"id\"') > 0",
+        "CREATE INDEX IF NOT EXISTS note_cites ON note(host, \(firstCited)) WHERE instr(refs, '\"id\"') > 0",
+        "CREATE INDEX IF NOT EXISTS note_cites_many ON note(host) WHERE instr(refs, '\"id\"') > 0 AND \(citesMany)",
+        // `note_cites` and `note_cites_many` answer what `note_refers` did (#360).
+        "DROP INDEX IF EXISTS note_refers",
         "CREATE INDEX IF NOT EXISTS note_marked ON note(host) WHERE \(readerSaidOrOwing)",
     ]
+
+    /// The id a row's first reference names, as `note_cites` holds it (#360): a row with one
+    /// reference — nearly every row that has any — is found by what it names, not by reading
+    /// the references of every row of its host. Nothing for references that are not JSON.
+    static let firstCited = "(CASE WHEN json_valid(refs) THEN json_extract(refs, '$[0].id') END)"
+
+    /// A row whose references are more than one, or not a list: read whole by `referring`, as
+    /// its first reference is not all it names (`note_cites_many`).
+    static let citesMany = "(CASE WHEN json_valid(refs) THEN json_type(refs) <> 'array' OR json_array_length(refs) > 1 ELSE 0 END)"
 
     /// A row's `statusID`, as `note_status` holds it; a read by it must spell it the same way
     /// for the index to be used. Nothing for facts that are not JSON, so neither the index nor a
@@ -583,21 +595,67 @@ extension StoreFile {
         }
     }
 
+    /// By `note_page` read from its oldest end, as `oldest` reads it, and the rows' cells left
+    /// whole: a key and a reblog's one reference are all a step of the months limit asks (#360).
+    public func beyond(_ cutoff: Date, limit: Int, after: PageCursor?) throws -> (rows: [PastLimit], next: PageCursor?) {
+        try poolRead { db, _ in
+            let past = after == nil ? "" : " AND posted_at >= ? AND NOT (posted_at = ? AND rowid <= ?)"
+            var arguments: [any DatabaseValueConvertible] = [cutoff]
+            if let after { arguments += [after.postedAt, after.postedAt, after.rowid] }
+            arguments.append(limit)
+            let found = try Row.fetchAll(db, sql: """
+                SELECT rowid AS rowid, host, id, posted_at,
+                (instr(refs, 'reblogs') > 0 AND EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(refs) THEN refs ELSE '[]' END) r
+                 WHERE r.type = 'object' AND json_extract(r.value, '$.kind') = 'reblogs')) AS reblogs
+                FROM note WHERE NOT kept AND posted_at < ?\(past) ORDER BY posted_at ASC, rowid ASC LIMIT ?
+                """, arguments: StatementArguments(arguments))
+            let next = found.count < limit ? nil : found.last.flatMap { row in
+                String.fromDatabaseValue(row["posted_at"] as DatabaseValue)
+                    .map { PageCursor(postedAt: $0, id: row["id"], rowid: row["rowid"]) }
+            }
+            return (found.map { PastLimit(key: NoteKey(host: $0["host"], id: $0["id"]), reblogs: $0["reblogs"]) }, next)
+        }
+    }
+
     /// Off `refs` alone, as `ReferenceRow` writes it: a reference names a row of its own host.
-    /// Only a cell that names an id is taken apart.
+    /// Only a cell that names an id is taken apart — a row of one reference found by the id it
+    /// names (`note_cites`), and only a row of several read whole (`note_cites_many`).
     public func referring(to keys: [NoteKey]) throws -> [Referrer] {
-        try poolRead { db, beside in
+        try referring(to: keys, staying: nil)
+    }
+
+    /// Only a row that stays is taken apart: a kept one, or one inside the limit, its cut asked
+    /// before its references are read.
+    public func referring(to keys: [NoteKey], stayingFrom cutoff: Date) throws -> [Referrer] {
+        try referring(to: keys, staying: cutoff)
+    }
+
+    private func referring(to keys: [NoteKey], staying cutoff: Date?) throws -> [Referrer] {
+        guard !keys.isEmpty else { return [] }
+        let staying = cutoff == nil ? "" : " AND (kept OR posted_at >= ?)"
+        return try poolRead { db, beside in
             var found: [Referrer] = []
             for (host, keys) in Dictionary(grouping: keys, by: \.host).sorted(by: { $0.key < $1.key }) {
+                let ids = try Self.json(keys.map(\.id))
+                var arguments: [any DatabaseValueConvertible] = [host, ids]
+                if let cutoff { arguments.append(cutoff) }
+                arguments.append(host)
+                if let cutoff { arguments.append(cutoff) }
+                arguments.append(ids)
+                // A row is in one half or the other, never both.
                 let rows = try Row.fetchAll(db, sql: """
                     SELECT n.arrival AS rowid, n.id AS id, n.posted_at AS posted_at, n.kept AS kept,
                     json_extract(r.value, '$.id') AS target
                     FROM (SELECT rowid AS arrival, id, posted_at, kept, refs FROM note
-                          WHERE host = ? AND instr(refs, '"id"') > 0) n,
+                          WHERE host = ? AND instr(refs, '"id"') > 0 AND \(Self.firstCited) IN (SELECT value FROM json_each(?))
+                          AND NOT \(Self.citesMany)\(staying)
+                          UNION ALL
+                          SELECT rowid AS arrival, id, posted_at, kept, refs FROM note
+                          WHERE host = ? AND instr(refs, '"id"') > 0 AND \(Self.citesMany)\(staying)) n,
                     json_each(CASE WHEN json_valid(n.refs) THEN n.refs ELSE '[]' END) r
                     WHERE r.type = 'object' AND json_type(r.value, '$.id') = 'text'
                     AND json_extract(r.value, '$.id') IN (SELECT value FROM json_each(?))
-                    """, arguments: [host, try Self.json(keys.map(\.id))])
+                    """, arguments: StatementArguments(arguments))
                 for row in rows {
                     let posted: Date? = row["posted_at"]
                     guard let posted else { continue }

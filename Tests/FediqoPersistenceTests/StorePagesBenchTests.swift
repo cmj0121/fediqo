@@ -130,7 +130,7 @@ struct StorePagesBenchTests {
         var rest: [String] = []
         for sql in StoreFile.pageIndexes.dropFirst() {
             let (_, lap) = try await time { try await file.db.write { db in try db.execute(sql: sql) } }
-            rest.append("\(sql.split(separator: " ")[5]) \(milliseconds(lap))")
+            rest.append("\(sql.split(separator: " ")[sql.hasPrefix("DROP") ? 4 : 5]) \(milliseconds(lap))")
         }
         let (_, scrubbed) = await time { await file.scrubIfDue() }
         let earlyText = early.map { "provisional page in hand \(milliseconds($0.0)), \($0.1) rows; " } ?? "no provisional page; "
@@ -167,7 +167,7 @@ struct StorePagesBenchTests {
         let copy = try DatabaseQueue(path: dir.appendingPathComponent(StoreFile.indexName).path)
         try source.backup(to: copy)
         try copy.writeWithoutTransaction { db in
-            for name in ["note_page", "note_status", "note_owing", "note_kept", "note_gone", "note_refers", "note_marked"] {
+            for name in ["note_page", "note_status", "note_owing", "note_kept", "note_gone", "note_refers", "note_cites", "note_cites_many", "note_marked"] {
                 try db.execute(sql: "DROP INDEX IF EXISTS \(name)")
             }
         }
@@ -188,7 +188,7 @@ struct StorePagesBenchTests {
             let (_, alone) = try await Self.time { try await file.makePageIndex() }
             print("[first] note_page alone, after the open: \(Self.milliseconds(alone))")
             for sql in StoreFile.pageIndexes.dropFirst() {
-                let name = sql.split(separator: " ")[5]
+                let name = sql.split(separator: " ")[sql.hasPrefix("DROP") ? 4 : 5]
                 let (_, lap) = try await Self.time { try await file.db.write { db in try db.execute(sql: sql) } }
                 print("[first] \(name): \(Self.milliseconds(lap))")
             }
