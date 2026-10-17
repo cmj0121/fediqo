@@ -52,7 +52,7 @@ struct StoreWordsBenchTests {
 
     /// 60 % of posts CJK, 20–200 characters from 3,000 by Zipf; 40 % Latin, words of a
     /// vocabulary of 2,000 by Zipf — as the K0 design's measure.
-    private static func synthetic(_ count: Int) -> [Note] {
+    static func synthetic(_ count: Int) -> [Note] {
         var random = Seeded(state: 360)
         let characters = (0..<3_000).map { Character(Unicode.Scalar(0x4E00 + $0 * 7)!) }
         let vocabulary = (0..<2_000).map { _ in
