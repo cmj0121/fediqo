@@ -129,7 +129,8 @@ final class Launch {
         // `nil` when the index could not be read and could not be set aside either: this run
         // then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
         // It is also `nil` when the index was written by a newer build, which is left as found.
-        saver = StoreSaver(store: store, file: opened.file, protected: protected)
+        let saver = StoreSaver(store: store, file: opened.file, protected: protected)
+        self.saver = saver
         file = opened.file
         words = opened.file.map { WordsBuilder(file: $0, saver: saver, protected: protected) }
         // Only beside an index this run writes: a run that must not write the index (a newer
