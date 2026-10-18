@@ -133,10 +133,16 @@ enum NoticeActFixture {
     static let plain = MastodonOAuth.scopes(writing: false)
     static let plainActing = MastodonOAuth.scopes(writing: true)
 
+    /// The one moment every `ago` counts back from. Taken once, not at each call: answers are
+    /// written at different points of a test — some in a `static let` touched first by another
+    /// test — and on a slow runner minutes pass between them, so a clock read at each call would
+    /// let an answer written later outrank one written earlier that is meant to be newer.
+    static let now = Date()
+
     static func ago(_ minutes: Int) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: Date().addingTimeInterval(-Double(minutes) * 60))
+        return formatter.string(from: now.addingTimeInterval(-Double(minutes) * 60))
     }
 
     /// One notice of the single read, by `name`.
