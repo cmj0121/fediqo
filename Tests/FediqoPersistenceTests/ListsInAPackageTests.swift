@@ -401,7 +401,8 @@ struct ListsInAPackageTests {
         let lists = ListFiles(directory: copy, defaults: onto.defaults, protected: .always)
         #expect(lists.timelines.read() == .data(Self.timelines) && lists.allowances.read() == .data(Self.allowances))
         #expect(try !names(copy).contains { $0.contains(ListFile.asideInfix) })
-        #expect(after.leftOwed() == ["index", "pictures", "secrets", "settings"], "kept to be said until it has been")
+        // The index is put back from what the read back set aside (#360), and is said no more.
+        #expect(after.leftOwed() == ["pictures", "secrets", "settings"], "kept to be said until it has been")
         after.toldLeftOwed()
         #expect(try !named(copy))
     }

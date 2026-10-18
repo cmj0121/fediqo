@@ -76,6 +76,14 @@ public struct StoreFile: Sendable {
             return made
         }
 
+        /// The making of the pages' index on its way, where one is: what a take-away's copy waits
+        /// for, so the making's commit is not left waiting on the copy's read (#360).
+        var pageIndexInFlight: Task<Void, any Error>? {
+            lock.lock()
+            defer { lock.unlock() }
+            return pageIndexTask
+        }
+
         /// The making ended, made or failed: the next caller asks the file again.
         func pageIndexEnded() {
             lock.lock()
@@ -96,6 +104,23 @@ public struct StoreFile: Sendable {
                 defer { lock.unlock() }
                 besideQueue = newValue
             }
+        }
+
+        /// Who builds the words index this run (`WordsBuilder`), told when a save left more due
+        /// than it makes the docs of itself.
+        private var wordsDue: (@Sendable () -> Void)?
+
+        func onWordsLeftDue(_ tell: (@Sendable () -> Void)?) {
+            lock.lock()
+            defer { lock.unlock() }
+            wordsDue = tell
+        }
+
+        func wordsLeftDue() {
+            lock.lock()
+            let tell = wordsDue
+            lock.unlock()
+            tell?()
         }
 
         /// This connection has written, or tried to: the sources it holds may have changed.
@@ -126,6 +151,23 @@ public struct StoreFile: Sendable {
         nonmutating set { held.beside = newValue }
     }
 
+    /// Tells `tell` whenever a save leaves more of the words index due than it drains (#360).
+    func onWordsLeftDue(_ tell: (@Sendable () -> Void)?) {
+        held.onWordsLeftDue(tell)
+    }
+
+    /// Tells the words builder there is more to do (`onWordsLeftDue`): a read back left none of
+    /// the index (#360).
+    func wordsLeftDue() {
+        held.wordsLeftDue()
+    }
+
+    /// This connection wrote the file whole, past `save` (#360, `copy(from:)`): the sources it
+    /// read before are no longer the file's.
+    func wroteWhole() {
+        held.wrote()
+    }
+
     /// The one making of the pages' index, whoever asks (`Held.pageIndexBuild`).
     func pageIndexBuild(_ make: () -> Task<Void, any Error>) -> Task<Void, any Error> {
         held.pageIndexBuild(make)
@@ -133,6 +175,12 @@ public struct StoreFile: Sendable {
 
     func pageIndexEnded() {
         held.pageIndexEnded()
+    }
+
+    /// Waits for the making of the pages' index on its way, where one is, made or failed; never
+    /// starts one.
+    func pageIndexSettled() async {
+        _ = await held.pageIndexInFlight?.result
     }
 
     /// A connection of its own to this store's file, **for reading alone** (#357, C15), made as
@@ -349,7 +397,7 @@ public struct StoreFile: Sendable {
         }) ?? (0, 1)
         guard version < Self.scrubbed || free > 0 else { return }
         try? db.writeWithoutTransaction { db in
-            try db.execute(sql: "VACUUM")
+            try Self.rebuild(db)
             try db.execute(sql: "PRAGMA user_version = \(Self.scrubbed)")
         }
     }
@@ -370,10 +418,35 @@ public struct StoreFile: Sendable {
         }) ?? false
         guard due else { return }
         try? await db.writeWithoutTransaction { db in
-            try db.execute(sql: "VACUUM")
+            try Self.rebuild(db)
             try db.execute(sql: "PRAGMA user_version = \(Self.scrubbed)")
         }
     }
+
+    /// The whole file rebuilt (`VACUUM`), **and from then on able to give its room back a part at
+    /// a time** (#360, C26): `auto_vacuum = INCREMENTAL` is a mode in the file's header that only
+    /// a rebuild can change, so it is set wherever a rebuild happens anyway — the scrub, and a
+    /// `compact()` of a file not yet in that mode, which most stores the scrub already rebuilt
+    /// would otherwise never leave. It
+    /// keeps a map of where each page points — a page in some eight hundred — so the file weighs
+    /// that much more from then. A build before this one reads such a file as any other; going
+    /// back needs another rebuild. Inside the rowid guard, as every `VACUUM` is.
+    static func rebuild(_ db: Database) throws {
+        try db.execute(sql: "PRAGMA auto_vacuum = INCREMENTAL")
+        try guardingRowids(db) { try db.execute(sql: "VACUUM") }
+    }
+
+    /// The size of one page of the file (`PRAGMA page_size`), or SQLite's own where it cannot be
+    /// asked.
+    var pageSize: Int {
+        (try? db.read { db in try Int.fetchOne(db, sql: "PRAGMA page_size") }) ?? 4_096
+    }
+
+    /// `auto_vacuum`'s number for `INCREMENTAL`.
+    static let incremental = 2
+
+    /// How many free pages one step of `compact()` gives back (#360, C26).
+    public static let compactPages = 2_048
 
     /// Whether a file of `pages` pages, `free` of them free, is rebuilt (`scrubIfDue`).
     static func scrubDue(version: Int, free: Int, pages: Int, pageSize: Int) -> Bool {
@@ -714,8 +787,46 @@ public struct StoreFile: Sendable {
     /// posts it let go of. Asked only after a limit acted, never on the ordinary save: it
     /// rewrites the whole index. **Room, and nothing else**: what the rows let go said is already
     /// gone from those pages by the save that freed them (`scrub`).
+    ///
+    /// **A part at a time, once the file is able to** (#360, C26): in a file whose header says
+    /// `auto_vacuum = INCREMENTAL`, `compactPages` free pages are given back a step — the file's
+    /// last pages moved into the free ones, and its tail cut off — and the queue is free between
+    /// two, so a page waits for one step and not for the file. A file not yet in that mode is
+    /// rebuilt whole, as before, and is in it from then on (`rebuild`). The caller holds the
+    /// saves' place (`StoreSaver.exclusively`) for the whole of it.
+    ///
+    /// **The tokens of what was let go first** (#360, C27, `letWordsGo`): the words index
+    /// rewritten frees its old segments, zeroed as they go, and the steps after give that room
+    /// back with the rest.
     public func compact() async throws {
-        try await db.writeWithoutTransaction { db in try db.execute(sql: "VACUUM") }
+        try await letWordsGo()
+        let mode = try await db.read { db in try Int.fetchOne(db, sql: "PRAGMA auto_vacuum") ?? 0 }
+        guard mode == Self.incremental else {
+            try await db.writeWithoutTransaction { db in try Self.rebuild(db) }
+            return
+        }
+        while try await compactStep() > 0 {
+            await Task.yield()
+        }
+    }
+
+    /// One step of `compact()` in a file able to give its room back a part at a time: at most
+    /// `pages` free pages given back, in a transaction of its own. Returns how many are free
+    /// still — none in a file not in that mode, where this gives nothing back. **Pages move and
+    /// rows do not**: no rowid changes, so the words index needs no guard here, as a `VACUUM`
+    /// does; and what moves is a page in use, while what was freed is zeroed already
+    /// (`secure_delete`) and cut off with the tail.
+    @discardableResult
+    public func compactStep(pages: Int = StoreFile.compactPages) async throws -> Int {
+        try await db.writeWithoutTransaction { db in
+            guard try Int.fetchOne(db, sql: "PRAGMA auto_vacuum") == Self.incremental else { return 0 }
+            let before = try Int.fetchOne(db, sql: "PRAGMA freelist_count") ?? 0
+            guard before > 0 else { return 0 }
+            try db.execute(sql: "PRAGMA incremental_vacuum(\(max(1, pages)))")
+            let after = try Int.fetchOne(db, sql: "PRAGMA freelist_count") ?? 0
+            // A step that gave nothing back is not asked again.
+            return after < before ? after : 0
+        }
     }
 
     /// Moves `index.sqlite` and any journal SQLite left beside it to
@@ -822,7 +933,7 @@ public struct StoreFile: Sendable {
         try db.read(Self.sources)
     }
 
-    private static func sources(_ db: Database) throws -> (sources: [Source], said: [SourceProfile]) {
+    static func sources(_ db: Database) throws -> (sources: [Source], said: [SourceProfile]) {
         let records = try SourceRecord.fetchAll(db)
         return (records.map(\.source), records.compactMap(\.saidProfile))
     }
@@ -847,21 +958,27 @@ public struct StoreFile: Sendable {
     public func save(_ changes: RowChanges) async throws {
         let said = Dictionary(changes.said.map { ($0.host, $0) }, uniquingKeysWith: { a, _ in a })
         defer { held.wrote() }
-        try await db.write { db in
+        let many = try await db.write { db -> Bool in
             for host in changes.removedHosts {
                 try db.execute(sql: "DELETE FROM source WHERE host = ?", arguments: [host])
             }
             for source in changes.sources ?? [] {
                 try SourceRecord(source, said: said[source.host]).upsert(db)
             }
+            var deleted = false
             for key in changes.deletes {
                 try db.execute(sql: "DELETE FROM note WHERE host = ? AND id = ?", arguments: [key.host, key.id])
+                deleted = deleted || db.changesCount > 0
             }
             for op in changes.ops { try Self.make(op, in: db) }
             for note in changes.upserts {
                 try NoteRecord(note).upsert(db)
             }
+            // The words of what was written, where they are few, and the tokens of what was
+            // let go owed (#360, C27).
+            return Self.drainWordsInSave(db, letGo: deleted)
         }
+        if many { held.wordsLeftDue() }
         dropWhatWasReplaced()
     }
 
@@ -881,9 +998,10 @@ public struct StoreFile: Sendable {
     ) async throws {
         let saidByHost = Dictionary(said.map { ($0.host, $0) }, uniquingKeysWith: { a, _ in a })
         defer { held.wrote() }
-        try await db.write { db in
+        let many = try await db.write { db -> Bool in
             if let notices { try Self.write(notices: notices, in: db) }
-            try NoteRecord.deleteAll(db)
+            // Every row goes, and every doc of the words index with them (C27).
+            if try NoteRecord.deleteAll(db) > 0 { Self.emptyWordsInSave(db) }
             try SourceRecord.deleteAll(db)
             for source in sources {
                 try SourceRecord(source, said: saidByHost[source.host]).insert(db)
@@ -891,7 +1009,9 @@ public struct StoreFile: Sendable {
             for note in notes {
                 try NoteRecord(note).insert(db)
             }
+            return Self.drainWordsInSave(db)
         }
+        if many { held.wordsLeftDue() }
         // Only here, the write having returned: a save that threw has replaced nothing.
         dropWhatWasReplaced()
     }

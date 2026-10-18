@@ -136,8 +136,11 @@ struct StorePackagerTests {
         let url = package()
         defer { from.remove(); onto.remove(); try? FileManager.default.removeItem(at: url) }
         try await from.packager().takeAway(to: url, key: .password("password"), pictures: true) { _ in }
-        // Twice the package: the staging, and what is moved in beside what was there.
-        let needed = try PackageReader(at: url).prelude.bytes * 2
+        // Into an open file (#360): the staging, the file set aside, its journal, and what it
+        // grows by where the package's store is the larger.
+        let package = try PackageReader(at: url).prelude.bytes
+        let held = try #require(onto.file).bytesOnDisk()
+        let needed = package + 2 * held + max(0, package - held)
         let before = try onto.fingerprint()
         await #expect(throws: PackageFault.noRoom(needed: needed, free: 10)) {
             try await onto.packager(free: 10).readBack(url, key: .password("password"), replacing: false) { _ in }

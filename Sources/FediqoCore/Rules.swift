@@ -326,13 +326,17 @@ public struct CompiledTimeline: Sendable {
             case category(Category, host: String?)
             /// A handle as a rule folds one (`Fold.handle`).
             case handle(String, host: String?)
+            /// A keyword as a rule folds it (`Fold.key`) (#360, K-4): the rows whose body may hold
+            /// it, and the reblogs of such posts — `verdict` asks a reblog's words of the post it
+            /// reblogs. **In an include group only**: a store finds the rows that *may* hold a
+            /// keyword, never the ones that surely do, so it can never hide by one.
+            case words(String, host: String?)
         }
 
-        /// Hides that a store can say: a row any of these matches is hidden.
+        /// Hides that a store can say: a row any of these matches is hidden. Never a keyword.
         public let excludes: [Member]
         /// The include groups a store can say whole: a row that matches no member of one is
-        /// hidden. A group with a rule on words or a field is left out, since it may let anything
-        /// through.
+        /// hidden. A group with a rule on a field is left out, since it may let anything through.
         public let groups: [[Member]]
         /// Whether a rule here is asked of the post a reblog reblogs (`verdict`), so whoever
         /// judges a reblog must hand that post in.
@@ -340,19 +344,20 @@ public struct CompiledTimeline: Sendable {
     }
 
     public var prefilter: Prefilter {
-        func member(_ matcher: Matcher) -> Prefilter.Member? {
+        func member(_ matcher: Matcher, include: Bool) -> Prefilter.Member? {
             switch matcher.check {
             case .host(let host): .host(host)
             case .category(let category): .category(category, host: matcher.host)
             case .handle(let handle): .handle(handle, host: matcher.host)
-            case .keyword, .field: nil
+            case .keyword(let text): include ? .words(text, host: matcher.host) : nil
+            case .field: nil
             }
         }
         let said = groups.compactMap { group -> [Prefilter.Member]? in
-            let members = group.compactMap(member)
+            let members = group.compactMap { member($0, include: true) }
             return members.count == group.count ? members : nil
         }
-        return Prefilter(excludes: excludes.compactMap(member), groups: said, readsWhatIsSaid: readsWhatIsSaid)
+        return Prefilter(excludes: excludes.compactMap { member($0, include: false) }, groups: said, readsWhatIsSaid: readsWhatIsSaid)
     }
 
     public init(_ definition: TimelineDefinition, sources: [Source]) {

@@ -14,6 +14,9 @@ struct SearchBar: View {
     var timeline: String
     /// How many posts are found, or nothing while no pattern is being searched.
     var found: Int?
+    /// Whether `found` is only at least so many — the file has more to give (#360, C25) — and the
+    /// line that says only the posts read so far were searched, where only they were.
+    var counted: (atLeast: Bool, readSoFar: String?) = (false, nil)
     /// Which sources the last Return asked, and which it could not (#176), or nothing before one.
     var reach: String? = nil
     /// The line about looking what was typed up through a source (#319), where it is an
@@ -50,7 +53,7 @@ struct SearchBar: View {
                     .accessibilityHidden(true)
                 field
                 if let found {
-                    Text(String(format: L10n.t("search.found"), found))
+                    Text(Self.foundText(found, atLeast: counted.atLeast))
                         .shellFont(.meta)
                         .monospacedDigit()
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
@@ -66,6 +69,17 @@ struct SearchBar: View {
             // An address typed: the one press that asks a source to look it up, under the field.
             if let lookUp {
                 SearchLookUpView(line: lookUp, onPress: onLookUp)
+                    .padding(.horizontal, ShellSpace.pad)
+                    .padding(.trailing, floatingCorner.width)
+                    .padding(.bottom, ShellSpace.snug)
+            }
+            // Only what was read so far was searched (#360): said under the field, wrapping.
+            if let readSoFar = counted.readSoFar {
+                Text(readSoFar)
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, ShellSpace.pad)
                     .padding(.trailing, floatingCorner.width)
                     .padding(.bottom, ShellSpace.snug)
@@ -108,6 +122,11 @@ struct SearchBar: View {
             guard !Task.isCancelled else { return }
             search.settle(typed)
         }
+    }
+
+    /// How many posts are found: "at least" so many while the file has more to give (#360).
+    static func foundText(_ found: Int, atLeast: Bool, language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t(atLeast ? "search.atLeast" : "search.found", language: language), found)
     }
 
     private var field: some View {

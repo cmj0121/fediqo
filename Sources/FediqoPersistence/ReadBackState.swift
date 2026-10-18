@@ -178,11 +178,14 @@ extension StorePackager {
         private let lock = NSLock()
         private var url: URL
         private var handle: FileHandle?
+        /// What the name says after its prefix: what names what this commit set aside (#360).
+        let id: String
 
         /// Makes the name in `directory` and holds it. Throws where it cannot be made or
         /// held: the commit then does not begin.
         init(in directory: URL) throws {
             let id = UUID().uuidString
+            self.id = id
             url = directory.appendingPathComponent(Self.prefix + id)
             let made = try Guarded.makeFile(at: url)
             guard flock(made.fileDescriptor, LOCK_EX | LOCK_NB) == 0 else {
@@ -252,7 +255,7 @@ extension StorePackager {
         /// Whether a process holds `url`; nil where it has gone meanwhile. **One that will
         /// not be opened is not known to be let go**, and is taken for held: nothing is
         /// settled or said on a guess.
-        private static func isHeld(_ url: URL) -> Bool? {
+        static func isHeld(_ url: URL) -> Bool? {
             guard let asked = try? FileHandle(forReadingFrom: url) else {
                 guard FileManager.default.fileExists(atPath: url.path) else { return nil }
                 // Said, because nothing else would: while it will not open, nothing in

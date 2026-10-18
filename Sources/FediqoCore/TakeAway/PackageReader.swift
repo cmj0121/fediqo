@@ -161,7 +161,15 @@ public final class PackageReader: @unchecked Sendable {
 
     /// The next box on the wire: its length, then that many bytes. Short is `.cutShort`; a
     /// length no writer of ours makes is `.altered`.
+    ///
+    /// **Read inside a pool of its own** (#360): what the file handle reads is handed back
+    /// autoreleased, and a read back's task drains no pool until it ends — so every box of a
+    /// package would otherwise stay in memory until the whole of it was read.
     private static func readBox(_ state: inout State) throws -> Data {
+        try autoreleasepool { try readBoxNow(&state) }
+    }
+
+    private static func readBoxNow(_ state: inout State) throws -> Data {
         guard let lengthBytes = try state.handle.read(upToCount: 4), lengthBytes.count == 4 else {
             throw PackageRefusal.cutShort
         }

@@ -86,6 +86,34 @@ public enum RowSelection: Sendable, Equatable {
     case gone(markedBy: Date?)
 }
 
+/// A row of the file past the months limit (`HeldRows.beyond`): its key, and whether it is a
+/// reblog — which nothing that refers to it spares.
+public struct PastLimit: Sendable, Equatable {
+    public let key: NoteKey
+    public let reblogs: Bool
+
+    public init(key: NoteKey, reblogs: Bool) {
+        self.key = key
+        self.reblogs = reblogs
+    }
+}
+
+/// A row of the file the room limit reads (`HeldRows.oldestKeys`): its key, where it stands in
+/// the order rows go in, and whether it is a reblog — which nothing that refers to it spares.
+public struct OldestRow: Sendable, Equatable {
+    public let key: NoteKey
+    public let postedAt: Date
+    public let arrival: Int64
+    public let reblogs: Bool
+
+    public init(key: NoteKey, postedAt: Date, arrival: Int64, reblogs: Bool) {
+        self.key = key
+        self.postedAt = postedAt
+        self.arrival = arrival
+        self.reblogs = reblogs
+    }
+}
+
 /// A row of the file that refers to another (`Note.heldWith`), as the room limit asks of it:
 /// the row, where it stands in the order rows go in, whether it is kept — and what it refers to.
 public struct Referrer: Sendable, Equatable {
@@ -136,6 +164,25 @@ public struct PageCursor: Sendable, Hashable {
         self.rowid = rowid
     }
 
+    /// A place in the file's order at a moment and an id, the moment written as the file writes
+    /// one (#359): where an edge drawn onto a row is read past from, **whether or not the file
+    /// still holds that row**. `rowid` steps past every copy under the id that way: the greatest
+    /// there is going older, the least going newer.
+    package init(millisecond: Int64, id: String, rowid: Int64) {
+        let seconds = millisecond >= 0 ? millisecond / 1000 : (millisecond - 999) / 1000
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        let at = calendar.dateComponents(
+            [.year, .month, .day, .hour, .minute, .second], from: Date(timeIntervalSince1970: TimeInterval(seconds))
+        )
+        postedAt = String(
+            format: "%04d-%02d-%02d %02d:%02d:%02d.%03d", at.year ?? 0, at.month ?? 0, at.day ?? 0, at.hour ?? 0,
+            at.minute ?? 0, at.second ?? 0, Int(millisecond - seconds * 1000)
+        )
+        self.id = id
+        self.rowid = rowid
+    }
+
     /// The row's time as a moment: the file's `YYYY-MM-DD HH:MM:SS.SSS`, in UTC, to the
     /// millisecond it holds. Nothing for a time the file did not write that way.
     public var moment: Date? {
@@ -175,13 +222,49 @@ public protocol HeldRows: Sendable {
     /// they arrived, from past `after` on — and where the next are asked from, or nothing where
     /// none are left. A row that will not decode is passed over.
     func oldest(_ limit: Int, after: PageCursor?) throws -> (rows: [HeldRow], next: PageCursor?)
+    /// `oldest`, by key and place alone and nothing decoded (#360, C33): what a hop of the room
+    /// limit reads. A row that would not decode is among them.
+    func oldestKeys(_ limit: Int, after: PageCursor?) throws -> (rows: [OldestRow], next: PageCursor?)
     /// Every row that refers to one of `keys` (`Note.heldWith`).
     func referring(to keys: [NoteKey]) throws -> [Referrer]
+    /// At most `limit` rows not kept and posted before `cutoff`, the oldest first and two of one
+    /// moment in the order they arrived, from past `after` on — by key, with whether each is a
+    /// reblog, and nothing decoded — and where the next are asked from, or nothing where none
+    /// are left (#360): what the months limit lets go a step at a time.
+    func beyond(_ cutoff: Date, limit: Int, after: PageCursor?) throws -> (rows: [PastLimit], next: PageCursor?)
+    /// Every row that refers to one of `keys` and stays by the months limit — kept, or posted at
+    /// or after `cutoff` (#360): what spares a row past it.
+    func referring(to keys: [NoteKey], stayingFrom cutoff: Date) throws -> [Referrer]
     /// Whether a row of `hosts` says what a reader did, or owes a load as one
     /// (`StoreOp.Kind.forgetReaderMarks`).
     func marked(_ hosts: StoreOp.Hosts) throws -> Bool
     /// How many rows the file holds.
     func rowCount() throws -> Int
+    /// How many rows the file holds of each host, by host as the rows are keyed, and the kind of
+    /// source a row of it wrote down: what Usage counts once the pool holds only part of them
+    /// (#359, C23), and names a source removed whose posts stayed by.
+    func rowCounts() throws -> [String: HostRows]
+    /// How many rows the file holds of each `period` of `calendar` that holds one, newest first,
+    /// a period by the moment it starts as `Holdings.byPeriod` names it: what Usage's breakdown
+    /// says once the pool holds only part of them (#360, C31) — exact, as `rowCounts` is. At
+    /// most `most` of them, the newest.
+    func rowsByPeriod(_ period: HeldPeriod, calendar: Calendar, most: Int) throws -> [Holdings.Bucket]
+    /// The source's own id of the oldest post of `host` the file holds through `category` — a
+    /// Mastodon id grows with time, and a longer one is a later one: where a timeline's next
+    /// stretch is asked from once the pool holds only part of what the file does (#201, #359).
+    func oldestStatusID(host: String, category: Category) throws -> String?
+}
+
+/// What the file holds of one host (`HeldRows.rowCounts`): how many rows, and the kind of source
+/// one of them wrote down, or nothing where none did.
+public struct HostRows: Equatable, Sendable {
+    public let count: Int
+    public let kind: ProtocolKind?
+
+    public init(count: Int, kind: ProtocolKind?) {
+        self.count = count
+        self.kind = kind
+    }
 }
 
 /// What a `HeldRows` read throws where some rows it found will not decode: those, by key, and
@@ -209,6 +292,32 @@ struct HeldNotes: Sequence {
     /// The keys let go since the last take, whether or not taken in again since: one held
     /// again is deleted and then written, so it is added where it arrived the second time.
     private(set) var dropped: Set<NoteKey> = []
+    /// When each row was last seen (#359) — laid in, changed, or drawn (`saw`) — as a tick that
+    /// only goes up, and the `drawing` it was last laid in or changed under: what a pool over
+    /// the file lets go of first, and what it keeps for screens drawn before it came.
+    private(set) var seen: [NoteKey: Seen] = [:]
+    private var clock = 0
+    /// The store's `drawn` now: what a row laid in or changed is stamped with.
+    var drawing = 0
+
+    struct Seen {
+        let tick: Int
+        let drawn: Int
+    }
+
+    /// For a pool that lets rows go (#359): **how many rows held hold each key with them**
+    /// (`holds`), and every sighting in the order made — a tick and its key, ticks only going
+    /// up, one whose tick is no longer its key's being stale. Kept as rows come, change and go,
+    /// so a letting go reads them in order and pops, and works out neither afresh. Nothing for
+    /// a store held whole, which never lets a row go.
+    private(set) var tracking = false
+    private(set) var holders: [NoteKey: Int] = [:]
+    private(set) var sightings: [Sighting] = []
+
+    struct Sighting {
+        let tick: Int
+        let key: NoteKey
+    }
 
     /// `rows` as they are on disk — nothing owed — or, `owed`, every one of them owed a write.
     init(_ rows: [NoteKey: Note] = [:], owed: Bool = false) {
@@ -216,20 +325,105 @@ struct HeldNotes: Sequence {
         if owed { touched = Set(rows.keys) }
     }
 
+    /// What a pool that lets rows go keeps of its rows (`holders`, `sightings`), from now on.
+    mutating func track() {
+        tracking = true
+        holders = [:]
+        for note in rows.values { hold(Self.holds(note), by: 1) }
+        sightings = seen.map { Sighting(tick: $0.value.tick, key: $0.key) }.sorted { $0.tick < $1.tick }
+    }
+
+    /// What `note` holds with it, but itself: what its staying keeps in the pool.
+    /// Each once, and never the note's own key: what a pool lets go of hundreds of a pass, so
+    /// no set is made where there is one key or none.
+    static func holds(_ note: Note) -> [NoteKey] {
+        let topic = note.topicKey
+        guard !note.refs.isEmpty || topic != nil else { return [] }
+        var keys = note.heldWith
+        if let topic { keys.append(topic) }
+        keys.removeAll { $0 == note.key }
+        guard keys.count > 1 else { return keys }
+        var once = Set<NoteKey>()
+        return keys.filter { once.insert($0).inserted }
+    }
+
+    private mutating func hold(_ keys: [NoteKey], by step: Int) {
+        for key in keys {
+            let count = (holders[key] ?? 0) + step
+            holders[key] = count > 0 ? count : nil
+        }
+    }
+
+    /// The row under `key` replaced by `note`: what each holds counted again — the old row's
+    /// as `holding` says, where the caller worked it out already.
+    private mutating func set(_ key: NoteKey, to note: Note?, holding: [NoteKey]? = nil) {
+        if tracking, let old = rows[key] { hold(holding ?? Self.holds(old), by: -1) }
+        rows[key] = note
+        if tracking, let note { hold(Self.holds(note), by: 1) }
+    }
+
     subscript(key: NoteKey) -> Note? {
         get { rows[key] }
         set {
             guard rows[key] != newValue else { return }
             if newValue == nil { dropped.insert(key) }
-            rows[key] = newValue
+            set(key, to: newValue)
             touched.insert(key)
+            if newValue == nil { seen[key] = nil } else { stamp(key) }
         }
     }
 
     /// `note` as the file holds it, laid in under a key that holds nothing: read, and so owed
     /// no write.
     mutating func lay(_ note: Note) {
-        rows[note.key] = note
+        set(note.key, to: note)
+        stamp(note.key)
+    }
+
+    private mutating func stamp(_ key: NoteKey) {
+        clock += 1
+        seen[key] = Seen(tick: clock, drawn: drawing)
+        sighted(key)
+    }
+
+    /// The sighting just made of `key` kept in order; the stale ones let go once they are as
+    /// many as the rest, so the order stays within twice the pool.
+    private mutating func sighted(_ key: NoteKey) {
+        guard tracking else { return }
+        sightings.append(Sighting(tick: clock, key: key))
+        if sightings.count > 2 * rows.count + 4_096 {
+            sightings.removeAll { seen[$0.key]?.tick != $0.tick }
+        }
+    }
+
+    /// The rows under `keys` drawn now: seen, and changed no more than they were.
+    mutating func saw(_ keys: some Sequence<NoteKey>) {
+        for key in keys where rows[key] != nil {
+            clock += 1
+            seen[key] = Seen(tick: clock, drawn: seen[key]?.drawn ?? -1)
+            sighted(key)
+        }
+    }
+
+    /// The rows under `keys` a page read again while they were held (#359): seen as if laid in
+    /// now, under the drawing in hand — the page's window is about to draw them, and no screen
+    /// has said so yet.
+    mutating func readAgain(_ keys: some Sequence<NoteKey>) {
+        for key in keys where rows[key] != nil { stamp(key) }
+    }
+
+    /// Every row laid in now, as `lay` stamps one: what a pool laid in whole (`replace`) is
+    /// newer than any drawing made before it, and none of it leaves before the next is made.
+    mutating func stampAll() {
+        for key in rows.keys { stamp(key) }
+    }
+
+    /// The row under `key` let go of the pool and not of the file (#359): owed nothing, as it
+    /// is the file's. Only of a row no take is owed — the file would not have it otherwise.
+    mutating func evict(_ key: NoteKey, holding: [NoteKey]? = nil) {
+        assert(!touched.contains(key), "a row let go of the pool before a save took it")
+        set(key, to: nil, holding: holding)
+        seen[key] = nil
     }
 
     var values: Dictionary<NoteKey, Note>.Values { rows.values }

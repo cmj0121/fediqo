@@ -51,6 +51,8 @@ final class ShellRefs {
 
     /// How many loads are asked or on the wire. For a test to read.
     var count: Int { asking.values.reduce(0) { $0 + $1.count } }
+    /// How many items were seen asked of each source, summed: a count for a census (#360).
+    var seenCount: Int { seen.values.reduce(0) { $0 + $1.count } }
 
     /// `landed(in:)`, started and not waited for: one at a time, and once more where the store
     /// changed again meanwhile.

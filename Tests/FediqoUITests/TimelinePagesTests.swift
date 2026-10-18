@@ -5,8 +5,9 @@ import Testing
 @testable import FediqoUI
 
 /// #357, H3b: a launch reads no row. The timeline is there from the sources alone, drawn as being
-/// read until its first page lands; reaching its foot reads the page below from this device before
-/// anything asks a source; and a timeline drawn a moment ago is drawn again for nothing.
+/// read until its first page lands; the place moving toward its foot reads the page below from
+/// this device before anything asks a source (#359); and a timeline drawn a moment ago is drawn
+/// again for nothing.
 @Suite("A timeline read from this device a page at a time")
 @MainActor
 struct TimelinePagesTests {
@@ -80,7 +81,7 @@ struct TimelinePagesTests {
         #expect(!session.timelineItems(latest: nil).contains { $0.noteID == "p240" })
     }
 
-    @Test("Reaching the foot reads the page below from this device, and the file's end is where a source would be asked")
+    @Test("The place moving toward the foot reads the page below from this device, and the file's end is where a source would be asked")
     func readOnFromTheFile() async throws {
         let (session, _, _, dir) = try await launched()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -88,11 +89,11 @@ struct TimelinePagesTests {
         await session.cover(latest: nil)
         #expect(session.readsOnFromFile(.all))
         var items = session.timelineItems(latest: nil)
-        await session.readOn(.all, from: items[items.count - ShellSession.readAhead].id, latest: nil)
+        await session.placed(.all, at: items[ShellSession.readAhead].id, latest: nil)
         items = session.timelineItems(latest: nil)
         #expect(items.count == 200)
         #expect(Set(items.map(\.noteID)).count == 200, "no row twice where the stretch was read again")
-        await session.readOn(.all, from: items[items.count - ShellSession.readAhead].id, latest: nil)
+        await session.placed(.all, at: items[2 * ShellSession.readAhead].id, latest: nil)
         items = session.timelineItems(latest: nil)
         #expect(items.count == 250 && items.last?.noteID == "p249")
         #expect(!session.readsOnFromFile(.all), "nothing below: the sources are asked from here on")
@@ -249,7 +250,7 @@ struct TimelinePagesTests {
         #expect(session.readEarly == nil)
     }
 
-    @Test("A reader at the foot of a provisional page reads nothing below it, and reads on once the first page lands")
+    @Test("A reader moving down a provisional page reads nothing below it, and reads on once the first page lands")
     func footReachedWhileProvisional() async throws {
         let (session, _, file, dir) = try await launched(notes: Self.posts(250).reversed())
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -266,7 +267,7 @@ struct TimelinePagesTests {
         }
         let early = session.timelineItems(latest: nil)
         #expect(early.count == ShellSession.pageRows)
-        await session.readOn(.all, from: early[early.count - ShellSession.readAhead].id, latest: nil)
+        await session.placed(.all, at: early[early.count - ShellSession.readAhead].id, latest: nil)
         #expect(session.timelineItems(latest: nil).map(\.id) == early.map(\.id), "nothing read below a provisional page")
         await held.open()
         await first.value
@@ -309,7 +310,7 @@ struct TimelinePagesTests {
         await session.cover(latest: nil)
         let before = session.timelineItems(latest: nil)
         #expect(session.timelineDrawn(latest: nil).arrived == Set(before.map(\.id)), "drawn from none: every row comes in")
-        await session.readOn(.all, from: before[before.count - ShellSession.readAhead].id, latest: nil)
+        await session.placed(.all, at: before[ShellSession.readAhead].id, latest: nil)
         let after = session.timelineDrawn(latest: nil)
         #expect(Array(after.ids.prefix(before.count)) == before.map(\.id), "rows drawn already stay where they were")
         #expect(after.arrived == Set(after.ids.dropFirst(before.count)))

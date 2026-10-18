@@ -23,6 +23,11 @@ public struct WentByLimit: Equatable, Sendable {
     }
 
     public static let none = WentByLimit()
+
+    /// This and `other` together: what two steps of one act let go (#360).
+    public func adding(_ other: WentByLimit) -> WentByLimit {
+        WentByLimit(posts: posts + other.posts, sources: Set(sources + other.sources).sorted())
+    }
 }
 
 /// One line of the account a limit keeps (#251): which limit acted, when, how many posts and

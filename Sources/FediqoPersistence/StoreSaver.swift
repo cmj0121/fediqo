@@ -269,6 +269,32 @@ public actor StoreSaver {
         return try await task.value
     }
 
+    /// `exclusively`, with every write owed made first in the same turn (#360, K-9): the texts,
+    /// the notices and the rows that changed, as a save writes them, and then `body`, with
+    /// nothing of this saver's between the two. A write that fails throws, and `body` is not run:
+    /// what it reads of the file would not be what the store holds.
+    ///
+    /// **Cancelled with its caller**: a turn still waiting ends as soon as it comes, writing and
+    /// running nothing — the turns before it keep their order — and one under way is cancelled:
+    /// the write, which marks what it did not land owed as any failed save does, and `body`,
+    /// which is asked to stop. The saver's next turn waits for it to end either way.
+    public func afterSaving<T: Sendable>(_ body: @escaping @Sendable () async throws -> T) async throws -> T {
+        let previous = tail
+        let task = Task<T, any Error> {
+            _ = await previous?.result
+            try Task.checkCancellation()
+            _ = try await self.writeNow()
+            try Task.checkCancellation()
+            return try await body()
+        }
+        tail = Task { _ = try await task.value }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
     /// What a launch's sweep found of a read back killed after moving the old index aside and
     /// before the new one was in its place (#247): how many had the old index put back, and how
     /// many could not be settled — said here, where the index's log is, and only as counts.
@@ -589,6 +615,7 @@ public actor StoreSaver {
         do {
             let began = ContinuousClock.now
             try await write(changes)
+            await store.wrote(changes)
             written = revision
             // Only counts and a time: what `gap` is set by.
             let took = ContinuousClock.now - began

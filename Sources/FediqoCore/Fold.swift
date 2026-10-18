@@ -127,6 +127,8 @@ public struct TextIndex: Sendable {
     private let entries: [NoteKey: Entry]
     /// How many entries this build folded rather than reused.
     let folded: Int
+    /// How many rows it holds the words of: a count for a census (#360), nothing they say.
+    public var count: Int { entries.count }
 
     public init(_ notes: [Note], reusing old: TextIndex? = nil) {
         var entries: [NoteKey: Entry] = [:]
@@ -166,6 +168,8 @@ public struct TextIndex: Sendable {
 /// store.
 public struct ReblogTargets: Sendable {
     private let byKey: [NoteKey: Note]
+    /// How many posts it answers for: a count for a census (#360), nothing they say.
+    public var count: Int { byKey.count }
 
     /// Counts the lookups built over notes while it is set, on the task that set it. For a test
     /// to read: that one adopt builds one, whatever reads it. Nothing sets it otherwise.
@@ -198,6 +202,20 @@ public struct ReblogTargets: Sendable {
         for note in notes where !note.isReblog {
             let key = note.key
             if named.contains(key), byKey[key] == nil { byKey[key] = note }
+        }
+        self.byKey = byKey
+    }
+
+    /// What `notes` reblog and quote, each found by `held` among every note held (#359): what
+    /// a stretch of a timeline drawn from a few rows of a large pool asks — two lookups a name
+    /// it holds, and no walk of the pool. The same answers as the lookup built over every note
+    /// held, for every note of `notes`.
+    public init(naming notes: [Note], among held: (NoteKey) -> Note?) {
+        var byKey: [NoteKey: Note] = [:]
+        for note in notes {
+            for key in [note.reblogKey, note.quotedKey].compactMap({ $0 }) where byKey[key] == nil {
+                if let target = held(key), !target.isReblog { byKey[key] = target }
+            }
         }
         self.byKey = byKey
     }

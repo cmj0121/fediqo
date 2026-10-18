@@ -51,6 +51,12 @@ public struct WildcardPattern: Sendable {
         self.tokens = tokens
     }
 
+    /// The runs of characters the pattern names outright, between its wildcards, in order: what
+    /// any field it matches holds, each run whole (#360, K-5). None for a pattern of wildcards alone.
+    public var literals: [String] {
+        tokens.compactMap { if case .literal(let word) = $0 { word } else { nil } }
+    }
+
     /// Whether a field, already folded by `Fold.key`, matches.
     public func matches(_ field: String) -> Bool {
         // A plain keyword, the commonest search, skips the walk and its copy of the field.
@@ -187,13 +193,10 @@ public struct SearchIndex: Sendable {
             handle = note.handle
             boostedBy = note.boostedBy
             boosterHandle = note.boosterHandle
-            let text = Fold.key(note.body)
-            var fields = [text, "@" + Fold.handle(note.handle), Fold.key(note.author)]
-            if let booster = note.boosterHandle { fields.append("@" + Fold.handle(booster)) }
-            if let name = note.boostedBy { fields.append(Fold.key(name)) }
-            fields += Self.hashtags(in: text)
-            fields.append(note.source.host)
-            self.fields = fields
+            fields = SearchIndex.fields(
+                body: note.body, handle: note.handle, author: note.author, boosterHandle: note.boosterHandle,
+                boostedBy: note.boostedBy, host: note.source.host
+            )
         }
 
         func describes(_ note: Note) -> Bool {
@@ -213,6 +216,20 @@ public struct SearchIndex: Sendable {
     }
 
     private let entries: [NoteKey: Entry]
+
+    /// The folded fields a post is searched by (`Entry.fields`), from its cells as they are: what
+    /// the store's file asks of a row before it reads it whole (#360).
+    public static func fields(
+        body: String, handle: String, author: String, boosterHandle: String?, boostedBy: String?, host: String
+    ) -> [String] {
+        let text = Fold.key(body)
+        var fields = [text, "@" + Fold.handle(handle), Fold.key(author)]
+        if let boosterHandle { fields.append("@" + Fold.handle(boosterHandle)) }
+        if let boostedBy { fields.append(Fold.key(boostedBy)) }
+        fields += Entry.hashtags(in: text)
+        fields.append(host)
+        return fields
+    }
 
     public init(_ notes: [Note], reusing old: SearchIndex? = nil) {
         var entries: [NoteKey: Entry] = [:]
@@ -241,6 +258,21 @@ public struct NoteSearch: Sendable {
     private let categoryNames: [String: [Category: [String]]]
     /// Folded names of public, trends and home, which are the same on every source.
     private let sharedNames: [Category: [String]]
+    /// The categories whose names the pattern matches — a board or a list of one source, or
+    /// public, trends or home of every source (`host` nothing) — by which a post is found
+    /// whatever its words (#360, K-5): what the file asks beside the words index.
+    public let namedCategories: [NamedCategory]
+
+    /// A category a pattern names, on one source or on every one.
+    public struct NamedCategory: Hashable, Sendable {
+        public let category: Category
+        public let host: String?
+
+        public init(category: Category, host: String?) {
+            self.category = category
+            self.host = host
+        }
+    }
 
     /// Nothing for an empty pattern.
     ///
@@ -263,9 +295,18 @@ public struct NoteSearch: Sendable {
         }
         categoryNames = names
         let words: [Category: String] = [.public: "public", .trends: "trends", .home: "home"]
-        sharedNames = words.reduce(into: [:]) { shared, pair in
+        let shared: [Category: [String]] = words.reduce(into: [:]) { shared, pair in
             shared[pair.key] = [pair.value] + (labels[pair.key] ?? []).map(Fold.key)
         }
+        sharedNames = shared
+        var named = shared.filter { $0.value.contains(where: pattern.matches) }.map { NamedCategory(category: $0.key, host: nil) }
+        for (host, byCategory) in names {
+            for (category, spelled) in byCategory where spelled.contains(where: pattern.matches) {
+                named.append(NamedCategory(category: category, host: host))
+            }
+        }
+        // In one order every time: a page's SQL is made of them.
+        namedCategories = named.sorted { ($0.host ?? "", "\($0.category)") < ($1.host ?? "", "\($1.category)") }
     }
 
     private func names(of category: Category, on host: String) -> [String] {

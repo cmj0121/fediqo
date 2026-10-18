@@ -142,7 +142,9 @@ struct StoreLaunchTests {
         let whole = ItemStore(sources: [Self.one], notes: notes)
         await whole.letGoBeyond(months: 1, from: Self.now)
         #expect(Set(await whole.all().map(\.id)) == Set(await pool.all().map(\.id)))
-        // And the row stays in the file, for the limit to be kept there in its turn.
+        // And the row goes from the file with the save that follows (#360).
         #expect(try file.rowCount() == 4)
+        try await file.save(await pool.takeChanges().changes)
+        #expect(try file.rowCount() == 3)
     }
 }

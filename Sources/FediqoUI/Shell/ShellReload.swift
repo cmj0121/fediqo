@@ -588,6 +588,9 @@ final class ShellReload {
     /// back none of the others. Nothing while the timeline editor is up: it owns the keys.
     func timeline(_ query: TimelineQuery, in session: ShellSession) async {
         guard !asking.contains(.timeline), session.editing == nil else { return }
+        // Read deep, with the rows above let go: the newest page of the file first, drawn
+        // there, so what the sources bring lands where the reader is (#359, C22).
+        await session.readNewest(query)
         await run(.timeline) {
             let asks = CompiledTimeline(query.definition(among: session.written), sources: session.sources)
                 .sourcesToAsk()

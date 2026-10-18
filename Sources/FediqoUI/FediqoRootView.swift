@@ -124,9 +124,11 @@ public struct FediqoRootView: View {
         savesLanded: (@Sendable () async -> AsyncStream<Void>)? = nil,
         measureStore: (@Sendable () async -> Int)? = nil,
         compactStore: (@Sendable () async throws -> Void)? = nil,
+        letWordsGo: (@Sendable () async throws -> Void)? = nil,
         weighStore: (@Sendable () async -> Int)? = nil,
         readPage: (@Sendable (PageQuery, PageAsk, Int) async throws -> Page)? = nil,
         readEarly: (@Sendable (PageQuery, Int) async throws -> Page?)? = nil,
+        readSearch: (@Sendable (PageQuery, NoteSearch, PageAsk, Int) async throws -> Page?)? = nil,
         afterFirstPage: (@Sendable () async -> Void)? = nil,
         limits: (any LimitAccountStore)? = nil,
         storeIsNewer: Bool = false,
@@ -155,9 +157,11 @@ public struct FediqoRootView: View {
         session.deviceName = deviceName
         session.measureStore = measureStore
         session.compactStore = compactStore
+        session.letWordsGo = letWordsGo
         session.weighStore = weighStore
         session.readPage = readPage
         session.readEarly = readEarly
+        session.readSearch = readSearch
         session.afterFirstPage = afterFirstPage
         session.limitStore = limits
         _session = State(initialValue: session)
@@ -285,13 +289,18 @@ public struct FediqoRootView: View {
                 tags.placing = { tag, row in openTag(tag, from: row) }
                 placeMentions()
                 placeQuotes()
+                // What the search and the person pages draw is said to the store with the rest
+                // of what is drawn (#359).
+                session.openSearch = search
+                session.personPages = people
                 // What an earlier run could not put back and did not live to (#344): said once,
                 // as the launch begins, and from here — a listing of the store's folder is no
                 // work for an initializer that runs every time the view is made.
                 if let carrier = session.carrier { session.carry.say(leftBy: carrier) }
                 await session.loadLimitAccount()
-                // The months limit before any page: every page is cut by it (#357).
-                await session.keep(months: prefs.keepMonths)
+                // The months limit before any page: every page is cut by it (#357). What it lets
+                // go is let go a step at a time once the first page is in (below, #360).
+                await session.cut(months: prefs.keepMonths)
                 // **Where this launch lands is the sources' answer, and nothing else's** (#101,
                 // #357): the timeline is there where a source is, whether or not a row of it has
                 // been read, and its pane reads its first page as it shows — drawn as being read
@@ -302,10 +311,13 @@ public struct FediqoRootView: View {
                 }
                 await session.reloadFromStore()
                 await session.adoptUnsent()
-                // Then the room (#249), judged once the months limit has had its turn — the one
-                // order in which each limit acts once at a launch.
+                // The room as set (#249), then the months limit kept in the file, in a task of its
+                // own so no page waits for more than one step of it (#360), and the launch's room
+                // check once it has had its turn.
                 session.roomBytes = prefs.roomBytes
-                await session.keepWithinRoom()
+                let months = prefs.keepMonths
+                let keeping = Task { await session.keepAtLaunch(months: months) }
+                defer { keeping.cancel() }
                 // Ended with this view's own task, so a window closed stops saying its notice.
                 let arriving = staged.map { staged in Task { await arrive(at: staged) } }
                 defer { arriving?.cancel() }
@@ -324,6 +336,10 @@ public struct FediqoRootView: View {
             .modifier(KeepingWithinRoom(session: session))
             .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes))
             .modifier(AnnouncementsAsk(session: session, announcements: people.announcements))
+            // The pages open over the timeline, whose rows the store keeps while they are (#359).
+            .modifier(PinsPages(session: session, pages: openPages))
+            // And the open search read from the file, past what is held (#360).
+            .modifier(CoversSearch(session: session, ask: session.searchAsk(search, latest: prefs.latestDate)))
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }
@@ -1974,6 +1990,15 @@ public struct FediqoRootView: View {
         return (row, who)
     }
 
+    /// The pages open over the timeline as the session is handed them (#359): every step of
+    /// the walk, the search, and the latest date the timeline is drawn to.
+    private var openPages: OpenPages {
+        OpenPages(
+            steps: walk.steps, searching: search.isOpen, pattern: search.pattern, indexed: search.isIndexed,
+            latest: prefs.latestDate
+        )
+    }
+
     // MARK: - A quoted post — #214
 
     /// The quote's press and `o`, answered by the walk: set once, before anything can be pressed.
@@ -2672,6 +2697,7 @@ public struct FediqoRootView: View {
                         search: search,
                         timeline: session.name(of: session.currentTimeline),
                         found: search.isIndexed ? searchItems?.count : nil,
+                        counted: session.searchCount(found: searchItems?.count ?? 0, searched: search.searchedCount),
                         reach: session.reload.reach?.sentence,
                         lookUp: people.found.line(typed: search.text, in: session),
                         onLookUp: lookUpPressed,

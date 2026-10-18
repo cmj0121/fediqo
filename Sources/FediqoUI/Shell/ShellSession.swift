@@ -391,13 +391,70 @@ final class ShellSession {
     /// A provisional first page (C15), read beside the file's pages' index while it is being
     /// made, and nothing once it is: set by the app beside `readPage`.
     @ObservationIgnored var readEarly: (@Sendable (PageQuery, Int) async throws -> Page?)?
+    /// Reads one page of what a search finds in a timeline from the file (#360, C25), or nothing
+    /// for a pattern the file cannot narrow: set by the app beside `readPage`, and nil where it is.
+    @ObservationIgnored var readSearch: (@Sendable (PageQuery, NoteSearch, PageAsk, Int) async throws -> Page?)?
+    /// How far the open search has been read from the file (`coverSearch`); nothing while none is.
+    var searchReading: SearchReading?
     /// Run once, after the first page of the timeline in front is drawn: what waits for the
     /// timeline to show (C1).
     @ObservationIgnored var afterFirstPage: (@Sendable () async -> Void)?
     @ObservationIgnored var firstPageDrawn = false
-    /// Where each timeline has been read down to in the file, by query (#357). Nothing for one
+    /// Which stretch of the file each timeline has read and draws, by query (#357). Nothing for one
     /// not read yet, which waits for its first page.
     var coverage: [TimelineQuery: TimelineCoverage] = [:]
+    /// The row each timeline's window was last moved round (#359, C19): its last anchor, or
+    /// where it was left. Past observation, as `scrolledTop` is — written from the scroll.
+    @ObservationIgnored var anchors: [TimelineQuery: String] = [:]
+    /// How many window moves (`placed`) each timeline has running, begun from the scroll: none
+    /// more is begun for a short list while one is (`scrolled`, `footReached`).
+    @ObservationIgnored var placing: [TimelineQuery: Int] = [:]
+    /// The pages open over the timeline, as the root has them (#359, G-4): what each draws is
+    /// said to the store with the rest of what the screens draw (`pins`). Handed in by the root
+    /// as its walk or its search moves (`pagesOpened`).
+    @ObservationIgnored var openPages = OpenPages()
+    /// The search the root holds, whose results are drawn while it is open; and the person
+    /// pages it holds, whose posts read from a source are drawn from the store where it holds
+    /// them. Set once by the root; nothing in a session drawn without one.
+    @ObservationIgnored weak var openSearch: ShellSearch?
+    @ObservationIgnored weak var personPages: ShellPersonPages?
+    /// The store's `drawn` as `notes` was last read from it (`ItemStore.all()`), read before it:
+    /// what the keys the screens draw from `notes` are made from (`ItemStore.hold`). Nothing
+    /// before the first read, and nothing is said to the store before then.
+    @ObservationIgnored private(set) var notesDrawnAt: Int?
+    /// What was last said to the store as drawn, and the `drawn` it was made from: said again
+    /// only where either moved.
+    @ObservationIgnored var heldLast: (pins: Set<NoteKey>, at: Int)?
+    /// The last saying of it on its way: each waits for the one before, so the store hears them
+    /// in the order they were made.
+    @ObservationIgnored var pinsOnTheirWay: Task<Void, Never>?
+    /// Who this session is to the store as it says what it draws: one window among the windows
+    /// over the one store, each saying its own (`ItemStore.hold(_:drawnAt:by:)`).
+    @ObservationIgnored var screen = UUID()
+    /// The window's following of the store ended (`screenGone`): nothing more is said to it
+    /// under `screen`, until the window follows it again (`screenOpened`).
+    @ObservationIgnored var screenClosed = false
+    /// The rows the timeline in front is about to draw, worked out as what it draws was said to
+    /// the store, and taken as they are by the drawing that follows (`timelineItemsKept`).
+    @ObservationIgnored var pinnedDrawing: (key: DrawnTimeline.Key, items: [DummyItem])?
+    /// What the pages that walk the pool draw, and what it was worked out from (`pagePins`).
+    @ObservationIgnored var pagePinsKept: (key: PagePinsKey, pins: Set<NoteKey>)?
+    /// Each held row by its host and its source's id, made once as `notes` changes (`heldRow`).
+    @ObservationIgnored var statusIndex: (revision: Int, rows: [String: NoteKey])?
+    /// How many rows the file holds of each host, as last counted (#359, C23): what Usage says
+    /// of the posts held, as many as there are rather than at least those read. Nothing until
+    /// counted, and where there is no file.
+    private(set) var rowsOnFile: [String: HostRows]?
+    /// How many rows the file holds of each week and each month, as last counted beside
+    /// `rowsOnFile` (#360, C31): what Usage's breakdown says, as many as there are. Nothing until
+    /// counted, and where there is no file.
+    private(set) var periodsOnFile: PeriodsCounted?
+    /// The store's revision while every change to a row was written, as last asked
+    /// (`ItemStore.rowsWritten`): asked at every adopt and every count, so the breakdown is
+    /// said exactly only while the file holds what the pool does.
+    private(set) var rowsWrittenAt: Int?
+    /// How many saves landed this run (`landed()`): what Usage counts the file again on.
+    var writesLanded = 0
     /// Whether every kept row of the file is in the pool (`readKeptRows`): nil until asked and
     /// while the read is out, then whether it read. What Usage's kept section waits for, so it
     /// never says nothing is kept where the file keeps some (#357).
@@ -524,7 +581,11 @@ final class ShellSession {
     /// The item one row id stands for, among every item this device holds (`notes`). See
     /// `held(_:)`. A forum topic's replies its forum gave no date, which are not items, are not found here.
     func heldNote(_ rowID: String) -> Note? {
-        guard let key = NoteKey(rowID: rowID) else { return nil }
+        NoteKey(rowID: rowID).flatMap(heldNote(key:))
+    }
+
+    /// The note held under `key`, as `heldNote(_:)` finds it.
+    func heldNote(key: NoteKey) -> Note? {
         let index: [NoteKey: Int]
         if let builtHeldIndex {
             index = builtHeldIndex
@@ -547,8 +608,19 @@ final class ShellSession {
 
     /// Everything this device holds, counted (#7): `notes` and `heldReplies` together (#194), so the
     /// figure is the store's and not a timeline's. Rebuilt where either is assigned or the
-    /// breakdown switches between week and month, never on a redraw.
-    private(set) var holdings = Holdings(notes: [], per: .month)
+    /// breakdown switches between week and month, never on a redraw — **and only once it is
+    /// read** (#359): a pool over the file is assigned at every landing, and the count walks
+    /// every row of it, which only Usage and a limit ask for. A screen drawing it follows what
+    /// it is counted from.
+    var holdings: Holdings {
+        let (notes, replies, period) = (self.notes, heldReplies, heldPeriod)
+        if let holdingsKept { return holdingsKept }
+        let counted = Holdings(notes: notes + replies, per: period)
+        holdingsKept = counted
+        return counted
+    }
+
+    @ObservationIgnored private var holdingsKept: Holdings?
     /// How many notices the store holds of each source, by host (#323): what Usage says.
     /// Counted off the store and not off what the notices page draws, which is empty while
     /// who is signed in cannot be read and the disk still holds them.
@@ -564,7 +636,7 @@ final class ShellSession {
 
     private func recount() {
         guard !recountHeld else { return }
-        holdings = Holdings(notes: notes + heldReplies, per: heldPeriod)
+        holdingsKept = nil
     }
 
     /// Both halves of what is held assigned in one breath, nil where one did not move, and the
@@ -575,11 +647,17 @@ final class ShellSession {
     /// it is left out of what every page draws, over a store that still holds it. Its copies'
     /// own rows, and no more: a reblog of it, or a post that quotes it, still draws it inside
     /// its own row until the source answers — the post is held until then.
-    private func adoptHeld(notes items: [Note]?, replies: [Note]?) {
+    ///
+    /// `drawnAt` is the store's `drawn` read before `items` was (#359): what is drawn from them
+    /// is made from that.
+    private func adoptHeld(notes items: [Note]?, replies: [Note]?, drawnAt: Int?) {
         guard items != nil || replies != nil else { return }
         recountHeld = true
         let leaving = acts.leaving
-        if let items { notes = leaving.isEmpty ? items : items.filter { !leaving.contains($0.key.rowID) } }
+        if let items {
+            notes = leaving.isEmpty ? items : items.filter { !leaving.contains($0.key.rowID) }
+            notesDrawnAt = drawnAt
+        }
         if let replies { heldReplies = replies }
         recountHeld = false
         recount()
@@ -599,8 +677,28 @@ final class ShellSession {
     /// whenever Usage asks. **The one call a limit on the store makes too**, so what it is held
     /// to is what is shown.
     func readStoreBytes() async {
+        await readRowCounts()
         guard let measureStore else { return }
         storeBytes = await measureStore()
+    }
+
+    /// Counts again how many rows the file holds of each host (#359, C23), off the main actor:
+    /// where `readStoreBytes` measures it, so after every drop written and whenever Usage asks.
+    /// The breakdown by week and month is counted beside it, the same way (#360, C31), in
+    /// `calendar`'s weeks and months and only as many of each as Usage shows — and written down
+    /// with whether every change was in the file from before the count to after it.
+    func readRowCounts(calendar: Calendar = .current) async {
+        let before = await store.rowsWritten()
+        async let byHost = store.rowsByHost()
+        async let byPeriod = store.rowsByPeriod(calendar: calendar, most: UsagePane.stretchesShown)
+        let (hosts, periods) = await (byHost, byPeriod)
+        let after = await store.rowsWritten()
+        if after != rowsWrittenAt { rowsWrittenAt = after }
+        if let hosts, hosts != rowsOnFile { rowsOnFile = hosts }
+        if let periods {
+            let counted = PeriodsCounted(buckets: periods, calendar: calendar, written: before == after ? after : nil)
+            if counted != periodsOnFile { periodsOnFile = counted }
+        }
     }
 
     /// Gives the index back the room that rows let go of left in it, so `measureStore` sees them
@@ -608,6 +706,19 @@ final class ShellSession {
     /// where the rebuild did not happen — a full disk, a run cancelled — and then the file keeps
     /// its size until it is asked again.
     @ObservationIgnored var compactStore: (@Sendable () async throws -> Void)?
+
+    /// Takes the words of the posts let go out of the index's words index (#360, C27): FTS5
+    /// keeps a deleted post's tokens until it rewrites itself, and this rewrites it — where a
+    /// save would run, and only where a save let rows go since it last ran. Set by the app
+    /// beside `compactStore`, which does it first; nil where this run has no index.
+    @ObservationIgnored var letWordsGo: (@Sendable () async throws -> Void)?
+
+    /// After an act that let posts go and is not followed by `compactStore` — a span, a source
+    /// removed, what is marked gone, a post taken back — once its save has returned: chained
+    /// after every save asked for before, so several such acts in a row rewrite the index once.
+    func wordsLetGo() async {
+        try? await letWordsGo?()
+    }
 
     /// What the rows held weigh, whatever the file does (`StoreFile.bytesHeld`): what the room
     /// check judges each round by, since `measureStore` only moves once `compactStore` has run.
@@ -686,7 +797,7 @@ final class ShellSession {
     /// removed source nothing is held from, is not shown.
     var usageDetailShown: Bool {
         guard usagePurpose == .source, let host = usageOpened else { return false }
-        return sources.contains { $0.host == host } || holdings.posts(host: host) > 0
+        return sources.contains { $0.host == host } || postsHeld(host: host).count > 0
     }
 
     /// Escape on Usage: back from a source's detail to the list. Only a detail on screen is closed,
@@ -1377,7 +1488,7 @@ final class ShellSession {
                 // says it is gone — a kept copy drawn again, marked — while the file still
                 // holds its words (#292). Whatever became of the sign-in meanwhile: the source
                 // said yes, so the post is gone there. A write that did not land is said.
-                if act == .withdraw { await saveNow(.post) }
+                if act == .withdraw { await saveNow(.post) { [weak self] in await self?.wordsLetGo() } }
                 guard stands(flight, copy.id, act, door) else { break }
                 if act == .withdraw {
                     acts.landed(copy.id, act)
@@ -1476,7 +1587,10 @@ final class ShellSession {
     ///
     /// **Observed, and the sheet is presented from it**, so a key and a press on the mark open
     /// the one surface by writing the one value.
-    var answering: AnswerTarget?
+    var answering: AnswerTarget? {
+        // The post answered, and the one the thread is about, are drawn while it is written.
+        didSet { if answering != oldValue { pinsMoved() } }
+    }
     /// What has been written to each post and not yet sent, by row. Kept when the sheet closes
     /// unsent. A send takes the text at the press and holds it, on disk, until it lands or the
     /// person discards it (`ShellOutbox`).
@@ -2644,6 +2758,7 @@ final class ShellSession {
     /// their ids across an adopt, which is what keeps the selected post selected.
     func followStore() async {
         // Listening before the first adopt, so a landing between the two is not missed.
+        screenOpened()
         let changes = await store.changes()
         await adopt()
         for await _ in changes {
@@ -2651,6 +2766,8 @@ final class ShellSession {
             // A landing may have taken the store past its room (#249): asked, not measured, here.
             roomMayBeReached()
         }
+        // The window is gone: what it drew is drawn nowhere now (#359).
+        await screenGone()
     }
 
     /// Only the sources, projected again through what each server has just said it is — for a
@@ -2707,8 +2824,13 @@ final class ShellSession {
         // nothing else: nothing but the moment each was read could place it (#297). A reply the
         // forum dated is an item, and is among `all`.
         let replies = adoptedReplies != repliesRevision ? await store.replies() : nil
-        adoptHeld(notes: all, replies: replies)
+        adoptHeld(notes: all, replies: replies, drawnAt: drawn)
         if all != nil { adopted = (store: drawn, notes: notesRevision) }
+        // Whether the file holds every change, for the breakdown it counts (#360, C31).
+        if store.heldInPart {
+            let written = await store.rowsWritten()
+            if written != rowsWrittenAt { rowsWrittenAt = written }
+        }
         // A text that may have been posted is let go where its post is now among what is held.
         if all != nil { outbox.reconcile(in: self) }
         // The misses as they stand with what was just assigned: only these are settled, by
@@ -2727,6 +2849,9 @@ final class ShellSession {
         // for**: adopting is what every landing and every press waits on, and asking a source's
         // line for a load is not part of having adopted.
         if all != nil { refs.landing(in: self) }
+        // What the screens draw of what was just adopted, said to the store (#359): the rows
+        // it may then let go are drawn nowhere.
+        await holdDrawn()
     }
 
     /// `heldRevision` as the open conversations last drew from what is held.
@@ -3030,38 +3155,100 @@ final class ShellSession {
     /// relaunch; where it dropped nothing — forever, a wider window, a launch with nothing old —
     /// neither happens. Returns how many notes went.
     ///
+    /// **A step at a time over a file** (#360, C32): at most `step` of the file's rows past the
+    /// limit are read and let go at once (`ItemStore.letGoBeyond(months:from:calendar:step:after:)`),
+    /// what is held read again and the step written before the next — so a landing saved between
+    /// two steps is written as it comes, and a page asked meanwhile waits for one step, never the
+    /// lot. **A limit set again meanwhile ends this one**, as does its task cancelled: the steps
+    /// left are the newer limit's, or the next launch's.
+    ///
     /// **What went is written into the limits' account** (#251): the months limit acted, when,
-    /// how many posts and from which sources — the one thing that can still be said of them.
+    /// how many posts and from which sources — the one thing that can still be said of them —
+    /// one line for the act, its steps summed.
     @discardableResult
-    func keep(months: Int?, from now: Date = Date()) async -> Int {
+    func keep(months: Int?, from now: Date = Date(), step: Int = ItemStore.beyondStep) async -> Int {
+        await keepRun(months: months, from: now, step: step).posts
+    }
+
+    /// `keep(months:)`, saying too whether its steps ran to the end — not ended by a newer limit
+    /// or by its task cancelled. **Notices older than the limit** go as the limit is set, once a
+    /// run, and are written by the first save after: a step's that let posts go, or the one
+    /// below where none went.
+    func keepRun(months: Int?, from now: Date = Date(), step: Int = ItemStore.beyondStep) async -> (posts: Int, ended: Bool) {
+        keeping &+= 1
+        let run = keeping
         let told = await store.noticesRevision
-        let went = await store.letGoBeyond(months: months, from: now)
-        // Every page is cut where the store now keeps from (#357): moved, each timeline is read
-        // afresh, as what its pages left out is no longer what they would.
-        let cut = await store.keepFrom
-        if cut != keepFrom { keepFrom = cut }
-        // The notices page draws nothing past the limit from this moment (`ShellNoticeList.cut`).
-        await noticeList.follow(in: self)
+        // The limit set once, for every step of this run: a step under a limit moved since lets
+        // nothing go (`ItemStore.letGoBeyond(_:step:after:)`).
+        let cutoff = await store.setLimit(months: months, from: now)
+        await followCut()
+        var went = WentByLimit.none
+        var next: PageCursor?
+        repeat {
+            guard let cutoff else { break }
+            let made = await store.letGoBeyond(cutoff, step: step, after: next)
+            next = made.next
+            went = went.adding(made.went)
+            guard made.went.posts > 0 else { continue }
+            // What is drawn follows each step — a row an open page drew among what went, with it
+            // — and what the screens draw is said to the store again (`reloadFromStore`).
+            await reloadFromStore()
+            // Waited for: what the window dropped is not said to be gone while the file still
+            // holds it (#292), and the next step is not read before this one is written.
+            await saveNow(.posts)
+            await Task.yield()
+        } while next != nil && run == keeping && !Task.isCancelled
+        let ended = next == nil && run == keeping
         guard went.posts > 0 else {
             // Only notices older than the limit went, or the copy of a post that old one
             // carried: waited for all the same, and counted nowhere — a notice is not a post.
             if await store.noticesRevision != told { await saveNow(.posts) }
-            return 0
+            return (0, ended)
         }
-        // The window cuts a topic's kept replies too, and the count says so at once (#194).
-        let all = await store.all()
-        let replies = await store.replies()
-        adoptHeld(notes: all, replies: replies)
-        adoptedReplies = await store.repliesRevision
-        // Waited for: what the window dropped is not said to be gone while the file still holds
-        // it (#292). Giving the file back its room, and measuring it, follow and are not.
-        await saveNow(.posts) { [weak self] in
+        // Giving the file back its room, and measuring it, follow the last step's save and are
+        // not waited for. **A run ended early writes its own line**, of what its steps let go —
+        // true of what went, as the newer run's line is of what it let go after.
+        let before = saving
+        saving = Task { [weak self] in
+            await before?.value
             try? await self?.compactStore?()
             await self?.readStoreBytes()
         }
         await record(LimitAct(limit: .months, at: now, posts: went.posts, sources: went.sources))
-        return went.posts
+        return (went.posts, ended)
     }
+
+    /// A launch's months limit kept in the file, then its one room check (#249) — the one order
+    /// in which each limit acts once at a launch — **and no room check where the months run did
+    /// not end**: a newer limit's run, or none at all for a task cancelled. The room itself is
+    /// set before this, so a landing meanwhile is judged by it as ever.
+    func keepAtLaunch(months: Int?) async {
+        let run = await keepRun(months: months)
+        guard run.ended, !Task.isCancelled else { return }
+        await keepWithinRoom()
+    }
+
+    /// The months limit set and nothing let go by it but the notices older than it (#360): what a
+    /// launch asks before its first page, every page being cut by it (#357). The rows past it
+    /// are let go by `keep(months:)`, which follows.
+    func cut(months: Int?, from now: Date = Date()) async {
+        let told = await store.noticesRevision
+        await store.setLimit(months: months, from: now)
+        await followCut()
+        if await store.noticesRevision != told { saveSoon() }
+    }
+
+    /// Every page cut where the store now keeps from (#357): moved, each timeline is read afresh,
+    /// as what its pages left out is no longer what they would. The notices page draws nothing
+    /// past the limit from this moment (`ShellNoticeList.cut`).
+    private func followCut() async {
+        let cut = await store.keepFrom
+        if cut != keepFrom { keepFrom = cut }
+        await noticeList.follow(in: self)
+    }
+
+    /// Counts the months limit's acts begun (`keep(months:)`): one begun since ends the one before.
+    @ObservationIgnored private var keeping = 0
 
     /// An opening post just read, kept with its row in the store and saved (#154).
     ///
@@ -3234,7 +3421,7 @@ final class ShellSession {
     func removeQuestion(host: String, postsStay: Bool, language: DummyLanguage? = nil) -> ShellConfirmation {
         sayingOthersSignedOut(ShellQuestion.remove(
             host: host, boards: Self.boards(of: host, in: sources), postsStay: postsStay,
-            kept: holdings.kept(host: host).posts, unsent: outbox.count(host: host), atLeast: store.heldInPart,
+            kept: holdings.kept(host: host).posts, unsent: outbox.count(host: host), atLeast: keptAtLeast,
             language: language
         ), host: host, language: language)
     }
@@ -3484,7 +3671,8 @@ final class ShellSession {
         // kept or not, are off the disk before the rest is said to have gone (#292): removing
         // a source is the person asking for them to be gone, whatever it held.
         await store.remove(host: host, keepingPosts: keepingPosts)
-        await saveNow(.source)
+        // And their words out of the words index once that save has returned (C27).
+        await saveNow(.source) { [weak self] in await self?.wordsLetGo() }
         // What waited to be sent to it goes with it, as its question said — off the disk
         // before the rest is said to have gone (#292). A sign-out and a Clear leave them.
         await outbox.forget(host: host, in: self)
@@ -3717,4 +3905,59 @@ private struct RemovedStops: HTTPClient {
 struct SignOutAsk: Equatable {
     let host: String
     let question: ShellConfirmation
+}
+
+extension ShellSession {
+    /// **How many entries each collection the session holds has** (#360, K-12): counts only,
+    /// never what an entry says. A collection of collections is counted by what it holds summed:
+    /// the rows each timeline's coverage pins, what each drawn timeline lists and remembers.
+    /// A cache not built now counts nothing.
+    func census() -> [String: Int] {
+        let drawn = drawnTimelines.values
+        return [
+            "notes": notes.count,
+            "notes.capacity": notes.capacity,
+            "heldReplies": heldReplies.count,
+            "sources": sources.count,
+            "profiles": profiles.count,
+            "unread": unread.count,
+            "queries": queries.count,
+            "written": written.count,
+            "coverage": coverage.count,
+            "coverage.pinned": coverage.values.reduce(0) { $0 + $1.pinned.count },
+            "anchors": anchors.count,
+            "placing": placing.count,
+            "missingRules": missingRules.count,
+            "drawnTimelines": drawnTimelines.count,
+            "drawnOrder": drawnOrder.count,
+            "drawn.items": drawn.reduce(0) { $0 + $1.items.count },
+            "drawn.ids": drawn.reduce(0) { $0 + $1.ids.count },
+            "drawn.index": drawn.reduce(0) { $0 + $1.index.count },
+            "drawn.priorIndex": drawn.reduce(0) { $0 + $1.priorIndex.count },
+            "drawn.arrived": drawn.reduce(0) { $0 + $1.arrived.count },
+            "drawn.left": drawn.reduce(0) { $0 + $1.left.count },
+            "drawn.before": drawn.reduce(0) { $0 + $1.before.count },
+            "drawn.gapMarks": drawn.reduce(0) { $0 + $1.items.reduce(0) { $0 + $1.gaps.count } },
+            "textIndex": builtTextIndex?.count ?? 0,
+            "reblogTargets": builtReblogTargets?.count ?? 0,
+            "owingRows": builtOwingRows?.count ?? 0,
+            "heldIndex": builtHeldIndex?.count ?? 0,
+            "statusIndex": statusIndex?.rows.count ?? 0,
+            "pinnedDrawing": pinnedDrawing?.items.count ?? 0,
+            "pagePinsKept": pagePinsKept?.pins.count ?? 0,
+            "heldLast": heldLast?.pins.count ?? 0,
+            "openPages.steps": openPages.steps.count,
+            "slides": slides.count,
+            "removals": removals.count,
+            "removes": removes.count,
+            "noticesHeld": noticesHeld.count,
+            "noticesSaid": noticesSaid.count,
+            "rowsOnFile": rowsOnFile?.count ?? 0,
+            "lamps": readingMark.lampCount,
+            "readingMark.rows": readingMark.rows.count,
+            "refs.asking": refs.count,
+            "refs.seen": refs.seenCount,
+            "misses": acts.misses.count,
+        ]
+    }
 }

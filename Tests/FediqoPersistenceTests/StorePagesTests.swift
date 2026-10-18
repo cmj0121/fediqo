@@ -271,7 +271,7 @@ struct StorePagesTests {
         let words = try query([.source("one.example"), .keyword("swift", in: .every)])
         #expect(exact.compiled.prefilter.groups.count == 2)
         #expect(exact.compiled.prefilter.excludes == [.handle("ada@one.example", host: nil)])
-        #expect(words.compiled.prefilter.groups == [[.host("one.example")]])
+        #expect(words.compiled.prefilter.groups == [[.host("one.example")], [.words("swift", host: nil)]])
         #expect(words.compiled.prefilter.readsWhatIsSaid)
         func hits(_ query: PageQuery) async throws -> Int {
             let (hit, arguments) = StoreFile.hit(query.compiled.prefilter, keepFrom: nil)

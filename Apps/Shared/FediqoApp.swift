@@ -89,6 +89,9 @@ final class Launch {
     private let protected: ProtectedData
     /// The index on disk, measured for Usage (#194); nil where this run has none.
     let file: StoreFile?
+    /// The words index's build (#360), begun once the timeline shows; nil where this run has no
+    /// index.
+    let words: WordsBuilder?
     /// The limits' account beside the index (#251); nil where the folder could not be made.
     let limits: LimitAccountFile?
     /// The person's own lists beside the index (#344): what may be reached beyond a source,
@@ -126,8 +129,10 @@ final class Launch {
         // `nil` when the index could not be read and could not be set aside either: this run
         // then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
         // It is also `nil` when the index was written by a newer build, which is left as found.
-        saver = StoreSaver(store: store, file: opened.file, protected: protected)
+        let saver = StoreSaver(store: store, file: opened.file, protected: protected)
+        self.saver = saver
         file = opened.file
+        words = opened.file.map { WordsBuilder(file: $0, saver: saver, protected: protected) }
         // Only beside an index this run writes: a run that must not write the index (a newer
         // build's, or one that could not be set aside) writes no lines about it either.
         limits = opened.file == nil ? nil : try? LimitAccountFile(directory: StoreFile.applicationSupportDirectory)
@@ -219,6 +224,8 @@ final class Launch {
     func end() async {
         await forgetChangedReaders()
         _ = await saver.flush()
+        // The words' build stood down for good: a write of it left is one chunk, where a save would run.
+        await words?.end()
         let hosts = await store.sources().map(\.host)
         // Nothing where this run never read the store: `ForumSessions.sourcesRead`.
         await forums.leaveNothing(keeping: hosts, within: StoreSaver.deadline)
@@ -428,8 +435,20 @@ private struct Live: View {
         guard let file = launch.file else { return nil }
         let saver = launch.saver
         // Where a save would run: after every save asked for before it and before any after,
-        // and never inside a read back's commit, which holds the same place (#247).
-        return { try await saver.exclusively { try await file.compact() } }
+        // and never inside a read back's commit, which holds the same place (#247). The words of
+        // what was let go first (C27), a step at a time with saves between, then the room.
+        return {
+            try await file.letWordsGo(in: saver)
+            try await saver.exclusively { try await file.compact() }
+        }
+    }
+
+    /// Takes the words of the posts an act let go out of the index's words index (#360, C27),
+    /// or nothing where this run has no index. Each step where a save would run, on its own.
+    private var letWordsGo: (@Sendable () async throws -> Void)? {
+        guard let file = launch.file else { return nil }
+        let saver = launch.saver
+        return { _ = try await file.letWordsGo(in: saver) }
     }
 
     /// One page of a timeline read from the index (#357), or nothing where this run has none: the
@@ -437,6 +456,13 @@ private struct Live: View {
     private var readPage: (@Sendable (PageQuery, PageAsk, Int) async throws -> Page)? {
         guard let file = launch.file else { return nil }
         return { query, ask, limit in try await file.page(query, ask, limit: limit) }
+    }
+
+    /// One page of what a search finds in a timeline, read from the index (#360), or nothing where
+    /// this run has none: the search then reads what is held, which is everything.
+    private var readSearch: (@Sendable (PageQuery, NoteSearch, PageAsk, Int) async throws -> Page?)? {
+        guard let file = launch.file else { return nil }
+        return { query, search, ask, limit in try await file.search(query, search, ask, limit: limit) }
     }
 
     /// A provisional first page (C15), read beside the index's pages' index while a first launch
@@ -452,9 +478,16 @@ private struct Live: View {
     private var afterFirstPage: (@Sendable () async -> Void)? {
         guard let file = launch.file else { return nil }
         let saver = launch.saver
+        let words = launch.words
         return {
-            try? await file.makeIndexes()
+            try? await file.makeIndexes(in: saver)
+            // The words of what was let go and not yet taken out of the words index (C27):
+            // before the scrub, which would copy them into the file it makes.
+            await file.letWordsGoIfOwed(in: saver)
             _ = try? await saver.exclusively { await file.scrubIfDue() }
+            // The words index (#360), built a chunk at a time behind everything else and waited
+            // for by nothing: until it is, a keyword reads as it did.
+            await words?.begin()
         }
     }
 
@@ -469,8 +502,8 @@ private struct Live: View {
             store: launch.store, forums: launch.forums,
             mastodon: launch.mastodon, persist: save, persistUnsent: saveUnsent,
             savesLanded: { [saver = launch.saver] in await saver.landings() },
-            measureStore: measureStore, compactStore: compactStore, weighStore: weighStore,
-            readPage: readPage, readEarly: readEarly, afterFirstPage: afterFirstPage,
+            measureStore: measureStore, compactStore: compactStore, letWordsGo: letWordsGo, weighStore: weighStore,
+            readPage: readPage, readEarly: readEarly, readSearch: readSearch, afterFirstPage: afterFirstPage,
             limits: launch.limits,
             storeIsNewer: launch.storeIsNewer,
             storeNoticeSeen: { launch.storeIsNewer = false },

@@ -170,8 +170,8 @@ struct TagPageSaid: Equatable {
     var stripped: Bool { PageFrame.stripDrawn(tabs) }
 
     static func made(
-        of tag: PostTag, held: Int, asking: [String] = [], failed: [String] = [], reach: String? = nil,
-        follows: [TagFollowLine] = [], front kept: TagTab? = nil, language: DummyLanguage? = nil
+        of tag: PostTag, held: Int, heldAtLeast: Bool = false, asking: [String] = [], failed: [String] = [],
+        reach: String? = nil, follows: [TagFollowLine] = [], front kept: TagTab? = nil, language: DummyLanguage? = nil
     ) -> TagPageSaid {
         let tabs = TagTab.tabs(follows: follows)
         let front = TagTab.front(kept, among: tabs)
@@ -181,10 +181,11 @@ struct TagPageSaid: Equatable {
         let beingAsked = !asking.isEmpty
         return TagPageSaid(
             tag: tag, tabs: tabs, front: front,
-            // What this device holds, counted here: a figure of its own, and so never a guess.
+            // What this device holds, counted here: a figure of its own, and so never a guess —
+            // and over a store held in part, of what was read, at least so many (#360, C31).
             figure: PageFigure(
-                symbol: TagTab.posts.symbol, figure: L10n.grouped(held, language: language),
-                spoken: L10n.count("person.held", held, language: language),
+                symbol: TagTab.posts.symbol, figure: heldFigure(held, atLeast: heldAtLeast, language: language),
+                spoken: PersonHeadSaid.heldLine(held, atLeast: heldAtLeast, language: language),
                 opens: PageFrame.stripDrawn(tabs), lit: front == .posts
             ),
             followed: follows.filter { $0.standing == .said(true) }.map {
@@ -220,13 +221,20 @@ extension TagPageSaid {
         }
     }
 
+    /// The figure of the posts held under the hashtag, its thousands apart — and where it is only
+    /// at least so many (#360, C31), said so.
+    static func heldFigure(_ held: Int, atLeast: Bool = false, language: DummyLanguage? = nil) -> String {
+        let figure = L10n.grouped(held, language: language)
+        return atLeast ? String(format: L10n.t("tag.held.figure.atLeast", language: language), figure) : figure
+    }
+
     /// The page of `tag` as the session stands: what its ask says only where the ask is this
     /// hashtag's — another's, or one left behind, is not this page's to say.
     @MainActor
     static func made(of tag: PostTag, held: Int, follows: [TagFollowLine], front: TagTab?, in session: ShellSession) -> TagPageSaid {
         let asked = session.reload.tagAsk?.tag == tag
         return made(
-            of: tag, held: held, asking: asked ? session.reload.tagAsking : [], failed: asked ? session.reload.tagFailed : [],
+            of: tag, held: held, heldAtLeast: session.heldAtLeast, asking: asked ? session.reload.tagAsking : [], failed: asked ? session.reload.tagFailed : [],
             reach: asked ? session.reload.tagAsk?.reach.sentence : nil, follows: follows, front: front
         )
     }

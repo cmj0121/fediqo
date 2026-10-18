@@ -281,9 +281,25 @@ struct StorePoolTests {
         func oldest(_ limit: Int, after: PageCursor?) throws -> (rows: [HeldRow], next: PageCursor?) {
             try call { try file.oldest(limit, after: after) }
         }
+        func oldestKeys(_ limit: Int, after: PageCursor?) throws -> (rows: [OldestRow], next: PageCursor?) {
+            try call { try file.oldestKeys(limit, after: after) }
+        }
         func referring(to keys: [NoteKey]) throws -> [Referrer] { try call { try file.referring(to: keys) } }
+        func beyond(_ cutoff: Date, limit: Int, after: PageCursor?) throws -> (rows: [PastLimit], next: PageCursor?) {
+            try call { try file.beyond(cutoff, limit: limit, after: after) }
+        }
+        func referring(to keys: [NoteKey], stayingFrom cutoff: Date) throws -> [Referrer] {
+            try call { try file.referring(to: keys, stayingFrom: cutoff) }
+        }
         func marked(_ hosts: StoreOp.Hosts) throws -> Bool { try call { try file.marked(hosts) } }
         func rowCount() throws -> Int { try call { try file.rowCount() } }
+        func rowCounts() throws -> [String: HostRows] { try call { try file.rowCounts() } }
+        func rowsByPeriod(_ period: HeldPeriod, calendar: Calendar, most: Int) throws -> [Holdings.Bucket] {
+            try call { try file.rowsByPeriod(period, calendar: calendar, most: most) }
+        }
+        func oldestStatusID(host: String, category: FediqoCore.Category) throws -> String? {
+            try call { try file.oldestStatusID(host: host, category: category) }
+        }
 
         /// How many times the kept rows were asked for.
         var keptAsked: Int { lock.withLock { keptReads } }
@@ -378,32 +394,31 @@ struct StorePoolTests {
         #expect(counted.keptAsked == 1)
     }
 
-    @Test("the months limit over a file lets nothing go, from it or from the pool, and no page shows a row past it")
+    @Test("the months limit over a file lets go of what the whole store would, from it and from the pool, and no page shows a row past it")
     func monthsLeaveTheFile() async throws {
         let now = Self.at
         let old = Self.post("old", Self.one, at: now.addingTimeInterval(-400 * 86_400))
+        let unread = Self.post("unread", Self.one, at: now.addingTimeInterval(-410 * 86_400))
         let quotedOld = Self.post("quoted-old", Self.one, at: now.addingTimeInterval(-500 * 86_400), [])
         let recent = Self.post("recent", Self.one, at: now.addingTimeInterval(-60), refs: [Reference(kind: .quotes, id: "quoted-old", state: .accepted)])
-        let file = try await seededFile([old, quotedOld, recent])
+        let file = try await seededFile([old, unread, quotedOld, recent])
         let pool = ItemStore(sources: Self.sources, rows: file)
-        _ = try await read(try query([]), pages: 1, limit: 10, from: file, into: pool)
-        let before = await pool.all()
-        #expect(Set(before.map(\.key.id)) == ["old", "quoted-old", "recent"])
+        _ = try await read(try query([]), pages: 1, limit: 3, from: file, into: pool)
         let went = await pool.letGoBeyond(months: 1, from: now)
-        #expect(went.posts == 0)
-        // Held still, and handed over by `all()` no more (H3b): what the whole store would have
-        // let go — the post an in-window one quotes stays, as it stays there.
-        #expect(await pool.note(old.key) != nil)
+        #expect(went == WentByLimit(posts: 2, sources: ["one.example"]))
+        // The post an in-window one quotes stays, as it stays in the whole store.
+        #expect(await pool.note(old.key) == nil)
         #expect(Set(await pool.all().map(\.key.id)) == ["quoted-old", "recent"])
         let changes = await pool.takeChanges().changes
-        #expect(changes.deletes.isEmpty && changes.upserts.isEmpty)
-        #expect(try file.rows([old.key]).count == 1)
+        #expect(Set(changes.deletes) == [old.key, unread.key] && changes.upserts.isEmpty)
+        try await file.save(changes)
+        #expect(try file.rows([old.key, unread.key]).isEmpty)
         let cutoff = try #require(KeepPolicy.cutoff(keepingMonths: 1, from: now, calendar: .current))
         let page = try await file.page(try query([], keepFrom: cutoff), .newest)
         #expect(page.rows.map(\.note.key.id) == ["recent"])
     }
 
-    @Test("a save that fails after the months limit acted owes no delete of a row past it")
+    @Test("a save that fails after the months limit acted still owes the delete of a row past it, and not its change")
     func monthsThenAFailedSave() async throws {
         let now = Self.at
         let old = Self.post("old", Self.one, at: now.addingTimeInterval(-400 * 86_400))
@@ -418,10 +433,11 @@ struct StorePoolTests {
         await pool.letGoBeyond(months: 1, from: now)
         await pool.putBack(taken)
         let again = await pool.takeChanges().changes
-        #expect(again.deletes.isEmpty)
-        #expect(again.upserts.map(\.key) == [old.key])
+        #expect(again.deletes == [old.key])
+        #expect(again.upserts.isEmpty)
         try await file.save(again)
-        #expect(try file.rows([old.key]).map(\.note) == [try #require(await pool.note(old.key))])
+        #expect(try file.rows([old.key]).isEmpty)
+        #expect(await pool.note(old.key) == nil)
     }
 
     @Test("a copy landing while a save is in flight is written with its newer word, whether the save lands or fails")

@@ -94,7 +94,7 @@ struct DrawnTimeline {
         let latest: LatestDate?
         /// The hosts still here (#250): which copy a merged row is drawn as follows them.
         let hosts: Set<String>
-        /// How far down the file it was read (#357): nothing for a store held whole.
+        /// Which stretch of the file it draws (#357, #359): nothing for a store held whole.
         let reach: TimelineCoverage.Reach?
     }
 
@@ -103,6 +103,12 @@ struct DrawnTimeline {
     /// The rows' ids, worked out once a drawing and handed out as one array, so a list comparing
     /// what it was handed with what it had compares nothing it did not have to.
     let ids: [String]
+    /// Where each row stands in `ids`, made once a drawing (#359): what the place is measured by
+    /// as the list is scrolled, a lookup a report.
+    let index: [String: Int]
+    /// `index` of the drawing before this one of the same timeline: whether the rows above a row
+    /// moved (`movedAbove`).
+    var priorIndex: [String: Int] = [:]
     /// The rows new to this drawing of the timeline since its last (#357): what eases in. None
     /// for a timeline drawn for the first time; every row for one drawn from none.
     var arrived: Set<String> = []
@@ -119,6 +125,22 @@ struct DrawnTimeline {
     /// `arrived` has been handed to a list once (`timelineArrived`): a row drawn again later —
     /// scrolled to, or a switch back to this drawing — is simply there.
     var arrivedHanded = false
+
+    init(key: Key, items: [DummyItem], ids: [String], stamp: Int) {
+        self.key = key
+        self.items = items
+        self.ids = ids
+        index = Dictionary(ids.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        self.stamp = stamp
+    }
+
+    /// Whether the rows above `row` are not the number they were in the drawing before (#359):
+    /// a page landed above it, or rows above it were let go — and the row is to be held where
+    /// it is read (`HoldsPlace`). Nothing for a row either drawing lacks.
+    func movedAbove(_ row: String) -> Bool {
+        guard let now = index[row], let then = priorIndex[row] else { return false }
+        return now != then
+    }
 }
 
 /// The rows a timeline is shown as (#357): what it draws, and — while they ease out — the rows
@@ -222,10 +244,10 @@ extension ShellSession {
     /// redraw reads it several times. The stream compiles without the sources; their hosts are a
     /// key all the same, for which copy a merged row is drawn as (#250).
     ///
-    /// **Over a file, only as far down as the timeline was read from it** (#357), and nothing
-    /// before its first page: a post held for another reason — a thread, another timeline, what
-    /// a row quotes — would otherwise stand alone below rows not yet read. Arrivals stand above
-    /// the first page, and are drawn.
+    /// **Over a file, only the stretch of the timeline read from it and kept** (#357, #359), and
+    /// nothing before its first page: a post held for another reason — a thread, another
+    /// timeline, what a row quotes — would otherwise stand alone past rows not read. Arrivals
+    /// stand above the first page, and are drawn while the timeline is drawn to its newest.
     func timelineItems(latest: LatestDate?) -> [DummyItem] {
         timelineDrawn(latest: latest).items
     }
@@ -308,14 +330,46 @@ extension ShellSession {
         return drawn.arrived
     }
 
+    /// Whether the last drawing of the timeline in front moved the rows above `row` (#359):
+    /// `DrawnTimeline.movedAbove`, asked as the drawing changes alone.
+    func timelineDrawnMovedAbove(_ row: String) -> Bool {
+        drawnTimelines[currentTimeline.id]?.movedAbove(row) ?? false
+    }
+
+    /// What the timeline in front, drawn now up to `latest`, is drawn from: a drawing of it under
+    /// another key is of something else.
+    func timelineDrawingKey(latest: LatestDate?) -> DrawnTimeline.Key {
+        let query = currentTimeline
+        let reach = readPage == nil ? nil : coverage[query].flatMap { $0.reach(for: coverageKey(of: query, latest: latest)) }
+        return DrawnTimeline.Key(
+            definition: definition(of: query), notesRevision: notesRevision, latest: latest,
+            hosts: Set(sources.map(\.host)), reach: reach
+        )
+    }
+
+    /// The rows the timeline in front draws under `key`, worked out afresh and kept nowhere.
+    func timelineItems(under key: DrawnTimeline.Key) -> [DummyItem] {
+        let reach = key.reach
+        // Its first page not read yet: the pane says it is being read (`timelineLoading`).
+        if readPage != nil, reach == nil { return [] }
+        let definition = key.definition
+        // Between its edges, in the store's order (#359): merged from what stands near them,
+        // and drawn where a copy stands inside, so no post is split at an edge.
+        let clipped = reach.map { $0.floor != nil || $0.ceiling != nil } ?? false
+        let held = clipped ? notes.filter { reach?.nears($0) ?? true } : notes
+        // A stretch of a large pool finds what its own rows reblog and quote, and builds no
+        // lookup over the whole pool at each landing.
+        let targets = clipped ? ReblogTargets(naming: held, among: heldNote(key:)) : reblogTargets
+        let merged = currentTimeline.items(
+            from: held, among: written, index: definition.readsText ? textIndex : TextIndex([]), latest: key.latest,
+            here: key.hosts, targets: targets
+        )
+        return clipped ? merged.filter { reach?.holds($0, held: heldNote) ?? true } : merged
+    }
+
     func timelineDrawn(latest: LatestDate?) -> DrawnTimeline {
         let query = currentTimeline
-        let definition = definition(of: query)
-        let hosts = Set(sources.map(\.host))
-        let reach = readPage == nil ? nil : coverage[query].flatMap { $0.reach(for: coverageKey(of: query, latest: latest)) }
-        let key = DrawnTimeline.Key(
-            definition: definition, notesRevision: notesRevision, latest: latest, hosts: hosts, reach: reach
-        )
+        let key = timelineDrawingKey(latest: latest)
         if let drawn = drawnTimelines[query.id], drawn.key == key {
             if drawnOrder.last != query.id {
                 drawnOrder.removeAll { $0 == query.id }
@@ -323,22 +377,15 @@ extension ShellSession {
             }
             return drawn
         }
-        let items: [DummyItem]
-        if readPage != nil, reach == nil {
-            // Its first page not read yet: the pane says it is being read (`timelineLoading`).
-            items = []
-        } else {
-            let floor = reach?.floor
-            let held = floor.map { floor in notes.filter { $0.postedAt >= floor } } ?? notes
-            items = query.items(
-                from: held, among: written, index: definition.readsText ? textIndex : TextIndex([]), latest: latest,
-                here: hosts, targets: reblogTargets
-            )
-            timelineEvaluations += 1
-        }
+        // Worked out already where what is drawn was just said to the store (#359).
+        let kept = pinnedDrawing?.key == key ? pinnedDrawing?.items : nil
+        pinnedDrawing = nil
+        let items = kept ?? timelineItems(under: key)
+        if kept == nil, readPage == nil || key.reach != nil { timelineEvaluations += 1 }
         let ids = items.map(\.id)
         drawings += 1
         var drawn = DrawnTimeline(key: key, items: items, ids: ids, stamp: drawings)
+        if let before = drawnTimelines[query.id] { drawn.priorIndex = before.index }
         if let before = drawnTimelines[query.id], !ids.isEmpty {
             if before.ids.isEmpty {
                 drawn.arrived = Set(ids)
@@ -357,6 +404,8 @@ extension ShellSession {
         while drawnOrder.count > Self.drawnKept {
             drawnTimelines[drawnOrder.removeFirst()] = nil
         }
+        // What it draws now said to the store, once this pass is drawn (#359).
+        pinsMoved()
         return drawn
     }
 

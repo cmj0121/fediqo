@@ -763,9 +763,6 @@ enum ShellQuestion {
         case .nothingToTake:
             key = "carry.refused.nothingToTake"
             line = L10n.t(key + ".line", language: language)
-        case .heldInPart:
-            key = "carry.refused.heldInPart"
-            line = L10n.t(key + ".line", language: language)
         case .locked:
             key = "carry.refused.locked"
             line = L10n.t(key + ".line", language: language)
@@ -875,8 +872,6 @@ enum ShellQuestion {
             return carryRefused(.storeNotOpened, language: language)
         case .nothingToTake:
             return carryRefused(.nothingToTake, language: language)
-        case .heldInPart:
-            return carryRefused(.heldInPart, language: language)
         case .locked:
             return carryRefused(.locked, language: language)
         case .notAllowed, .wrongCode, .refusedThere, .lost, .malformed, .unsure, .guessing, .timedOut:

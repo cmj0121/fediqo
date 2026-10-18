@@ -80,6 +80,11 @@ struct UsagePane: View {
         /// acted moved the figures, and a clear moved the lines.
         let acted: UUID?
         let lines: Int
+        /// The saves landed this run (#359): what the file counts of each source moved with them.
+        let written: Int
+        /// Whether the file's breakdown is no longer what is held, or of another calendar's weeks
+        /// (#360, C31): counted again, so a change of zone or first weekday is followed.
+        let periodsStale: Bool
     }
 
     private var sources: [Source] { session?.sources ?? [] }
@@ -162,7 +167,9 @@ struct UsagePane: View {
         .padding(ShellSpace.snug)
         .task(id: Probe(
             hosts: sources.map(\.host), cleared: session?.cleared ?? 0,
-            acted: session?.limitAccount.first?.id, lines: session?.limitAccount.count ?? 0
+            acted: session?.limitAccount.first?.id, lines: session?.limitAccount.count ?? 0,
+            written: session?.writesLanded ?? 0,
+            periodsStale: session.map { $0.periodsOnFile != nil && !$0.periodsExact() } ?? false
         )) {
             await readCatalogues()
             await readDisk()
@@ -261,15 +268,17 @@ struct UsagePane: View {
             // Everything held (#194), and what it all weighs on disk.
             stretch(
                 Text(L10n.t("prefs.held.total")).shellFont(.name).foregroundStyle(ShellChrome.ink(colorScheme)),
-                figure: Self.totalLine(holdings.posts, onDisk: session.storeBytes, atLeast: session.store.heldInPart)
+                figure: Self.totalLine(session.postsHeldTotal, onDisk: session.storeBytes)
             )
             // What changed posts said before (#286): held with them, so counted with them.
-            if let earlier = Self.earlierFigure(holdings.earlier) {
+            if let earlier = Self.earlierFigure(holdings.earlier, atLeast: session.store.heldInPart) {
                 stretch(ShellReadingLine(Text(L10n.t("prefs.held.earlier"))), figure: earlier)
             }
-            ForEach(holdings.byPeriod.prefix(Self.stretchesShown), id: \.start) { bucket in
+            // As the file counts each stretch once it has been (#360, C31), and so exact.
+            let periods = session.heldByPeriod()
+            ForEach(periods.buckets.prefix(Self.stretchesShown), id: \.start) { bucket in
                 stretch(ShellReadingLine(Text(Self.stretchLabel(bucket.start, period: session.heldPeriod))),
-                        figure: Self.postsLine(bucket.posts))
+                        figure: Self.postsLine(bucket.posts, atLeast: periods.atLeast))
             }
         } header: {
             ShellSectionHead(title: "prefs.held.breakdown")
@@ -418,6 +427,15 @@ struct UsagePane: View {
 
     /// "12 posts · 1.2 MB on disk", with the disk half left off until the index has been measured
     /// (#194) — the same rule the pictures line keeps, for the same reason.
+    /// `postsLine` of a count and whether it is only at least so many (`ShellSession.postsHeld`).
+    static func postsLine(_ held: (count: Int, atLeast: Bool), language: DummyLanguage? = nil) -> String {
+        postsLine(held.count, atLeast: held.atLeast, language: language)
+    }
+
+    static func totalLine(_ held: (count: Int, atLeast: Bool), onDisk: Int?) -> String {
+        totalLine(held.count, onDisk: onDisk, atLeast: held.atLeast)
+    }
+
     static func totalLine(_ count: Int, onDisk: Int?, atLeast: Bool = false) -> String {
         guard let onDisk else { return postsLine(count, atLeast: atLeast) }
         return postsLine(count, atLeast: atLeast) + " · " + String(format: L10n.t("prefs.held.disk"), size(onDisk))
@@ -425,8 +443,10 @@ struct UsagePane: View {
 
     /// How many earlier wordings of changed posts are held, as a figure — or nothing where none
     /// are, so a device that never saw a post change draws no line about it.
-    static func earlierFigure(_ count: Int, language: DummyLanguage? = nil) -> String? {
-        count == 0 ? nil : L10n.count("prefs.held.earlier.count", count, language: language)
+    /// `atLeast`: counted over the rows the pool holds of a store over a file (#359), which are
+    /// only those lately seen — at least so many, never how many.
+    static func earlierFigure(_ count: Int, atLeast: Bool = false, language: DummyLanguage? = nil) -> String? {
+        count == 0 ? nil : L10n.count("prefs.held.earlier.count" + (atLeast ? ".atLeast" : ""), count, language: language)
     }
 
     /// A week by the day it starts, a month by its name, both in the shell's language.

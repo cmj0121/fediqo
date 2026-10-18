@@ -23,6 +23,8 @@ final class ShellReadingMark {
     }
 
     private var lamps: [String: Lamp] = [:]
+    /// How many rows have a lamp: a count for a census (#360).
+    var lampCount: Int { lamps.count }
     /// The row marked, or nothing where the list has no rows on screen.
     private(set) var id: String?
 

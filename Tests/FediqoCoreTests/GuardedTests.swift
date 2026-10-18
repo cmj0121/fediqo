@@ -816,6 +816,9 @@ struct GuardedSourceTests {
             // A read back: the index to and from an aside `Guarded` made, in the store's folder —
             // and a choice between two stores, or a launch finishing one, moving the other aside.
             "Sources/FediqoPersistence/StorePackager.swift": 8,
+            // A read back's aside of an open file, made by SQLite in a folder `Guarded` made
+            // beside the index, moved back into the index's place where none stands (#360).
+            "Sources/FediqoPersistence/StoreReadBack.swift": 1,
         ])
     }
 
