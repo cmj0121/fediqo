@@ -341,7 +341,11 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocolDidFinishLoading(self)
             return
         }
-        DispatchQueue.global().async { [weak self] in self?.pace(stub) }
+        // A thread of its own, not one of the shared pool's: the pacer holds its thread until the
+        // transfer is torn down, and on a busy runner every thread of the pool can be held by
+        // others, so a pacer queued there may never start — no body moves, and the request
+        // times out instead of being refused.
+        Thread.detachNewThread { [weak self] in self?.pace(stub) }
     }
 
     /// Hands half the body over a chunk at a time, stopping the moment the task is torn down,
