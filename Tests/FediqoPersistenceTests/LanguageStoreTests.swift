@@ -109,7 +109,7 @@ struct LanguageStoreTests {
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier")
         }
         #expect(migrations == [
-            "v1-index", "v10-references", "v11-one-holding", "v12-references-only", "v13-unsent", "v14-notices", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions",
+            "v1-index", "v10-references", "v11-one-holding", "v12-references-only", "v13-unsent", "v14-notices", "v15-compose", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions",
             "v9-language",
         ])
     }
@@ -204,5 +204,19 @@ struct LanguageStoreTests {
         #expect(onto.lists.timelines.read() == .data(timelines), "the rule did not come with what the device holds")
         #expect(await onto.store.snapshot().notes.map(\.language) == ["ja", nil])
         #expect(try StoreFile(at: onto.directory).load().notes.map(\.language) == ["ja", nil])
+    }
+
+    @Test("The app a post names is read back with it, and one that names none still names none")
+    func theAppComesBack() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let named = PackagerFixture.note("1", via: "Fediqo")
+        let silent = PackagerFixture.note("2")
+        let file = try StoreFile(at: dir)
+        try await file.save(sources: [PackagerFixture.mastodon], notes: [named, silent])
+
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.notes.map(\.via) == ["Fediqo", nil])
+        #expect(opened.notes.map(\.id) == ["1", "2"])
     }
 }

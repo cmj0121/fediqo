@@ -76,13 +76,24 @@ struct ComposeTests {
         )
     }
 
-    private static func status(body: String = "hello", visibility: String = "public") -> String {
+    private static func status(body: String = "hello", visibility: String = "public", extra: String = "") -> String {
         """
         {"id":"9","uri":"https://social.example/users/me/statuses/9",
          "created_at":"2024-06-01T00:00:00.000Z","content":"<p>\(body)</p>",
-         "visibility":"\(visibility)",
+         "visibility":"\(visibility)"\(extra),
          "account":{"username":"me","acct":"me","display_name":"Me"}}
         """
+    }
+
+    /// The form as it was sent, keys decoded, repeated keys kept.
+    private static func pairs(_ request: URLRequest) -> [(String, String)] {
+        guard let body = request.httpBody, let text = String(data: body, encoding: .utf8) else { return [] }
+        return text.split(separator: "&").map { pair in
+            let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
+            let key = parts[0].removingPercentEncoding ?? parts[0]
+            let value = (parts.count > 1 ? parts[1].removingPercentEncoding : "") ?? ""
+            return (key, value)
+        }
     }
 
     private func shell(
@@ -94,7 +105,7 @@ struct ComposeTests {
     ) async throws -> (ShellSession, WriteServer, MemoryMastodonTokens) {
         let tokens = MemoryMastodonTokens()
         try tokens.save(token(host, scopes: scopes))
-        let server = WriteServer(routes, gate: gate)
+        let server = WriteServer(routes, holding: holding, gate: gate)
         let store = ItemStore()
         await store.add(Source(host: host, kind: .mastodon))
         await store.add(Source(host: forum, kind: .discuz))
@@ -297,7 +308,11 @@ struct ComposeTests {
             "compose.cancel", "compose.post", "compose.body", "compose.source",
             "compose.visibility", "compose.visibility.public", "compose.visibility.unlisted",
             "compose.visibility.private", "compose.visibility.direct",
-            "compose.limit", "compose.none.title", "compose.none.detail",
+            "compose.limit", "compose.cover", "compose.language", "compose.sensitive",
+            "compose.media.add", "compose.media.remove", "compose.media.description",
+            "compose.media.count", "compose.media.tooLarge", "compose.media.tooMany",
+            "compose.media.kind", "compose.media.description.over", "compose.media.unreadable",
+            "compose.none.title", "compose.none.detail", "item.via",
         ]
         for key in keys {
             for language in [DummyLanguage.english, .taiwanese] {
@@ -328,5 +343,226 @@ struct ComposeTests {
         let (session, _, _) = try await shell(scopes: writing)
         #expect(session.availability.canCompose)
         #expect(session.availability.composeHintKey == "compose.summary")
+    }
+
+    @Test("A cover within the limit can be sent, a cover past it cannot, and files alone can while a cover alone cannot")
+    func aCoverAndFilesAreHeldToTheSameLimit() {
+        #expect(ComposerSheet.canSend(text: "ok", limit: 500, hasSource: true, cover: "mind"))
+        #expect(!ComposerSheet.canSend(text: "ok", limit: 10, hasSource: true, cover: String(repeating: "c", count: 11)))
+        #expect(ComposerSheet.canSend(text: "", limit: 500, hasSource: true, attachments: 2))
+        #expect(!ComposerSheet.canSend(text: "", limit: 500, hasSource: true, cover: "only a cover"))
+        #expect(!ComposerSheet.canSend(text: "ok", limit: 500, hasSource: true, attachments: 1, attachmentsOK: false))
+    }
+
+    @Test("A file over the ceiling the source stated is refused with that ceiling named, and the words stay")
+    func tooLargeKeepsTheWords() async throws {
+        let (session, server, _) = try await shell(scopes: writing + " write:media")
+        session.prepareCompose()
+        session.composeDraft = "kept"
+        session.composeRooms[host] = ComposeRoom(
+            limit: 500,
+            media: MastodonMediaLimits(count: 4, descriptionLimit: 1500, imageBytes: 1024, videoBytes: nil, mimeTypes: [])
+        )
+        let note = session.composeAttach(bytes: Data(count: 1025), name: "big.png", type: "image/png")
+        #expect(note?.contains("1 KiB") == true)
+        #expect(note?.contains(host) == true)
+        #expect(session.composeDraft == "kept")
+        #expect(session.composeMedia.isEmpty)
+        #expect(session.canPost)
+        #expect(await server.paths.isEmpty)
+
+        let fifth = (0..<4).allSatisfy { _ in
+            session.composeAttach(bytes: Data([1]), name: "ok.png", type: "image/png") == nil
+        }
+        #expect(fifth)
+        let tooMany = session.composeAttach(bytes: Data([1]), name: "fifth.png", type: "image/png")
+        #expect(tooMany?.contains(host) == true)
+        #expect(session.composeMedia.count == 4)
+        #expect(session.composeDraft == "kept")
+    }
+
+    @Test("Adding media the sign-in was not asked for says what the page will ask, and does not open it or the picker")
+    func addingMediaAsksBeforeThePage() async throws {
+        let (session, server, _) = try await shell(scopes: writing)
+        session.prepareCompose()
+        session.composeDraft = "kept"
+        session.composeAddMedia()
+        let ask = try #require(session.partAsks.open)
+        #expect(ask.ticked == [.media])
+        let question = ShellQuestion.part(ask)
+        #expect(question.line.contains("media"))
+        #expect(question.help?.contains("picture") == true)
+        #expect(question.help?.contains("description") == true)
+        #expect(session.composeDraft == "kept")
+        #expect(!session.composeImporting)
+        #expect(await server.paths.isEmpty)
+    }
+
+    @Test("A new post starts from what the source said, and a late answer does not overwrite a choice already made")
+    func aNewPostStartsFromTheSource() async throws {
+        let prefs = #"""
+        {"posting:default:visibility":"private","posting:default:language":"zh-TW","posting:default:sensitive":true}
+        """#
+        let (session, _, _) = try await shell(
+            scopes: writing, routes: ["/api/v1/preferences": .json(prefs)]
+        )
+        session.prepareCompose()
+        await session.loadComposeDefaults()
+        #expect(session.composeAudience == .followers)
+        #expect(session.composeLanguage == "zh-tw")
+        #expect(session.composeCoversMedia == true)
+        #expect(!session.composeTouchedLanguage)
+
+        let gate = Gate()
+        let watchdog = watching(gate, "the defaults, held on the wire")
+        defer { watchdog.cancel() }
+        let (late, server, _) = try await shell(
+            scopes: writing, routes: ["/api/v1/preferences": .json(prefs)],
+            holding: "/api/v1/preferences", gate: gate
+        )
+        late.prepareCompose()
+        let loading = Task { await late.loadComposeDefaults() }
+        await met("the defaults are on the wire", by: loading) { await server.paths.contains("/api/v1/preferences") }
+        late.composeTouchedLanguage = true
+        late.composeLanguage = "fr"
+        await gate.open()
+        await loading.value
+        #expect(late.composeLanguage == "fr")
+        #expect(late.composeAudience == .followers)
+        #expect(late.composeCoversMedia == true)
+        #expect(!late.composeTouchedAudience)
+    }
+
+    @Test("Two described pictures are sent to that source alone, and the post names both")
+    func twoDescribedPicturesGoWithThePost() async throws {
+        let posted = Self.status(body: "with pictures", extra: #"""
+        ,"spoiler_text":"mind","language":"zh-tw","sensitive":true,"application":{"name":"Fediqo"},
+         "media_attachments":[
+           {"type":"image","url":"https://social.example/m1.jpg","description":"a hill"},
+           {"type":"image","url":"https://social.example/m2.jpg","description":"a bird"}]
+        """#)
+        let server = MediaServer(media: [
+            .init(status: 202, body: #"{"id":"m1"}"#),
+            .init(status: 202, body: #"{"id":"m2"}"#),
+        ], status: posted)
+        let session = try await mediaShell(server)
+        session.prepareCompose()
+        session.composeDraft = "with pictures"
+        session.composeCover = "mind"
+        session.chooseLanguage("zh-TW")
+        session.chooseCoversMedia(true)
+        #expect(session.composeAttach(bytes: Data("hill".utf8), name: "hill.png", type: "image/png", description: "a hill") == nil)
+        #expect(session.composeAttach(bytes: Data("bird".utf8), name: "bird.png", type: "image/png", description: "a bird") == nil)
+        #expect(session.send())
+        await session.outbox.settled()
+
+        let requests = await server.requests
+        #expect(requests.map { $0.url?.path } == ["/api/v2/media", "/api/v2/media", "/api/v1/statuses"])
+        #expect(requests.allSatisfy { $0.url?.host() == host })
+        let uploads = requests.filter { $0.url?.path == "/api/v2/media" }
+        #expect(uploads.allSatisfy { $0.value(forHTTPHeaderField: MastodonWrite.idempotencyKey) == nil })
+        #expect(uploads[0].httpBody?.range(of: Data("a hill".utf8)) != nil)
+        #expect(uploads[1].httpBody?.range(of: Data("a bird".utf8)) != nil)
+        let form = Self.pairs(requests[2])
+        #expect(form.filter { $0.0 == "media_ids[]" }.map(\.1) == ["m1", "m2"])
+        #expect(form.contains { $0 == ("spoiler_text", "mind") })
+        #expect(form.contains { $0 == ("language", "zh-tw") })
+        #expect(form.contains { $0 == ("sensitive", "true") })
+        #expect(requests[2].value(forHTTPHeaderField: MastodonWrite.idempotencyKey) != nil)
+        let note = try #require(session.notes.first { $0.body == "with pictures" })
+        #expect(note.attachments.map(\.alt) == ["a hill", "a bird"])
+        #expect(note.covered == true)
+        #expect(note.via == "Fediqo")
+        #expect(note.language == "zh-tw")
+        let item = DummyItem(note)
+        #expect(item.covered && item.via == "Fediqo")
+        #expect(DummyItemRow.viaLine(item.via) == "via Fediqo")
+        #expect(DummyItemRow.viaLine(nil) == nil && DummyItemRow.viaLine("") == nil)
+        #expect(DummyItemRow.viaLine("Fediqo", language: .taiwanese) == "來自 Fediqo")
+    }
+
+    @Test("A file refused part-way leaves the post unsent and whole, and trying again does not upload the one already taken")
+    func aFailurePartWayLeavesThePostWhole() async throws {
+        let server = MediaServer(media: [
+            .init(status: 202, body: #"{"id":"m1"}"#),
+            .init(status: 422, body: "{}"),
+            .init(status: 202, body: #"{"id":"m2"}"#),
+        ], status: Self.status(body: "kept"))
+        let session = try await mediaShell(server)
+        session.prepareCompose()
+        session.composeDraft = "kept"
+        #expect(session.composeAttach(bytes: Data("hill".utf8), name: "hill.png", type: "image/png", description: "a hill") == nil)
+        #expect(session.composeAttach(bytes: Data("bird".utf8), name: "bird.png", type: "image/png", description: "a bird") == nil)
+        #expect(session.send())
+        await session.outbox.settled()
+
+        let failed = try #require(session.outbox.sendings.first)
+        #expect(failed.unsent.text == "kept")
+        #expect(failed.unsent.media.map(\.remoteID) == ["m1", nil])
+        #expect(failed.standing == .failed(.declined))
+        #expect(await server.paths == ["/api/v2/media", "/api/v2/media"])
+        #expect(session.outbox.again(failed.id, in: session))
+        await session.outbox.settled()
+
+        let requests = await server.requests
+        #expect(requests.map { $0.url?.path } == ["/api/v2/media", "/api/v2/media", "/api/v2/media", "/api/v1/statuses"])
+        #expect(requests[2].httpBody?.range(of: Data("a bird".utf8)) != nil)
+        #expect(requests[2].httpBody?.range(of: Data("a hill".utf8)) == nil)
+        #expect(Self.pairs(requests[3]).filter { $0.0 == "media_ids[]" }.map(\.1) == ["m1", "m2"])
+        #expect(requests.filter { $0.url?.path == "/api/v1/statuses" }.count == 1)
+        #expect(requests.allSatisfy { $0.url?.host() == host })
+        #expect(session.notes.contains { $0.body == "kept" })
+    }
+
+    /// A writing sign-in that may also attach media, talking to `server`.
+    private func mediaShell(_ server: MediaServer) async throws -> ShellSession {
+        let tokens = MemoryMastodonTokens()
+        try tokens.save(token(host, scopes: writing + " write:media"))
+        let store = ItemStore()
+        await store.add(Source(host: host, kind: .mastodon))
+        let session = ShellSession(
+            http: FixtureHTTP(), store: store,
+            mastodon: MastodonSessions(tokens: tokens, sender: server)
+        )
+        session.sources = await store.sources()
+        session.mastodon.refresh()
+        return session
+    }
+}
+
+/// Two uploads of one path are two answers, then the post.
+private actor MediaServer: HTTPSender {
+    struct Answer: Sendable {
+        var status: Int = 200
+        var body: String
+    }
+
+    private var media: [Answer]
+    private let statusBody: String
+    private(set) var requests: [URLRequest] = []
+
+    init(media: [Answer], status: String) {
+        self.media = media
+        self.statusBody = status
+    }
+
+    var paths: [String] { requests.compactMap { $0.url?.path } }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        requests.append(request)
+        let path = request.url?.path ?? ""
+        let answer: Answer
+        if path == "/api/v2/media" {
+            guard !media.isEmpty else { throw FixtureHTTPError.unmapped }
+            answer = media.removeFirst()
+        } else if path == "/api/v1/statuses" {
+            answer = Answer(body: statusBody)
+        } else {
+            throw FixtureHTTPError.unmapped
+        }
+        return (
+            Data(answer.body.utf8),
+            HTTPURLResponse(url: request.url!, statusCode: answer.status, httpVersion: "HTTP/1.1", headerFields: nil)!
+        )
     }
 }

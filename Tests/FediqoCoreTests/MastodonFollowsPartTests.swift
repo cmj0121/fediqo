@@ -28,7 +28,7 @@ struct MastodonFollowsPartTests {
         #expect(!part.rider, "follows rode along on the read-or-act question")
         #expect(!part.needsActing, "a sign-in that only reads could not be asked for follows")
         #expect(MastodonPart.allCases.firstIndex(of: .follows) == 5, "follows moved in the table")
-        #expect(MastodonPart.allCases.filter(\.needsActing) == [.bookmarks])
+        #expect(MastodonPart.allCases.filter(\.needsActing) == [.bookmarks, .media])
         #expect(MastodonPart.allCases.filter(\.rider) == [.search, .bookmarks])
     }
 
