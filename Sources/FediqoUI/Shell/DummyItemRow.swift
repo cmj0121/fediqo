@@ -646,6 +646,12 @@ struct DummyItemRow: View {
         }
     }
 
+    /// The app a post names, as one line, or nothing where it named none.
+    static func viaLine(_ name: String?, language: DummyLanguage? = nil) -> String? {
+        guard let name, !name.isEmpty else { return nil }
+        return String(format: L10n.t("item.via", language: language), name)
+    }
+
     /// Nothing in here is pinned to a width any more, but nothing may overflow
     /// either: the host gives way first and truncates, and the age — the one reading
     /// that is useless half-drawn — keeps its own size and its place at the end.
@@ -659,6 +665,13 @@ struct DummyItemRow: View {
                 .fixedSize(horizontal: fit != nil, vertical: false)
                 .layoutPriority(0)
                 .modifier(Probed(\.meta, .source, probe: probe))
+            if let via = Self.viaLine(item.via) {
+                Text(via)
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .lineLimit(1)
+                    .accessibilityLabel(via)
+            }
             leftMark(terse: terse)
                 .modifier(Probed(\.meta, .left, probe: probe))
             goneMark(terse: terse)

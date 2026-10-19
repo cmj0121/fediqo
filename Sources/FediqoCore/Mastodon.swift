@@ -185,19 +185,22 @@ public struct MastodonClient: Sendable {
         return (said.kind, said.profile)
     }
 
-    /// `introduction()`, and what the same document says the host has (`MastodonHostSays`) — one
-    /// request, three readings, so whoever wants the third asks nothing the other two did not.
+    /// `introduction()`, what the same document says the host has (`MastodonHostSays`), and how
+    /// much media it takes (`MastodonMediaLimits`) — one request, four readings, so whoever wants
+    /// another asks nothing the others did not.
     ///
     /// Each reading is its own: a document the profile cannot be read from still says what kind
     /// of server it is and what it has, and one that says nothing of what it has
-    /// (`MastodonHostSays.nothing`) still has a profile. **Throws where the document did not come**, as
+    /// (`MastodonHostSays.nothing`) still has a profile. A document that says nothing of media
+    /// is `MastodonMediaLimits.unstated`, and that is not a host that could not be read.
+    /// **Throws where the document did not come**, as
     /// `introduction()` does, so a host that was not heard is not taken for one that said nothing.
-    public func said() async throws -> (kind: ProtocolKind, profile: SourceProfile?, has: MastodonHostSays) {
+    public func said() async throws -> (kind: ProtocolKind, profile: SourceProfile?, has: MastodonHostSays, limits: MastodonMediaLimits) {
         let data = try await instanceDocument()
         let kind = Probe.kind(from: data)
         let profile = (try? MastodonJSON.decoder.decode(InstanceDTO.self, from: data))?
             .asProfile(host: host, kind: kind)
-        return (kind, profile, MastodonHostSays(document: data))
+        return (kind, profile, MastodonHostSays(document: data), MastodonMediaLimits(document: data))
     }
 
     private func statuses(
@@ -424,6 +427,11 @@ struct StatusDTO: Decodable, Sendable {
     /// **Read leniently** (`Lenient`): a `quote` of a shape this build cannot read — a fork's own
     /// idea, a string — is no quote, and never costs the reader the status or the page it is on.
     let quote: Lenient<QuoteDTO>?
+    /// The app the source says wrote this status, or nothing where it said none.
+    ///
+    /// **Read leniently**, as `quote` is: a shape this build cannot read — a string, a fork's
+    /// own idea — is no name, and never costs the reader the status.
+    let application: Lenient<AppDTO>?
 
     /// A value read where it can be and nothing where it cannot, rather than a failed decode.
     struct Lenient<Wrapped: Decodable & Sendable>: Decodable, Sendable {
@@ -432,6 +440,19 @@ struct StatusDTO: Decodable, Sendable {
         init(from decoder: any Decoder) throws {
             value = try? Wrapped(from: decoder)
         }
+    }
+
+    /// The application a status names. Only the name is kept; a website is the source's to show.
+    struct AppDTO: Decodable, Sendable {
+        let name: String?
+    }
+
+    /// The app's name, fit for one line, or nothing where the status named none or named nothing
+    /// that can stand in a line. Cleaned here, once, so a held name is not cleaned again.
+    static func applicationName(_ application: Lenient<AppDTO>?) -> String? {
+        guard let raw = application?.value?.name else { return nil }
+        let line = LineText.oneLine(raw, limit: 80).trimmingCharacters(in: .whitespacesAndNewlines)
+        return line.isEmpty ? nil : line
     }
 
     /// The quote this status states — its reference, and the quoted post where the source
@@ -612,7 +633,7 @@ struct StatusDTO: Decodable, Sendable {
             // The pictures the reblogger's name is written in, and no others: the post's own
             // are on the post.
             emojis: CustomEmoji.folded((account.emojis ?? []).compactMap(\.asEmoji)),
-            statusID: id, refs: [reference]
+            statusID: id, via: Self.applicationName(application), refs: [reference]
         )
         item.asked = sent
         guard inner.reblog == nil else { return (item, nil) }
@@ -700,6 +721,7 @@ struct StatusDTO: Decodable, Sendable {
             statusID: subject.id,
             editedAt: Self.edited(subject.editedAt?.value, posted: subject.createdAt, now: Date()),
             language: subject.language?.value,
+            via: Self.applicationName(subject.application),
             // What it refers to, as the status says it: the post it answers, the post it quotes.
             refs: [
                 Self.answers(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),

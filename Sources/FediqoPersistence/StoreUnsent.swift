@@ -21,12 +21,18 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
     var writerID: String?
     var writer: String?
     var askedAt: Date?
+    var spoiler: String?
+    var language: String?
+    var sensitive: Bool?
+    /// JSON of the files, or NULL where there are none. A cell that will not read is no media.
+    var media: String?
 
     enum CodingKeys: String, CodingKey {
         case id, host, body, audience, answers, root, standing, writer
         case pressedAt = "pressed_at"
         case writerID = "writer_id"
         case askedAt = "asked_at"
+        case spoiler, language, sensitive, media
     }
 
     init(_ text: Unsent) {
@@ -41,6 +47,10 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
         writerID = text.writerID
         writer = text.writer
         askedAt = text.askedAt
+        spoiler = text.spoiler
+        language = text.language
+        sensitive = text.sensitive
+        media = UnsentMediaRow.text(text.media)
     }
 
     /// **A standing this build does not know is read as asked** — the careful word: it may have
@@ -52,8 +62,48 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
             id: id, host: host, text: body, audience: Audience(rawValue: audience) ?? .mentioned,
             answers: answers.flatMap(NoteKey.init(rowID:)), root: root.flatMap(NoteKey.init(rowID:)),
             pressedAt: pressedAt, standing: Unsent.Standing(rawValue: standing) ?? .asked,
-            writerID: writerID, writer: writer, askedAt: askedAt
+            writerID: writerID, writer: writer, askedAt: askedAt,
+            spoiler: spoiler, language: language, sensitive: sensitive, media: UnsentMediaRow.list(media)
         )
+    }
+}
+
+/// The files of one unsent text, as the `media` cell holds them. Bytes are base64. A row whose
+/// bytes will not read is left out; a cell that is not the array is no media, and the text is
+/// still read.
+private enum UnsentMediaRow {
+    struct Row: Codable {
+        var id: String
+        var bytes: String
+        var mime: String
+        var name: String
+        var description: String
+        var remoteID: String?
+    }
+
+    static func text(_ media: [UnsentMedia]) -> String? {
+        guard !media.isEmpty else { return nil }
+        let rows = media.map {
+            Row(
+                id: $0.id.uuidString, bytes: $0.bytes.base64EncodedString(), mime: $0.mime,
+                name: $0.name, description: $0.description, remoteID: $0.remoteID
+            )
+        }
+        guard let data = try? JSONEncoder().encode(rows) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func list(_ text: String?) -> [UnsentMedia] {
+        guard let text, let data = text.data(using: .utf8),
+              let rows = try? JSONDecoder().decode([Row].self, from: data)
+        else { return [] }
+        return rows.compactMap { row in
+            guard let id = UUID(uuidString: row.id), let bytes = Data(base64Encoded: row.bytes) else { return nil }
+            return UnsentMedia(
+                id: id, bytes: bytes, mime: row.mime, name: row.name, description: row.description,
+                remoteID: row.remoteID
+            )
+        }
     }
 }
 

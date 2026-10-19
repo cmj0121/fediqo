@@ -173,6 +173,8 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let sensitive: Bool?
     /// The line the author covered it with, where there is one.
     public let spoiler: String?
+    /// The app the source says wrote this post, where it said one. Nothing where it said none.
+    public let via: String?
     /// The pictures this post is partly written in, as the post itself carried them.
     ///
     /// The post's own list and not the reading server's: `:blobcat:` registered on two servers
@@ -553,6 +555,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         gaps = identity.gaps
         sensitive = note.sensitive
         spoiler = note.spoiler
+        via = note.via
         emojis = note.emojis
         mentions = note.mentions
         counts = DummyCounts(

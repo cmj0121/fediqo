@@ -1452,6 +1452,20 @@ private var migrator: DatabaseMigrator {
             t.column("post", .text)
         }
     }
+    // A cover line, a language, whether the media is covered, and the files themselves, on a
+    // text waiting to be sent. NULL is none: a text from before this step has none of them.
+    //
+    // **A migration id for `v3-holding`'s reason.** A build from before would open the store
+    // and send a text on without the cover or the pictures the person believes are waiting
+    // with it. The id makes it refuse the store instead.
+    migrator.registerMigration("v15-compose") { db in
+        try db.alter(table: "unsent") { t in
+            t.add(column: "spoiler", .text)
+            t.add(column: "language", .text)
+            t.add(column: "sensitive", .boolean)
+            t.add(column: "media", .text)
+        }
+    }
     return migrator
 }
 
@@ -1814,6 +1828,10 @@ private struct NoteFacts: Codable {
     /// as mentioning nobody, which the next read that says fills in, and an older build ignores
     /// the key and draws the words as it always did.
     var mentions: [String]?
+    /// `Note.via`: the app the source says wrote the post, or nothing where it said none.
+    /// Additive and optional, so no migration id: a row written before reads as none, and an
+    /// older build ignores the key and draws the row as it always did.
+    var via: String?
 }
 
 /// `Counts` as `NoteFacts` writes it.
@@ -2071,7 +2089,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             audience: note.audience?.rawValue,
             counts: CountsRow(note.counts),
             kind: note.source.kind.rawValue,
-            mentions: note.mentions.isEmpty ? nil : note.mentions
+            mentions: note.mentions.isEmpty ? nil : note.mentions,
+            via: note.via
         )
     }
 
@@ -2160,6 +2179,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             // Held to the bounds every kept wording is held to, whoever wrote the cell.
             earlier: Wording.bounded(WordingRow.wordings(earlier)),
             language: language,
+            via: facts.via,
             refs: references,
             refsDue: refs_due
         )

@@ -573,6 +573,12 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// (#287), or nothing where the source said none — which is not a language, and matches no
     /// rule on one.
     public let language: String?
+    /// The app the source says wrote this post, where it said one. Nothing where it said none —
+    /// which is not a name, and does not take one already held off the row.
+    ///
+    /// **A fact of the status, a reblog's included.** It is not what the post says, so a reblog
+    /// keeps the app its source named for the reblog itself. The post it carries keeps its own.
+    public let via: String?
     /// What this item refers to (#290, #293): each another item on the same source, with the
     /// kind of reference it is. Held to `Reference.bounded`.
     ///
@@ -651,6 +657,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         editedAt: Date? = nil,
         earlier: [Wording] = [],
         language: String? = nil,
+        via: String? = nil,
         refs: [Reference] = [],
         refsDue: Bool = false
     ) {
@@ -724,6 +731,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         // Held to what a language tag looks like wherever a note is made (#287) — off the wire,
         // back from the store, in a test — so nothing that is not one is ever on a row.
         self.language = SourceField.languageTag(language)
+        // Not wiped on a reblog, and not cleaned again: the decode already made it one line.
+        self.via = via
     }
 
     /// What this post's words weigh, in the bytes they are written in (#294): its body, title and
@@ -803,7 +812,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions, url: url,
             counts: stale.counts.filled(from: counts), statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed,
-            kept: kept, editedAt: editedAt, earlier: earlier, language: language,
+            kept: kept, editedAt: editedAt, earlier: earlier, language: language, via: via,
             refs: refs, refsDue: refsDue
         )
     }
@@ -836,6 +845,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             // The language the post says it is in **now**, nothing included: a post changed to
             // state none no longer matches a rule on the one it used to state.
             language: later.language,
+            // A name the later copy states replaces the one held. One it does not state leaves it.
+            via: later.via ?? via,
             refs: Reference.rebuilt(answers: answersReference, quotes: quotes, from: refs), refsDue: refsDue
         )
     }
@@ -894,6 +905,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             // language is this copy's even where it states none — unlike the reader's marks,
             // which a signed-out read leaves unsaid rather than says no to.
             language: language,
+            // As the spoiler is: a read that names no app leaves the name already held.
+            via: via ?? held.via,
             // **What it reblogs is the held row's, always** (#290): a reblog's target does not
             // change once it is held, so no later copy can turn a reblog — a kept one, which
             // holds its post — towards another post.
@@ -954,6 +967,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             statusID: statusID ?? other.statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed,
             kept: kept, editedAt: editedAt, earlier: earlier, language: language ?? other.language,
+            via: via ?? other.via,
             refs: Reference.rebuilt(answers: answersReference, quotes: quotes, from: refs), refsDue: refsDue
         )
     }
@@ -970,7 +984,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, refs: refs, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, language: language, via: via, refs: refs, refsDue: refsDue
         )
     }
 
@@ -984,7 +998,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, refs: refs, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, language: language, via: via, refs: refs, refsDue: refsDue
         )
     }
 
@@ -999,7 +1013,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, refs: references, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, language: language, via: via, refs: references, refsDue: refsDue
         )
     }
 
@@ -1013,7 +1027,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             avatarURL: avatarURL, attachments: attachments, sensitive: sensitive, spoiler: spoiler,
             emojis: emojis, mentions: mentions, url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, refs: refs, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, language: language, via: via, refs: refs, refsDue: refsDue
         )
     }
 }

@@ -370,7 +370,8 @@ final class ShellOutbox {
         let old = sendings[at].unsent
         let fresh = Unsent(
             host: old.host, text: typed, audience: old.audience, answers: old.answers, root: old.root,
-            pressedAt: old.pressedAt, writerID: old.writerID, writer: old.writer
+            pressedAt: old.pressedAt, writerID: old.writerID, writer: old.writer,
+            spoiler: old.spoiler, language: old.language, sensitive: old.sensitive, media: old.media
         )
         sendings[at] = Sending(unsent: fresh, standing: .waiting)
         out.insert(fresh.id)
@@ -750,7 +751,11 @@ final class ShellOutbox {
             return .refused
         case MastodonAuthError.http(let status):
             return (400..<500).contains(status) && !Self.answeredInFront.contains(status) ? .declined : nil
-        case MastodonWriteError.noSource, MastodonWriteError.unfindable:
+        case MastodonWriteError.noSource, MastodonWriteError.unfindable, MastodonWriteError.refusedHere(_):
+            return .unreachable
+        case is MastodonUnprocessable:
+            return .declined
+        case is MultipartError:
             return .unreachable
         case is OutwardRefusal:
             return .unreachable
@@ -848,6 +853,14 @@ final class ShellOutbox {
             unsent.writerID = reader.id
             unsent.writer = reader.handle
         }
+        switch await uploadMedia(unsent, id: id, in: session) {
+        case .stopped: return
+        case .missed(let why):
+            await missed(id, why, in: session)
+            return
+        case .ready(let uploaded):
+            unsent = uploaded
+        }
         // Written down as asked before the request leaves: from here it may have landed.
         let before = unsent
         unsent.standing = .asked
@@ -879,7 +892,11 @@ final class ShellOutbox {
         lastAsked[id] = asking
         do {
             let note = try await session.reach.write(door, landingIn: session.store)
-                .post(unsent.text, visibility: unsent.audience, answering: answering, key: id)
+                .post(
+                    unsent.text, visibility: unsent.audience, answering: answering, key: id,
+                    spoiler: unsent.spoiler, language: unsent.language, sensitive: unsent.sensitive,
+                    mediaIDs: unsent.media.compactMap(\.remoteID).filter { !$0.isEmpty }
+                )
             if let root = unsent.root {
                 let rootID = targets[id]?.root.statusID ?? session.note(ofRow: root.rowID)?.statusID
                 session.conversations.landed(note, under: root.rowID, rootID: rootID)
@@ -898,6 +915,68 @@ final class ShellOutbox {
                 stand(id, .unconfirmed, in: session)
             }
         }
+    }
+
+    /// Where an upload of `unsent`'s files got to, before the post itself is asked.
+    private enum Uploaded {
+        /// Every file the post needs has an id. Nothing was uploaded where there was no file.
+        case ready(Unsent)
+        /// The text was let go of while a file was going up. Nothing further is sent.
+        case stopped
+        /// A file was refused or did not land. The post was not asked. Ids already stored stay.
+        case missed(WriteWhy)
+    }
+
+    /// Uploads each file that has no id yet, and writes each id down before the next, so a
+    /// failure part-way leaves the post unsent and the files already accepted ready to try again.
+    ///
+    /// **Nothing is asked where the post cannot carry these files**: the sign-in does not hold
+    /// media, there are more than the source takes, a description or a kind or a stated size is
+    /// past what it said. A file the source already accepted is not sent again.
+    ///
+    /// A failure here is a post that was not sent, whatever a lost answer might mean for a file:
+    /// the status is the request the key covers, and it has not left.
+    private func uploadMedia(_ unsent: Unsent, id: UUID, in session: ShellSession) async -> Uploaded {
+        guard !unsent.media.isEmpty else { return .ready(unsent) }
+        let limits = session.mediaLimits(of: unsent.host)
+        let overSize = unsent.media.contains { piece in
+            guard (piece.remoteID ?? "").isEmpty else { return false }
+            guard let ceiling = limits.byteLimit(for: piece.mime) else { return false }
+            return piece.bytes.count > ceiling
+        }
+        if session.mastodon.standing(.media, host: unsent.host) != .held
+            || unsent.media.count > limits.count
+            || unsent.media.contains(where: { $0.description.count > limits.descriptionLimit })
+            || unsent.media.contains(where: { !limits.mimeTypes.isEmpty && !limits.allows($0.mime) })
+            || overSize
+        {
+            return .missed(.unreachable)
+        }
+        guard let (door, _) = ready(unsent, in: session) else { return .missed(.unreachable) }
+        var current = unsent
+        for index in current.media.indices {
+            if let remote = current.media[index].remoteID, !remote.isEmpty { continue }
+            let piece = current.media[index]
+            do {
+                let remote = try await session.reach.write(door, landingIn: session.store).upload(
+                    bytes: piece.bytes, name: piece.name, type: piece.mime,
+                    description: piece.description, byteLimit: limits.byteLimit(for: piece.mime)
+                )
+                current.media[index].remoteID = remote
+                if let at = sendings.firstIndex(where: { $0.id == id }) { sendings[at].unsent = current }
+                guard await session.store.hold(current) else {
+                    letGoHere(id, in: session)
+                    return .stopped
+                }
+                _ = await session.persistUnsent?()
+                if await gone(id, in: session) { return .stopped }
+            } catch {
+                session.writeFailed(error, host: current.host)
+                if let at = sendings.firstIndex(where: { $0.id == id }) { sendings[at].unsent = current }
+                return .missed(Self.notSent(error) ?? .unreachable)
+            }
+        }
+        return .ready(current)
     }
 
     /// What a text needs to leave, as things stand at this moment: a sign-in at its source that
@@ -1072,18 +1151,27 @@ extension ShellSession {
     /// every page.
     @discardableResult
     func send() -> Bool {
-        let text = ComposerSheet.trimmed(composeDraft)
-        guard !text.isEmpty, let host = composeHost,
-              writableSources.contains(where: { $0.host == host }),
-              text.count <= postLimit(of: host),
+        guard canPost, let host = composeHost,
               mastodon.authorized(host: host, for: .write) != nil
         else { return false }
+        if !composeMedia.isEmpty, mastodon.standing(.media, host: host) != .held { return false }
         let writer = mastodon.reader(host: host)
+        let text = ComposerSheet.trimmed(composeDraft)
         outbox.take(
-            Unsent(host: host, text: text, audience: composeAudience, writerID: writer?.id, writer: writer?.handle),
+            Unsent(
+                host: host, text: text, audience: composeAudience, writerID: writer?.id, writer: writer?.handle,
+                spoiler: ComposerSheet.trimmed(composeCover),
+                language: composeLanguage.isEmpty ? nil : composeLanguage,
+                sensitive: composeCoversMedia, media: composeMedia
+            ),
             in: self
         )
+        // The cover and the files go with this post. Who it reaches, its language and whether
+        // it covers its media stay, which is where the next one starts.
         composeDraft = ""
+        composeCover = ""
+        composeMedia = []
+        composeMediaNote = nil
         return true
     }
 

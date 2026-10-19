@@ -31,6 +31,10 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     /// people and hashtags, pinning a post, dismissing an announcement or a suggestion — so the
     /// question says so. Stands without `acting`.
     case account
+    /// A picture, a sound or a film on a post, each with a description. **Adds to acting**:
+    /// a sign-in that only reads has nothing to attach it to. Not a rider — a page that
+    /// lacks the word is made again, rather than signed in without it.
+    case media
 
     /// The words a page asks for this part.
     public var words: [String] {
@@ -42,6 +46,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
         case .notices: ["read:notifications"]
         case .follows: ["read:follows", "write:follows"]
         case .account: ["write:accounts"]
+        case .media: ["write:media"]
         }
     }
 
@@ -50,7 +55,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var wordsBesideActing: [String] {
         switch self {
         case .notices: ["write:notifications"]
-        case .reading, .search, .acting, .bookmarks, .follows, .account: []
+        case .reading, .search, .acting, .bookmarks, .follows, .account, .media: []
         }
     }
 
@@ -60,7 +65,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var rider: Bool {
         switch self {
         case .search, .bookmarks: true
-        case .reading, .acting, .notices, .follows, .account: false
+        case .reading, .acting, .notices, .follows, .account, .media: false
         }
     }
 
@@ -68,7 +73,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     /// such a sign-in has nothing to add it to, and its row already says to sign in to act.
     public var needsActing: Bool {
         switch self {
-        case .bookmarks: true
+        case .bookmarks, .media: true
         case .reading, .search, .acting, .notices, .follows, .account: false
         }
     }

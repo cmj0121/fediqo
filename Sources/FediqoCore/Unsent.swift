@@ -1,5 +1,39 @@
 import Foundation
 
+/// One file waiting to go with a post: its bytes, what kind they are, the description the person
+/// wrote, and the id its source gave it once the upload landed.
+///
+/// **The bytes stay here until the post lands or is discarded**, so a try that failed part-way
+/// can be tried again without asking for the file a second time. A file the source already
+/// accepted is not sent again: `remoteID` is what the later try of the post carries.
+///
+/// Prints as its size. The bytes and the description are the person's, and neither belongs in a log.
+public struct UnsentMedia: Identifiable, Hashable, Sendable, CustomDebugStringConvertible {
+    public let id: UUID
+    public var bytes: Data
+    public var mime: String
+    public var name: String
+    /// The description as typed. Not trimmed: a description over the source's limit is a refusal,
+    /// and the words are what the person wrote.
+    public var description: String
+    /// The id the source gave this file, once it accepted the upload. Nothing until then.
+    public var remoteID: String?
+
+    public var debugDescription: String { "\(bytes.count) bytes" }
+
+    public init(
+        id: UUID = UUID(), bytes: Data, mime: String, name: String, description: String = "",
+        remoteID: String? = nil
+    ) {
+        self.id = id
+        self.bytes = bytes
+        self.mime = mime
+        self.name = name
+        self.description = description
+        self.remoteID = remoteID
+    }
+}
+
 /// A post or an answer the person pressed to send, held until its source says it landed or the
 /// person discards it.
 ///
@@ -51,11 +85,20 @@ public struct Unsent: Hashable, Sendable, Identifiable {
     /// When its source was first asked: no post published before this can be it, and the key
     /// it was sent under is only kept by a source for so long after.
     public var askedAt: Date?
+    /// The cover line, where one was written. Empty is none.
+    public var spoiler: String?
+    /// The language, folded as a note's is, or nothing where none was chosen.
+    public var language: String?
+    /// Whether the post covers its media, where that was chosen. Nothing is not a no.
+    public var sensitive: Bool?
+    /// The files that go with it, in the order they were added.
+    public var media: [UnsentMedia]
 
     public init(
         id: UUID = UUID(), host: String, text: String, audience: Audience,
         answers: NoteKey? = nil, root: NoteKey? = nil, pressedAt: Date = Date(), standing: Standing = .fresh,
-        writerID: String? = nil, writer: String? = nil, askedAt: Date? = nil
+        writerID: String? = nil, writer: String? = nil, askedAt: Date? = nil,
+        spoiler: String? = nil, language: String? = nil, sensitive: Bool? = nil, media: [UnsentMedia] = []
     ) {
         self.writerID = writerID
         self.writer = writer
@@ -68,6 +111,11 @@ public struct Unsent: Hashable, Sendable, Identifiable {
         self.root = root
         self.pressedAt = pressedAt
         self.standing = standing
+        let line = spoiler?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.spoiler = line?.isEmpty == false ? line : nil
+        self.language = SourceField.languageTag(language)
+        self.sensitive = sensitive
+        self.media = media
     }
 }
 
