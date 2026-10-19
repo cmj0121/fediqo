@@ -67,6 +67,17 @@ public enum ShellPlace: String, CaseIterable, Identifiable, Hashable, Sendable {
     /// **Each keeps its own walk and lamp** (`StreamSides`), and the session follows the one in
     /// front (`ShellSession.stream`).
     var isStream: Bool { self == .timeline || self == .trends }
+
+    /// The narrow arrangement's tab the place is drawn in (decision 9): its own, but Usage's is
+    /// Preferences'. A phone's bar holds five, so Usage is reached from Preferences
+    /// (`OpensUsage`), and `place` still says Usage while it is drawn there.
+    var tab: ShellPlace { self == .usage ? .preferences : self }
+
+    /// What this tab draws with the reader standing on `place`: Usage, in Preferences' tab, while
+    /// they stand on Usage; otherwise the tab's own place.
+    func drawn(standingOn place: ShellPlace) -> ShellPlace {
+        place.tab == self ? place : self
+    }
 }
 
 /// Which of the two stream places the session follows (DESIGN-trends, option C): the one the
@@ -190,6 +201,14 @@ struct ShellAvailability: Hashable, Sendable {
 
     var enabledPlaces: [ShellPlace] {
         ShellPlace.allCases.filter(allows)
+    }
+
+    /// The narrow arrangement's tabs (decision 9): the places that can be entered, but Usage,
+    /// which is drawn in Preferences' tab (`ShellPlace.tab`). **Five at most**, which is what a
+    /// phone's bar holds, and the names the Mac's fold measures (`ShellFold`), so Trends taking
+    /// Usage's room leaves the line where it was. The rail and the fold's pop-up list them all.
+    var tabbedPlaces: [ShellPlace] {
+        enabledPlaces.filter { $0.tab == $0 }
     }
 
     /// The places the rail lists: every one, drawn dim where it cannot be entered — **but Trends,

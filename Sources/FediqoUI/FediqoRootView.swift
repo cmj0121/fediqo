@@ -2790,7 +2790,9 @@ public struct FediqoRootView: View {
     /// they are put on here, around either one. A fold that moved the button to make room for
     /// its name would be moving something it did not fold.
     private var narrow: some View {
-        ShellNarrow(titles: availability.enabledPlaces.map(\.title)) {
+        // **The tabs' names are measured, and the pop-up lists every place**: Usage is no tab
+        // (decision 9), so five names decide the fold, and folded it is a place of its own again.
+        ShellNarrow(titles: availability.tabbedPlaces.map(\.title)) {
             tabbed
         } folded: {
             FoldedPlaces(place: placeBinding, places: availability.enabledPlaces) {
@@ -2812,14 +2814,41 @@ public struct FediqoRootView: View {
     /// since #110, for a window dragged narrower than the rail allows. A tab bar has no disabled
     /// state worth the name: tapping a dead tab selected it, the binding put it back, and the
     /// reader was told nothing at all. A place that is not ready is not a tab yet.
+    ///
+    /// **Usage is no tab** (decision 9): a phone's bar holds five, so it is drawn in Preferences'
+    /// tab, entered from a row at the head of Preferences and left by a back row (`OpensUsage`).
     private var tabbed: some View {
-        TabView(selection: $place) {
-            ForEach(availability.enabledPlaces) { item in
-                placedPage(item)
+        TabView(selection: tabSelection) {
+            ForEach(availability.tabbedPlaces) { item in
+                placedPage(item.drawn(standingOn: place))
                     .tabItem { Label(item.title, systemImage: item.symbolName) }
                     .tag(item)
             }
         }
+        .environment(\.shellOpensUsage, opensUsage)
+    }
+
+    /// The tab lit for where the reader stands: Preferences' while they stand on Usage, so a key,
+    /// an errand or a state put back that stands them there finds a tab and not a missing one.
+    private var tabSelection: Binding<ShellPlace> {
+        Binding(
+            get: { place.tab },
+            set: { place = Self.selecting($0, standingOn: place) }
+        )
+    }
+
+    /// Where a tab set by the bar stands the reader: on that tab's place, but **a set of the tab
+    /// already lit leaves them where they are**. A bar may set its own tab again — a reselect on
+    /// a phone, the tabs rebuilt as Trends comes or goes — and with Usage drawn in Preferences'
+    /// tab that would otherwise drop the reader from Usage onto Preferences, on one platform and
+    /// not another. Leaving Usage is the back row's (`OpensUsage`).
+    static func selecting(_ tab: ShellPlace, standingOn place: ShellPlace) -> ShellPlace {
+        tab == place.tab ? place : tab
+    }
+
+    /// Preferences' way into Usage and Usage's way back, handed to the tabs alone.
+    private var opensUsage: OpensUsage {
+        OpensUsage(go: { place = availability.placing(place, as: $0) })
     }
 
     /// Solid ink, not phosphor: the lamp says where the reader is, and a button that

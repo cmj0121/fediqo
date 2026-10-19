@@ -488,6 +488,9 @@ struct TimelineHeadTests {
         let session: ShellSession
         let layout: ShellLayout
         let probe: PaneProbe
+        /// Usage folded into Preferences' tab, as the narrow tabs hand it down (decision 19).
+        var opens: OpensUsage? = nil
+        var stepProbe: UsageStepProbe? = nil
         @State private var prefs = DummyPrefs(defaults: HeadDefaults())
 
         var body: some View {
@@ -504,6 +507,37 @@ struct TimelineHeadTests {
             .environment(\.shellLayout, layout)
             .environment(\.shellSlides, true)
             .environment(\.shellPaneProbe, probe)
+            .environment(\.shellOpensUsage, opens)
+            .environment(\.usageStepProbe, stepProbe)
+        }
+    }
+
+    /// Decisions 9 and 19. Where the narrow tabs have folded Usage into Preferences' tab, the
+    /// head of Preferences is a row into Usage and the head of Usage a row back, over the page's
+    /// own tabs; where nothing was handed down — the rail, the fold's pop-up — neither is drawn.
+    @Test("Usage's way in heads Preferences, and its way back heads Usage, over their tabs and only where the tabs folded Usage in",
+          arguments: [TabbedPage.preferences, .usage])
+    func usageStepHeadsThePage(_ page: TabbedPage) async throws {
+        for folded in [false, true] {
+            let session = try session()
+            let probe = PaneProbe(), step = UsageStepProbe()
+            let host = TabbedHost(
+                page: page, session: session, layout: .narrow, probe: probe,
+                opens: folded ? OpensUsage(go: { _ in }) : nil, stepProbe: step
+            )
+            let hosted = NSHostingView(rootView: host)
+            hosted.frame = NSRect(x: 0, y: 0, width: 390, height: 700)
+            for _ in 0 ..< 3 {
+                turn(hosted)
+                await Task.yield()
+            }
+            #expect(probe.head.height > 0, "\(page): the tabs' head was laid out")
+            if folded {
+                #expect(step.frame.height > 0, "\(page): the row was laid out")
+                #expect(step.frame.maxY <= probe.head.minY + 0.5, "\(page): row \(step.frame) over the tabs \(probe.head)")
+            } else {
+                #expect(step.frame == .zero, "\(page): a row at \(step.frame) with nothing handed down")
+            }
         }
     }
 

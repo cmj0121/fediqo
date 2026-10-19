@@ -13,6 +13,8 @@
 "shell.timeline.disabled" = "先到帳號頁新增來源";
 "shell.places.fold" = "地方";
 "shell.places.fold.help" = "地方：%@";
+"shell.usage.open" = "打開用量";
+"shell.usage.back" = "回到偏好";
 "account.rail.empty" = "新增來源";
 "account.add.title" = "新增來源";
 "account.hero.promise" = "你的時間軸。你的規則。";

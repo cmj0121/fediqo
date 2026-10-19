@@ -140,6 +140,8 @@ struct PreferencesPane: View {
         }
         // On a narrow one the tabs are one head over the list, and the whole list follows.
         .modifier(TabsOverForm(headed: headed, slide: slide) { tabs })
+        // Over the tabs, Usage's way in where the tabs have folded it in here (decision 19).
+        .modifier(UsageStep(on: .preferences))
         .formStyle(.grouped)
         // **The pane the type size is chosen on has to move with it** (#96). A `Form`'s rows
         // take the platform's own font unless they are told otherwise, and on a Mac that font

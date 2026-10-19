@@ -13,6 +13,8 @@
 "shell.timeline.disabled" = "Add a source on Account first";
 "shell.places.fold" = "Places";
 "shell.places.fold.help" = "Places: %@";
+"shell.usage.open" = "Open Usage";
+"shell.usage.back" = "Back to Preferences";
 "account.rail.empty" = "Add a source";
 "account.add.title" = "Add a source";
 "account.hero.promise" = "Your timeline. Your rules.";

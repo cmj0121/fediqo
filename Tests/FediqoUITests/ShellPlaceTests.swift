@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import Testing
 @testable import FediqoUI
@@ -65,6 +66,65 @@ struct ShellPlaceTests {
             walk.insert(step)
         }
         #expect(walk == Set(ShellPlace.allCases))
+    }
+
+    /// Decision 9. A phone's bar holds five, so the narrow arrangement's tabs are the places
+    /// that can be entered but Usage, which is drawn in Preferences' tab; ⌃Tab and the rail still
+    /// walk all six, and standing on Usage lights Preferences' tab and draws Usage in it.
+    @Test("The narrow tabs are five at most and hold no Usage, which is drawn in Preferences' tab while the reader stands on it")
+    func usageIsDrawnInPreferencesTab() {
+        let held = ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: [.posts])
+        #expect(held.tabbedPlaces == [.timeline, .trends, .notices, .account, .preferences])
+        #expect(ShellAvailability(queryIDs: ["all"]).tabbedPlaces == [.timeline, .notices, .account, .preferences])
+        #expect(ShellAvailability.empty.tabbedPlaces == [.notices, .account, .preferences])
+        for availability in [held, ShellAvailability(queryIDs: ["all"]), .empty] {
+            #expect(availability.tabbedPlaces.count <= 5)
+            // Every place that can be entered has a tab to be drawn in, so none is a missing one.
+            for place in availability.enabledPlaces {
+                #expect(availability.tabbedPlaces.contains(place.tab), "\(place)")
+                #expect(place.tab.drawn(standingOn: place) == place, "\(place)")
+            }
+        }
+        #expect(ShellPlace.usage.tab == .preferences)
+        #expect(ShellPlace.preferences.drawn(standingOn: .usage) == .usage)
+        #expect(ShellPlace.preferences.drawn(standingOn: .timeline) == .preferences)
+        #expect(ShellPlace.timeline.drawn(standingOn: .usage) == .timeline)
+        // The keys still walk Usage, on its own.
+        #expect(held.rotate(from: .account, by: 1) == .usage && held.rotate(from: .usage, by: 1) == .preferences)
+    }
+
+    /// A tab the bar sets again — a reselect, the tabs rebuilt as Trends comes or goes — leaves
+    /// the reader on Usage, which is drawn in that tab; any other tab moves them.
+    @Test("A set of the tab already lit leaves the reader on Usage; another tab moves them")
+    @MainActor
+    func aTabSetAgainKeepsUsage() {
+        #expect(FediqoRootView.selecting(.preferences, standingOn: .usage) == .usage)
+        #expect(FediqoRootView.selecting(.timeline, standingOn: .usage) == .timeline)
+        #expect(FediqoRootView.selecting(.preferences, standingOn: .timeline) == .preferences)
+        #expect(FediqoRootView.selecting(.preferences, standingOn: .preferences) == .preferences)
+        #expect(FediqoRootView.selecting(.trends, standingOn: .notices) == .trends)
+    }
+
+    /// Decision 19. The row into Usage and the row back are named, in every table and not only
+    /// through `zh-TW`'s fallback to `zh-Hant`.
+    @Test("Usage's way in and way back are written in every table")
+    func usageStepIsWritten() throws {
+        for language in DummyLanguage.allCases {
+            for key in ["shell.usage.open", "shell.usage.back"] {
+                #expect(L10n.t(key, language: language) != key, "\(language)/\(key)")
+            }
+        }
+        for lproj in ["en", "zh-Hant", "zh-TW"] {
+            let url = URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("Sources/FediqoUI/Resources/\(lproj).lproj/Localizable.strings")
+            let table = try String(contentsOf: url, encoding: .utf8)
+            for key in ["shell.usage.open", "shell.usage.back"] {
+                #expect(table.contains("\"\(key)\" = \""), "\(lproj)/\(key)")
+            }
+        }
     }
 
     @Test("Every place can say what the action is for")

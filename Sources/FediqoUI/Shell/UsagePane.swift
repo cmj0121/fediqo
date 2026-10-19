@@ -142,6 +142,7 @@ struct UsagePane: View {
                 detail: L10n.t("usage.empty.detail"),
                 help: L10n.t("usage.empty.help")
             )
+            .modifier(UsageStep(on: .usage))
         } else {
             readout
         }
@@ -159,6 +160,8 @@ struct UsagePane: View {
         }
         // On a narrow one the tabs are one head over the list, and the whole list follows.
         .modifier(TabsOverForm(headed: headed, slide: slide) { tabs })
+        // Over the tabs, the way back to Preferences where Usage is drawn in its tab (decision 19).
+        .modifier(UsageStep(on: .usage))
         .formStyle(.grouped)
         // The page's own colour, as on the timeline and Account, and no scroll bar.
         .scrollContentBackground(.hidden)

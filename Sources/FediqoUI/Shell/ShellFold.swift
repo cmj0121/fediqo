@@ -10,9 +10,9 @@ import AppKit
 ///
 /// **The narrow arrangement draws the places as a `TabView`, and on a Mac a `TabView` is an
 /// `NSTabView`**: one segmented strip across the top of a bordered page. The strip wants the width
-/// its names need, and a window may be dragged to 320 points since #110. In English the five names
-/// are laid out at 378 and need 364, and below that what does not fit is cut short or folded
-/// behind a mark. A folded tab strip is a mark that names nothing, and a reader who has never seen
+/// its names need, and a window may be dragged to 320 points since #110. In English the five tabs'
+/// names need 367 points (`ShellAvailability.tabbedPlaces`: Usage is no tab, decision 9), and
+/// below that what does not fit is cut short or folded behind a mark. A folded tab strip is a mark that names nothing, and a reader who has never seen
 /// the wide window cannot tell that the places they are looking for are behind it. #112 accepted
 /// that whatever a layout folds away has a way in that names what it opens; this was the one that
 /// did not.
@@ -25,9 +25,9 @@ import AppKit
 /// ## Where the line is, and why it is measured rather than written down
 ///
 /// **The line is the strip's own width, asked of AppKit for the names it would draw.** A number
-/// written down here would be right for one language and wrong for the other: the same five places
-/// are 364 points of English and 247 of 中文, so a Chinese window at 320 has room to spare and
-/// keeps its tabs. Asking an `NSSegmentedControl` with those names for its size is asking the
+/// written down here would be right for one language and wrong for the other: the same five tabs
+/// are 367 points of English and 247 of 中文, so a Chinese window at 320 has room to
+/// spare and keeps its tabs. Asking an `NSSegmentedControl` with those names for its size is asking the
 /// control `NSTabView` draws, and `FoldHostedTests` checks that against a hosted `TabView` a point
 /// at a time. This does not change which width folds what (#110 and #112 decided that). It only
 /// says what is drawn once AppKit has folded.

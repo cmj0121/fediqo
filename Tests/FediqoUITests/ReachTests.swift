@@ -45,7 +45,8 @@ struct ReachTests {
     // MARK: Keys reach what the tabs draw
 
     /// The tabs are the places that can be entered, and ⌃Tab walks exactly those, in both
-    /// arrangements, because the keys are read above either of them.
+    /// arrangements, because the keys are read above either of them. In the narrow one Usage is
+    /// drawn in Preferences' tab (decision 9), and ⌃Tab still stands on it as a place of its own.
     @Test("⌃Tab walks exactly the places the tabs draw, whatever is open")
     func theKeysWalkTheTabs() {
         let cases: [ShellAvailability] = [
