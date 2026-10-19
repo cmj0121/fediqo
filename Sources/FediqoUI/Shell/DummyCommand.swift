@@ -80,9 +80,10 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// `Return` already opens the post itself, and one key meaning two posts on a quoting post
     /// would leave the reader guessing which of the two a press is about.
     case openQuote
-    /// `h` — the hashtags rising on the sources (#320), from the timeline that reads what is
-    /// rising: the press a finger makes on the line at its head. `h` for hashtag, and free.
-    case openRising
+    /// `h` — Trends brought in front from any place (decision 7), on the tab and the walk it was
+    /// left with (decision 18): the press a finger makes on its place. `h` for hashtag, which is
+    /// what it opened first, and free.
+    case openTrends
     /// `l` — follow whoever's page is in front, or the hashtag whose page is (#313, #318): the
     /// press a finger makes on Follow there. Free, and beside `j` and `k` under the hand.
     /// **It only ever follows**: unfollowing is in the page's `…`, and in the `…` of a hashtag's
@@ -146,7 +147,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "p": return .openAuthor
         case "t": return .openTag
         case "o": return .openQuote
-        case "h": return .openRising
+        case "h": return .openTrends
         case "l": return .follow
         case "c": return .compose
         case "j", KeyEquivalent.downArrow.character: return .nextPost
@@ -574,9 +575,9 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         // pressed for the list of them all (#304).
         DummyShortcut(group: .move, keys: ["Tab", "⇧Tab"], name: "tabs",
                       commands: [.nextTab, .previousTab], touch: .press, gestures: [.swipe, .name, .pill]),
-        // The line at the head of the timeline that reads what is rising, pressed (#320): a
-        // way from that timeline to a page beside it, as the pills above are ways between them.
-        DummyShortcut(group: .move, keys: ["h"], name: "rising", commands: [.openRising], touch: .press),
+        // Trends, pressed on the rail or the tab bar (decision 7): from any place, as the
+        // places' own keys below are.
+        DummyShortcut(group: .move, keys: ["h"], name: "rising", commands: [.openTrends], touch: .press),
         // The rail on a Mac, the tab bar on a phone.
         DummyShortcut(group: .move, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
                       commands: [.nextPage, .previousPage], touch: .press),

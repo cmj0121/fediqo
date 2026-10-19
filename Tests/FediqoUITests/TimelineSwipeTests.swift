@@ -255,9 +255,15 @@ struct TimelineSwipeTests {
         let session = ShellSession(http: FixtureHTTP([:]), timelines: nil)
         session.sources = [Source(host: "m.example", kind: .mastodon)]
         session.rebuildQueries()
+        for name in ["Ada", "Lin"] {
+            var draft = TimelineDraft(new: session.written.count + 1)
+            draft.name = name
+            draft.position = session.written.count
+            session.commit(draft)
+        }
         session.timelineID = .all
         let count = session.queries.count
-        #expect(count >= 2)
+        try #require(count >= 2)
         #expect(!session.stepTimeline(by: -1) && session.currentTimeline == .all, "nothing before the first")
         for index in 1 ..< count {
             #expect(session.stepTimeline(by: 1))

@@ -791,8 +791,8 @@ struct PersonPageTests {
             url.deleteLastPathComponent()
         }
         let root = try String(contentsOf: url.appending(path: "Sources/FediqoUI/FediqoRootView.swift"), encoding: .utf8)
-        #expect(root.components(separatedBy: "people.left(left.step, of: walk)").count == 2)
-        #expect(root.components(separatedBy: "people.tabs.leftAll()").count == 3)
+        #expect(root.components(separatedBy: "people.left(left.step, of: walk, besides: sides[session.stream.other].walk)").count == 2)
+        #expect(root.components(separatedBy: "people.leftAll(").count == 3)
     }
 
     @Test("Somebody met twice through two rows that carried them differently — another name, another picture — is one page: leaving the second step keeps the first's tab and its lamps, and leaving the last forgets them")
@@ -867,7 +867,7 @@ struct PersonPageTests {
         }
         let found = FoundAt(source: "m.example", words: "swift", gave: FoundWhich.allCases)
         for step in [
-            ShellStep.thread("post"), .people(PeopleList(directoryAt: "m.example")), .rising(.tags), .found(found, .tags),
+            ShellStep.thread("post"), .people(PeopleList(directoryAt: "m.example")), .found(found, .tags),
             .followedTags(FollowedTags(host: "m.example")),
         ] {
             #expect(!TimelinePane.headDrawn(over: step) && TimelinePane.headDrawn(over: step, drawn: false), "\(step)")
@@ -913,7 +913,7 @@ struct PersonPageTests {
         }
         let root = try String(contentsOf: ui.appending(path: "FediqoRootView.swift"), encoding: .utf8)
         for call in [
-            "if place == .timeline, let key = walk.tabKey {\n            switch Self.stepTab(key, drawn: standingDrawn, open: openLayers) {\n            case .page: return rotateStepTab(key, by: step)\n            case .covered: return false\n            case .timelines: break\n            }\n        }",
+            "if place.isStream, let key = walk.tabKey {\n            switch Self.stepTab(key, drawn: standingDrawn, open: openLayers) {\n            case .page: return rotateStepTab(key, by: step)\n            case .covered: return false\n            case .timelines: break\n            }\n        }",
             "case .person(let person):\n            guard Self.turnsPersonTabs(open: openLayers) else { return false }\n            return people.rotate(person, by: step, lamp: &selectedItemID, in: session)",
             "walk.openedPerson.map { people.walkedIDs(of: $0, in: session) }",
             "people.followByKey(\n            place: place, open: openLayers, person: walk.openedPerson, tag: walk.openedTag, in: session",

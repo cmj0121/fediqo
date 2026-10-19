@@ -37,10 +37,6 @@ enum ShellStep: Hashable, Sendable {
     /// from where the source counts them. A row of it opens that person, and leaving their page
     /// gives the row back: both are the walk's own.
     case people(PeopleList)
-    /// The hashtags, or the links, rising on the sources (#320), opened from the head of the
-    /// timeline that reads what is rising. A hashtag's row opens that hashtag's page, and
-    /// leaving it gives the row back: both are the walk's own.
-    case rising(RisingWhich)
     /// What one source found for a search's words (#319): its people and its hashtags, one
     /// page with a tab for each (F10), opened from either press for all of one kind under its
     /// bands, on that kind's tab. A row opens that person's or that hashtag's page, and leaving
@@ -60,10 +56,6 @@ enum StepTabKey: Hashable, Sendable {
     /// A hashtag's page (F10): Posts and About where it has both, round their ring — and
     /// taken, turning nothing, where it has its posts alone.
     case tag(PostTag)
-    /// What is rising (F10): Hashtags and Links where its sources have both, round their
-    /// ring — the tab is the step's own value, turned in place (`ShellWalk.turned(to:)`) — and
-    /// taken, turning nothing, where they have one.
-    case rising(RisingWhich)
     /// What a search found at a source (F10): People and Hashtags where it gave both, round
     /// their ring — the tab is the step's own value, turned in place — and taken, turning
     /// nothing, where it gave one.
@@ -75,14 +67,14 @@ enum StepTabKey: Hashable, Sendable {
 
 extension ShellStep {
     /// The layer this step is drawn as, among what is open (`DummyLayer`): the hashtags a
-    /// search found and those followed are drawn as rising's are, and the people it found as a
-    /// list of people is — by the tab of what it found that is in front.
+    /// search found and those followed are a page of hashtags, and the people it found are drawn
+    /// as a list of people is — by the tab of what it found that is in front.
     var layer: DummyLayer {
         switch self {
         case .person: .person
         case .tag: .tag
         case .people, .found(_, .people): .people
-        case .rising, .found(_, .tags), .followedTags: .rising
+        case .found(_, .tags), .followedTags: .rising
         case .thread: .thread
         case .link: .link
         }
@@ -97,15 +89,19 @@ extension ShellStep {
         case .people: .sole(.people)
         case .followedTags: .sole(.rising)
         case .tag(let tag): .tag(tag)
-        case .rising(let which): .rising(which)
         case .found(let at, let which): .found(at, which)
         case .link: nil
         }
     }
 
+    /// Whether this is a page of what a search found.
+    var isFound: Bool {
+        if case .found = self { true } else { false }
+    }
+
     /// Whether `other` is another value of the same kind of step — what a tab turned in place
-    /// may turn to (`ShellWalk.turned(to:)`): `.rising(.tags)` and `.rising(.links)` are, and
-    /// so are the two tabs of what a search found; a hashtag's page and a person's are not.
+    /// may turn to (`ShellWalk.turned(to:)`): the two tabs of what a search found are; a
+    /// hashtag's page and a person's are not.
     func isKind(of other: ShellStep) -> Bool {
         switch self {
         case .person: if case .person = other { true } else { false }
@@ -113,7 +109,6 @@ extension ShellStep {
         case .link: if case .link = other { true } else { false }
         case .tag: if case .tag = other { true } else { false }
         case .people: if case .people = other { true } else { false }
-        case .rising: if case .rising = other { true } else { false }
         case .found: if case .found = other { true } else { false }
         case .followedTags: if case .followedTags = other { true } else { false }
         }
@@ -257,7 +252,7 @@ struct ShellWalk: Hashable, Sendable {
     /// opened from, and the walk is no deeper: leaving never passes through the other tab.
     ///
     /// **Only for a tab of the page in front** — the same kind of step, another of its own
-    /// values (`.rising(.tags)` to `.rising(.links)`); it is not a way to another page, and
+    /// values (what a search found, from People to Hashtags); it is not a way to another page, and
     /// **a step of another kind is refused** (`ShellStep.isKind(of:)`). Nothing is turned on
     /// the stream, to the step already in front, or to the step beneath: that would stand the
     /// reader twice on one step, which `walk(to:)` refuses.

@@ -130,10 +130,11 @@ final class ShellPersonTabs {
         lamps[id] = nil
     }
 
-    /// The walk has ended in one go: every page's tab in front is forgotten.
-    func leftAll() {
-        fronts = [:]
-        lamps = [:]
+    /// The walk has ended in one go: every page's tab in front is forgotten — but those of the
+    /// pages `kept` names, still steps of the other stream place's walk.
+    func leftAll(but kept: Set<String> = []) {
+        fronts = fronts.filter { kept.contains($0.key) }
+        lamps = lamps.filter { kept.contains($0.key) }
     }
 
     /// Everything kept of the page `id` names let go: it is no longer one of the pages kept.
@@ -372,14 +373,29 @@ extension ShellPersonPages {
     /// their steps goes.
     ///
     /// **A hashtag's page keeps its tab the same way** (F10), and forgets it with the last of
-    /// its steps. **And what is rising and what a search found their tabs' lamps** — the tab in
-    /// front of each is the step's own.
-    func left(_ step: ShellStep, of walk: ShellWalk) {
-        if case .tag(let tag) = step, !walk.holdsTag(tag) { tags.left(tag) }
-        if case .rising = step { rising.left() }
-        if case .found = step { found.left() }
-        guard case .person(let who) = step, !walk.holdsPerson(who.id) else { return }
+    /// its steps. **And what a search found its tabs' lamps** — the tab in front is the step's
+    /// own. **`besides` is the other stream place's walk** (DESIGN-trends): a page still one of
+    /// its steps keeps its tab there.
+    func left(_ step: ShellStep, of walk: ShellWalk, besides other: ShellWalk = ShellWalk()) {
+        if case .tag(let tag) = step, !walk.holdsTag(tag), !other.holdsTag(tag) { tags.left(tag) }
+        if case .found = step, !other.steps.contains(where: \.isFound) { found.left() }
+        guard case .person(let who) = step, !walk.holdsPerson(who.id), !other.holdsPerson(who.id) else { return }
         tabs.left(who.id)
+    }
+
+    /// A walk ended in one go — `keeping` the hashtag's page left standing on it, where one is
+    /// (#197) — with `other`, the other stream place's walk, still as it was: every page's tab
+    /// in front forgotten but those still steps of `other`.
+    func leftAll(keeping kept: PostTag? = nil, besides other: ShellWalk = ShellWalk()) {
+        tabs.leftAll(but: Set(other.steps.compactMap { step in
+            if case .person(let who) = step { return who.id }
+            return nil
+        }))
+        tags.leftAll(but: [kept].compactMap { $0 } + other.steps.compactMap { step in
+            if case .tag(let tag) = step { return tag }
+            return nil
+        })
+        if !other.steps.contains(where: \.isFound) { found.left() }
     }
 
     // MARK: - What each part of the page is handed

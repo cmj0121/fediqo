@@ -745,7 +745,7 @@ extension ShellPersonPages {
     func followByKey(
         place: ShellPlace, open: Set<DummyLayer>, person: DummyPerson?, tag: PostTag?, in session: ShellSession
     ) -> Bool {
-        guard place == .timeline, DummyCommand.canWalk(whenOpen: open) else { return false }
+        guard place.isStream, DummyCommand.canWalk(whenOpen: open) else { return false }
         if let person { return followByKey(person, in: session) }
         guard let tag else { return false }
         return tags.followByKey(tag, in: session) != nil

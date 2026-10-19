@@ -1,8 +1,8 @@
 import FediqoCore
 import SwiftUI
 
-// The hashtags and the links rising on the sources (#320), as their two pages draw them — and
-// the line at the head of the timeline that reads what is rising, which is the way to both.
+// The hashtags and the links rising on the sources (#320), as Trends' two tabs of them draw
+// them.
 //
 // **One band a source, and nothing merged.** What is rising is each source's own ranking: its
 // rows stand under its name, in its order, and where it gave none, could not be asked, or is
@@ -99,43 +99,11 @@ extension RisingSaid.Band {
     }
 }
 
-/// The line at the head of the timeline that reads what is rising: the two ways on, each a
-/// press — to the hashtags rising on the sources, and to the links.
-struct RisingLine: View {
-    var onOpen: (RisingWhich) -> Void
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        HStack(spacing: ShellSpace.pad) {
-            ForEach(RisingWhich.allCases, id: \.self) { which in
-                Button {
-                    onOpen(which)
-                } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
-                        Text(RisingSaid.title(which))
-                        Image(systemName: "chevron.right")
-                            .shellFont(.mark)
-                            .accessibilityHidden(true)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .shellFont(.meta, weight: .medium)
-                .foregroundStyle(ShellChrome.selectInk(colorScheme))
-                .onePressLine()
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, ShellSpace.pad)
-        .padding(.vertical, ShellSpace.snug)
-    }
-}
-
 /// The tab of what is rising in front: under one band a source what that source says is rising
-/// on it, led by the page's head where the head scrolls away (`RisingPage`).
+/// on it, led by `lead` where a page hands it its first rows.
 ///
-/// **A tab of a step of the walk**, so the way back, the lamp and the row given back on leaving
-/// a hashtag's page are the walk's own. It draws what it is handed and asks nothing: the asking
+/// **A tab of Trends** (decision 2), so the lamp and the row given back on leaving a hashtag's
+/// page opened from it are Trends' walk's own. It draws what it is handed and asks nothing: the asking
 /// is `ShellRising`'s, and which kind of source this is is never looked at here.
 struct RisingPane<Lead: View>: View {
     let said: RisingSaid

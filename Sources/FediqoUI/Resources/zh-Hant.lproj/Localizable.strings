@@ -1,5 +1,7 @@
 "shell.timeline.title" = "時間軸";
 "shell.timeline.summary" = "一條流，時間序";
+"shell.trends.title" = "趨勢";
+"shell.trends.summary" = "你的來源上正在竄升的";
 "shell.notices.title" = "通知";
 "shell.notices.summary" = "誰來找你";
 "shell.account.title" = "帳號";
@@ -1876,6 +1878,7 @@
 "rising.unsaid" = "沒有說";
 "rising.link.leads" = "通往 %@";
 "rising.title" = "正在竄升的";
+"trends.tab.posts" = "貼文";
 "rising.tab.tags" = "主題標籤";
 "rising.tab.links" = "連結";
 "rising.reload" = "再問各來源一次";

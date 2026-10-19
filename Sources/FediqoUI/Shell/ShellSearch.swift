@@ -172,10 +172,12 @@ final class ShellSearch {
         selectionBefore = place(selectionBefore)
     }
 
-    /// Whether moving to `place` closes the search. It belongs to the timeline, and one left
-    /// open behind another page would be closed by an Escape pressed there, for nothing seen.
-    func closes(leavingFor place: ShellPlace) -> Bool {
-        isOpen && place != .timeline
+    /// Whether moving from `from` to `place` closes the search. It belongs to the stream it was
+    /// opened over — the timeline's, or Trends' posts — and one left open behind another page
+    /// would be closed by an Escape pressed there, for nothing seen; a search left open behind
+    /// the other stream would search what is not drawn.
+    func closes(leaving from: ShellPlace, for place: ShellPlace) -> Bool {
+        isOpen && place != from
     }
 
     /// Return in the field (#163): what it says is searched now, and the keys go back to the list.

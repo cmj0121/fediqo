@@ -1,8 +1,12 @@
+import FediqoCore
 import SwiftUI
 
 /// A destination in the shell. Compose is not one: it is an action over the current page.
 public enum ShellPlace: String, CaseIterable, Identifiable, Hashable, Sendable {
     case timeline
+    /// What is rising on the sources: their trending posts, hashtags and links, a tab each
+    /// (decision 1). Only where some source has one of them; see `ShellAvailability.railPlaces`.
+    case trends
     case notices
     case account
     case usage
@@ -22,6 +26,7 @@ public enum ShellPlace: String, CaseIterable, Identifiable, Hashable, Sendable {
     func title(language: DummyLanguage?) -> String {
         switch self {
         case .timeline: L10n.t("shell.timeline.title", language: language)
+        case .trends: L10n.t("shell.trends.title", language: language)
         case .notices: L10n.t("shell.notices.title", language: language)
         case .account: L10n.t("shell.account.title", language: language)
         case .usage: L10n.t("shell.usage.title", language: language)
@@ -33,6 +38,7 @@ public enum ShellPlace: String, CaseIterable, Identifiable, Hashable, Sendable {
     var summary: String {
         switch self {
         case .timeline: L10n.t("shell.timeline.summary")
+        case .trends: L10n.t("shell.trends.summary")
         case .notices: L10n.t("shell.notices.summary")
         case .account: L10n.t("shell.account.summary")
         case .usage: L10n.t("shell.usage.summary")
@@ -43,6 +49,8 @@ public enum ShellPlace: String, CaseIterable, Identifiable, Hashable, Sendable {
     var symbolName: String {
         switch self {
         case .timeline: "list.bullet.rectangle"
+        // The glyph the Trends tab of the timeline led with, which the place is now.
+        case .trends: "chart.line.uptrend.xyaxis"
         case .notices: "bell"
         // Decision 32. Several things stacked into one, which is the README's own picture —
         // several sources go in and one timeline comes out — and it matches the geometric register
@@ -54,12 +62,105 @@ public enum ShellPlace: String, CaseIterable, Identifiable, Hashable, Sendable {
         case .preferences: "gearshape"
         }
     }
+
+    /// Whether the place draws a stream of posts: the timeline, and Trends on its Posts tab.
+    /// **Each keeps its own walk and lamp** (`StreamSides`), and the session follows the one in
+    /// front (`ShellSession.stream`).
+    var isStream: Bool { self == .timeline || self == .trends }
+}
+
+/// Which of the two stream places the session follows (DESIGN-trends, option C): the one the
+/// reader last stood on, kept while they are on a place that draws no stream.
+enum ShellStream: Hashable, Sendable {
+    case timeline, trends
+
+    init?(_ place: ShellPlace) {
+        switch place {
+        case .timeline: self = .timeline
+        case .trends: self = .trends
+        case .notices, .account, .usage, .preferences: return nil
+        }
+    }
+
+    /// The other stream place's.
+    var other: ShellStream {
+        switch self {
+        case .timeline: .trends
+        case .trends: .timeline
+        }
+    }
+
+    /// The place that draws this stream.
+    var place: ShellPlace {
+        switch self {
+        case .timeline: .timeline
+        case .trends: .trends
+        }
+    }
+}
+
+/// What one stream place keeps while the reader is on the other (DESIGN-trends, Root): its walk,
+/// its lamp, and the row that was at the top of its list.
+struct StreamSide: Hashable, Sendable {
+    var walk = ShellWalk()
+    var lamp: String?
+    var top: String?
+}
+
+/// Each stream place's own side, so a thread opened on Trends is not under the timeline, and
+/// the lamp of one is not the other's. **Held by the root for the run**, as the walk was.
+struct StreamSides: Hashable, Sendable {
+    private var timeline = StreamSide()
+    private var trends = StreamSide()
+
+    subscript(stream: ShellStream) -> StreamSide {
+        get {
+            switch stream {
+            case .timeline: timeline
+            case .trends: trends
+            }
+        }
+        set {
+            switch stream {
+            case .timeline: timeline = newValue
+            case .trends: trends = newValue
+            }
+        }
+    }
+
+    /// The session leaving `from` to follow `to`: the row at the top of the list left kept on
+    /// its side, and the row at the top of the one arrived at handed back. **A page read out of
+    /// a post is left with the side it was opened on** (#169): there is one reader to draw it,
+    /// in front of the stream followed, so that step is taken back — its lamp given back — and
+    /// whether one was is said, for the root to close the reader. The rest of each walk stays.
+    mutating func follow(from: ShellStream, to: ShellStream, top: String?) -> (top: String?, leftLink: Bool) {
+        guard from != to else { return (top, false) }
+        var leaving = self[from]
+        let leftLink = leaving.walk.openedLink != nil
+        if leftLink, let back = leaving.walk.back() { leaving.lamp = back.lamp }
+        leaving.top = top
+        self[from] = leaving
+        return (self[to].top, leftLink)
+    }
+
+    /// Whether the page of the person `id` names is a step of either side's walk.
+    func holdsPerson(_ id: String) -> Bool {
+        timeline.walk.holdsPerson(id) || trends.walk.holdsPerson(id)
+    }
+
+    /// Whether the page of `tag` is a step of either side's walk.
+    func holdsTag(_ tag: PostTag) -> Bool {
+        timeline.walk.holdsTag(tag) || trends.walk.holdsTag(tag)
+    }
 }
 
 /// What this session has, used to enable the rail. Compose is not a place.
 struct ShellAvailability: Hashable, Sendable {
     var queryIDs: Set<String> = []
     var signedIn = false
+    /// The tabs Trends has, in their order (`TrendsTab.tabs(in:)`): none where no source has
+    /// trending posts, hashtags or links, and then there is no Trends.
+    var trendsTabs: [TrendsTab] = []
 
     static let empty = ShellAvailability()
 
@@ -91,11 +192,19 @@ struct ShellAvailability: Hashable, Sendable {
         ShellPlace.allCases.filter(allows)
     }
 
+    /// The places the rail lists: every one, drawn dim where it cannot be entered — **but Trends,
+    /// which is absent and never dim** where no source has anything rising (a Discourse-only
+    /// store): it is not a place waiting for a sign-in, it is one this store does not have.
+    var railPlaces: [ShellPlace] {
+        ShellPlace.allCases.filter { $0 != .trends || allows(.trends) }
+    }
+
     /// **Notices is always there** (#323): with nobody signed in the page itself says what
     /// would make it fill, which a place that could not be entered never got to say.
     func allows(_ place: ShellPlace) -> Bool {
         switch place {
         case .timeline: timelineEnabled
+        case .trends: !trendsTabs.isEmpty
         case .notices, .account, .usage, .preferences: true
         }
     }

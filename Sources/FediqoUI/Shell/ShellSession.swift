@@ -476,8 +476,15 @@ final class ShellSession {
     /// How many times a tab's mark was worked out: the test's window on `missingRules`.
     @ObservationIgnored var missingRuleEvaluations = 0
 
-    /// The query the timeline draws: the one selected, or All.
-    var currentTimeline: TimelineQuery { timelineID ?? .all }
+    /// The stream place the session follows (DESIGN-trends, option C): the one the reader last
+    /// stood on. Set by the root as a stream place comes in front; a place with no stream leaves
+    /// it as it was, so a notice's errand walks the timeline it lands on.
+    var stream: ShellStream = .timeline
+
+    /// The query the stream in front draws: on Trends its posts, and on the timeline the one
+    /// selected, or All. **Every reader of what is drawn reads this**, so Posts is the old Trends
+    /// tab by construction: the same query, held, read on and reloaded as it was.
+    var currentTimeline: TimelineQuery { stream == .trends ? .trends : (timelineID ?? .all) }
     /// Every change is handed on to `forums`, which is the one place that knows which of them
     /// are forums a sign-in can be held for.
     var sources: [Source] = [] {
@@ -1061,7 +1068,8 @@ final class ShellSession {
     var availability: ShellAvailability {
         ShellAvailability(
             queryIDs: Set(queries.map(\.id)),
-            signedIn: sources.contains { isSignedIn(host: $0.host) }
+            signedIn: sources.contains { isSignedIn(host: $0.host) },
+            trendsTabs: TrendsTab.tabs(in: self)
         )
     }
 
@@ -2928,22 +2936,20 @@ final class ShellSession {
 
     /// The tabs, rebuilt from what is actually joined.
     ///
-    /// **All and Trends, then the reader's own timelines in their order.** Boards stay a property of
-    /// the source — what this device fetches next — not a third timeline. A Discourse is not
-    /// offered Trends: it has no trending read, and an empty tab is a promise the app cannot keep.
-    /// A Discuz! is, for its ranking lists.
+    /// **All, then the reader's own timelines in their order.** Trends is no tab of the timeline
+    /// any more: it is a place of its own (decision 1), whose Posts read the `.trends` query
+    /// through `stream`. A remembered `.trends` selection falls to All below. Boards stay a
+    /// property of the source — what this device fetches next — not a timeline.
     ///
-    /// Rebuilt rather than appended to, because a second join changes what the first one's tabs
-    /// should be: joining a forum after a microblog must not take Trends away, and the only way
-    /// to be sure of that is to ask every source each time.
+    /// Rebuilt rather than appended to, because the reader's timelines change under it and the
+    /// only way to be sure the tabs match is to ask each time.
     func rebuildQueries() {
         guard !sources.isEmpty else {
             queries = []
             timelineID = nil
             return
         }
-        var rebuilt: [TimelineQuery] = sources.contains(where: { Self.hasTrends($0.kind) }) ? [.all, .trends] : [.all]
-        rebuilt += written.map { .written($0.id) }
+        let rebuilt: [TimelineQuery] = [.all] + written.map { .written($0.id) }
         if rebuilt != queries { queries = rebuilt }
         if !queries.contains(where: { $0 == timelineID }) {
             timelineID = .all
@@ -2952,7 +2958,7 @@ final class ShellSession {
 
     /// Whether a source of this kind has a trending timeline to offer.
     ///
-    /// **`ProtocolKind.hasTrends`, not a second list**, so the Trends tab and the Trends
+    /// **`ProtocolKind.hasTrends`, not a second list**, so Trends' Posts tab and the Trends
     /// timeline's own rule cannot disagree about which servers have trends. A Discuz! has them —
     /// its ranking lists — and a Discourse has none; a forum's boards choose what is fetched and
     /// are not tabs.

@@ -7,7 +7,7 @@ struct ShellPlaceTests {
     @Test("Compose is not a place")
     func composeIsNotAPlace() {
         #expect(ShellPlace.allCases.map(\.rawValue) == [
-            "timeline", "notices", "account", "usage", "preferences",
+            "timeline", "trends", "notices", "account", "usage", "preferences",
         ])
     }
 
@@ -20,7 +20,7 @@ struct ShellPlaceTests {
     @Test("A launch holding a source lands on the timeline, and one holding none lands on Account")
     func launchLandsOnWhatIsHeld() {
         #expect(ShellAvailability(queryIDs: ["all"]).launchPlace == .timeline)
-        #expect(ShellAvailability(queryIDs: ["all", "trends"], signedIn: true).launchPlace == .timeline)
+        #expect(ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: [.posts]).launchPlace == .timeline)
         #expect(ShellAvailability.empty.launchPlace == .account)
         // Never a place the rail has turned off.
         for availability in [ShellAvailability(queryIDs: ["all"]), .empty] {
@@ -56,7 +56,7 @@ struct ShellPlaceTests {
     /// before: the set of places is what a session holds, and the landing is drawn from it.
     @Test("The rail reaches every place from either landing")
     func everyPlaceIsStillReachable() {
-        let held = ShellAvailability(queryIDs: ["all", "trends"], signedIn: true)
+        let held = ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: [.posts])
         #expect(held.enabledPlaces == ShellPlace.allCases)
         var walk: Set<ShellPlace> = [held.launchPlace]
         var step = held.launchPlace

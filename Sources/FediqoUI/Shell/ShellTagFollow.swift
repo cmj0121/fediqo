@@ -495,9 +495,15 @@ final class ShellTagFollow {
     /// The walk has ended in one go: every page's tab in front is forgotten — all but the
     /// page of `kept`, where the walk ended with that one page left standing (#197).
     func leftAll(but kept: PostTag? = nil) {
-        let id = kept.map(HeldUnderTag.folded)
-        fronts = fronts.filter { $0.key == id }
-        lamps = lamps.filter { $0.key == id }
+        leftAll(but: [kept].compactMap { $0 })
+    }
+
+    /// The same, all but the pages of each of `kept` — the one left standing, and those still
+    /// steps of the other stream place's walk.
+    func leftAll(but kept: [PostTag]) {
+        let ids = Set(kept.map(HeldUnderTag.folded))
+        fronts = fronts.filter { ids.contains($0.key) }
+        lamps = lamps.filter { ids.contains($0.key) }
     }
 
     /// The tabs of the page of `tag` changed under it — a sign-in ended, and About went with

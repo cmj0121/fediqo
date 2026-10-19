@@ -3,14 +3,14 @@ import Foundation
 import Observation
 
 // The hashtags and the links rising on the sources (#320): what is asked, when, and what the
-// two pages are handed of the answers.
+// two tabs of Trends are handed of the answers.
 //
-// **Asked when a tab comes in front, and when the person presses.** The two are tabs of one
-// page (F10); bringing Hashtags in front asks each source that has them for one stretch, and
+// **Asked when a tab comes in front, and when the person presses.** The two are tabs of Trends
+// (F10, decision 2); bringing Hashtags in front asks each source that has them for one stretch, and
 // Links likewise: one ask a source, and none when the tab comes in front again this run. **A
 // tab never in front has asked nothing.** `r` asks every source again,
 // and a failure's "Try again" asks that source; a press while a source is being asked asks it
-// nothing. Nothing reads on, nothing is asked while neither page is open, and nothing by itself.
+// nothing. Nothing reads on, nothing is asked while neither tab is in front, and nothing by itself.
 //
 // **Each source for itself.** The answers are never merged: a source's rows stand under its own
 // band, in its own order, and a source that fails says so under its band while the others land.
@@ -98,14 +98,6 @@ struct RisingSaid: Equatable {
     var rows: [RisingRow] { bands.flatMap(\.rows) }
 }
 
-extension ShellWalk {
-    /// The page of rising hashtags or links in front, where one is (#320).
-    var openedRising: RisingWhich? {
-        guard case .rising(let which) = standing else { return nil }
-        return which
-    }
-}
-
 /// What every source said is rising on it this run, by page and source.
 ///
 /// Held by `ShellPersonPages`, on its count of asks, and handed the session at each ask: the
@@ -132,9 +124,6 @@ final class ShellRising {
     @ObservationIgnored private let readers: PageReaders
     /// What this run knows each host has: where a not-found of an address is written down.
     @ObservationIgnored private let hosts: ShellHostsKnown
-    /// Where the lamp stood on each tab of the page when the tab was left. Not observed: it is
-    /// read only as a tab is brought in front.
-    @ObservationIgnored private var lamps: [RisingWhich: String] = [:]
     /// How long one ask may take. A test shortens it.
     @ObservationIgnored var deadline: Duration = .seconds(30)
     /// Another way to what is rising on a host, where a test reaches it by one — a wire that
@@ -177,46 +166,10 @@ final class ShellRising {
             .filter { hosts.has(which.thing, at: $0.host) != .absent }
     }
 
-    /// The tabs of the page (F10): each kind of thing some source has a ranking of.
+    /// The tabs of Trends that list what is rising (F10): each kind of thing some source has a
+    /// ranking of. Posts is not this object's; see `TrendsTab.tabs(in:)`.
     func tabs(in session: ShellSession) -> [RisingWhich] {
         RisingWhich.tabs { !sources(of: $0, in: session).isEmpty }
-    }
-
-    /// A tab's pill pressed, or a swipe: brought in front on the page `walk` stands on, each
-    /// tab keeping its own lamp. Whether anything changed (`RisingWhich.turned`).
-    @discardableResult
-    func turn(_ walk: inout ShellWalk, to which: RisingWhich, lamp: inout String?, in session: ShellSession) -> Bool {
-        RisingWhich.turned(&walk, to: which, among: tabs(in: session), rows: walked(which, in: session), lamps: &lamps, lamp: &lamp)
-    }
-
-    /// What the page stood on at `which`'s tab is handed, where it is drawn: that tab's, or the
-    /// one left where no source ranks it any more (`RisingWhich.front`) — nothing where none is.
-    func drawn(at which: RisingWhich, in session: ShellSession) -> RisingSaid? {
-        RisingWhich.front(which, among: tabs(in: session)).flatMap { said($0, in: session) }
-    }
-
-    /// Tab and ⇧Tab on the page `walk` stands on, as `RisingWhich.keyed` answers for it: the
-    /// tab beside; taken, and nothing turned, with one tab; and not the page's at all while
-    /// it is `covered`. Whether the key was taken.
-    func rotate(_ walk: inout ShellWalk, by step: Int, covered: Bool, lamp: inout String?, in session: ShellSession) -> Bool {
-        guard let front = walk.openedRising else { return false }
-        switch RisingWhich.keyed(tabs(in: session), front: front, by: step, covered: covered) {
-        case .turn(let tab):
-            turn(&walk, to: tab, lamp: &lamp, in: session)
-            return true
-        case .taken: return true
-        case .unheard: return false
-        }
-    }
-
-    /// The walk has left the page: each tab's lamp is forgotten, and opened afresh it is lit
-    /// nowhere but where the press that opened it says.
-    func left() { lamps = [:] }
-
-    /// Whether the ways to the two pages are offered at the head of `timeline`: it is the one
-    /// that reads what is rising, no search stands over it, and a source has such pages.
-    func offered(on timeline: TimelineQuery, searching: Bool, in session: ShellSession) -> Bool {
-        timeline == .trends && !searching && session.sources.contains { ShellPersonPages.source(at: $0.host, in: session) != nil }
     }
 
     private func standing(_ which: RisingWhich, at host: String, in session: ShellSession) -> Page? {
@@ -257,12 +210,6 @@ final class ShellRising {
     /// where it was where the press opened nothing — a press that opens nothing moves nothing.
     static func lamp(after opened: Bool, of row: RisingRow, before: String?) -> String? {
         opened ? row.id : before
-    }
-
-    /// Whether `h` opens the rising hashtags now: the stream of the timeline that reads what
-    /// is rising is in front, with at most a row lit on it, and a source has such a page.
-    func opensByKey(place: ShellPlace, open: Set<DummyLayer>, timeline: TimelineQuery, in session: ShellSession) -> Bool {
-        place == .timeline && open.subtracting([.selection]).isEmpty && offered(on: timeline, searching: false, in: session)
     }
 
     // MARK: - Asking

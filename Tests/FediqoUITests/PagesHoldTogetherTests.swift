@@ -32,8 +32,6 @@ struct PagesHoldTogetherTests {
         (.link(URL(string: "https://example.org/a")!), false),
         (.thread("withdrawn"), true),
         (.people(PeopleList(directoryAt: gone)), true),
-        (.rising(.tags), true),
-        (.rising(.links), true),
         (.found(found, .people), true),
         (.found(found, .tags), true),
         (.followedTags(FollowedTags(host: gone)), true),
@@ -49,7 +47,6 @@ struct PagesHoldTogetherTests {
         case .link: "link"
         case .thread: "thread"
         case .people: "people"
-        case .rising: "rising"
         case .found: "found"
         case .followedTags: "followedTags"
         }
@@ -57,7 +54,7 @@ struct PagesHoldTogetherTests {
 
     @Test("The list of steps is every kind there is")
     func everyKindIsHere() {
-        #expect(Set(Self.everyKind.map { Self.kind($0.step) }) == ["stream", "person", "tag", "link", "thread", "people", "rising", "found", "followedTags"])
+        #expect(Set(Self.everyKind.map { Self.kind($0.step) }) == ["stream", "person", "tag", "link", "thread", "people", "found", "followedTags"])
     }
 
     /// A session with one source and five posts on the stream; the pages held beside it.
@@ -111,7 +108,7 @@ struct PagesHoldTogetherTests {
             // The walk as the keys have it is none: the stream drawn in its stead.
             let keyed = FediqoRootView.keyed(walk, drawn: shown.drawn)
             #expect(keyed.isEmpty && keyed.standing == nil, "\(name)")
-            #expect(keyed.openedPeople == nil && keyed.openedRising == nil && keyed.openedFoundTags == nil && keyed.openedFollowedTags == nil, "\(name): Return reads no row of the page")
+            #expect(keyed.openedPeople == nil && keyed.openedFoundTags == nil && keyed.openedFollowedTags == nil, "\(name): Return reads no row of the page")
             let items = FediqoRootView.listItems(on: keyed, pages: pages, stream: stream, latest: nil, in: session)
             let ids = FediqoRootView.listIDs(on: keyed, pages: pages, found: [], items: items, in: session)
             #expect(items.map(\.id) == streamIDs && ids == streamIDs, "\(name): the stream's posts are walked")

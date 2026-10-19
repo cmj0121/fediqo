@@ -51,7 +51,7 @@ struct ReachTests {
         let cases: [ShellAvailability] = [
             .empty,
             ShellAvailability(queryIDs: ["all"]),
-            ShellAvailability(queryIDs: ["all", "trends"], signedIn: true),
+            ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: TrendsTab.allCases),
         ]
         for availability in cases {
             let tabs = availability.enabledPlaces

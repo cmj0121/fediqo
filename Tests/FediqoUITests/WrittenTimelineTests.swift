@@ -4,7 +4,7 @@ import SwiftUI
 import Testing
 @testable import FediqoUI
 
-/// #27: timelines the reader writes, keeps, orders and removes, beside All and Trends.
+/// #27: timelines the reader writes, keeps, orders and removes, beside All — Trends is a place of its own.
 @Suite("Timelines you write")
 @MainActor
 struct WrittenTimelineTests {
@@ -53,16 +53,16 @@ struct WrittenTimelineTests {
 
     // MARK: Acceptance: add, rename, reorder, remove
 
-    @Test("A timeline is added on Done, after All and Trends, and put in front")
+    @Test("A timeline is added on Done, after All, and put in front")
     func add() {
         let session = session()
         var draft = draft("Swift folks", in: session)
-        #expect(session.queries == [.all, .trends])
+        #expect(session.queries == [.all])
         session.editing = draft
         session.commit(draft)
         #expect(session.editing == nil)
         #expect(session.written.map(\.name) == ["Swift folks"])
-        #expect(session.queries == [.all, .trends, .written(draft.id)])
+        #expect(session.queries == [.all, .written(draft.id)])
         #expect(session.timelineID == .written(draft.id))
 
         draft.name = "   "
@@ -102,7 +102,7 @@ struct WrittenTimelineTests {
         #expect(editing.position == 0 && !editing.canMoveEarlier)
         session.commit(editing)
         #expect(session.written.map(\.name) == ["C", "A", "B"])
-        #expect(session.queries.dropFirst(2).map(\.id) == session.written.map { TimelineQuery.written($0.id).id })
+        #expect(session.queries.dropFirst(1).map(\.id) == session.written.map { TimelineQuery.written($0.id).id })
     }
 
     @Test("Moving is only on Done: Cancel leaves the order and the name as they were")
@@ -132,7 +132,7 @@ struct WrittenTimelineTests {
         let a = session.written[0].id
         session.timelineID = .written(a)
         session.removeTimeline(a)
-        #expect(session.timelineID == .trends)
+        #expect(session.timelineID == .all)
     }
 
     @Test("All and Trends cannot be removed or edited: e says so, and opens nothing")
@@ -149,13 +149,13 @@ struct WrittenTimelineTests {
         #expect(L10n.t("timeline.edit.fixed").contains("can't be edited"))
         session.removeTimeline(TimelineDefinition.all.id)
         session.removeTimeline(TimelineDefinition.trends.id)
-        #expect(session.queries.prefix(2) == [.all, .trends])
+        #expect(session.queries.prefix(2) == [.all, .written(session.written[0].id)])
         #expect(session.written.count == 1)
     }
 
     // MARK: Acceptance: Tab order and the key
 
-    @Test("Tab goes All, Trends, yours in your order, and round again; [+] is not a stop")
+    @Test("Tab goes All, yours in your order, and round again — Trends is no tab of the timeline; [+] is not a stop")
     func tabOrder() {
         let session = session()
         for name in ["A", "B"] { session.commit(draft(name, in: session)) }
@@ -165,7 +165,7 @@ struct WrittenTimelineTests {
             session.rotateTab(by: 1)
             visited.append(session.name(of: session.currentTimeline))
         }
-        #expect(visited == ["Trends", "A", "B", "All", "Trends"])
+        #expect(visited == ["A", "B", "All", "A", "B"])
 
         session.timelineID = .all
         session.rotateTab(by: -1)
@@ -193,14 +193,14 @@ struct WrittenTimelineTests {
     @Test("Pressing [+] opens a new timeline; Tab never lands on it")
     func pressingAddOpensANewTimeline() throws {
         let session = session()
-        session.timelineID = .trends
+        session.timelineID = .all
         session.newTimeline()
         let editing = try #require(session.editing)
         #expect(editing.isNew && editing.name.isEmpty && editing.position == 0)
-        #expect(session.currentTimeline == .trends)
+        #expect(session.currentTimeline == .all)
         session.editing = nil
         session.rotateTab(by: 1)
-        #expect(session.currentTimeline == .all)
+        #expect(session.currentTimeline == .all, "All alone: round to itself")
         #expect(session.editCurrentTimeline())
         #expect(session.editing == nil)
         #expect(session.toast?.text == L10n.t("timeline.edit.fixed"))
@@ -343,7 +343,7 @@ struct WrittenTimelineTests {
         let session = session(store)
         #expect(session.timelinesUnreadable)
         #expect(session.written.isEmpty)
-        #expect(session.queries == [.all, .trends])
+        #expect(session.queries == [.all])
 
         // Nothing is written over what is kept, by any route.
         session.newTimeline()

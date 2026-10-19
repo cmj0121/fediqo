@@ -303,8 +303,8 @@ struct ConversationPageTests {
         let here = ShellStep.thread(held), gone = ShellStep.thread("https://m.example/users/ada/statuses/withdrawn")
         func drawn(_ step: ShellStep?) -> TimelinePane.Drawn { TimelinePane.drawn(step, of: nil, in: session) }
         #expect(drawn(here).drawn && !drawn(gone).drawn)
-        // What is rising is drawn only where somebody says what it is (F10): with nobody, the stream.
-        #expect(drawn(nil).drawn && !drawn(.rising(.tags)).drawn)
+        // A list of people is drawn only where somebody says what it is (F10): with nobody, the stream.
+        #expect(drawn(nil).drawn && !drawn(.people(PeopleList(directoryAt: "m.example"))).drawn)
         // Drawn: no head of the timelines, the page's own swipe, and the key the page's.
         #expect(!TimelinePane.headDrawn(over: here, drawn: drawn(here).drawn))
         // Not drawn: the head, the swipe that goes back — and the key the timelines'.
@@ -312,7 +312,7 @@ struct ConversationPageTests {
         #expect(TimelinePane.headDrawn(over: gone, drawn: undrawn) && TimelinePane.page(gone, drawn: undrawn) == .opened)
         #expect(gone.tabKey == .sole(.thread), "the step still answers; the root asks what is drawn before it listens")
         let root = try String(contentsOf: Self.sources().appending(path: "FediqoRootView.swift"), encoding: .utf8)
-        let asked = "if place == .timeline, let key = walk.tabKey {\n            switch Self.stepTab(key, drawn: standingDrawn, open: openLayers) {\n            case .page: return rotateStepTab(key, by: step)\n            case .covered: return false\n            case .timelines: break\n            }\n        }\n        return switch place {\n        case .timeline: session.rotateTab(by: step)"
+        let asked = "if place.isStream, let key = walk.tabKey {\n            switch Self.stepTab(key, drawn: standingDrawn, open: openLayers) {\n            case .page: return rotateStepTab(key, by: step)\n            case .covered: return false\n            case .timelines: break\n            }\n        }\n        return switch place {\n        case .timeline: session.rotateTab(by: step)"
         #expect(root.components(separatedBy: asked).count == 2, "the root asks what is drawn, and else turns the timelines")
         #expect(root.contains("private var standingDrawn: Bool {\n        TimelinePane.drawn(walk.standing, of: people, in: session).drawn\n    }"))
         let pane = try String(contentsOf: Self.sources().appending(path: "Shell/TimelinePane.swift"), encoding: .utf8)

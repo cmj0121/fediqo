@@ -84,7 +84,7 @@ struct TagTimelineTests {
         #expect(session.heldPosts(under: Self.swift, latest: nil).count == 2)
         _ = try friends(in: session)
         #expect(session.heldPosts(under: Self.swift, latest: nil).map(\.id) == [Self.note("1", "").key.rowID])
-        session.timelineID = .trends
+        session.stream = .trends
         #expect(session.heldPosts(under: Self.swift, latest: nil).isEmpty, "no post under the tag is a trend")
     }
 
@@ -212,7 +212,7 @@ struct TagTimelineTests {
         await session.reload.tagSwitched(to: .all, in: session)
         #expect(await http.requested.count == first, "the same timeline is not asked again")
 
-        session.timelineID = .trends
+        session.stream = .trends
         await session.reload.tagSwitched(to: .trends, in: session)
         #expect(await http.requested.count == first, "Trends' sources are not asked")
         #expect(session.reload.tagAsk?.reach.asked == [], "the line is Trends', not All's")
@@ -222,6 +222,7 @@ struct TagTimelineTests {
         draft.name = "Mine"
         draft.rules = [try #require(Rule.source(Self.one))]
         session.commit(draft)
+        session.stream = .timeline
         session.timelineID = .written(draft.id)
         await session.reload.tagSwitched(to: .written(draft.id), in: session)
         let asked = await http.paths.dropFirst(first)
@@ -234,10 +235,10 @@ struct TagTimelineTests {
     func lateSwitchAsksNothing() async throws {
         let http = FixtureHTTP([Self.mastodonTag: .text("[]")])
         let session = await shell(http)
-        session.timelineID = .trends
+        session.stream = .trends
         await session.reload.tag(Self.swift, timeline: .trends, in: session)
         let query = try friends(in: session)
-        session.timelineID = .trends
+        session.stream = .trends
         await session.reload.tagSwitched(to: query, in: session)
         #expect(await http.requested.isEmpty)
         #expect(session.reload.tagAsk?.timeline == .trends)

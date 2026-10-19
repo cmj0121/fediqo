@@ -732,7 +732,7 @@ struct FollowedTagsTests {
         let root = try String(contentsOf: Self.root, encoding: .utf8)
         for call in [
             "let lists = walk.followedTags\n", "for page in lists { people.followed.closed(page) }\n",
-            "for page in walk.followedTags { people.followed.closed(page) }\n        walk.clear()",
+            "for page in cleared.lists { people.followed.closed(page) }",
             "if case .followedTags(let page) = left.step { people.followed.closed(page) }",
         ] {
             #expect(root.components(separatedBy: call).count == 2, "the root calls \(call) once")

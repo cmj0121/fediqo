@@ -170,8 +170,9 @@ struct ReadOnTests {
         #expect(marks == [Self.row(newest): TimelineGapMarks(above: [Self.stretch])], "said above the newest read")
 
         // Trends reads no public timeline, so it says nothing of one.
-        session.timelineID = .trends
+        session.stream = .trends
         #expect(session.gapMarks(in: session.timelineItems(latest: nil)).isEmpty)
+        session.stream = .timeline
         session.timelineID = nil
 
         // Reached — scrolled, walked or pressed to — as `r` lands too: both read on from the
@@ -266,7 +267,7 @@ struct ReadOnTests {
         let more = Task { await session.reload.more(.all, in: session) }
         await met("the ask for more is held on the wire", by: more) { await server.parked == 1 }
         await session.reload.readOn(Self.stretch, in: session)
-        session.timelineID = .trends
+        session.stream = .trends
         await server.gate.open()
         await more.value
         // Counted turns, behind the ask for more having ended: the place kept is looked at by a

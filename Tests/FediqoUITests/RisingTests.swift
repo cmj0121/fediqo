@@ -169,7 +169,6 @@ struct RisingTests {
         #expect(await servers[Self.two]?.asked == [Self.links, Self.links])
         #expect(bands(rising, .links, session).map(\.source) == [Self.one, Self.two] && bands(rising, .links, session)[1].rows.count == 1)
         #expect(bands(rising, .tags, session).map(\.source) == [Self.one, Self.two])
-        #expect(rising.offered(on: .trends, searching: false, in: session))
 
         let (bare, _, _) = await self.session([Self.links: Self.off], sources: [Source(host: Self.one, kind: .mastodon)])
         let alone = ShellPersonPages().rising
@@ -270,7 +269,7 @@ struct RisingTests {
 
     // MARK: - A forum
 
-    @Test("A source that is not asked who people are has no band and is asked nothing; where every source is such a one there are no pages, no line at the head of Trends and no key — the timeline is drawn as it was — and the files that draw and ask name no kind of source")
+    @Test("A source that is not asked who people are has no band and is asked nothing; where every source is such a one there are no tabs of what is rising on Trends — its posts are drawn as they were — and the files that draw and ask name no kind of source")
     func aForumReadsTheSame() async throws {
         let (session, servers, work) = await session([:], sources: [Self.forum, Source(host: "talk.example", kind: .discourse)])
         let rising = ShellPersonPages().rising
@@ -280,8 +279,7 @@ struct RisingTests {
             await rising.again(which, in: session)
             #expect(rising.walked(which, in: session).isEmpty && rising.opening(which, in: session).isEmpty)
         }
-        #expect(!rising.offered(on: .trends, searching: false, in: session), "a forum's Trends gains no line")
-        #expect(!rising.opensByKey(place: .timeline, open: [], timeline: .trends, in: session))
+        #expect(rising.tabs(in: session).isEmpty, "a forum's Trends gains no tab of what is rising")
         for server in servers.values { #expect(await server.asked.isEmpty) }
         #expect(work.record.isEmpty)
 
@@ -293,33 +291,10 @@ struct RisingTests {
         }
         let asked = try String(contentsOf: Self.shell.appending(path: "ShellRising.swift"), encoding: .utf8)
         #expect(asked.contains("ShellPersonPages.source(at:"), "the one fact is read where a person's page reads it")
-        // The timeline's own file decides by the one rule, and draws what it drew where the rule says no.
+        // The pane draws a tab of what is rising only where Trends has it in front, and the stream otherwise.
         let pane = try String(contentsOf: Self.shell.appending(path: "TimelinePane.swift"), encoding: .utf8)
-        #expect(pane.components(separatedBy: "rising.offered(on:").count == 2 && pane.contains("} else {\n            stream\n        }"))
+        #expect(pane.components(separatedBy: "trends?.front.rising").count == 2 && pane.contains("} else {\n            stream\n        }"))
         #expect(!pane.contains("offers.") && !pane.contains(".kind == "))
-    }
-
-    @Test("The ways to the two pages stand at the head of the timeline that reads what is rising and nowhere else: not on All or a written timeline, not over a search; and the key opens the hashtags only there, with nothing in front of the stream but a lit row")
-    func whereTheWaysAre() async throws {
-        let (session, _, _) = await session([:])
-        let rising = ShellPersonPages().rising
-        #expect(rising.offered(on: .trends, searching: false, in: session))
-        #expect(!rising.offered(on: .all, searching: false, in: session) && !rising.offered(on: .written(UUID()), searching: false, in: session))
-        #expect(!rising.offered(on: .trends, searching: true, in: session))
-
-        #expect(rising.opensByKey(place: .timeline, open: [], timeline: .trends, in: session))
-        #expect(rising.opensByKey(place: .timeline, open: [.selection], timeline: .trends, in: session))
-        #expect(!rising.opensByKey(place: .timeline, open: [], timeline: .all, in: session))
-        #expect(!rising.opensByKey(place: .account, open: [], timeline: .trends, in: session))
-        for layer in DummyLayer.allCases where layer != .selection {
-            #expect(!rising.opensByKey(place: .timeline, open: [layer], timeline: .trends, in: session), "\(layer)")
-        }
-        #expect(DummyCommand.from("h") == .openRising && DummyCommand.from("h", typing: true) == nil && DummyCommand.from("h", fieldFocused: true) == nil)
-        let line = try #require(DummyShortcut.all.first { $0.commands == [.openRising] })
-        #expect(line.keys == ["h"] && line.group == .move && line.touch == .press)
-        #expect(L10n.t("shortcut.rising", language: .english) == "On Trends, open the hashtags rising on your sources")
-        let keys = try String(contentsOf: Self.shell.appending(path: "DummyShellKeys.swift"), encoding: .utf8)
-        #expect(keys.contains(#""o", "h", "l", "y""#), "the key reaches the shell")
     }
 
     private static var shell: URL {
@@ -328,39 +303,6 @@ struct RisingTests {
             url.deleteLastPathComponent()
         }
         return url.appending(path: "Sources/FediqoUI/Shell")
-    }
-
-    // MARK: - A step of the walk
-
-    @Test("A page of what is rising is one step of the walk: leaving it gives back the row it was opened over, a hashtag opened from it is the next step and leaving that gives its row back; the keys that leave, walk, go to the top and ask again treat it as they treat a list of people")
-    func aStepOfTheWalk() throws {
-        var walk = ShellWalk()
-        let took = walk.walk(to: .rising(.tags), from: "post"), again = walk.walk(to: .rising(.tags), from: "post")
-        #expect(took && !again && walk.openedRising == .tags && walk.depth == 1, "a step onto the page in front is no step")
-        let row = Self.tag("birds", at: Self.one)
-        let opened = walk.walk(to: .tag(PostTag("#birds")!), from: row.id)
-        #expect(opened && walk.openedRising == nil && walk.openedTag != nil)
-        let fromTag = walk.back()
-        #expect(fromTag?.lamp == row.id && walk.openedRising == .tags)
-        let left = walk.back()
-        #expect(left?.step == .rising(.tags) && left?.lamp == "post" && walk.isEmpty)
-        let links = walk.walk(to: .rising(.links), from: nil)
-        #expect(links && walk.openedRising == .links)
-
-        #expect(DummyCommand.walk.contains(.rising) && DummyCommand.canWalk(whenOpen: [.rising]) && DummyCommand.canLightRow(whenOpen: [.rising]))
-        #expect(!DummyCommand.canEditTimeline(whenOpen: [.rising]) && DummyCommand.outermost(of: [.rising, .selection]) == .rising)
-        #expect(FediqoRootView.escapeSees([.rising, .selection], place: .usage) == [.selection])
-        // The page is the frame's, and its swipe the frame's, where it is drawn (F10).
-        #expect(TimelinePane.page(.rising(.tags)) == .tabbed && TimelinePane.page(.rising(.tags), drawn: false) == .opened)
-        #expect(TimelinePane.openedID(.rising(.links)) == "rising:links")
-        #expect(FediqoRootView.canReload(place: .timeline, editing: false, hasSources: true, open: [.rising], personAsked: true))
-        #expect(!FediqoRootView.canReload(place: .timeline, editing: false, hasSources: true, open: [.rising]))
-        #expect(!FediqoRootView.canSearch(place: .timeline, open: [.rising]))
-        #expect(FediqoRootView.moved(in: [row.id, "b"], from: nil, by: 1, open: [.rising]) == row.id)
-        var selected: String? = "b"
-        var jump = 0
-        #expect(FediqoRootView.jumpedToTop(in: [row.id, "b"], standing: .rising(.tags), place: .timeline, selected: &selected, jump: &jump))
-        #expect(selected == row.id && jump == 1)
     }
 
     @Test("A link's row leads where a post's link leads, by the same door: its address is one this device would follow, the reader opens it listed under the source that named it and says the host of the address — and a row is drawn as words alone, with no picture and no press of its own inside it")
@@ -445,7 +387,7 @@ struct RisingTests {
         #expect(chinese.contains("那一列") && chinese.contains("通知") && !chinese.contains("討論串"))
     }
 
-    @Test("The pages, the line at the head of Trends and a row are laid out to the width they are given and never past it, in light and in dark, in each state they have; a link's row is no taller for a title or words of any length than for four lines of them")
+    @Test("The tabs and a row are laid out to the width they are given and never past it, in light and in dark, in each state they have; a link's row is no taller for a title or words of any length than for four lines of them")
     func laidOut() throws {
         func size<Content: View>(_ content: Content, _ width: CGFloat, scheme: ColorScheme = .light) -> CGSize {
             let hosted = NSHostingView(rootView: VStack(spacing: 0) { content }.frame(width: width).environment(\.colorScheme, scheme))
@@ -468,7 +410,6 @@ struct RisingTests {
             let tall = size(RisingRowView(row: wordy), width).height, short = size(RisingRowView(row: brief), width).height
             #expect(tall >= short && tall < short * 3, "a link's words are held to their lines at \(width): \(tall) against \(short)")
             #expect(size(RisingRowView(row: bare), width).height < short)
-            #expect(size(RisingLine(onOpen: { _ in }), width, scheme: scheme).width == width)
             #expect(size(RisingHead(), width, scheme: scheme).width == width)
         }
         let states = [
@@ -481,8 +422,8 @@ struct RisingTests {
         ]
         for (layout, width) in [(ShellLayout.wide, CGFloat(720)), (.narrow, 320)] {
             for said in states {
-                // The page as one page now draws them (F10): the tab in front in the frame.
-                let pane = RisingPage(said: said, tabs: RisingWhich.allCases, selectedID: .constant(said.rows.first?.id))
+                // The tab in front, as Trends draws it under its head.
+                let pane = RisingPane(said: said, selectedID: .constant(said.rows.first?.id), onOpen: { _ in }) { RisingHead() }
                     .environment(\.shellLayout, layout)
                 let hosted = NSHostingView(rootView: pane.frame(width: width, height: 700))
                 hosted.layoutSubtreeIfNeeded()

@@ -798,7 +798,7 @@ struct PersonStandingTests {
             pages.followByKey(place: place, open: open, person: person, tag: tag, in: session)
         }
         // Not from another place, and not under the viewer or the keys' own list.
-        for place in ShellPlace.allCases where place != .timeline {
+        for place in ShellPlace.allCases where !place.isStream {
             #expect(!key(place, [.person], person: Self.ada), "\(place)")
             #expect(!key(place, [.tag], tag: swift), "\(place)")
         }

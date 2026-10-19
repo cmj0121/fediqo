@@ -107,8 +107,9 @@ struct TimelinePagesTests {
         await session.cover(latest: nil)
         _ = session.timelineItems(latest: nil)
         let drawn = session.timelineEvaluations
-        session.timelineID = .trends
+        session.stream = .trends
         _ = session.timelineItems(latest: nil)
+        session.stream = .timeline
         session.timelineID = .all
         #expect(session.timelineItems(latest: nil).count == 30)
         #expect(session.timelineEvaluations == drawn, "All was drawn again on the way back")
@@ -283,8 +284,9 @@ struct TimelinePagesTests {
         await session.cover(latest: nil)
         #expect(session.timelineArrived(latest: nil).count == ShellSession.pageRows)
         #expect(session.timelineArrived(latest: nil).isEmpty, "a second pass over the same drawing")
-        session.timelineID = .trends
+        session.stream = .trends
         _ = session.timelineItems(latest: nil)
+        session.stream = .timeline
         session.timelineID = .all
         #expect(session.timelineArrived(latest: nil).isEmpty, "a switch back to the drawing kept")
     }

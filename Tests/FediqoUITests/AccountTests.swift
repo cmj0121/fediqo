@@ -39,7 +39,7 @@ struct AccountAddTests {
         await session.add()
         await session.confirm()
         #expect(session.sources.map(\.host) == ["first.example"])
-        #expect(session.queries.map(\.id) == ["all", "trends"])
+        #expect(session.queries.map(\.id) == ["all"] && session.availability.trendsTabs.contains(.posts))
         #expect(session.timelineID == .all)
         #expect(session.availability.timelineEnabled)
         #expect(session.availability.allows(.notices))

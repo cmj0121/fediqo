@@ -1,5 +1,7 @@
 "shell.timeline.title" = "Timeline";
 "shell.timeline.summary" = "One stream, in time order";
+"shell.trends.title" = "Trends";
+"shell.trends.summary" = "What is rising on your sources";
 "shell.notices.title" = "Notices";
 "shell.notices.summary" = "Who has been in touch";
 "shell.account.title" = "Account";
@@ -1929,6 +1931,7 @@
 "rising.unsaid" = "not said";
 "rising.link.leads" = "leads to %@";
 "rising.title" = "What is rising";
+"trends.tab.posts" = "Posts";
 "rising.tab.tags" = "Hashtags";
 "rising.tab.links" = "Links";
 "rising.reload" = "Ask the sources again";

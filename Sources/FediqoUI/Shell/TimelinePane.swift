@@ -25,7 +25,9 @@ struct TimelineWays {
     var onReload: () -> Void
 }
 
-/// The timeline place: named queries, a brief rule, then the stream or a thread.
+/// The timeline place: named queries, a brief rule, then the stream or a thread — and Trends,
+/// whose Posts are the same stream on the `.trends` query (DESIGN-trends, option C), drawn
+/// under Trends' own tabs and not under the timelines' names.
 struct TimelinePane: View {
     @Bindable var session: ShellSession
     @Binding var selectedID: String?
@@ -74,13 +76,9 @@ struct TimelinePane: View {
     /// A row of a list of people opened (#311), answered by the root: it lights the row and
     /// takes the step together, so leaving that person's page gives the row back.
     var onOpenListed: (Person) -> Void = { _ in }
-    /// One of the two ways at the head of the timeline that reads what is rising, pressed
-    /// (#320), answered by the root: the page of rising hashtags or links is a step of the walk.
-    var onOpenRising: (RisingWhich) -> Void = { _ in }
-    /// A tab of that page pressed or swiped to, answered by the root: the step turned in place.
-    var onTurnRising: (RisingWhich) -> Void = { _ in }
-    /// A row of such a page opened, answered by the root: a hashtag's page, or a link through
-    /// the door a post's link goes through.
+    /// A row of what is rising opened (#320) — on a tab of Trends, or of the hashtags
+    /// followed — answered by the root: a hashtag's page, or a link through the door a post's
+    /// link goes through.
     var onOpenRisingRow: (RisingRow) -> Void = { _ in }
     /// A row of what a search found at a source opened (#319), answered by the root: somebody's
     /// page, a hashtag's, or the page of all of one kind.
@@ -97,6 +95,10 @@ struct TimelinePane: View {
     var onOpenFeatured: (FeaturedPress) -> Void = { _ in }
     /// The press about looking somebody up through a source, answered by the root.
     var onLookUp: (SearchLookUpLine.Press) -> Void = { _ in }
+    /// Trends' tabs, where this pane is Trends: drawn in place of the timelines' names, and
+    /// Hashtags and Links drawn in place of the stream when they are in front. Nothing on the
+    /// timeline, which is then drawn exactly as it was.
+    var trends: TrendsHead?
     /// Bumped once each server's emoji catalogue has landed, so the rows already on screen ask
     /// again. Per host and not one counter for the pane: see `waitForCatalogues`.
     @State private var settledHosts: Set<String> = []
@@ -115,7 +117,7 @@ struct TimelinePane: View {
     @State private var returns = 0
     /// How far a sideways swipe has slid what is under the head (#305). Read by `Slid`, and by
     /// the head's dots, which lean with it.
-    private var slide: PageSlide { session.slide("timeline") }
+    private var slide: PageSlide { session.slide(trends == nil ? "timeline" : "trends") }
     /// When the reload mark was last pressed to begin a reload (#307). See `reloadMark`.
     @State private var reloadPressed: Date?
     /// A jump to the top read the newest page afresh (#359, C22): the list is put at its head
@@ -191,14 +193,6 @@ struct TimelinePane: View {
                 } else {
                     underneath
                 }
-            case .rising(let which):
-                // No source with a ranking of any tab — the last one removed since — draws the
-                // stream; one left with a ranking of the other tab only, that tab.
-                if let people, let rising = shown.rising {
-                    risingPage(rising, standing: which, in: people.rising)
-                } else {
-                    underneath
-                }
             case .found(_, let which):
                 // Neither kind left to draw — the answer no longer held and its people no longer
                 // asked of a source that says who people are — draws the stream; one left, that one.
@@ -239,7 +233,7 @@ struct TimelinePane: View {
         // What follows the finger stays inside the pane: not over the rail on a wide page.
         .modifier(SwipesSideways(
             session: session, slide: slide, touch: touch, page: Self.page(standing, drawn: drawn),
-            opened: Self.openedID(standing), searching: searching, back: onBack
+            opened: Self.openedID(standing), searching: searching, back: onBack, trends: trends
         ))
         .modifier(HoldsSlide(holds: touch))
         // One asker for the `…` of every row under this pane — the timeline, a conversation, a
@@ -285,6 +279,8 @@ struct TimelinePane: View {
         // parked instead — among the posts that timeline shows, not among the results — so
         // closing the search gives back the post of the timeline the reader is in.
         .onChange(of: session.timelineID) { left, arrived in
+            // Trends' posts are no timeline of the timeline's: a switch there is not this list's.
+            guard trends == nil else { return }
             let top = session.scrolledTop
             // Another list, so the row the last one had at the top means nothing here.
             session.scrolledTop = nil
@@ -461,9 +457,9 @@ struct TimelinePane: View {
         case .person, .tag: .tabbed
         // A conversation's page is the frame's, and its sideways the frame's (F10) — where it
         // is drawn; over the stream drawn in its stead the swipe goes back, as it did.
-        // So is a list of people's (F10), where it is drawn, and what is rising's.
+        // So is a list of people's (F10), where it is drawn.
         // And what a search found at a source, and the hashtags followed.
-        case .thread, .people, .rising, .found, .followedTags: drawn ? .tabbed : .opened
+        case .thread, .people, .found, .followedTags: drawn ? .tabbed : .opened
         case .link: .link
         case nil: .timeline
         }
@@ -471,13 +467,13 @@ struct TimelinePane: View {
 
     /// Whether the timelines' head — their names, the search, the reload — is drawn over what
     /// the reader stands on: not over somebody's page, a conversation's, a hashtag's, a list
-    /// of people's, what is rising, what a search found nor the hashtags followed, each a page
+    /// of people's, what a search found nor the hashtags followed, each a page
     /// of its own. **Asked of what is drawn, not of the step alone** (F10 §1): any of those
     /// that cannot be drawn (`drawn` false) draws the stream, and the head is over that.
     static func headDrawn(over standing: ShellStep?, drawn: Bool = true) -> Bool {
         switch standing {
         case .person, .tag: false
-        case .thread, .people, .rising, .found, .followedTags: !drawn
+        case .thread, .people, .found, .followedTags: !drawn
         case .link, nil: true
         }
     }
@@ -492,18 +488,16 @@ struct TimelinePane: View {
     }
 
     /// What is drawn of the step in front: the post a conversation is around, where this device
-    /// still holds it; the list a list of people's page is handed, where it can be said; what
-    /// the tab of what is rising in front is handed, where a source has a ranking of it; and
-    /// whether the step's page is drawn at all. A conversation whose post is no longer held, a
-    /// list nobody can say — its source gone, nobody signed in to see it — or a tab no source
-    /// ranks any more is not, and the stream is drawn in its stead.
+    /// still holds it; the list a list of people's page is handed, where it can be said; and
+    /// whether the step's page is drawn at all. A conversation whose post is no longer held, or
+    /// a list nobody can say — its source gone, nobody signed in to see it — is not, and the
+    /// stream is drawn in its stead.
     ///
     /// **The one decision of what is drawn**: the pane's body, its head and its swipe, and the
     /// root asked what Tab and `r` do, all ask it here, handed the same things.
     struct Drawn {
         var root: DummyItem?
         var list: PeopleSaid?
-        var rising: RisingSaid?
         /// What the tab of what a search found in front is handed, where any tab is left.
         var found: FoundSaid?
         /// What the list of the hashtags followed is handed, where the sign-in still sees it.
@@ -519,9 +513,6 @@ struct TimelinePane: View {
         case .people(let list):
             let said = people?.lists.said(of: list, in: session)
             return Drawn(list: said, drawn: said != nil)
-        case .rising(let which):
-            let said = people?.rising.drawn(at: which, in: session)
-            return Drawn(rising: said, drawn: said != nil)
         case .found(let at, let which):
             let said = people?.found.drawn(at, at: which, in: session)
             return Drawn(found: said, drawn: said != nil)
@@ -746,42 +737,6 @@ struct TimelinePane: View {
         .task(id: ShellPeoplePages.opening(list, in: session)) { await people.lists.opened(list, in: session) }
     }
 
-    /// What is rising (F10): the whole height of the pane, in the frame every opened page stands
-    /// in, handed its tabs and what the tab in front says — worked out where the sources are
-    /// asked. Its bar's mark is where `r` asks the sources again; **never Stop** — its asks are
-    /// not the timeline's reload, and a Stop here would stop one running out of sight.
-    ///
-    /// The walk stood on `standing`'s tab: where the page draws the other one — no source ranks
-    /// `standing` any more — the walk is turned to it, so Tab, the keys and leaving all stand on
-    /// the tab that is drawn.
-    private func risingPage(_ said: RisingSaid, standing: RisingWhich, in rising: ShellRising) -> some View {
-        let which = said.which
-        return RisingPage(
-            said: said,
-            tabs: rising.tabs(in: session),
-            selectedID: $selectedID,
-            slide: session.slide("rising"),
-            reload: RisingPage.reloadName(canReload: ways.canReload),
-            acts: RisingPage.acts(
-                onBack: onBack,
-                onTab: onTurnRising,
-                onReload: ways.onReload,
-                // Pulled down, the sources are asked again as `r` asks them.
-                onPull: { await rising.again(which, in: session) }
-            ),
-            onOpen: onOpenRisingRow,
-            onAskAgain: { host in Task { await rising.again(which, at: host, in: session) } },
-            jumpToTop: jumpToTop
-        )
-        // **A tab asks when it first comes in front**, once a run for each source: one stretch
-        // of what is rising there, of that source and nobody else. A tab never in front has
-        // asked nothing.
-        .task(id: rising.opening(which, in: session)) { await rising.opened(which, in: session) }
-        .onChange(of: which != standing, initial: true) { _, fell in
-            if fell { onTurnRising(which) }
-        }
-    }
-
     /// What a search found at a source (F10): the whole height of the pane, in the frame every
     /// opened page stands in, handed its tabs and what the tab in front lists — worked out where
     /// the answer is held. Its bar's mark is on People alone, where `r` asks the source for the
@@ -921,7 +876,6 @@ struct TimelinePane: View {
         case .person(let person): "person:" + person.id
         case .tag(let tag): "tag:" + String(describing: tag)
         case .people(let list): "people:" + list.id
-        case .rising(let which): "rising:" + which.rawValue
         case .found(let at, let which): "found:" + at.id + "\u{1e}" + which.rawValue
         case .followedTags(let page): "followed:" + page.id
         case .link, nil: nil
@@ -946,18 +900,39 @@ struct TimelinePane: View {
     /// miss are the bottom toast, and the distinctions inside empty live on `EmptyNotice`.
     @ViewBuilder
     private var underneath: some View {
-        // The ways to the hashtags and the links rising (#320) stand at the head of the
-        // timeline that reads what is rising, over its posts or over there being none — and
-        // nowhere else: every other timeline is drawn exactly as it was.
-        if people?.rising.offered(on: timeline, searching: searching, in: session) == true {
-            VStack(alignment: .leading, spacing: 0) {
-                RisingLine(onOpen: onOpenRising)
-                ShellRule()
-                stream
-            }
+        // On Trends, Hashtags or Links in front is drawn in the stream's place (#320, F10); the
+        // stream is Posts. Everywhere else the stream, exactly as it was.
+        if let which = trends?.front.rising, let rising = people?.rising, let said = rising.said(which, in: session) {
+            risingTab(said, in: rising)
         } else {
             stream
         }
+    }
+
+    /// Hashtags or Links on Trends (#320, F10): the head that says once whose ranking it shows,
+    /// then a band a source — the inside of the page they were before Trends was a place, under
+    /// Trends' own tabs and marks instead of a page's bar. Its mark and a pull ask the sources
+    /// again, as `r` does.
+    private func risingTab(_ said: RisingSaid, in rising: ShellRising) -> some View {
+        let which = said.which
+        return VStack(alignment: .leading, spacing: 0) {
+            RisingHead()
+            ShellRule()
+            RisingPane(
+                said: said, selectedID: $selectedID, onOpen: onOpenRisingRow,
+                onAskAgain: { host in Task { await rising.again(which, at: host, in: session) } },
+                jumpToTop: jumpToTop
+            ) { EmptyView() }
+        }
+        // One list per tab, so a tab brought in front is drawn afresh at its own lamp.
+        .id(which)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Pulled down, the sources are asked again as `r` asks them.
+        .modifier(PullsToReload(offered: { ways.canReload }, reload: {}, settled: { await rising.again(which, in: session) }))
+        // **A tab asks when it first comes in front**, once a run for each source: one stretch
+        // of what is rising there, of that source and nobody else. A tab never in front has
+        // asked nothing.
+        .task(id: rising.opening(which, in: session)) { await rising.opened(which, in: session) }
     }
 
     @ViewBuilder
@@ -1299,7 +1274,9 @@ struct TimelinePane: View {
     /// `TimelineNarrowHead`.
     private var header: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
-            if shellLayout == .narrow, !session.queries.isEmpty {
+            if let trends {
+                trendsHead(trends)
+            } else if shellLayout == .narrow, !session.queries.isEmpty {
                 TimelineNarrowHead(session: session, slide: slide) {
                     searchMark
                     reloadMark
@@ -1347,7 +1324,7 @@ struct TimelinePane: View {
                 reloadMark
             }
             }
-            if session.timelinesUnreadable {
+            if trends == nil, session.timelinesUnreadable {
                 Text(L10n.t("timeline.unreadable.line"))
                     .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
@@ -1359,7 +1336,21 @@ struct TimelinePane: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .modifier(ScrollsToNeighbour(session: session))
+        .modifier(ScrollsToNeighbour(session: session, steps: trends == nil))
+    }
+
+    /// Trends' head (DESIGN-trends, Pane): its tabs where it has more than one — no names of
+    /// timelines, no `[+]`, no rule and no editor, since Trends is written by nobody — then the
+    /// search, on Posts alone, and the reload.
+    private func trendsHead(_ trends: TrendsHead) -> some View {
+        HStack(alignment: .center, spacing: ShellSpace.step) {
+            if PageFrame.stripDrawn(trends.tabs) {
+                ShellTabs(trends.tabs, selected: trends.front, slide: slide, onSelect: trends.onTurn)
+            }
+            Spacer(minLength: 0)
+            searchMark
+            reloadMark
+        }
     }
 
     /// Quiet word that newer posts are held back by the latest date in Preferences (#22), so a
@@ -1663,6 +1654,9 @@ struct SwipesSideways: ViewModifier {
     let opened: String?
     let searching: Bool
     let back: () -> Void
+    /// Trends' tabs, where the pane is Trends: beside on its own page is the tab beside, and
+    /// there is no leaving it from the first — Trends is a place, not a page opened over one.
+    var trends: TrendsHead?
 
     @Environment(\.shellCovered) private var covered
 
@@ -1671,14 +1665,21 @@ struct SwipesSideways: ViewModifier {
             touch: touch, page: page, searching: searching,
             listShown: session.timelineListShown, editing: session.editing != nil, covered: covered
         )
-        let place = session.timelinePosition
+        let tabs = trends?.tabs ?? []
+        let place = trends.map { (index: $0.tabs.firstIndex(of: $0.front), count: $0.tabs.count) }
+            ?? session.timelinePosition
         let ways = means.map { TimelineSwipe.ways($0, index: place.index, count: place.count) }
         content.modifier(PageSwipes(
             slide: slide, enabled: means != nil, key: means == .back ? "back" : "beside",
             hasNext: ways?.next ?? false, hasPrevious: ways?.previous ?? false,
-            inFront: { means == .back ? opened : session.currentTimeline.id },
+            inFront: { means == .back ? opened : trends.map(\.front.id) ?? session.currentTimeline.id },
             step: { step in
-                guard means == .back else { return session.stepTimeline(by: step) }
+                guard means == .back else {
+                    guard let trends else { return session.stepTimeline(by: step) }
+                    guard let to = TimelineSwipe.target(from: place.index, count: tabs.count, step: step) else { return false }
+                    trends.onTurn(tabs[to])
+                    return true
+                }
                 guard step == -1 else { return false }
                 back()
                 return true
@@ -1721,6 +1722,8 @@ struct SlideBounds: Shape {
 /// all, behind the name, reaches any.
 struct ScrollsToNeighbour: ViewModifier {
     let session: ShellSession
+    /// Whether the scroll goes to a timeline: not over Trends' head, whose tabs are no timelines.
+    var steps = true
 
     /// Which way a scroll toward `edge` goes: on for the trailing edge, back for the leading.
     /// A three-finger swipe toward the leading edge scrolls toward the trailing one, so it is
@@ -1737,7 +1740,7 @@ struct ScrollsToNeighbour: ViewModifier {
         #if os(iOS)
         content.accessibilityScrollAction { edge in
             let step = Self.step(toward: edge)
-            guard step != 0 else { return }
+            guard steps, step != 0 else { return }
             // At an end nothing moves, and what is said is where the reader still is.
             session.stepTimeline(by: step)
             let place = session.timelinePosition

@@ -355,6 +355,32 @@ struct TagPageTests {
 
     // MARK: - The tab in front
 
+    @Test("A hashtag's page still a step of the other stream place's walk keeps its tab when this side leaves it, or ends in one go; once neither side holds it, it is forgotten")
+    func theTabStaysWhileEitherSideHoldsIt() async throws {
+        let (session, _) = await session([Self.asked: Self.answer(true)])
+        try signIn(session)
+        let people = ShellPersonPages()
+        let tags = people.tags
+        var lamp: String?
+        #expect(tags.turn(Self.swift, to: .about, lamp: &lamp, in: session))
+        var here = ShellWalk(), there = ShellWalk()
+        _ = here.walk(to: .tag(Self.swift), from: "row")
+        _ = there.walk(to: .tag(Self.swift), from: "rising-row")
+        let left = here.back()
+        people.left(try #require(left).step, of: here, besides: there)
+        #expect(tags.front(of: Self.swift, in: session) == .about, "the other side still holds the page")
+        people.leftAll(besides: there)
+        #expect(tags.front(of: Self.swift, in: session) == .about, "ended in one go, the other side's page keeps its tab")
+        people.left(try #require(left).step, of: here, besides: ShellWalk())
+        #expect(tags.front(of: Self.swift, in: session) == .posts, "neither side holds it: forgotten")
+        #expect(tags.turn(Self.swift, to: .about, lamp: &lamp, in: session))
+        people.leftAll(keeping: nil, besides: ShellWalk())
+        #expect(tags.front(of: Self.swift, in: session) == .posts)
+        #expect(tags.turn(Self.swift, to: .about, lamp: &lamp, in: session))
+        people.leftAll(keeping: Self.swift, besides: ShellWalk())
+        #expect(tags.front(of: Self.swift, in: session) == .about, "the page left standing keeps it")
+    }
+
     @Test("The tab in front is kept with the page, by the hashtag whatever case it was written in, each tab with its own lamp; Tab goes round the two; the walk leaving the page's last step forgets it, and a page opened afresh opens on Posts")
     func theTabInFrontIsKeptWithThePage() async throws {
         let (session, _) = await session([Self.asked: Self.answer(true)])

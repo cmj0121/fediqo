@@ -167,8 +167,6 @@ struct PeoplePageTests {
         let gone = TimelinePane.drawn(atForum, of: pages, in: session)
         #expect(gone.list == nil && !gone.drawn && !TimelinePane.drawn(step, of: nil, in: session).drawn)
         #expect(TimelinePane.headDrawn(over: atForum, drawn: gone.drawn) && TimelinePane.page(atForum, drawn: gone.drawn) == .opened)
-        let rising = TimelinePane.drawn(.rising(.tags), of: pages, in: session)
-        #expect(rising.list == nil && rising.drawn)
     }
 
     @Test("Tab on a list is the page's — taken, turning nothing — while the list is drawn and in front, nobody's while something covers it, and the timelines' over a list that cannot be drawn; Esc, q, Back and the swipe go one step back, the lamp on the row the list was taken from")

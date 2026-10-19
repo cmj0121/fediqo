@@ -68,7 +68,7 @@ struct RemovedPostsTests {
 
         #expect(session.sources == [Self.alpha])
         #expect(Set(session.notes.map(\.id)) == ["1", "2"], "a kept post left All")
-        #expect(session.queries.map(\.id) == ["all", "trends"], "the board's tab outlived the board")
+        #expect(session.queries.map(\.id) == ["all"], "the board's tab outlived the board")
         let search = NoteSearch("hello", sources: session.sources)
         #expect(search?.found(session.notes, SearchIndex(session.notes)).map(\.id).sorted() == ["1", "2"])
         #expect(await session.store.sources() == [Self.alpha])

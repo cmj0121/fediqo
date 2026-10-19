@@ -765,7 +765,7 @@ struct SearchFoundTests {
         var walk = ShellWalk()
         let page = FoundTags(source: Self.one, words: "a\u{202E}b\nc")
         let at = FoundAt(source: page.source, words: page.words, gave: [.tags])
-        #expect(walk.walk(to: .found(at, .tags), from: page.id) && walk.openedFoundTags == page && walk.openedRising == nil)
+        #expect(walk.walk(to: .found(at, .tags), from: page.id) && walk.openedFoundTags == page)
         let named: String = "found:\(at.id)\u{1e}tags"
         #expect(TimelinePane.page(walk.standing) == .tabbed && TimelinePane.openedID(walk.standing) == named)
         var jump = 0

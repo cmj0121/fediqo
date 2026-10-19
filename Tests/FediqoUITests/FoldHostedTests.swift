@@ -132,7 +132,7 @@ struct FoldHostedTests {
     /// source at all, so no Timeline and no Notices.
     private static let offered: [[ShellPlace]] = [
         ShellPlace.allCases,
-        ShellPlace.allCases.filter { $0 != .notices },
+        ShellPlace.allCases.filter { $0 != .notices && $0 != .trends },
         [.account, .usage, .preferences],
     ]
 

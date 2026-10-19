@@ -208,7 +208,7 @@ struct TimelineHeadTests {
         session.goToTimeline(own)
         #expect(session.timelineList.offersEdit)
         #expect(session.timelineList.position == session.queries.count - 1)
-        session.goToTimeline(.trends)
+        session.goToTimeline(.all)
         #expect(!session.timelineList.offersEdit)
         let none = TimelineList.offered([], current: .all, name: { _ in "" }, rule: { _ in "" }, missing: { _ in false })
         #expect(!none.offersNew && !none.offersEdit && none.entries.isEmpty && none.position == nil)
@@ -217,7 +217,7 @@ struct TimelineHeadTests {
     @Test("One function puts a timeline in front, by itself or by its place; one that is not among them, or a place past either end, is refused and moves nothing")
     func goingToATimeline() throws {
         let session = try session(timelines: ["Ada"])
-        #expect(session.goToTimeline(.trends) && session.currentTimeline == .trends)
+        #expect(!session.goToTimeline(.trends), "Trends is a place of its own, not a timeline")
         #expect(session.goToTimeline(at: 0) && session.currentTimeline == .all)
         #expect(session.goToTimeline(at: session.queries.count - 1))
         #expect(session.currentTimeline == session.queries.last)
@@ -246,7 +246,7 @@ struct TimelineHeadTests {
     @Test("Changing a timeline pressed in the list opens the editor on that timeline, though another is in front by the time the list has gone; and it is done once")
     func theEditIsForTheTimelinePressed() throws {
         let session = try session(timelines: ["Ada", "Bob"])
-        let ada = session.queries[2], bob = session.queries[3]
+        let ada = session.queries[1], bob = session.queries[2]
         session.goToTimeline(ada)
         session.timelineHeadShown = true
         session.timelineListPressed = .edit(ada)
@@ -290,8 +290,8 @@ struct TimelineHeadTests {
     @Test("Where the timeline in front stands is read without building the list")
     func thePosition() throws {
         let session = try session(timelines: ["Ada"])
-        session.goToTimeline(at: 2)
-        #expect(session.timelinePosition.index == 2 && session.timelinePosition.count == 3)
+        session.goToTimeline(at: 1)
+        #expect(session.timelinePosition.index == 1 && session.timelinePosition.count == 2)
     }
 
     // MARK: - What is said

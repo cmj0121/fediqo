@@ -129,7 +129,7 @@ struct TrendsReadOnHostedTests {
         )
         session.deadlinesUnturned()
         await session.reloadFromStore()
-        session.timelineID = .trends
+        session.stream = .trends
         let view = NSHostingView(rootView: Host(session: session, search: ShellSearch()))
         view.frame = NSRect(x: 0, y: 0, width: 900, height: 6000)
         return (session, http, view)
