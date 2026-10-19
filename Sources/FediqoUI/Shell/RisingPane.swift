@@ -20,16 +20,6 @@ import SwiftUI
 extension RisingSaid {
     // MARK: - Words
 
-    /// What the page is called, whichever tab is in front.
-    static func pageTitle(language: DummyLanguage? = nil) -> String {
-        L10n.t("rising.title", language: language)
-    }
-
-    /// The one line under the title: whose ranking this is.
-    static func headLine(language: DummyLanguage? = nil) -> String {
-        L10n.t("rising.line", language: language)
-    }
-
     /// How much a hashtag or a link was used of late, as its source counts: one sentence, or
     /// nothing where the source gave no figure. **Its figures, written whole**, with "not
     /// said" where it gave one and not the other.
@@ -91,20 +81,18 @@ extension RisingSaid.Answer {
 }
 
 /// The tab of what is rising in front: the one list of what the sources say is rising on them,
-/// led by `lead` where a page hands it its first rows, and at its foot each source that gave none.
+/// right under Trends' tabs as Posts is, and at its foot each source that gave none.
 ///
 /// **A tab of Trends** (decision 2), so the lamp and the row given back on leaving a hashtag's
 /// page opened from it are Trends' walk's own. It draws what it is handed and asks nothing: the asking
 /// is `ShellRising`'s, and which kind of source this is is never looked at here.
-struct RisingPane<Lead: View>: View {
+struct RisingPane: View {
     let said: RisingSaid
     @Binding var selectedID: String?
     /// A row opened, answered by the root: a hashtag's page, or a link through the door a
     /// post's link goes through, of the first source that named it.
     var onOpen: (RisingListed) -> Void
     var jumpToTop: Int = 0
-    /// The page's head, where it is the first rows of the list.
-    @ViewBuilder var lead: Lead
 
     @Environment(\.colorScheme) private var colorScheme
     /// Under a finger one press on a row opens it (#303); the lamp here is where the walk left it.
@@ -117,7 +105,6 @@ struct RisingPane<Lead: View>: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    lead
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, listed in
                         rowView(listed)
                             .id(listed.id)
@@ -172,30 +159,6 @@ struct RisingPane<Lead: View>: View {
             },
             onOpen: { onOpen(listed) }
         )
-    }
-}
-
-/// The head of the page of what is rising: what the page is, and whose ranking it shows —
-/// said once, whichever tab is in front.
-struct RisingHead: View {
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            Text(RisingSaid.pageTitle())
-                .shellFont(.name)
-                .foregroundStyle(ShellChrome.ink(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-            Text(RisingSaid.headLine())
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, ShellSpace.pad)
-        .padding(.vertical, ShellSpace.step)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
     }
 }
 

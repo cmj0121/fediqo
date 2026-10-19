@@ -1902,7 +1902,6 @@
 "source.you.media.covered" = "Covered";
 "source.you.media.open" = "Not covered";
 "work.purpose.rising" = "Reading what is rising on a source";
-"rising.line" = "What your sources say is rising, one list, in each source's own order.";
 "rising.asking" = "Asking %@…";
 "rising.none.tags" = "%@ gave no rising hashtags.";
 "rising.none.links" = "%@ gave no rising links.";
@@ -1910,7 +1909,6 @@
 "rising.use.one" = "Posts %1$@, people %2$@, today.";
 "rising.unsaid" = "not said";
 "rising.link.leads" = "leads to %@";
-"rising.title" = "What is rising";
 "trends.tab.posts" = "Posts";
 "rising.tab.tags" = "Hashtags";
 "rising.tab.links" = "Links";

@@ -1001,19 +1001,12 @@ struct TimelinePane: View {
         }
     }
 
-    /// Hashtags or Links on Trends (#320, F10): the head that says once whose ranking it shows,
-    /// then the one list woven of what the sources say — the inside of the page they were
-    /// before Trends was a place, under Trends' own tabs and marks instead of a page's bar. Its
-    /// mark and a pull ask the sources again, as `r` does.
+    /// Hashtags or Links on Trends (#320, F10): the one list woven of what the sources say,
+    /// right under Trends' own tabs and marks as Posts is. Its mark and a pull ask the sources
+    /// again, as `r` does.
     private func risingTab(_ said: RisingSaid, in rising: ShellRising) -> some View {
         let which = said.which
-        return VStack(alignment: .leading, spacing: 0) {
-            RisingHead()
-            ShellRule()
-            RisingPane(
-                said: said, selectedID: $selectedID, onOpen: onOpenRising, jumpToTop: jumpToTop
-            ) { EmptyView() }
-        }
+        return RisingPane(said: said, selectedID: $selectedID, onOpen: onOpenRising, jumpToTop: jumpToTop)
         // One list per tab, so a tab brought in front is drawn afresh at its own lamp.
         .id(which)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

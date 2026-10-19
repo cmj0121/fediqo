@@ -597,9 +597,10 @@ struct RisingTests {
             else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        // The page's title and its two tabs; the two titles a way in had, the bar's mark and
-        // the lines that said a miss went with the page.
-        #expect(keys.count == 14 && keys.contains("rising.use.two") && keys.contains("work.purpose.rising") && keys.contains("shortcut.expand"))
+        // The two tabs; the two titles a way in had, the bar's mark, the lines that said a miss
+        // and the head — its title and its line — went with the page.
+        #expect(!keys.contains("rising.line") && !keys.contains("rising.title"), "the list stands right under Trends' tabs")
+        #expect(keys.count == 12 && keys.contains("rising.use.two") && keys.contains("work.purpose.rising") && keys.contains("shortcut.expand"))
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }
@@ -644,7 +645,6 @@ struct RisingTests {
             let tall = size(RisingRowView(row: wordy), width).height, short = size(RisingRowView(row: brief), width).height
             #expect(tall >= short && tall < short * 3, "a link's words are held to their lines at \(width): \(tall) against \(short)")
             #expect(size(RisingRowView(row: bare), width).height < short)
-            #expect(size(RisingHead(), width, scheme: scheme).width == width)
         }
         let states = [
             RisingSaid(which: .tags, answers: [RisingSaid.Answer(source: Self.one), RisingSaid.Answer(source: Self.two, reading: .failed)]),
@@ -660,8 +660,8 @@ struct RisingTests {
         ]
         for (layout, width) in [(ShellLayout.wide, CGFloat(720)), (.narrow, 320)] {
             for said in states {
-                // The tab in front, as Trends draws it under its head.
-                let pane = RisingPane(said: said, selectedID: .constant(said.rows.first?.id), onOpen: { _ in }) { RisingHead() }
+                // The tab in front, as Trends draws it right under its tabs.
+                let pane = RisingPane(said: said, selectedID: .constant(said.rows.first?.id), onOpen: { _ in })
                     .environment(\.shellLayout, layout)
                 let hosted = NSHostingView(rootView: pane.frame(width: width, height: 700))
                 hosted.layoutSubtreeIfNeeded()
