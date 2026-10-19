@@ -98,12 +98,12 @@ struct HeldTag {
 /// A hashtag, opened: a page of its own (F10), drawn in the frame every opened page stands in
 /// (`OpenedPage`) — what this device holds under it, and what its sources were asked (#124).
 ///
-///     ‹ Back                                                    Esc or q
+///     ‹ Back                                              ↻   Esc or q
 ///     ─────────────────────────────────────────────────────────────────────
 ///     #swift                                                  [ Follow ]
 ///     (bubble 41)  [✓ mastodon.social]
 ///     ─────────────────────────────────────────────────────────────────────
-///     Asking mastodon.social, example.org for #swift…        the page's line
+///     Asked mastodon.social. Not asked, as …                 the page's line
 ///     ─────────────────────────────────────────────────────────────────────
 ///     (bubble Posts)  (i About)         only where a source keeps it followed
 ///     ─────────────────────────────────────────────────────────────────────
@@ -114,14 +114,17 @@ struct HeldTag {
 /// sources are asked. **A page handed its posts alone draws no strip, no mark and no Follow**
 /// — a forum's reader, and nobody signed in, have the one list.
 ///
-/// **Unlike somebody's page, this one has nobody to ask again from its bar**: what a source
-/// sends under the tag is asked as the page opens, lands in the store and the list renews
-/// from it; while it is on its way, and where it failed, that is said in the page's line, with
-/// a way to ask again.
+/// What a source sends under the tag is asked as the page opens, lands in the store and the
+/// list renews from it. **Its bar's mark asks again, as `r` and a pull do** (decision 11), and is
+/// Stop while the sources are asked; that they are, and that one failed, is the page's toast
+/// (DESIGN-reload), and no line of the page's.
 struct TagPane: View {
     let said: TagPageSaid
     /// What this device holds under it, newest first — `ShellSession.heldPosts(under:)`.
     let items: [DummyItem]
+    /// What the bar's mark is called — whom it asks again — or nothing where nobody is asked:
+    /// then the mark is absent, and a pull asks nothing (`reloadName`).
+    var reload: String?
     /// How far a sideways swipe has slid what is under the tabs.
     var slide = PageSlide()
     var acts = TagPageActs()
@@ -148,28 +151,25 @@ struct TagPane: View {
 
     var body: some View {
         OpenedPage(
-            tabs: said.tabs, front: said.front, slide: slide,
-            acts: OpenedPageActs(onBack: acts.onBack, onTab: acts.onTab),
+            tabs: said.tabs, front: said.front, slide: slide, reload: reload,
+            acts: Self.acts(acts),
             head: { heading },
             inFront: { lead in inFront { lead } }
         )
     }
 
-    /// What the ask of the sources has to say, or nothing once it has landed whole.
-    enum Said: Equatable {
-        case asking(String)
-        case failed(String)
+    /// What the bar's mark is called, where `r` may ask: the sources it asks again, and for
+    /// what. Nothing where it may not, or where none of the timeline's sources keeps tags.
+    static func reloadName(_ tag: PostTag, asking hosts: [String], canReload: Bool, language: DummyLanguage? = nil) -> String? {
+        guard canReload, !hosts.isEmpty else { return nil }
+        return String(format: L10n.t("tag.retry.spoken", language: language), hosts.joined(separator: ", "), tag.text)
     }
 
-    /// A function of what it reads, so a test can ask it without standing a pane up.
-    static func said(asking: [String], failed: [String], tag: PostTag, language: DummyLanguage? = nil) -> Said? {
-        if !asking.isEmpty {
-            return .asking(String(format: L10n.t("tag.asking", language: language), asking.joined(separator: ", "), tag.text))
-        }
-        if !failed.isEmpty {
-            return .failed(String(format: L10n.t("tag.failed", language: language), failed.joined(separator: ", "), tag.text))
-        }
-        return nil
+    /// What the frame presses on this page. **Stop is the page's own** (decision 10): handed
+    /// while its sources are asked, it stops that ask and nothing else — never a reload of the
+    /// stream running out of sight under the page.
+    static func acts(_ acts: TagPageActs) -> OpenedPageActs<TagTab> {
+        OpenedPageActs(onBack: acts.onBack, onTab: acts.onTab, onReload: acts.onReload, onPull: acts.onPull, onStop: acts.onStop)
     }
 
     /// The empty page's sentence: about this device, never about the tag — a page that said
@@ -183,11 +183,8 @@ struct TagPane: View {
     private var heading: some View {
         TagHead(said: said, onTab: acts.onTab, onFollow: acts.onHeadFollow)
         ShellRule()
-        if said.line != nil || said.reach != nil || !said.troubles.isEmpty {
-            TagPageLine(
-                line: said.line, retrySpoken: said.retrySpoken, troubles: said.troubles, reach: said.reach,
-                onRetry: acts.onRetry, onAgain: acts.onFollow
-            )
+        if said.reach != nil || !said.troubles.isEmpty {
+            TagPageLine(troubles: said.troubles, reach: said.reach, onAgain: acts.onFollow)
             ShellRule()
         }
     }
@@ -286,17 +283,13 @@ struct TagPane: View {
 }
 
 /// The page's line of a hashtag's page, between its head and its tabs and seen from every
-/// tab: the sources being asked, or those that could not be, with the press that asks again ·
-/// what a source failed at about following — a press that did not arrive, a source that could
-/// not say whether it is followed, with its press · which sources were asked and why not the
-/// rest, where the page has no About to say it. What is said, is `TagPageSaid`'s to say.
+/// tab: what a source failed at about following — a press that did not arrive, a source that
+/// could not say whether it is followed, with its press · which sources were asked and why not
+/// the rest, where the page has no About to say it. **Never how the ask of its posts stands**,
+/// which is the page's toast. What is said, is `TagPageSaid`'s to say.
 struct TagPageLine: View {
-    let line: TagPane.Said?
-    /// What the press beside a failed ask is called, where its word alone does not say.
-    var retrySpoken: String?
     var troubles: [TagPageSaid.Trouble] = []
     let reach: String?
-    var onRetry: () -> Void = {}
     /// The press beside a source that could not be asked whether it is followed.
     var onAgain: (TagFollowLine) -> Void = { _ in }
 
@@ -304,15 +297,6 @@ struct TagPageLine: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            switch line {
-            case .asking(let words):
-                quiet(words).accessibilityAddTraits(.updatesFrequently)
-            case .failed(let words):
-                // Full ink, and where the answer would have been: a way to ask again.
-                failure(words, press: L10n.t("tag.retry"), spoken: retrySpoken, action: onRetry)
-            case nil:
-                EmptyView()
-            }
             ForEach(troubles) { trouble in
                 failure(trouble.words, press: trouble.again?.pressWords(), spoken: trouble.spoken) {
                     if let line = trouble.again { onAgain(line) }

@@ -167,6 +167,8 @@ struct TimelinePane: View {
         case person(DummyPerson)
         case people(PeopleList)
         case followed(FollowedTags)
+        /// A hashtag's page: its ask of the sources, as the side in front made it.
+        case tag(PostTag)
         /// A tab of Trends that lists what is rising, with nothing drawn over it.
         case rising(RisingWhich)
         /// A page that asks nothing of its own: the hashtags a search found.
@@ -174,8 +176,8 @@ struct TimelinePane: View {
     }
 
     /// What is in front of the stream that asks for itself, or nothing where the stream is in
-    /// front — the timeline, Posts, a conversation, a hashtag's page, and any step that cannot
-    /// be drawn, since the stream is drawn in its stead. `rising` is Trends' tab in front where
+    /// front — the timeline, Posts, a conversation, and any step that cannot be drawn, since the
+    /// stream is drawn in its stead. `rising` is Trends' tab in front where
     /// it lists what is rising.
     static func askInFront(
         _ standing: ShellStep?, rising: RisingWhich?, of people: ShellPersonPages?, in session: ShellSession
@@ -189,7 +191,9 @@ struct TimelinePane: View {
             guard let found = shown.found else { return nil }
             return found.which == .people ? .people(found.at.people) : .quiet
         case .followedTags(let page) where shown.drawn: return .followed(page)
-        case .thread where shown.drawn, .tag: return nil
+        // Always drawn, whatever it holds.
+        case .tag(let tag): return .tag(tag)
+        case .thread where shown.drawn: return nil
         case .people, .found, .followedTags, .thread, .link, nil: break
         }
         // What stands in the stream's place on Trends, where a tab of what is rising is drawn.
@@ -203,6 +207,7 @@ struct TimelinePane: View {
         case .person(let who): people.ask(of: who, in: session)
         case .people(let list): people.lists.ask(of: list, in: session)
         case .followed(let page): people.followed.ask(of: page, in: session)
+        case .tag(let tag): session.reload.tagPageAsk(of: tag, on: session.stream)
         case .rising(let which): people.rising.ask(of: which, in: session)
         case .quiet: PageAsking()
         }
@@ -217,6 +222,7 @@ struct TimelinePane: View {
         case .person(let who): people.stop(who, in: session)
         case .people(let list): people.lists.stop(list)
         case .followed(let page): people.followed.stop(page)
+        case .tag(let tag): session.reload.stopTag(tag, on: session.stream)
         case .rising(let which): people.rising.stop(which)
         case .quiet: false
         }
@@ -885,15 +891,19 @@ struct TimelinePane: View {
     /// A hashtag's page (F10): the whole height of the pane, in the frame every opened page
     /// stands in, handed which tabs it has, which is in front and what its head says — all of
     /// them worked out where its sources are asked, and nothing here looks at which kind of
-    /// source any of them is.
+    /// source any of them is. Its bar's mark asks the sources again where `r` would, and is
+    /// Stop while they are asked, stopping that ask and nothing else (decision 11).
     private func tagPage(_ tag: PostTag) -> some View {
         let items = session.heldPosts(under: tag, latest: prefs.latestDate)
+        let timeline = session.currentTimeline
+        let asked = ways.canReload ? session.reload.tagReach(of: timeline, in: session).asked : []
         return TagPane(
             // Whether the reader follows it at each source they are signed in to (#318), and
             // so whether the page has an About; with nobody to ask, its posts alone.
             said: people?.tags.said(of: tag, held: items.count, in: session)
                 ?? TagPageSaid.made(of: tag, held: items.count, follows: [], front: nil, in: session),
             items: items,
+            reload: TagPane.reloadName(tag, asking: asked, canReload: ways.canReload),
             slide: session.slide("tag"),
             acts: TagPageActs(
                 onBack: onBack,
@@ -905,11 +915,15 @@ struct TimelinePane: View {
                 onFeature: { line in _ = people?.tags.featurePressed(line, in: session) },
                 onUnfeature: { line in _ = people?.tags.unfeatured(line, in: session) },
                 onAskFollows: { host in session.askFor([.follows], host: host) },
-                // Asked again of the timeline in front, as the press asked it.
-                onRetry: {
-                    let timeline = session.currentTimeline
-                    Task { await session.reload.tag(tag, timeline: timeline, in: session) }
-                }
+                onReload: ways.onReload,
+                // Pulled down, the sources are asked again as `r` asks them, and the spinner
+                // stays until that ask is over — landed, failed or stopped.
+                onPull: {
+                    await session.reload.tagAgain(tag, timeline: timeline, in: session)
+                    await session.reload.settled(.tag)
+                },
+                // While they are asked, the bar's mark stops that ask.
+                onStop: onStop(.tag(tag))
             ),
             catalogues: session.emoji,
             catalogueSettled: false,

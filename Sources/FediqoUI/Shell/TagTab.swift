@@ -105,7 +105,8 @@ struct TagAboutSaid: Equatable {
 }
 
 /// What a hashtag's page is handed (F10): which tabs it has and which is in front, what its
-/// head says, the page's line, and what About holds.
+/// head says, the page's line, and what About holds. **Its ask is its toast's** (DESIGN-reload):
+/// being asked, and a miss, are said there, and `r`, the mark or a pull asks again.
 ///
 /// **Worked out from what the sources said, by nothing that draws** — the page draws it as it
 /// is handed, in either form: with the strip of tabs, or as one list with none.
@@ -144,21 +145,15 @@ struct TagPageSaid: Equatable {
     let followed: [Followed]
     /// The head's Follow: the line of the one source that offers it, where exactly one does.
     let follow: TagFollowLine?
-    /// Where the ask of the sources stands, or nothing once it has landed whole.
-    let line: TagPane.Said?
-    /// What the press beside a failed ask is called to a listener and a pointer: whom it
-    /// asks again, and for what. Nothing where no ask failed.
-    let retrySpoken: String?
     /// What a source failed at about following: full ink, under the head — **while Posts is
     /// in front**. On About each is said by its source's own row, with its press, and is not
     /// said a second time over it.
     let troubles: [Trouble]
     /// Which sources were asked, said in the page's line — only where the page has no About
-    /// to say it, and not while the sources are being asked, when the line names them.
+    /// to say it, and not while the sources are being asked, when the toast names them.
     ///
-    /// **Under a failure it is still said**, which is more than F10's "one at a time": a
-    /// source that fails says so, and which sources were asked and why not the rest is no
-    /// less true for it — the two rules both hold, as they did before the page had a frame.
+    /// **Under a failure it is still said**: the toast says which source failed, and which
+    /// sources were asked and why not the rest is no less true for it.
     let reach: String?
     /// The sentence of a page with no posts, once nobody is being asked for any: about this
     /// device, never about the hashtag.
@@ -170,14 +165,13 @@ struct TagPageSaid: Equatable {
     var stripped: Bool { PageFrame.stripDrawn(tabs) }
 
     static func made(
-        of tag: PostTag, held: Int, heldAtLeast: Bool = false, asking: [String] = [], failed: [String] = [],
+        of tag: PostTag, held: Int, heldAtLeast: Bool = false, asking: [String] = [],
         reach: String? = nil, follows: [TagFollowLine] = [], front kept: TagTab? = nil, language: DummyLanguage? = nil
     ) -> TagPageSaid {
         let tabs = TagTab.tabs(follows: follows)
         let front = TagTab.front(kept, among: tabs)
         let hasAbout = tabs.contains(.about)
         let offering = follows.filter { $0.offers == .follow }
-        let line = TagPane.said(asking: asking, failed: failed, tag: tag, language: language)
         let beingAsked = !asking.isEmpty
         return TagPageSaid(
             tag: tag, tabs: tabs, front: front,
@@ -192,13 +186,10 @@ struct TagPageSaid: Equatable {
                 Followed(host: $0.host, spoken: String(format: L10n.t("tag.stands.followed", language: language), $0.host))
             },
             follow: offering.count == 1 ? offering.first : nil,
-            line: line,
-            retrySpoken: failed.isEmpty || beingAsked ? nil : String(
-                format: L10n.t("tag.retry.spoken", language: language), failed.joined(separator: ", "), tag.text
-            ),
             troubles: front == .about ? [] : troubles(of: follows, language: language),
             reach: hasAbout || beingAsked ? nil : reach,
-            // Never left blank under a line that has finished asking, which would read as waiting.
+            // Blank while the toast says the sources are asked (risk 4), and never once they have
+            // answered, which would read as waiting.
             none: held == 0 && asking.isEmpty ? TagPane.none(tag, language: language) : nil,
             about: hasAbout ? TagAboutSaid(follows: follows, reach: reach) : nil
         )
@@ -229,13 +220,14 @@ extension TagPageSaid {
     }
 
     /// The page of `tag` as the session stands: what its ask says only where the ask is this
-    /// hashtag's — another's, or one left behind, is not this page's to say.
+    /// hashtag's, made on the side in front — another's, one left behind, or the same hashtag's
+    /// asked for the other stream place, is not this page's to say.
     @MainActor
     static func made(of tag: PostTag, held: Int, follows: [TagFollowLine], front: TagTab?, in session: ShellSession) -> TagPageSaid {
-        let asked = session.reload.tagAsk?.tag == tag
+        let asked = session.reload.tagAsk(of: tag, on: session.stream)
         return made(
-            of: tag, held: held, heldAtLeast: session.heldAtLeast, asking: asked ? session.reload.tagAsking : [], failed: asked ? session.reload.tagFailed : [],
-            reach: asked ? session.reload.tagAsk?.reach.sentence : nil, follows: follows, front: front
+            of: tag, held: held, heldAtLeast: session.heldAtLeast, asking: asked == nil ? [] : session.reload.tagAsking,
+            reach: asked?.reach.sentence, follows: follows, front: front
         )
     }
 }
@@ -259,6 +251,10 @@ struct TagPageActs {
 
     /// A lock's press: the question that asks that source's sign-in for who the reader follows.
     var onAskFollows: (String) -> Void = { _ in }
-    /// Asks the sources again, after a failure.
-    var onRetry: () -> Void = {}
+    /// The bar's mark: what `r` does — the sources asked again.
+    var onReload: () -> Void = {}
+    /// The same, pulled for: it returns when the answers have landed.
+    var onPull: () async -> Void = {}
+    /// What stops the sources' ask while it runs: the bar's mark is then Stop.
+    var onStop: (() -> Void)?
 }

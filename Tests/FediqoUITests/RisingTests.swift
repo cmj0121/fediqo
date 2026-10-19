@@ -206,6 +206,9 @@ struct RisingTests {
         #expect(ReloadMark.shown(canReload: canReload, stoppable: rising.ask(of: .tags, in: session).stoppable) == .stop)
         let midway = bands(rising, .tags, session)
         #expect(midway[0].asking && midway[0].reading == .asking && midway[0].stateLine(.tags) == nil)
+        // The source beside is asked and answers on its own wire: waited on to land, so the toast
+        // names the held one alone.
+        await met("the source beside the held one has answered") { !bands(rising, .tags, session)[1].asking }
         #expect(rising.ask(of: .tags, in: session, language: .english).asking == "Asking m.example…", "the toast says who is on the wire")
         await first.release(Self.tags)
         await again.value
@@ -265,7 +268,7 @@ struct RisingTests {
         #expect(bands(rising, .tags, session).map(\.rows.count) == [1, 1])
     }
 
-    @Test("Whose ask is in front is one decision — the toast's, the mark's and Escape's: a page opened over the stream asks for itself, a list whose source is gone draws the stream and is not, a conversation and a hashtag's page are the stream's, and on Trends with nothing over it a tab of what is rising is; Stop there stops that tab and nothing else")
+    @Test("Whose ask is in front is one decision — the toast's, the mark's and Escape's: a page opened over the stream asks for itself, a hashtag's page too, a list whose source is gone draws the stream and is not, a conversation is the stream's, and on Trends with nothing over it a tab of what is rising is; Stop there stops that tab and nothing else")
     func whoseAskIsInFront() async throws {
         let (session, servers, _) = await session([Self.tags: Self.none], [Self.tags: Self.none])
         let pages = ShellPersonPages()
@@ -279,7 +282,7 @@ struct RisingTests {
         #expect(front(.people(PeopleList(directoryAt: "gone.example")), .tags) == .rising(.tags), "undrawn, the stream's place is in front")
         #expect(front(.followedTags(FollowedTags(host: Self.one))) == nil, "nobody signed in: the stream is drawn in its stead")
         let birds = try #require(PostTag("#birds"))
-        #expect(front(.thread("nowhere")) == nil && front(.tag(birds)) == nil)
+        #expect(front(.thread("nowhere")) == nil && front(.tag(birds), .tags) == .tag(birds))
         #expect(front(nil) == nil, "the stream: its own reload")
         #expect(front(nil, .links) == .rising(.links))
         #expect(TimelinePane.askInFront(.person(ada), rising: nil, of: nil, in: session) == nil, "with no pages, nobody's")

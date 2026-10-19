@@ -1704,9 +1704,12 @@ public struct FediqoRootView: View {
     /// **`risingAsked` is Trends on Hashtags or Links**, with nothing walked over it: whether
     /// the tab's sources may be asked again (`ShellRising.canAskAgain`) — and nothing on Posts
     /// and on the timeline, where the stream is what `r` asks for.
+    ///
+    /// **`tagAsked` is a hashtag's page in front**: whether any source of the timeline in front
+    /// keeps tags, and so is asked for its posts under it (`ShellReload.tagReach`).
     static func canReload(
         place: ShellPlace, editing: Bool, hasSources: Bool, open: Set<DummyLayer>, personAsked: Bool = false,
-        risingAsked: Bool? = nil
+        risingAsked: Bool? = nil, tagAsked: Bool = false
     ) -> Bool {
         guard place.isStream, !editing, hasSources else { return false }
         switch DummyCommand.outermost(of: open) {
@@ -1718,8 +1721,8 @@ public struct FediqoRootView: View {
         // And a list of people is its source's word too (#311): `r` asks it from the top.
         // And the hashtags followed are their source's word (#318): `r` asks it again.
         case .person, .people, .rising: return personAsked
-        // A tag's page asks for itself as it opens, and says so there with a way to ask again.
-        case .tag: return false
+        // A tag's page asks its sources as it opens (#124), and `r` asks them again (decision 11).
+        case .tag: return tagAsked
         // A page read out of a post is not a timeline; there is nothing of ours on it to ask for.
         case .link: return false
         // And a tab of what is rising is its sources' word (#320): `r` asks them again.
@@ -1732,6 +1735,13 @@ public struct FediqoRootView: View {
         if let list = walk.openedPeople { return people.lists.canAskAgain(list, in: session) }
         if let page = walk.openedFollowedTags { return people.followed.canAskAgain(page, in: session) }
         return walk.openedPerson.map { people.canAskAgain($0, in: session) } ?? false
+    }
+
+    /// Whether the hashtag's page in front has a source to ask: one of the timeline in front's
+    /// that keeps tags. Nothing is worked out with no such page.
+    private var tagAsked: Bool {
+        guard walk.openedTag != nil else { return false }
+        return !session.reload.tagReach(of: session.currentTimeline, in: session).asked.isEmpty
     }
 
     /// What is open, as far as what is drawn goes: a step in front whose page cannot be drawn
@@ -1747,7 +1757,8 @@ public struct FediqoRootView: View {
     private var canReloadNow: Bool {
         Self.canReload(
             place: place, editing: session.editing != nil, hasSources: !session.sources.isEmpty, open: drawnOpenLayers,
-            personAsked: personAsked, risingAsked: risingInFront.map { people.rising.canAskAgain($0, in: session) }
+            personAsked: personAsked, risingAsked: risingInFront.map { people.rising.canAskAgain($0, in: session) },
+            tagAsked: tagAsked
         )
     }
 
@@ -1757,9 +1768,9 @@ public struct FediqoRootView: View {
     }
 
     /// `Escape`'s stop on a stream place (decision 17): the ask of the page in front — somebody's
-    /// page, a list, the hashtags followed, a tab of Trends that lists what is rising — and
-    /// nothing under it; where the stream is in front, its reload, and a thread's next page on
-    /// its way. **The pane's own decision of what is in front** (`TimelinePane.askInFront`), so
+    /// page, a list, the hashtags followed, a hashtag's page, a tab of Trends that lists what is
+    /// rising — and nothing under it; where the stream is in front, its reload, and a thread's
+    /// next page on its way. **The pane's own decision of what is in front** (`TimelinePane.askInFront`), so
     /// `Escape` stops what the toast says and the mark stops. Whether anything was stopped.
     private func stopInFront() -> Bool {
         let rising = place == .trends ? trendsTab?.rising : nil
@@ -1794,6 +1805,12 @@ public struct FediqoRootView: View {
         // On the list of the hashtags followed `r` asks its source for it again, from the top (#318).
         if DummyCommand.outermost(of: open) == .rising, let page = walk.openedFollowedTags {
             Task { await people.followed.again(page, in: session) }
+            return true
+        }
+        // On a hashtag's page `r` asks its sources again, of the timeline in front (decision 11).
+        if DummyCommand.outermost(of: open) == .tag, let tag = walk.openedTag {
+            let timeline = session.currentTimeline
+            Task { await session.reload.tagAgain(tag, timeline: timeline, in: session) }
             return true
         }
         // The thread as `TimelinePane` draws it: one it cannot find draws the timeline instead.
@@ -2570,7 +2587,7 @@ public struct FediqoRootView: View {
         sides[side].walk.clear()
         return Cleared(
             side: side, leftLink: walk.openedLink != nil,
-            endsTag: tagAsk.map { ($0 == .trends) == (side == .trends) } ?? true,
+            endsTag: tagAsk.map { ShellStream(of: $0) == side } ?? true,
             lists: walk.followedTags.filter { !other.followedTags.contains($0) }, other: other
         )
     }

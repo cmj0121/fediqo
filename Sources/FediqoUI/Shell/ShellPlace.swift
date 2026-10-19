@@ -93,6 +93,12 @@ enum ShellStream: Hashable, Sendable {
         }
     }
 
+    /// The stream place whose posts `query` draws: Trends' for `.trends`, and the timeline's for
+    /// every other — what an ask made of a timeline belongs to (`cleared`).
+    init(of query: TimelineQuery) {
+        self = query == .trends ? .trends : .timeline
+    }
+
     /// The other stream place's.
     var other: ShellStream {
         switch self {

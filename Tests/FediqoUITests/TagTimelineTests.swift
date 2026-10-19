@@ -187,16 +187,46 @@ struct TagTimelineTests {
         #expect(session.reload.tagFailed.isEmpty)
     }
 
-    @Test("A forum that fails says so where the answer would be, and can be tried again")
+    @Test("A forum that fails says so in the page's toast, and can be tried again")
     func forumFails() async {
         let http = FixtureHTTP([Self.mastodonTag: .text("[]"), Self.forumTag: .text("", status: 500)])
         let session = await shell(http)
         await session.reload.tag(Self.swift, timeline: .all, in: session)
         #expect(session.reload.tagFailed == [Self.forum])
-        #expect(TagPane.said(asking: [], failed: session.reload.tagFailed, tag: Self.swift)
-            == .failed(String(format: L10n.t("tag.failed"), Self.forum, Self.swift.text)))
+        #expect(session.reload.tagPageAsk(of: Self.swift, on: .timeline) == PageAsking(failed: [Self.forum]))
         await session.reload.tag(Self.swift, timeline: .all, in: session)
         #expect(await http.paths.filter { $0 == Self.forumTag }.count == 2, "tried again")
+    }
+
+    @Test("The page's toast names the sources still being asked, each let go of as it answers: two on the wire are the first and \"+1\", the one left is named alone, and none once both have answered")
+    func theToastDropsWhoAnswered() async throws {
+        let http = TwoHeld([
+            Self.mastodonTag: .text("[]"), Self.forumTag: .text(Self.listing), "/site.json": .text(Self.site),
+        ], holding: [Self.mastodonTag, Self.forumTag])
+        let mastodonGuard = watching(http.gates[Self.mastodonTag]!, "the Mastodon's posts under the hashtag, held")
+        defer { mastodonGuard.cancel() }
+        let forumGuard = watching(http.gates[Self.forumTag]!, "the forum's topics under the hashtag, held")
+        defer { forumGuard.cancel() }
+        let session = await shell(http)
+        // The gated source waits on a gate, not on a deadline under load.
+        session.reload.deadline = .seconds(3600)
+        func toast() -> String? { session.reload.tagPageAsk(of: Self.swift, on: .timeline, language: .english).asking }
+
+        let asking = Task { await session.reload.tag(Self.swift, timeline: .all, in: session) }
+        await met("both sources are asked for the hashtag", by: asking) {
+            let mastodon = await http.asks(Self.mastodonTag), forum = await http.asks(Self.forumTag)
+            return mastodon == 1 && forum == 1
+        }
+        #expect(toast() == "Asking forum.example for #swift… +1")
+
+        await http.gates[Self.forumTag]!.open()
+        await met("the forum has answered", by: asking) { session.reload.tagAsking == [Self.one] }
+        #expect(toast() == "Asking one.example for #swift…", "the one left, alone")
+        #expect(session.reload.tagPageAsk(of: Self.swift, on: .timeline).stoppable)
+
+        await http.gates[Self.mastodonTag]!.open()
+        await asking.value
+        #expect(session.reload.tagAsking.isEmpty && session.reload.tagPageAsk(of: Self.swift, on: .timeline) == PageAsking())
     }
 
     // MARK: - Switching timeline with the page open
@@ -375,5 +405,29 @@ struct TagTimelineTests {
 private struct Unreached: HTTPSender {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         throw FixtureHTTPError.unmapped
+    }
+}
+
+/// Answers as `FixtureHTTP` does, each of `held`'s paths held at a gate of its own until it is
+/// opened: two sources of one ask, let answer one at a time.
+private actor TwoHeld: HTTPClient {
+    private let inner: FixtureHTTP
+    nonisolated let gates: [String: Gate]
+    private var asked: [String: Int] = [:]
+
+    init(_ routes: [String: FixtureHTTP.Outcome], holding held: [String]) {
+        inner = FixtureHTTP(routes)
+        gates = Dictionary(uniqueKeysWithValues: held.map { ($0, Gate()) })
+    }
+
+    /// How many times `path` has been asked for, counted in front of its gate.
+    func asks(_ path: String) -> Int { asked[path] ?? 0 }
+
+    func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        if let gate = gates[url.path] {
+            asked[url.path, default: 0] += 1
+            await gate.wait()
+        }
+        return try await inner.data(from: url)
     }
 }
