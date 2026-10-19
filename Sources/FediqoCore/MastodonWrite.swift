@@ -4,11 +4,25 @@ import Foundation
 // the store the way a fetch already does, so the row appears without asking the timeline again.
 
 /// Why a write did not produce a note this device can hold.
+/// Why a write was refused on this device, before anything was asked of the source.
+public enum MastodonWriteRefusal: Equatable, Sendable {
+    /// The file is over the byte ceiling the source stated for that kind.
+    case tooLarge(limit: Int)
+    /// More attachments than the source takes.
+    case tooMany(count: Int)
+    /// A kind of file the source listed, and did not list this one.
+    case kind
+    /// A description longer than the source takes.
+    case description(limit: Int)
+}
+
 public enum MastodonWriteError: Error, Equatable, Sendable {
     /// This device no longer holds the source the token is for.
     case noSource
     /// The server answered a status this device could not read.
     case unreadable
+    /// Refused here, before a request left. The words typed are untouched.
+    case refusedHere(MastodonWriteRefusal)
     /// This device cannot name the post on its own server, so there is nothing to act on: a row
     /// stored before `Note.statusID` was kept, or a forum post that never had one.
     ///
@@ -23,6 +37,16 @@ public enum MastodonWriteError: Error, Equatable, Sendable {
 public struct MastodonWrite: Sendable {
     /// What a Mastodon that did not advertise a ceiling will take.
     public static let defaultLimit = 500
+
+    /// How many attachments, and how long a description, a Mastodon takes when its instance
+    /// document says nothing of either. Its own numbers, as `defaultLimit` is for a post —
+    /// not a ceiling invented for a byte size, which is refused only where the source stated one.
+    public static let defaultMediaCount = 4
+    public static let defaultDescriptionLimit = 1500
+
+    /// Room beside a file for the multipart wrapper, so a file at the source's exact byte
+    /// ceiling is not refused for the lines around it. Not a limit of the source's.
+    static let uploadMargin = 65_536
 
     private let door: MastodonAuthorized
     private let store: ItemStore
@@ -41,6 +65,14 @@ public struct MastodonWrite: Sendable {
     public static func limit(advertised: Int?) -> Int {
         guard let advertised, advertised > 0 else { return defaultLimit }
         return advertised
+    }
+
+    /// A byte ceiling named the way a refusal says it: a whole MiB, else a whole KiB, else the
+    /// bytes themselves.
+    public static func bytesNamed(_ bytes: Int) -> String {
+        if bytes > 0, bytes.isMultiple(of: 1_048_576) { return "\(bytes / 1_048_576) MiB" }
+        if bytes > 0, bytes.isMultiple(of: 1024) { return "\(bytes / 1024) KiB" }
+        return "\(bytes) bytes"
     }
 
     /// Categories a fetch of this post would have stamped: Home, because it was written as the
@@ -67,7 +99,9 @@ public struct MastodonWrite: Sendable {
     /// lets a send nobody confirmed be sent again without posting twice.
     @discardableResult
     public func post(
-        _ text: String, visibility: Audience, answering: Note? = nil, key: UUID? = nil
+        _ text: String, visibility: Audience, answering: Note? = nil, key: UUID? = nil,
+        spoiler: String? = nil, language: String? = nil, sensitive: Bool? = nil,
+        mediaIDs: [String] = []
     ) async throws -> Note {
         guard let source = await store.sources().first(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
@@ -79,6 +113,12 @@ public struct MastodonWrite: Sendable {
             }
             form.append(("in_reply_to_id", id))
         }
+        // A cover and a language are sent only where there is one. Sensitive is sent only
+        // where it was chosen: absent is not a no.
+        if let spoiler = Self.present(spoiler) { form.append(("spoiler_text", spoiler)) }
+        if let language = SourceField.languageTag(language) { form.append(("language", language)) }
+        if let sensitive { form.append(("sensitive", sensitive ? "true" : "false")) }
+        for id in mediaIDs where !id.isEmpty { form.append(("media_ids[]", id)) }
         let sent = ReadMoment.now()
         let data = try await door.post(
             path: "/api/v1/statuses", form: form,
@@ -92,6 +132,45 @@ public struct MastodonWrite: Sendable {
         try Task.checkCancellation()
         await store.ingest([note], ifSourceHere: host)
         return note
+    }
+
+    /// Uploads one file to this source and returns the id it gave it (`POST /api/v2/media`).
+    ///
+    /// **No `Idempotency-Key`.** That key is the post's, sent once, on the status. A file the
+    /// source already accepted is not sent again: its id is what a later try of the post carries.
+    ///
+    /// **`byteLimit` is the source's ceiling for this kind of file**, where it stated one.
+    /// Nothing, where it stated none — and then the file is not refused here for a size this
+    /// device invented. The multipart wrapper is allowed `uploadMargin` past the file, which is
+    /// not that ceiling: a file at the source's exact limit still goes.
+    ///
+    /// A 202 that carries an id is the file accepted. A 422 is the source's refusal, thrown
+    /// before this is taken for a post that may have landed.
+    public func upload(
+        bytes: Data, name: String, type: String, description: String, byteLimit: Int? = nil
+    ) async throws -> String {
+        if let byteLimit, bytes.count > byteLimit {
+            throw MastodonWriteError.refusedHere(.tooLarge(limit: byteLimit))
+        }
+        let fileName = name.isEmpty ? "file" : name
+        let parts = [
+            MultipartPart.file("file", named: fileName, type: type, bytes),
+            MultipartPart.field("description", description),
+        ]
+        let data = try await door.post(
+            path: "/api/v2/media", parts: parts, limit: bytes.count + Self.uploadMargin
+        )
+        guard let id = try? MastodonJSON.decoder.decode(UploadedMedia.self, from: data).id, !id.isEmpty else {
+            throw MastodonWriteError.unreadable
+        }
+        return id
+    }
+
+    /// A non-empty line, or nothing.
+    private static func present(_ text: String?) -> String? {
+        guard let text else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// Boosts `note` to this source, or takes the boost back (#106).
@@ -182,5 +261,102 @@ public struct MastodonWrite: Sendable {
         try Task.checkCancellation()
         await store.refresh([answered], ifSourceHere: host, acted: mark)
         return await store.note(answered.key) ?? answered.refreshed(over: note)
+    }
+}
+
+/// The id a media upload was answered with. Anything else about the file is the source's to
+/// keep; a post sends the id.
+private struct UploadedMedia: Decodable {
+    let id: String
+}
+
+/// How much media a Mastodon says it takes, read off the instance document beside the profile.
+///
+/// **Lenient, and never the reason a host could not be read.** A document that is not the
+/// shape this looks for, or that says nothing of media, is `unstated`: Mastodon's own count
+/// and description length, and no byte ceiling — a size is refused here only where the source
+/// stated one. A JSON boolean is not the number 1.
+public struct MastodonMediaLimits: Equatable, Sendable {
+    /// How many attachments one post may carry.
+    public let count: Int
+    /// How long a description may be.
+    public let descriptionLimit: Int
+    /// The image byte ceiling, where the source stated one.
+    public let imageBytes: Int?
+    /// The video byte ceiling, where the source stated one. Sound is held to the same one.
+    public let videoBytes: Int?
+    /// The types the source listed, lowercased. Empty means it listed none, which is not a
+    /// refusal of every type.
+    public let mimeTypes: [String]
+
+    /// What stands where the document says nothing of media.
+    public static let unstated = MastodonMediaLimits(
+        count: MastodonWrite.defaultMediaCount,
+        descriptionLimit: MastodonWrite.defaultDescriptionLimit,
+        imageBytes: nil, videoBytes: nil, mimeTypes: []
+    )
+
+    public init(count: Int, descriptionLimit: Int, imageBytes: Int?, videoBytes: Int?, mimeTypes: [String]) {
+        self.count = count
+        self.descriptionLimit = descriptionLimit
+        self.imageBytes = imageBytes
+        self.videoBytes = videoBytes
+        self.mimeTypes = mimeTypes
+    }
+
+    /// `document` read for the media ceilings, or `unstated` where it says nothing of them.
+    public init(document: Data) {
+        guard let root = (try? JSONSerialization.jsonObject(with: document)) as? [String: Any],
+              let configuration = root["configuration"] as? [String: Any]
+        else {
+            self = .unstated
+            return
+        }
+        let statuses = configuration["statuses"] as? [String: Any]
+        let media = configuration["media_attachments"] as? [String: Any]
+        self.init(
+            count: Self.positive(statuses?["max_media_attachments"]) ?? MastodonWrite.defaultMediaCount,
+            descriptionLimit: Self.positive(media?["description_limit"]) ?? MastodonWrite.defaultDescriptionLimit,
+            imageBytes: Self.positive(media?["image_size_limit"]),
+            videoBytes: Self.positive(media?["video_size_limit"]),
+            mimeTypes: Self.types(media?["supported_mime_types"])
+        )
+    }
+
+    /// The byte ceiling for `mime`, where the source stated one for that kind. Nothing for a
+    /// kind it did not, and nothing where it stated no ceiling: not a number this device made up.
+    public func byteLimit(for mime: String) -> Int? {
+        let kind = mime.lowercased()
+        if kind.hasPrefix("image/") { return imageBytes }
+        if kind.hasPrefix("video/") || kind.hasPrefix("audio/") { return videoBytes }
+        return nil
+    }
+
+    /// Whether `mime` is one the source listed. A source that listed none has not refused this.
+    public func allows(_ mime: String) -> Bool {
+        mimeTypes.isEmpty || mimeTypes.contains(mime.lowercased())
+    }
+
+    /// A positive whole number, or nothing. Zero is not a ceiling. A boolean is not a number.
+    private static func positive(_ value: Any?) -> Int? {
+        guard let number = value as? NSNumber else { return nil }
+        if value is Bool || CFGetTypeID(number as CFTypeRef) == CFBooleanGetTypeID() { return nil }
+        let whole = number.intValue
+        guard whole > 0, number.doubleValue == Double(whole) else { return nil }
+        return whole
+    }
+
+    /// The types listed, lowercased, empty ones dropped, each kept once, in the order given.
+    private static func types(_ value: Any?) -> [String] {
+        guard let list = value as? [Any] else { return [] }
+        var seen: Set<String> = []
+        var kept: [String] = []
+        for item in list {
+            guard let raw = item as? String else { continue }
+            let type = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !type.isEmpty, seen.insert(type).inserted else { continue }
+            kept.append(type)
+        }
+        return kept
     }
 }

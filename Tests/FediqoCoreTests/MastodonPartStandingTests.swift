@@ -43,7 +43,7 @@ struct MastodonPartStandingTests {
         }
     }
 
-    @Test("What a sign-in has been asked is every word of every page, each once and in the order met; a page's words beyond what is held are those it does not hold; and bookmarks alone only add to acting")
+    @Test("What a sign-in has been asked is every word of every page, each once and in the order met; a page's words beyond what is held are those it does not hold; and bookmarks and media only add to acting")
     func unionsAndWhatIsMore() {
         #expect(MastodonParts.union("a b", nil, "b c") == "a b c")
         #expect(MastodonParts.union(nil, nil) == nil && MastodonParts.union("", nil) == nil)
@@ -52,7 +52,7 @@ struct MastodonPartStandingTests {
         #expect(MastodonParts.same("a b", "b a") && !MastodonParts.same("a", "a b") && MastodonParts.same(nil, ""))
         #expect(MastodonParts.words(of: [.bookmarks, .reading]) == Self.reading + " write:bookmarks")
         #expect(MastodonParts.words(of: [.reading]) { $0 != "read:lists" } == "read:statuses read:accounts")
-        #expect(MastodonPart.allCases.filter(\.needsActing) == [.bookmarks])
+        #expect(MastodonPart.allCases.filter(\.needsActing) == [.bookmarks, .media])
     }
 
     @Test("A held word the table does not know is one a sign-in asked for more gives up: each once, in the order held — the source's one word for every read among them, and no word of any part")

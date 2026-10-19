@@ -1061,9 +1061,35 @@ final class ShellSession {
     /// The source the composer will write to, among those that may be written on.
     var composeHost: String?
     /// How far the post goes. Default public, which is what a Mastodon calls everyone.
+    /// A new post starts from the source's own default where the person has not chosen.
     var composeAudience: Audience = .everyone
+    /// The cover line. Cleared when a post is taken; not a default the source sets.
+    var composeCover = ""
+    /// The language, folded when it is taken from the source. Empty is none, and is not sent.
+    var composeLanguage = ""
+    /// Whether the post covers its media, where that was chosen. Nothing is not a no, and is
+    /// not sent.
+    var composeCoversMedia: Bool?
+    /// The files added, in order.
+    var composeMedia: [UnsentMedia] = []
+    /// Why a file was not added, or nothing.
+    var composeMediaNote: String?
+    /// Whether the system file picker is up. Opened only by the Add press, and only once the
+    /// sign-in already holds media.
+    var composeImporting = false
     /// Ceilings already asked for this run, so opening compose twice does not ask twice.
     @ObservationIgnored private var postLimits: [String: Int] = [:]
+    /// The same ask's media ceilings, beside the post's length. Nothing where this run has not
+    /// heard the document — which is not a byte ceiling this device invented.
+    @ObservationIgnored var composeRooms: [String: ComposeRoom] = [:]
+    /// Set from the control, and only from the control: a default that arrives late does not
+    /// overwrite a choice already made.
+    @ObservationIgnored var composeTouchedAudience = false
+    @ObservationIgnored var composeTouchedLanguage = false
+    @ObservationIgnored var composeTouchedSensitive = false
+    /// What each source said a new post starts from, asked once a run.
+    @ObservationIgnored private var composeDefaults: [String: PostingDefaults] = [:]
+    @ObservationIgnored private var composeDefaultsAsked: Set<String> = []
 
     var availability: ShellAvailability {
         ShellAvailability(
@@ -1111,17 +1137,22 @@ final class ShellSession {
     /// once the network is back (#222).
     func refreshPostLimit(of named: String? = nil) async {
         guard let host = named ?? composeHost else { return }
+        if composeRooms[host] != nil { return }
         if postLimits[host] != nil { return }
         if case .stated(let profile) = profiles[host],
            profile.asOf == nil || flavours.flavour(of: host) == .said(profile.kind) {
             return
         }
         do {
-            // The same document the reload reads, and what it says goes to the store too (#188):
-            // a source this device kept no word of yet has one from here on.
-            let (_, profile) = try await reach.mastodon(host, for: .serverCheck, within: nil).introduction()
-            postLimits[host] = MastodonWrite.limit(advertised: profile?.statusLimit)
-            if let profile {
+            // The same document the reload reads, once, and what it says goes to the store too
+            // (#188): a source this device kept no word of yet has one from here on. Media
+            // ceilings ride the same answer. Where this run already learnt the kind, the
+            // returns above leave them unstated rather than asking the document again.
+            let said = try await reach.mastodon(host, for: .serverCheck, within: nil).said()
+            let limit = MastodonWrite.limit(advertised: said.profile?.statusLimit)
+            postLimits[host] = limit
+            composeRooms[host] = ComposeRoom(limit: limit, media: said.limits)
+            if let profile = said.profile {
                 await store.said(profile)
                 // Landed here as well as followed from the store, so the composer that asked
                 // reads the new ceiling now rather than after the next adopt.
@@ -1132,15 +1163,165 @@ final class ShellSession {
             // `postLimit(of:)` says Mastodon's own 500 meanwhile.
         } catch {
             postLimits[host] = MastodonWrite.defaultLimit
+            composeRooms[host] = ComposeRoom(limit: MastodonWrite.defaultLimit, media: .unstated)
+        }
+    }
+
+    /// How much media `host` said it takes, or Mastodon's own count and description length and
+    /// no byte ceiling where this run has not heard it.
+    func mediaLimits(of host: String) -> MastodonMediaLimits {
+        composeRooms[host]?.media ?? .unstated
+    }
+
+    /// Asks what a new post starts from at the composer's source, once this run, and adopts it
+    /// where the person has not already chosen. A refusal leaves the composer's own defaults.
+    /// A dark network is asked again next time the composer opens.
+    func loadComposeDefaults() async {
+        guard let host = composeHost else { return }
+        if composeDefaultsAsked.contains(host) {
+            adoptComposeDefaults(for: host)
+            return
+        }
+        composeDefaultsAsked.insert(host)
+        guard let door = mastodon.authorized(host: host, for: .write) else {
+            composeDefaults[host] = PostingDefaults()
+            return
+        }
+        do {
+            let defaults = try await MastodonSettings(door: door).postingDefaults()
+            composeDefaults[host] = defaults
+            if composeHost == host { adoptComposeDefaults(for: host) }
+        } catch where DarkNetwork.caused(error) {
+            composeDefaultsAsked.remove(host)
+        } catch {
+            composeDefaults[host] = PostingDefaults()
+        }
+    }
+
+    /// Takes the cached defaults for `host` into the fields the person has not touched.
+    /// A reach this build does not know leaves the audience as it stands.
+    func adoptComposeDefaults(for host: String) {
+        guard let defaults = composeDefaults[host] else { return }
+        if !composeTouchedAudience, case .known(let audience)? = defaults.reach {
+            composeAudience = audience
+        }
+        if !composeTouchedLanguage {
+            composeLanguage = SourceField.languageTag(defaults.language) ?? ""
+        }
+        if !composeTouchedSensitive, let covers = defaults.coversMedia {
+            composeCoversMedia = covers
+        }
+    }
+
+    func chooseAudience(_ audience: Audience) {
+        composeTouchedAudience = true
+        composeAudience = audience
+    }
+
+    func chooseLanguage(_ language: String) {
+        composeTouchedLanguage = true
+        composeLanguage = language
+    }
+
+    func chooseCoversMedia(_ covers: Bool) {
+        composeTouchedSensitive = true
+        composeCoversMedia = covers
+    }
+
+    /// Whether the files already added are within what the source said it takes.
+    func attachmentsOK(host: String) -> Bool {
+        let limits = mediaLimits(of: host)
+        guard composeMedia.count <= limits.count else { return false }
+        for piece in composeMedia {
+            if piece.description.count > limits.descriptionLimit { return false }
+            if !limits.allows(piece.mime) { return false }
+            if let ceiling = limits.byteLimit(for: piece.mime), piece.bytes.count > ceiling { return false }
+        }
+        return true
+    }
+
+    /// Adds one file the person already has in hand. Returns why it was not added, or nothing.
+    /// The words typed are left as they are either way.
+    @discardableResult
+    func composeAttach(bytes: Data, name: String, type: String, description: String = "") -> String? {
+        let host = composeHost ?? ""
+        let limits = composeHost.map { mediaLimits(of: $0) } ?? .unstated
+        if composeMedia.count >= limits.count {
+            let note = String(format: L10n.t("compose.media.tooMany"), host, limits.count)
+            composeMediaNote = note
+            return note
+        }
+        if !limits.allows(type) {
+            let note = String(format: L10n.t("compose.media.kind"), host)
+            composeMediaNote = note
+            return note
+        }
+        if let ceiling = limits.byteLimit(for: type), bytes.count > ceiling {
+            let note = String(format: L10n.t("compose.media.tooLarge"), host, MastodonWrite.bytesNamed(ceiling))
+            composeMediaNote = note
+            return note
+        }
+        if description.count > limits.descriptionLimit {
+            let note = String(format: L10n.t("compose.media.description.over"), limits.descriptionLimit)
+            composeMediaNote = note
+            return note
+        }
+        composeMedia.append(UnsentMedia(bytes: bytes, mime: type, name: name, description: description))
+        composeMediaNote = nil
+        return nil
+    }
+
+    func composeRemoveMedia(_ id: UUID) {
+        composeMedia.removeAll { $0.id == id }
+    }
+
+    /// The Add press. Where the sign-in already holds media, the system picker opens. Where it
+    /// does not, the place says why and the question names what the source's page will ask —
+    /// and the picker does not open by itself when that page returns.
+    func composeAddMedia() {
+        guard let host = composeHost else { return }
+        if mastodon.standing(.media, host: host) == .held {
+            composeImporting = true
+            return
+        }
+        if let place = mastodon.place(.media, host: host) {
+            composeMediaNote = String(format: L10n.t(place.key), host)
+        }
+        _ = askFor([.media], host: host)
+    }
+
+    /// What the system picker handed back. A file that cannot be taken is said, and nothing
+    /// already typed or already added is cleared.
+    func composeRead(_ result: Result<[URL], Error>) {
+        switch result {
+        case .failure(let error):
+            let cocoa = error as NSError
+            if cocoa.domain == NSCocoaErrorDomain, cocoa.code == NSUserCancelledError { return }
+            composeMediaNote = L10n.t("compose.media.unreadable")
+        case .success(let urls):
+            guard let host = composeHost else { return }
+            let limits = mediaLimits(of: host)
+            for url in urls {
+                switch ComposeFile.read(url, host: host, limits: limits) {
+                case .refused(let note):
+                    composeMediaNote = note
+                    return
+                case .taken(let taken):
+                    if composeAttach(bytes: taken.bytes, name: taken.name, type: taken.type) != nil { return }
+                }
+            }
         }
     }
 
     var canPost: Bool {
-        ComposerSheet.canSend(
+        let hostOK = composeHost.map { host in writableSources.contains { $0.host == host } } ?? false
+        return ComposerSheet.canSend(
             text: composeDraft,
             limit: composeHost.map(postLimit(of:)) ?? MastodonWrite.defaultLimit,
-            hasSource: composeHost.map { host in writableSources.contains { $0.host == host } }
-                ?? false
+            hasSource: hostOK,
+            cover: composeCover,
+            attachments: composeMedia.count,
+            attachmentsOK: composeHost.map { attachmentsOK(host: $0) } ?? composeMedia.isEmpty
         )
     }
 

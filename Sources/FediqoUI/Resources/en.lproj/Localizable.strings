@@ -59,6 +59,18 @@
 "compose.visibility.private" = "private";
 "compose.visibility.direct" = "direct";
 "compose.limit" = "%d / %d";
+"compose.cover" = "Cover line";
+"compose.language" = "Language";
+"compose.sensitive" = "Cover the media";
+"compose.media.add" = "Add media";
+"compose.media.remove" = "Remove";
+"compose.media.description" = "Description";
+"compose.media.count" = "%1$d of %2$d";
+"compose.media.tooLarge" = "%1$@ takes a file up to %2$@.";
+"compose.media.tooMany" = "%1$@ takes up to %2$d.";
+"compose.media.kind" = "%@ does not take this kind of file.";
+"compose.media.description.over" = "A description is at most %d.";
+"compose.media.unreadable" = "That file could not be read.";
 "compose.none.title" = "Nothing to write to";
 "compose.none.detail" = "None of the sources you are signed in to can be written to from here.";
 "answer.title" = "Answer";
@@ -280,6 +292,7 @@
 "item.isReply" = "A reply";
 "item.replyingTo" = "Reply to %@";
 "item.boostedBy" = "Reblogged by %@";
+"item.via" = "via %@";
 "item.reply.onItsWay" = "%@ — that post is on its way";
 "item.reply.stalled" = "%@ — that post could not be read for now";
 "quote.short.onItsWay" = "quoted post on its way";
@@ -937,6 +950,10 @@
 "part.account.ask.line" = "Its page asks for what you allowed, and for your profile.";
 "part.account.ask.detail" = "%1$@'s own sign-in page opens. It asks for what this sign-in already has, and for one thing more — your profile: to change your pictures, your name, your bio, your extra fields and what your account lets others do. %1$@ gives the same permission for featuring people and hashtags on your profile, pinning your posts, and dismissing announcements and suggestions. Nothing is signed out first, on this device or another: close the page, or refuse on it, and the sign-in you have goes on as it is.";
 "part.account.unasked" = "This sign-in was not asked to change your profile. Update permission";
+"part.media.ask.title" = "Ask %@ to allow media?";
+"part.media.ask.line" = "Its page asks for what you allowed, and for media.";
+"part.media.ask.detail" = "%1$@'s own sign-in page opens. It asks for what this sign-in already has, and for one thing more — media: to attach a picture, a sound or a film to a post, each with a description. Nothing is signed out first, on this device or another: close the page, or refuse on it, and the sign-in you have goes on as it is.";
+"part.media.unasked" = "This sign-in was not asked to attach media. Update permission";
 /* What a sign-in holds, part by part (#347): its row and its source's page. */
 "part.held.line" = "This sign-in allows %@.";
 "part.held.partly" = "%@ (in part)";
@@ -949,6 +966,7 @@
 "part.notices.name.beside" = "dismissing your notices";
 "part.follows.name" = "who you follow";
 "part.account.name" = "your profile";
+"part.media.name" = "media";
 "profile.change" = "Change";
 "profile.change.help" = "Change your pictures, your name, your words, your fields and what others can do";
 "profile.change.spoken" = "Change your profile at %@";

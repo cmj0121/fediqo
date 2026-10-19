@@ -129,7 +129,7 @@ struct UnsentStoreTests {
         "v9-language", "v10-references", "v11-one-holding", "v12-references-only",
     ]
 
-    @Test("A store as the last build before texts and notices left it — every step up to v12-references-only and neither after — opens through both new steps with every source, post and kept mark it held, no text and no notice; it is then this build's")
+    @Test("A store as the last build before texts and notices left it — every step up to v12-references-only and neither after — opens through the steps since with every source, post and kept mark it held, no text and no notice; it is then this build's")
     func aStoreFromBefore() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -141,11 +141,11 @@ struct UnsentStoreTests {
         do {
             let file = try StoreFile(at: dir)
             try await file.save(sources: sources, notes: notes)
-            // As that build left it: the two steps since made three tables and changed no other,
-            // so without the tables and the word of either step this is its file.
+            // As that build left it: the steps since made three tables and the compose columns,
+            // so without the tables and the word of those steps this is its file.
             try await file.db.write { db in
                 for table in ["unsent", "notice", "notice_reach"] { try db.execute(sql: "DROP TABLE \(table)") }
-                try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier IN ('v13-unsent', 'v14-notices')")
+                try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier IN ('v13-unsent', 'v14-notices', 'v15-compose')")
             }
         }
         #expect(try migrations(index) == Self.before, "the premise: a store no step after v12-references-only has touched")
@@ -159,7 +159,7 @@ struct UnsentStoreTests {
         #expect(opened.notes.map(\.kept) == [false, true, false])
         #expect(opened.unsent.isEmpty)
         #expect(opened.notices.isEmpty)
-        #expect(try migrations(index) == Self.before + ["v13-unsent", "v14-notices"])
+        #expect(try migrations(index) == Self.before + ["v13-unsent", "v14-notices", "v15-compose"])
         #expect(try tables(index).isSuperset(of: ["unsent", "notice", "notice_reach"]))
 
         // And it is this build's from here: a text and a notice are held in it, beside what it held.
@@ -189,11 +189,47 @@ struct UnsentStoreTests {
         #expect(try Data(contentsOf: index) == before)
     }
 
+    @Test("A build that knows no v15-compose sees this build's store as newer, and the store is unchanged for being asked")
+    func aBuildBeforeComposeRefusesIt() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let index = dir.appendingPathComponent("index.sqlite")
+        try await StoreFile(at: dir).save(unsent: [Self.text("waiting on a cover")])
+        let before = try Data(contentsOf: index)
+
+        #expect(try supersededForTheBuildBefore(index, knowingNo: "v15-compose"))
+        #expect(try Data(contentsOf: index) == before)
+    }
+
+    @Test("A cover, a language and a file come back with the text, including the id the source gave the file")
+    func aCoverAndAFileComeBack() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = try StoreFile(at: dir)
+        let media = UnsentMedia(
+            bytes: Data([1, 2, 3, 4]), mime: "image/png", name: "hill.png", description: "a hill", remoteID: "m1"
+        )
+        let waiting = Unsent(
+            host: Self.mastodon.host, text: "hello", audience: .everyone,
+            pressedAt: Self.origin,
+            spoiler: " cover ", language: "zh-TW", sensitive: true, media: [media]
+        )
+        try await file.save(unsent: [waiting])
+
+        let read = try #require(StoreFile.open(at: dir).unsent.first)
+        #expect(read == waiting)
+        #expect(read.spoiler == "cover")
+        #expect(read.language == "zh-tw")
+        #expect(read.media.first?.bytes == Data([1, 2, 3, 4]))
+        #expect(read.media.first?.remoteID == "m1")
+        #expect(read.media.first?.debugDescription == "4 bytes")
+    }
+
     /// Asked as `StoreFile` asks: read-only, of a migrator — here one that knows every step this
     /// store records but the last, by name.
-    private func supersededForTheBuildBefore(_ index: URL) throws -> Bool {
+    private func supersededForTheBuildBefore(_ index: URL, knowingNo id: String = "v13-unsent") throws -> Bool {
         var older = DatabaseMigrator()
-        for id in try migrations(index) where id != "v13-unsent" { older.registerMigration(id) { _ in } }
+        for step in try migrations(index) where step != id { older.registerMigration(step) { _ in } }
         var readOnly = Configuration()
         readOnly.readonly = true
         return try DatabaseQueue(path: index.path, configuration: readOnly).read(older.hasBeenSuperseded)

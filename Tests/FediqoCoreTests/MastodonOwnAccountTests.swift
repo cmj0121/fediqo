@@ -56,14 +56,15 @@ struct MastodonOwnAccountTests {
 
     // MARK: - The part
 
-    @Test("The account part is its one word and nothing else's: it rides on no question, stands without acting, comes last in the table, and is no reason to call a sign-in one that acts")
+    @Test("The account part is its one word and nothing else's: it rides on no question, stands without acting, comes immediately before media, and is no reason to call a sign-in one that acts")
     func theEntry() {
         let part = MastodonPart.account
         #expect(part.words == ["write:accounts"])
         #expect(part.wordsBesideActing.isEmpty)
         #expect(!part.rider)
         #expect(!part.needsActing)
-        #expect(MastodonPart.allCases.last == .account)
+        #expect(MastodonPart.allCases.dropLast().last == .account)
+        #expect(MastodonPart.allCases.last == .media)
         #expect(MastodonGrant.of(scopes: "\(Self.r) \(Self.a)") == .reading)
         #expect(!MastodonOAuth.writes("\(Self.r) \(Self.s) \(Self.a)"))
     }
@@ -86,7 +87,7 @@ struct MastodonOwnAccountTests {
         }
         #expect(MastodonParts.page(held: nil, ticked: [.follows, .account]) == "\(f) \(a)")
         #expect(MastodonParts.page(held: "\(r) \(a)", ticked: [.reading, .search], readOnly: true) == "\(r) \(s)")
-        #expect(MastodonParts.everything == "\(r) \(s) \(w) \(b) \(n) \(d) \(f) \(a)")
+        #expect(MastodonParts.everything == "\(r) \(s) \(w) \(b) \(n) \(d) \(f) \(a) write:media")
     }
 
     @Test("Today's four sign-in choices ask exactly the strings they asked, byte for byte, and none of them asks for the account part")
@@ -100,6 +101,7 @@ struct MastodonOwnAccountTests {
             for notices in [false, true] {
                 #expect(!MastodonOAuth.scopes(writing: writing, notices: notices).contains("accounts:"))
                 #expect(!MastodonOAuth.scopes(writing: writing, notices: notices).contains("write:accounts"))
+                #expect(!MastodonOAuth.scopes(writing: writing, notices: notices).contains("write:media"))
             }
         }
     }
@@ -121,7 +123,7 @@ struct MastodonOwnAccountTests {
     func theRegistrationWidens() {
         let (r, s, w, b, n, d, f, a) = (Self.r, Self.s, Self.w, Self.b, Self.n, Self.d, Self.f, Self.a)
         let before = "\(r) \(s) \(w) \(b) \(n) \(d) \(f)"
-        #expect(MastodonRegistration.superset() == "\(before) \(a)")
+        #expect(MastodonRegistration.superset() == "\(before) \(a) write:media")
         #expect(MastodonRegistration.superset(listed: Set(before.split(separator: " ").map(String.init))) == before)
         let asked = "\(r) \(s) \(a)"
         #expect(!MastodonRegistration.holds(asked, on: before))

@@ -1,5 +1,6 @@
 import FediqoCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Compose over the current page. The same shape a reply will use: a sheet, not a destination.
 struct ComposerSheet: View {
@@ -34,9 +35,17 @@ struct ComposerSheet: View {
         limit - trimmed(text).count
     }
 
-    static func canSend(text: String, limit: Int, hasSource: Bool) -> Bool {
+    /// A post can go with words, with files, or with both. A cover alone cannot. The words and
+    /// the cover are each held to `limit`. Files the source will not take cannot.
+    static func canSend(
+        text: String, limit: Int, hasSource: Bool,
+        cover: String = "", attachments: Int = 0, attachmentsOK: Bool = true
+    ) -> Bool {
+        guard hasSource, attachmentsOK, attachments >= 0 else { return false }
         let body = trimmed(text)
-        return hasSource && !body.isEmpty && body.count <= limit
+        let line = trimmed(cover)
+        guard body.count <= limit, line.count <= limit else { return false }
+        return !body.isEmpty || attachments > 0
     }
 
     static func limitLine(remaining: Int, limit: Int) -> String {
@@ -64,7 +73,7 @@ struct ComposerSheet: View {
             draft: $session.composeDraft,
             limit: limit,
             canSend: session.canPost,
-            height: 400,
+            height: 640,
             hidesScrollIndicators: true,
             speaksLimitLine: true,
             writes: { failed in
@@ -86,11 +95,21 @@ struct ComposerSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             } else if !offered.isEmpty {
                 ComposeChoices(session: session, offered: offered)
-                .pickerStyle(.menu)
+                    .pickerStyle(.menu)
+                ComposeExtras(session: session, limit: limit)
             }
         }
         .onAppear { session.prepareCompose() }
-        .task(id: session.composeHost) { await session.refreshPostLimit() }
+        .task(id: session.composeHost) {
+            await session.refreshPostLimit()
+            await session.loadComposeDefaults()
+        }
+        .fileImporter(
+            isPresented: $session.composeImporting,
+            allowedContentTypes: [.image, .movie, .audio, .gif],
+            allowsMultipleSelection: true,
+            onCompletion: { session.composeRead($0) }
+        )
     }
 }
 
@@ -137,7 +156,10 @@ private struct ComposeChoices: View {
         }
         .shellFont(.meta)
         .accessibilityLabel(L10n.t("compose.source"))
-        Picker(L10n.t("compose.visibility"), selection: $session.composeAudience) {
+        Picker(L10n.t("compose.visibility"), selection: Binding(
+            get: { session.composeAudience },
+            set: { session.chooseAudience($0) }
+        )) {
             ForEach(Audience.allCases, id: \.self) { audience in
                 Text(L10n.t(ComposerSheet.visibilityKey(audience))).tag(audience)
             }
@@ -310,5 +332,91 @@ private struct HiddenIndicators: ViewModifier {
 enum WritingRoom {
     static func floor(_ asked: CGFloat, compact: Bool) -> CGFloat? {
         compact ? nil : asked
+    }
+}
+
+/// The cover, the language, whether the media is covered, and the files — above the editor,
+/// so an answer, which shares the sheet, does not grow them.
+private struct ComposeExtras: View {
+    @Bindable var session: ShellSession
+    let limit: Int
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let host = session.composeHost ?? ""
+        let limits = session.composeHost.map { session.mediaLimits(of: $0) } ?? .unstated
+        VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            TextField(L10n.t("compose.cover"), text: $session.composeCover, axis: .vertical)
+                .lineLimit(1...3)
+                .shellFont(.body)
+                .accessibilityLabel(L10n.t("compose.cover"))
+            let coverLeft = ComposerSheet.remaining(session.composeCover, limit: limit)
+            let coverLine = ComposerSheet.limitLine(remaining: coverLeft, limit: limit)
+            Text(coverLine)
+                .shellFont(.reading)
+                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .accessibilityLabel(coverLine)
+            TextField(L10n.t("compose.language"), text: Binding(
+                get: { session.composeLanguage },
+                set: { session.chooseLanguage($0) }
+            ))
+            .shellFont(.body)
+            .accessibilityLabel(L10n.t("compose.language"))
+            Toggle(L10n.t("compose.sensitive"), isOn: Binding(
+                get: { session.composeCoversMedia == true },
+                set: { session.chooseCoversMedia($0) }
+            ))
+            .shellFont(.meta)
+            .accessibilityLabel(L10n.t("compose.sensitive"))
+            let countLine = String(format: L10n.t("compose.media.count"), session.composeMedia.count, limits.count)
+            Text(countLine)
+                .shellFont(.reading)
+                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .accessibilityLabel(countLine)
+            ForEach(session.composeMedia) { piece in
+                mediaRow(piece, descriptionLimit: limits.descriptionLimit)
+            }
+            Button(L10n.t("compose.media.add")) { session.composeAddMedia() }
+                .accessibilityLabel(L10n.t("compose.media.add"))
+            if let note = session.composeMediaNote {
+                Text(note)
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(note)
+            }
+        }
+    }
+
+    private func mediaRow(_ piece: UnsentMedia, descriptionLimit: Int) -> some View {
+        VStack(alignment: .leading, spacing: ShellSpace.hair) {
+            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+                Text(piece.name)
+                    .shellFont(.meta)
+                    .lineLimit(1)
+                    .accessibilityLabel(piece.name)
+                Spacer(minLength: ShellSpace.snug)
+                Button(L10n.t("compose.media.remove")) { session.composeRemoveMedia(piece.id) }
+                    .accessibilityLabel(L10n.t("compose.media.remove"))
+            }
+            TextField(L10n.t("compose.media.description"), text: Binding(
+                get: { session.composeMedia.first { $0.id == piece.id }?.description ?? "" },
+                set: { next in
+                    guard let index = session.composeMedia.firstIndex(where: { $0.id == piece.id }) else { return }
+                    session.composeMedia[index].description = next
+                }
+            ), axis: .vertical)
+            .lineLimit(1...4)
+            .shellFont(.body)
+            .accessibilityLabel(L10n.t("compose.media.description"))
+            if piece.description.count > descriptionLimit {
+                let over = String(format: L10n.t("compose.media.description.over"), descriptionLimit)
+                Text(over)
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .accessibilityLabel(over)
+            }
+        }
     }
 }

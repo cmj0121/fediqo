@@ -817,6 +817,21 @@ public struct MastodonAuthorized: Sendable {
         try await finish(try await send(path: path, method: "POST", form: form, headers: headers), path: path)
     }
 
+    /// A POST carrying a file through the same door: the token, the 401 rule, and never off
+    /// this host. **`limit` is the caller's**, not lowered to `MultipartBody.byteLimit` — a
+    /// film the source takes is larger than a profile picture, and the wrapper's own ceiling
+    /// is not the source's. The body is made before anything is sent. A 422 throws
+    /// `MastodonUnprocessable` with the source's answer, as `patch(path:parts:)` does, so a
+    /// file the source refused is not taken for a post that may have landed.
+    public func post(
+        path: String, parts: [MultipartPart], limit: Int, headers: [String: String] = [:]
+    ) async throws -> Data {
+        let body = try MultipartBody(parts, limit: limit)
+        let result = try await send(path: path, method: "POST", parts: body, headers: headers)
+        if result.status == 422 { throw MastodonUnprocessable(body: result.body) }
+        return try await finish(result, path: path)
+    }
+
     /// A PATCH carrying a body of several parts through the same door (#312): a file's bytes
     /// beside fields of text, with the token, the 401 rule, and never off this host.
     ///

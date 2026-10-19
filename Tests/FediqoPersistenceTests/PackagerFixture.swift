@@ -78,11 +78,12 @@ enum PackagerFixture {
     }
 
     static func note(
-        _ id: String, source: Source = mastodon, body: String? = nil
+        _ id: String, source: Source = mastodon, body: String? = nil, via: String? = nil
     ) -> Note {
         Note(
             id: id, source: source, author: "Ada", handle: "@ada", body: body ?? "hello \(id)", postedAt: origin,
-            categories: [.public], attachments: [Attachment(kind: .image, url: URL(string: "https://cdn.example/\(id).jpg"))]
+            categories: [.public], attachments: [Attachment(kind: .image, url: URL(string: "https://cdn.example/\(id).jpg"))],
+            via: via
         )
     }
 

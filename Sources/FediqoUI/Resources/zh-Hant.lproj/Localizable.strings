@@ -59,6 +59,18 @@
 "compose.visibility.private" = "私人";
 "compose.visibility.direct" = "限提及";
 "compose.limit" = "%d / %d";
+"compose.cover" = "封面句";
+"compose.language" = "語言";
+"compose.sensitive" = "蓋住媒體";
+"compose.media.add" = "加入媒體";
+"compose.media.remove" = "移除";
+"compose.media.description" = "說明";
+"compose.media.count" = "%1$d / %2$d";
+"compose.media.tooLarge" = "%1$@ 接受的檔案最大是 %2$@。";
+"compose.media.tooMany" = "%1$@ 最多接受 %2$d 件。";
+"compose.media.kind" = "%@ 不接受這種檔案。";
+"compose.media.description.over" = "說明最多 %d 字。";
+"compose.media.unreadable" = "這個檔案讀不到。";
 "compose.none.title" = "沒有可以發文的來源";
 "compose.none.detail" = "你已登入的來源裡，沒有可以從這裡發文的。";
 "answer.title" = "回應";
@@ -278,6 +290,7 @@
 "item.isReply" = "一則回覆";
 "item.replyingTo" = "回覆 %@";
 "item.boostedBy" = "由 %@ 轉發";
+"item.via" = "來自 %@";
 "item.reply.onItsWay" = "%@——那則貼文還在路上";
 "item.reply.stalled" = "%@——那則貼文暫時讀不到";
 "quote.short.onItsWay" = "引用的貼文還在路上";
@@ -913,6 +926,10 @@
 "part.account.ask.line" = "它的頁面會問你已允許的，並加上你的個人檔案。";
 "part.account.ask.detail" = "%1$@ 自己的登入頁面會打開，問這個登入已經有的，再多問一件事——你的個人檔案：修改你的圖片、名稱、簡介、額外欄位，以及你的帳號讓別人做什麼。%1$@ 用同一個權限讓你在個人檔案上推薦人和主題標籤、釘選貼文，以及關閉公告和推薦。不會先登出，這台裝置和其他裝置都不會：關掉那一頁，或在上面拒絕，你原有的登入都照舊。";
 "part.account.unasked" = "這個登入還沒被問過修改你的個人檔案。更新權限";
+"part.media.ask.title" = "請 %@ 允許媒體？";
+"part.media.ask.line" = "它的頁面會問你已允許的，並加上媒體。";
+"part.media.ask.detail" = "%1$@ 自己的登入頁面會打開，問這個登入已經有的，再多問一件事——媒體：在貼文附上圖片、聲音或影片，每件都能寫說明。不會先登出，這台裝置和其他裝置都不會：關掉那一頁，或在上面拒絕，你原有的登入都照舊。";
+"part.media.unasked" = "這個登入還沒被問過在貼文附上媒體。更新權限";
 /* What a sign-in holds, part by part (#347): its row and its source's page. */
 "part.held.line" = "這個登入允許：%@。";
 "part.held.partly" = "%@（部分）";
@@ -925,6 +942,7 @@
 "part.notices.name.beside" = "移除通知";
 "part.follows.name" = "你追蹤的對象";
 "part.account.name" = "你的個人檔案";
+"part.media.name" = "媒體";
 "profile.change" = "修改";
 "profile.change.help" = "修改你的圖片、名稱、自我介紹、欄位，以及別人可以做的事";
 "profile.change.spoken" = "修改你在 %@ 的個人檔案";
