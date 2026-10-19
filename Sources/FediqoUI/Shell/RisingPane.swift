@@ -4,10 +4,11 @@ import SwiftUI
 // The hashtags and the links rising on the sources (#320), as Trends' two tabs of them draw
 // them.
 //
-// **One band a source, and nothing merged.** What is rising is each source's own ranking: its
-// rows stand under its name, in its order, and where it gave none that is said under its name
-// too — while the others stand as they are. Being asked, failing and being stopped are the
-// tab's toast's to say.
+// **One list, in each source's own order** (decision 22). What is rising is each source's own
+// ranking, woven: every source's first, then every second (`RisingListed.merged`). A hashtag or
+// a link stands once, naming its sources as a post row names its own ("m.example +1") and with
+// their uses added; a source that gave none says so at the foot of the list. Being asked,
+// failing and being stopped are the tab's toast's to say.
 //
 // **A hashtag opens its page; a link opens as any link does.** A hashtag's row is the hashtag
 // as a post's words would carry it, and opens the page such a hashtag opens. A link's row is
@@ -49,6 +50,18 @@ extension RisingSaid {
         link.title.isEmpty ? LineText.oneLine(link.link.text, limit: RisingLink.titleLength) : link.title
     }
 
+    /// What a row's pill draws of the sources that named it: the first, and how many more did —
+    /// a post row's pill's words (`item.source.more`). Nothing where no source is named.
+    static func drawnSources(_ sources: [String], language: DummyLanguage? = nil) -> String? {
+        sources.first.map { DummyItemRow.drawnSource($0, others: Array(sources.dropFirst()), language: language) }
+    }
+
+    /// What a listener hears of them: **every source, by name**, as of a post that came
+    /// through more than one (`item.source.also`) — a listener cannot see a count and look further.
+    static func spokenSources(_ sources: [String], language: DummyLanguage? = nil) -> String? {
+        sources.first.map { DummyItemRow.spokenSource($0, others: Array(sources.dropFirst()), language: language) }
+    }
+
     /// A row as a listener hears it: what it is, where a link leads, what the source says of
     /// it, and how much it was used.
     static func spoken(_ row: RisingRow, language: DummyLanguage? = nil) -> String {
@@ -66,9 +79,9 @@ extension RisingSaid {
     }
 }
 
-extension RisingSaid.Band {
-    /// What is said under a source's name in place of rows, once it has answered with
-    /// nothing: that it gave none — **never that it has none, or that it is switched off**: a
+extension RisingSaid.Answer {
+    /// What is said at the foot of the list of a source that answered with nothing: that it
+    /// gave none — **never that it has none, or that it is switched off**: a
     /// source answers the same either way. An ask on the wire, failed or stopped is the tab's
     /// toast to say (DESIGN-reload), and nothing here.
     func stateLine(_ which: RisingWhich, language: DummyLanguage? = nil) -> String? {
@@ -77,8 +90,8 @@ extension RisingSaid.Band {
     }
 }
 
-/// The tab of what is rising in front: under one band a source what that source says is rising
-/// on it, led by `lead` where a page hands it its first rows.
+/// The tab of what is rising in front: the one list of what the sources say is rising on them,
+/// led by `lead` where a page hands it its first rows, and at its foot each source that gave none.
 ///
 /// **A tab of Trends** (decision 2), so the lamp and the row given back on leaving a hashtag's
 /// page opened from it are Trends' walk's own. It draws what it is handed and asks nothing: the asking
@@ -87,8 +100,8 @@ struct RisingPane<Lead: View>: View {
     let said: RisingSaid
     @Binding var selectedID: String?
     /// A row opened, answered by the root: a hashtag's page, or a link through the door a
-    /// post's link goes through.
-    var onOpen: (RisingRow) -> Void
+    /// post's link goes through, of the first source that named it.
+    var onOpen: (RisingListed) -> Void
     var jumpToTop: Int = 0
     /// The page's head, where it is the first rows of the list.
     @ViewBuilder var lead: Lead
@@ -98,20 +111,21 @@ struct RisingPane<Lead: View>: View {
     @Environment(\.shellTouch) private var touch
 
     var body: some View {
+        // Woven once a pass: the rows, their rules and the jump to the top read the same list.
+        let rows = said.rows
+        let none = said.answers.compactMap { $0.stateLine(said.which) }
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     lead
-                    ForEach(said.bands) { band in
-                        ShellBandHead(band.source, pinned: true)
-                        if let line = band.stateLine(said.which) {
-                            stateLine(line)
-                        }
-                        ForEach(Array(band.rows.enumerated()), id: \.element.id) { index, row in
-                            rowView(row)
-                                .id(row.id)
-                            if index < band.rows.count - 1 { ShellRule() }
-                        }
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, listed in
+                        rowView(listed)
+                            .id(listed.id)
+                        if index < rows.count - 1 { ShellRule() }
+                    }
+                    if !rows.isEmpty, !none.isEmpty { ShellRule() }
+                    ForEach(none, id: \.self) { line in
+                        stateLine(line)
                     }
                 }
             }
@@ -126,13 +140,13 @@ struct RisingPane<Lead: View>: View {
                 withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) }
             }
             .onChange(of: jumpToTop) { _, _ in
-                guard let first = said.rows.first else { return }
+                guard let first = rows.first else { return }
                 withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(first.id, anchor: .top) }
             }
         }
     }
 
-    /// What stands under a source's name where it gave no rows.
+    /// What stands at the foot of the list for a source that gave no rows.
     private func stateLine(_ line: String) -> some View {
         Text(line)
             .shellFont(.meta)
@@ -145,17 +159,18 @@ struct RisingPane<Lead: View>: View {
 
     /// One row. A press lights it, and a second on the row it is already on opens it —
     /// `DummyCommand.tapped`, as on every list; under a finger one press opens.
-    private func rowView(_ row: RisingRow) -> some View {
+    private func rowView(_ listed: RisingListed) -> some View {
         RisingRowView(
-            row: row,
-            selected: row.id == selectedID,
+            row: listed.row,
+            sources: listed.sources,
+            selected: listed.id == selectedID,
             onPress: {
-                switch DummyCommand.tapped(row.id, selected: selectedID, touch: touch) {
-                case .select: selectedID = row.id
-                case .open: onOpen(row)
+                switch DummyCommand.tapped(listed.id, selected: selectedID, touch: touch) {
+                case .select: selectedID = listed.id
+                case .open: onOpen(listed)
                 }
             },
-            onOpen: { onOpen(row) }
+            onOpen: { onOpen(listed) }
         )
     }
 }
@@ -192,6 +207,9 @@ struct RisingHead: View {
 /// under them is read out of the address, never out of what the source calls the site.
 struct RisingRowView: View {
     let row: RisingRow
+    /// The sources that named it, where the list it stands on is of more than one source: drawn
+    /// in a pill as a post row draws its own. None on a list of one source's.
+    var sources: [String] = []
     var selected = false
     var onPress: (() -> Void)?
     var onOpen: (() -> Void)?
@@ -206,9 +224,13 @@ struct RisingRowView: View {
     var menuLabel: String?
     @Environment(\.colorScheme) private var colorScheme
 
-    /// What a listener is read: the row, and then what the page says of it.
-    static func spoken(_ row: RisingRow, said: String?, missed: String?, language: DummyLanguage? = nil) -> String {
-        [RisingSaid.spoken(row, language: language), said, missed].compactMap { $0 }
+    /// What a listener is read: the row, every source that named it, and then what the page
+    /// says of it.
+    static func spoken(
+        _ row: RisingRow, sources: [String] = [], said: String?, missed: String?, language: DummyLanguage? = nil
+    ) -> String {
+        [RisingSaid.spoken(row, language: language), RisingSaid.spokenSources(sources, language: language), said, missed]
+            .compactMap { $0 }
             .joined(separator: L10n.t("people.row.between", language: language))
     }
 
@@ -218,6 +240,9 @@ struct RisingRowView: View {
                 switch row {
                 case .tag(let tag, _): tagLines(tag)
                 case .link(let link, _): linkLines(link)
+                }
+                if let named = RisingSaid.drawnSources(sources), let spoken = RisingSaid.spokenSources(sources) {
+                    SourcePill(said: named, spoken: spoken)
                 }
                 if let said { figures(said) }
                 if let missed {
@@ -245,7 +270,7 @@ struct RisingRowView: View {
         .contentShape(Rectangle())
         .onTapGesture { onPress?() }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Self.spoken(row, said: said, missed: missed))
+        .accessibilityLabel(Self.spoken(row, sources: sources, said: said, missed: missed))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityAddTraits(onOpen == nil ? [] : .isButton)
         .accessibilityAction(.default) { onOpen?() }

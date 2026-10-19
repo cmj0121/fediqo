@@ -76,10 +76,12 @@ struct TimelinePane: View {
     /// A row of a list of people opened (#311), answered by the root: it lights the row and
     /// takes the step together, so leaving that person's page gives the row back.
     var onOpenListed: (Person) -> Void = { _ in }
-    /// A row of what is rising opened (#320) — on a tab of Trends, or of the hashtags
-    /// followed — answered by the root: a hashtag's page, or a link through the door a post's
-    /// link goes through.
+    /// A row of the hashtags followed opened (#318), answered by the root: a hashtag's page.
     var onOpenRisingRow: (RisingRow) -> Void = { _ in }
+    /// A row of a tab of what is rising on Trends opened (#320), answered by the root: a
+    /// hashtag's page, or a link through the door a post's link goes through, of the first
+    /// source that named it.
+    var onOpenRising: (RisingListed) -> Void = { _ in }
     /// A row of what a search found at a source opened (#319), answered by the root: somebody's
     /// page, a hashtag's, or the page of all of one kind.
     var onOpenFound: (SearchFoundRow) -> Void = { _ in }
@@ -1000,16 +1002,16 @@ struct TimelinePane: View {
     }
 
     /// Hashtags or Links on Trends (#320, F10): the head that says once whose ranking it shows,
-    /// then a band a source — the inside of the page they were before Trends was a place, under
-    /// Trends' own tabs and marks instead of a page's bar. Its mark and a pull ask the sources
-    /// again, as `r` does.
+    /// then the one list woven of what the sources say — the inside of the page they were
+    /// before Trends was a place, under Trends' own tabs and marks instead of a page's bar. Its
+    /// mark and a pull ask the sources again, as `r` does.
     private func risingTab(_ said: RisingSaid, in rising: ShellRising) -> some View {
         let which = said.which
         return VStack(alignment: .leading, spacing: 0) {
             RisingHead()
             ShellRule()
             RisingPane(
-                said: said, selectedID: $selectedID, onOpen: onOpenRisingRow, jumpToTop: jumpToTop
+                said: said, selectedID: $selectedID, onOpen: onOpenRising, jumpToTop: jumpToTop
             ) { EmptyView() }
         }
         // One list per tab, so a tab brought in front is drawn afresh at its own lamp.

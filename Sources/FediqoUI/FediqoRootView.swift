@@ -1615,8 +1615,8 @@ public struct FediqoRootView: View {
         // On a tab of Trends that lists what is rising the row the lamp is on is a hashtag or a
         // link (#320).
         if let which = risingInFront {
-            guard let row = people.rising.row(id, of: which, in: session) else { return false }
-            return openRisingRow(row)
+            guard let listed = people.rising.row(id, of: which, in: session) else { return false }
+            return openRisingRow(listed.row, lit: listed.id)
         }
         // Over a search's posts, and on the page of the hashtags it found, the row the lamp is
         // on may be what a source found (#319): Return opens it.
@@ -2297,20 +2297,23 @@ public struct FediqoRootView: View {
         )
     }
 
-    /// A row of such a page opened. **The lamp and the step in one turn**, as a post's row
-    /// opens: a hashtag is the page a hashtag pressed in a post's words opens, and a link goes
-    /// through the door a post's link goes through, listed under the source that named it.
-    private func openRisingRow(_ row: RisingRow) -> Bool {
+    /// A row of such a page opened, lit as `lit` where the list it stands on calls it that —
+    /// Trends' one list, whose row is of no source (`RisingListed`). **The lamp and the step in
+    /// one turn**, as a post's row opens: a hashtag is the page a hashtag pressed in a post's
+    /// words opens, and a link goes through the door a post's link goes through, listed under
+    /// the source that named it — on Trends, the first to.
+    private func openRisingRow(_ row: RisingRow, lit: String? = nil) -> Bool {
         guard Self.canWalk(place: place, open: openLayers) else { return false }
         // Lit first, so the step taken remembers this row — and put back where nothing opened.
         let before = selectedItemID
-        selectedItemID = row.id
+        let id = lit ?? row.id
+        selectedItemID = id
         let opened: Bool
         switch row {
-        case .tag(let tag, _): opened = openTag(tag.tag, from: row.id)
+        case .tag(let tag, _): opened = openTag(tag.tag, from: id)
         case .link(let link, let source): opened = linkReader.open(link.link.url, from: source)
         }
-        selectedItemID = ShellRising.lamp(after: opened, of: row, before: before)
+        selectedItemID = ShellRising.lamp(after: opened, of: id, before: before)
         return opened
     }
 
@@ -2965,6 +2968,7 @@ public struct FediqoRootView: View {
                 people: people,
                 onOpenListed: { _ = openListed($0) },
                 onOpenRisingRow: { _ = openRisingRow($0) },
+                onOpenRising: { _ = openRisingRow($0.row, lit: $0.id) },
                 onOpenFound: { _ = openFound($0) },
                 onTurnFound: foundTurned,
                 onFollowed: { _ = followedPressed($0) },

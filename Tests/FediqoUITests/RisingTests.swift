@@ -21,8 +21,9 @@ struct ServersByHost: HTTPClient, HTTPSender {
 }
 
 /// #320, the two pages: what is asked of each source for the hashtags and the links rising on
-/// it, when, what the pages are handed and say in each state — one band a source, never merged
-/// — and that a source which is not asked who people are has no band, and is asked nothing.
+/// it, when, what the pages are handed and say in each state — one list woven of what each
+/// source said (decision 22) — and that a source which is not asked who people are is no part
+/// of it, and is asked nothing.
 ///
 /// Every wait here is on an ask arriving or being let go (`PageServer`), tied to the work that
 /// made the ask where a check can name it: a held ask is let go by the check, and by a guard
@@ -31,6 +32,7 @@ struct ServersByHost: HTTPClient, HTTPSender {
 @Suite("The hashtags and links rising on the sources", .serialized, .watched)
 struct RisingTests {
     private static let one = "m.example", two = "n.example"
+    private static let long = "a-rather-long-name-of-a-host.a-rather-long-instance-name.example"
     private static let forum = Source(host: "forum.example", kind: .discuz)
     private static let tags = "/api/v1/trends/tags?limit=20"
     private static let links = "/api/v1/trends/links?limit=20"
@@ -75,20 +77,20 @@ struct RisingTests {
         session.mastodon.refresh()
     }
 
-    private func bands(_ rising: ShellRising, _ which: RisingWhich, _ session: ShellSession) -> [RisingSaid.Band] {
-        rising.said(which, in: session)?.bands ?? []
+    private func answers(_ rising: ShellRising, _ which: RisingWhich, _ session: ShellSession) -> [RisingSaid.Answer] {
+        rising.said(which, in: session)?.answers ?? []
     }
 
     // MARK: - What is asked, and when
 
-    @Test("Opening the rising hashtags asks each source that has them for one stretch of twenty — one ask a source, with no sign-in, listed in the run's record under that source — and the page is handed one band a source, in the order the sources stand, each with its own rows in its own order: the same hashtag on two sources is two rows, never one. Opened again, nobody is asked; the links are a page of their own; and a forum has no band")
+    @Test("Opening the rising hashtags asks each source that has them for one stretch of twenty — one ask a source, with no sign-in, listed in the run's record under that source — and the page is handed what each source said, in the order the sources stand, woven into one list: the same hashtag on two sources, however written, is one row naming both. Opened again, nobody is asked; the links are a page of their own; and a forum is no part of it")
     func openingAsksEachSourceOnce() async throws {
         let (session, servers, work) = await session(
             [Self.tags: Self.tagsAnswer(["Swift", "birds"]), Self.links: Self.story], [Self.tags: Self.tagsAnswer(["swift"], uses: 2), Self.links: Self.none]
         )
         let rising = ShellPersonPages().rising
-        #expect(bands(rising, .tags, session) == [RisingSaid.Band(source: Self.one), RisingSaid.Band(source: Self.two)], "before anything answered")
-        #expect(bands(rising, .tags, session).allSatisfy { $0.stateLine(.tags) == nil }, "being asked is the tab's toast to say")
+        #expect(answers(rising, .tags, session) == [RisingSaid.Answer(source: Self.one), RisingSaid.Answer(source: Self.two)], "before anything answered")
+        #expect(answers(rising, .tags, session).allSatisfy { $0.stateLine(.tags) == nil }, "being asked is the tab's toast to say")
 
         await rising.opened(.tags, in: session)
         for host in [Self.one, Self.two] {
@@ -99,11 +101,13 @@ struct RisingTests {
         #expect(work.record.map(\.reached).sorted() == [Self.one, Self.two] && work.record.allSatisfy { $0.purpose == .rising && $0.source == $0.reached })
 
         let said = try #require(rising.said(.tags, in: session))
-        #expect(said.bands.map(\.source) == [Self.one, Self.two] && said.bands.allSatisfy { $0.reading == .said && !$0.asking })
-        #expect(said.bands[0].rows == [Self.tag("Swift", at: Self.one), Self.tag("birds", at: Self.one)])
-        #expect(said.bands[1].rows == [Self.tag("swift", at: Self.two, people: 5, posts: 8)])
-        #expect(Set(said.rows.map(\.id)).count == 3 && rising.walked(.tags, in: session) == said.rows.map(\.id))
-        #expect(rising.row(said.rows[2].id, of: .tags, in: session) == said.rows[2] && rising.row("nothing", of: .tags, in: session) == nil)
+        #expect(said.answers.map(\.source) == [Self.one, Self.two] && said.answers.allSatisfy { $0.reading == .said && !$0.asking })
+        #expect(said.answers[0].rows == [Self.tag("Swift", at: Self.one), Self.tag("birds", at: Self.one)])
+        #expect(said.answers[1].rows == [Self.tag("swift", at: Self.two, people: 5, posts: 8)])
+        #expect(said.rows.map(\.row) == [Self.tag("Swift", at: Self.one, people: 20, posts: 36), Self.tag("birds", at: Self.one)])
+        #expect(said.rows.map(\.sources) == [[Self.one, Self.two], [Self.one]])
+        #expect(Set(said.rows.map(\.id)).count == 2 && rising.walked(.tags, in: session) == said.rows.map(\.id))
+        #expect(rising.row(said.rows[1].id, of: .tags, in: session) == said.rows[1] && rising.row("nothing", of: .tags, in: session) == nil)
         #expect(rising.row(said.rows[0].id, of: .links, in: session) == nil, "a row of one page is none of the other's")
         #expect(session.notes.isEmpty)
 
@@ -113,12 +117,13 @@ struct RisingTests {
         await rising.opened(.links, in: session)
         #expect(await servers[Self.one]?.asked == [Self.tags, Self.links])
         let links = try #require(rising.said(.links, in: session))
-        guard case .link(let link, let source) = try #require(links.bands[0].rows.first) else {
+        guard case .link(let link, let source) = try #require(links.rows.first?.row) else {
             Issue.record("the link's row is no link")
             return
         }
         #expect(source == Self.one && link.link.host == "far.example" && link.title == "A story" && link.use == RisingUse(posts: 21, people: 20, days: 1))
-        #expect(links.bands[1].rows.isEmpty && links.bands[1].stateLine(.links, language: .english) == "n.example gave no rising links.")
+        #expect(links.rows.map(\.sources) == [[Self.one]], "a source that gave none names no row")
+        #expect(links.answers[1].rows.isEmpty && links.answers[1].stateLine(.links, language: .english) == "n.example gave no rising links.")
         // Listing a link fetches nothing of it: every ask of the run went to a source, and none to the page or its picture.
         #expect(Set(work.record.map(\.reached)) == [Self.one, Self.two])
     }
@@ -128,7 +133,7 @@ struct RisingTests {
         let (session, servers, _) = await session([Self.tags: PageServer.Answer(body: "", status: 503)], [Self.tags: Self.none])
         let rising = ShellPersonPages().rising
         await rising.opened(.tags, in: session)
-        let said = bands(rising, .tags, session)
+        let said = answers(rising, .tags, session)
         #expect(said[0].reading == .failed && said[0].rows.isEmpty && said[0].stateLine(.tags) == nil)
         #expect(rising.ask(of: .tags, in: session) == PageAsking(failed: [Self.one]), "the miss is the toast's, and nobody else's")
         #expect(TimelineToast.asked(rising.ask(of: .tags, in: session), note: nil, language: .english) == TimelineToast(kind: .error, text: "Could not reload m.example."))
@@ -146,7 +151,7 @@ struct RisingTests {
         #expect(await servers[Self.one]?.asked.count == 2)
         #expect(await servers[Self.two]?.asked.count == 1, "one source asked again asks that source")
         #expect(rising.ask(of: .tags, in: session).failed.isEmpty)
-        #expect(bands(rising, .tags, session)[0].rows == [Self.tag("birds", at: Self.one)])
+        #expect(answers(rising, .tags, session)[0].rows == [Self.tag("birds", at: Self.one)])
         await rising.again(.tags, in: session)
         #expect(await servers[Self.one]?.asked.count == 3)
         #expect(await servers[Self.two]?.asked.count == 2)
@@ -158,7 +163,7 @@ struct RisingTests {
         let pages = ShellPersonPages()
         let rising = pages.rising
         await rising.opened(.links, in: session)
-        #expect(bands(rising, .links, session).map(\.source) == [Self.one])
+        #expect(answers(rising, .links, session).map(\.source) == [Self.one])
         #expect(pages.more.hosts.has(.risingLinks, at: Self.two) == .absent && pages.more.hosts.has(.risingTags, at: Self.two) == .unsaid)
         #expect(pages.more.hosts.has(.risingLinks, at: Self.one) == .unsaid, "an empty answer makes nothing absent")
         await rising.opened(.links, in: session)
@@ -169,13 +174,160 @@ struct RisingTests {
         #expect(rising.canAskAgain(.links, in: session))
         await rising.again(.links, in: session)
         #expect(await servers[Self.two]?.asked == [Self.links, Self.links])
-        #expect(bands(rising, .links, session).map(\.source) == [Self.one, Self.two] && bands(rising, .links, session)[1].rows.count == 1)
-        #expect(bands(rising, .tags, session).map(\.source) == [Self.one, Self.two])
+        #expect(answers(rising, .links, session).map(\.source) == [Self.one, Self.two] && answers(rising, .links, session)[1].rows.count == 1)
+        #expect(answers(rising, .tags, session).map(\.source) == [Self.one, Self.two])
 
         let (bare, _, _) = await self.session([Self.links: Self.off], sources: [Source(host: Self.one, kind: .mastodon)])
         let alone = ShellPersonPages().rising
         await alone.opened(.links, in: bare)
         #expect(alone.said(.links, in: bare) == nil && alone.canAskAgain(.links, in: bare), "nothing to draw, and somebody to ask afresh")
+    }
+
+    // MARK: - One list
+
+    private static func link(_ address: String, at source: String, title: String = "", use: RisingUse = .unsaid) -> RisingRow {
+        .link(RisingLink(link: PostLink(address)!, title: title, use: use), source: source)
+    }
+
+    @Test("The sources' lists are woven into one by each source's own rank — every source's first in the order the sources stand, then every second — lists of any length; a hashtag however it is written, or an address, stands once where it first comes, as the source that came first wrote it and through its door, every later saying of it folded in; and a row's id names no source")
+    func wovenByRank() throws {
+        let three = "o.example"
+        let tags = RisingListed.merged([
+            [Self.tag("Swift", at: Self.one), Self.tag("birds", at: Self.one), Self.tag("maps", at: Self.one), Self.tag("cats", at: Self.one)],
+            [Self.tag("BIRDS", at: Self.two), Self.tag("swift", at: Self.two)],
+            [Self.tag("dogs", at: three)],
+        ])
+        #expect(tags.map { name(of: $0) } == ["#Swift", "#BIRDS", "#dogs", "#maps", "#cats"])
+        #expect(tags.map(\.sources) == [[Self.one, Self.two], [Self.two, Self.one], [three], [Self.one], [Self.one]])
+        #expect(tags.map(\.row.source) == [Self.one, Self.two, three, Self.one, Self.one], "each as the first source to name it lists it")
+        #expect(Set(tags.map(\.id)).count == tags.count && tags[0].id == "rising\u{1e}tag\u{1e}swift")
+        #expect(tags.allSatisfy { row in !row.sources.contains { row.id.contains($0) } }, "an id names no source")
+        #expect(RisingListed.merged([]).isEmpty && RisingListed.merged([[], []]).isEmpty)
+
+        let links = RisingListed.merged([
+            [Self.link("https://far.example/x", at: Self.one), Self.link("https://far.example/y", at: Self.one, title: "Y at m")],
+            [Self.link("https://far.example/y", at: Self.two, title: "Y at n"), Self.link("https://far.example/z", at: Self.two)],
+        ])
+        #expect(links.map { RisingSaid.called(link(of: $0)) } == ["https://far.example/x", "Y at n", "https://far.example/z"])
+        #expect(links[1].sources == [Self.two, Self.one] && links[1].row.source == Self.two, "the door is the first source's to name it")
+        #expect(links[1].id == "rising\u{1e}link\u{1e}https://far.example/y")
+        let reader = ShellReader()
+        reader.work = SourceWork()
+        guard case .link(let y, let door) = links[1].row else { throw Unexpected.row }
+        #expect(reader.open(y.link.url, from: door) && reader.reading?.source == Self.two)
+    }
+
+    @Test("A link folded from several sources keeps the first one's door, place and id, and takes the first title and words any of them gave where the first gave none")
+    func aFoldedLinkTakesTheFirstWordsGiven() throws {
+        let x = "https://far.example/x"
+        func said(_ source: String, title: String = "", words: String = "") -> RisingRow {
+            .link(RisingLink(link: PostLink(x)!, title: title, words: words), source: source)
+        }
+        let three = "o.example"
+        let listed = RisingListed.merged([
+            [said(Self.one)], [said(Self.two, words: "What n says.")], [said(three, title: "Named at o", words: "What o says.")],
+        ])
+        #expect(listed.count == 1 && listed[0].row.source == Self.one && listed[0].sources == [Self.one, Self.two, three])
+        #expect(listed[0].id == "rising\u{1e}link\u{1e}\(x)")
+        #expect(link(of: listed[0]).title == "Named at o" && link(of: listed[0]).words == "What n says.")
+        let first = RisingListed.merged([[said(Self.one, title: "Named at m")], [said(Self.two, title: "Named at n", words: "Of n.")]])
+        #expect(link(of: first[0]).title == "Named at m" && link(of: first[0]).words == "Of n.", "what the first gave stands")
+    }
+
+    private enum Unexpected: Error { case row }
+
+    private func name(of listed: RisingListed) -> String {
+        guard case .tag(let tag, _) = listed.row else { return "" }
+        return tag.tag.text
+    }
+
+    private func link(of listed: RisingListed) -> RisingLink {
+        guard case .link(let link, _) = listed.row else { return RisingLink(link: PostLink("https://none.example")!) }
+        return link
+    }
+
+    @Test("A row's uses are added over the sources that said them: each figure the sum of those said and none where nobody said it, over the longest stretch of days any gave — said in the words the row always used")
+    func usesAdded() {
+        let one = RisingTag(tag: PostTag("#Swift")!, use: RisingUse(posts: 10, people: nil, days: 1))
+        let two = RisingTag(tag: PostTag("#swift")!, use: RisingUse(posts: 5, people: 3, days: 2))
+        let three = RisingTag(tag: PostTag("#SWIFT")!, use: .unsaid)
+        let listed = RisingListed.merged([[.tag(one, source: Self.one)], [.tag(two, source: Self.two)], [.tag(three, source: "o.example")]])
+        guard case .tag(let summed, _) = listed.first?.row else { Issue.record("no hashtag"); return }
+        #expect(listed.count == 1 && summed.use == RisingUse(posts: 15, people: 3, days: 2))
+        #expect(RisingSaid.used(summed.use, language: .english) == "Posts 15, people 3, over two days.")
+        #expect(RisingUse(posts: 1, people: nil, days: 1).adding(.unsaid) == RisingUse(posts: 1, people: nil, days: 1))
+        #expect(RisingUse(posts: nil, people: nil, days: 2).adding(RisingUse(posts: nil, people: 4, days: 1)) == RisingUse(posts: nil, people: 4, days: 2))
+        #expect(RisingSaid.used(RisingUse(posts: 1, people: nil, days: 1).adding(.unsaid), language: .english) == "Posts 1, people not said, today.")
+        let links = RisingListed.merged([
+            [Self.link("https://far.example/x", at: Self.one, use: RisingUse(posts: 2, people: 2, days: 1))],
+            [Self.link("https://far.example/x", at: Self.two, use: RisingUse(posts: 3, people: nil, days: 1))],
+        ])
+        #expect(links.count == 1 && link(of: links[0]).use == RisingUse(posts: 5, people: 2, days: 1))
+    }
+
+    @Test("A row names its sources as a post row names its own: the first, and how many more as '+1' — and a listener hears every one of them, by name; a row of one source's list names none")
+    func namesItsSources() {
+        let three = "o.example"
+        #expect(RisingSaid.drawnSources([]) == nil && RisingSaid.drawnSources([Self.one]) == Self.one)
+        #expect(RisingSaid.drawnSources([Self.one, Self.two], language: .english) == "m.example +1")
+        #expect(RisingSaid.drawnSources([Self.one, Self.two, three], language: .taiwanese) == "m.example +2")
+        #expect(RisingSaid.spokenSources([Self.one, Self.two, three], language: .english) == "m.example, also from n.example, o.example")
+        #expect(RisingSaid.spokenSources([Self.one], language: .english) == Self.one && RisingSaid.spokenSources([]) == nil)
+        let row = Self.tag("birds", at: Self.one)
+        #expect(RisingRowView.spoken(row, sources: [Self.one, Self.two], said: nil, missed: nil, language: .english)
+            == "#birds, Posts 28, people 15, over two days., m.example, also from n.example")
+        #expect(RisingRowView.spoken(row, said: nil, missed: nil, language: .english) == "#birds, Posts 28, people 15, over two days.")
+    }
+
+    @Test("What has landed is drawn while a source is still asked, and the toast names that one; the same answers landing in either order give the same list")
+    func landingInAnyOrder() async throws {
+        var lists: [[RisingListed]] = []
+        for held in [Self.one, Self.two] {
+            let (session, servers, _) = await session(
+                [Self.tags: Self.tagsAnswer(["Swift", "birds"])], [Self.tags: Self.tagsAnswer(["maps", "swift"], uses: 2)]
+            )
+            let server = try #require(servers[held])
+            let rising = ShellPersonPages().rising
+            await server.hold(Self.tags)
+            defer { Task { await server.release(Self.tags) } }
+            let heldGuard = watching("the ask of \(Self.tags), held at \(held)") { await server.release(Self.tags) }
+            defer { heldGuard.cancel() }
+            let tab = Task { await rising.opened(.tags, in: session) }
+            await server.arrival(of: Self.tags, by: tab)
+            let other = held == Self.one ? Self.two : Self.one
+            await met("the source beside \(held) has landed") {
+                answers(rising, .tags, session).first { $0.source == other }?.reading == .said
+            }
+            let partial = try #require(rising.said(.tags, in: session)).rows
+            #expect(!partial.isEmpty && partial.allSatisfy { $0.sources == [other] }, "what has landed is drawn: \(held) held")
+            #expect(rising.ask(of: .tags, in: session, language: .english).asking == "Asking \(held)…")
+            await server.release(Self.tags)
+            await tab.value
+            lists.append(try #require(rising.said(.tags, in: session)).rows)
+        }
+        #expect(lists[0] == lists[1])
+        #expect(lists[0].map(\.sources) == [[Self.one, Self.two], [Self.two], [Self.one]])
+    }
+
+    @Test("The lamp stays on its row when an ask again moves it: a row is the same row however the sources reorder, it is walked and opened at its new place, and a hashtag still opens as itself and a link through the first source's door")
+    func theLampOutlivesAReorder() async throws {
+        let (session, servers, _) = await session(
+            [Self.tags: Self.tagsAnswer(["Swift", "birds"])], [Self.tags: Self.tagsAnswer(["maps"])]
+        )
+        let rising = ShellPersonPages().rising
+        await rising.opened(.tags, in: session)
+        let before = rising.walked(.tags, in: session)
+        let lit = try #require(rising.said(.tags, in: session)?.rows.first { $0.sources == [Self.one] && $0.id.hasSuffix("birds") }).id
+        #expect(before.firstIndex(of: lit) == 2)
+        await servers[Self.one]?.answer(Self.tags, Self.tagsAnswer(["cats"]))
+        await servers[Self.two]?.answer(Self.tags, Self.tagsAnswer(["BIRDS", "maps"]))
+        await rising.again(.tags, in: session)
+        let after = rising.walked(.tags, in: session)
+        #expect(after.firstIndex(of: lit) == 1, "moved, and the same row: \(after)")
+        let listed = try #require(rising.row(lit, of: .tags, in: session))
+        #expect(listed.sources == [Self.two] && listed.row.source == Self.two)
+        guard case .tag(let birds, _) = listed.row else { throw Unexpected.row }
+        #expect(birds.tag == PostTag("#BIRDS") && ShellRising.lamp(after: true, of: listed.id, before: nil) == lit)
     }
 
     // MARK: - While an ask is out
@@ -204,33 +356,33 @@ struct RisingTests {
             place: .trends, editing: false, hasSources: true, open: [], risingAsked: rising.canAskAgain(.tags, in: session)
         )
         #expect(ReloadMark.shown(canReload: canReload, stoppable: rising.ask(of: .tags, in: session).stoppable) == .stop)
-        let midway = bands(rising, .tags, session)
+        let midway = answers(rising, .tags, session)
         #expect(midway[0].asking && midway[0].reading == .asking && midway[0].stateLine(.tags) == nil)
         // The source beside is asked and answers on its own wire: waited on to land, so the toast
         // names the held one alone.
-        await met("the source beside the held one has answered") { !bands(rising, .tags, session)[1].asking }
+        await met("the source beside the held one has answered") { !answers(rising, .tags, session)[1].asking }
         #expect(rising.ask(of: .tags, in: session, language: .english).asking == "Asking m.example…", "the toast says who is on the wire")
         await first.release(Self.tags)
         await again.value
         await pane.value
         #expect(rising.canAskAgain(.tags, in: session))
-        let landed = bands(rising, .tags, session)
+        let landed = answers(rising, .tags, session)
         #expect(landed.map(\.rows.count) == [1, 1] && landed.allSatisfy { !$0.asking && $0.reading == .said })
         #expect(await first.asked.count == 1)
         #expect(await servers[Self.two]?.asked.count == 1)
     }
 
-    @Test("An ask that was stopped before it answered leaves nothing saying Asking: its band says nothing, it is no failure, and it is asked again when the page next opens")
+    @Test("An ask that was stopped before it answered leaves nothing saying Asking: it says nothing on the page, it is no failure, and it is asked again when the page next opens")
     func aStoppedAskIsAskedAgain() async throws {
         let (session, servers, _) = await session([Self.tags: PageServer.Answer(body: "", cancelled: true)], [Self.tags: Self.none])
         let rising = ShellPersonPages().rising
         await rising.opened(.tags, in: session)
-        let stopped = bands(rising, .tags, session)[0]
+        let stopped = answers(rising, .tags, session)[0]
         #expect(stopped.reading == .stopped && !stopped.asking && stopped.stateLine(.tags) == nil)
         #expect(rising.ask(of: .tags, in: session).failed.isEmpty)
         await servers[Self.one]?.answer(Self.tags, Self.tagsAnswer(["birds"]))
         await rising.opened(.tags, in: session)
-        #expect(bands(rising, .tags, session)[0].rows.count == 1)
+        #expect(answers(rising, .tags, session)[0].rows.count == 1)
         #expect(await servers[Self.two]?.asked.count == 1, "the source that answered is not asked again")
     }
 
@@ -261,11 +413,11 @@ struct RisingTests {
         #expect(rising.canAskAgain(.tags, in: session), "stopped, it may be asked again")
         for server in [first, second] { await server.release(Self.tags) }
         await pane.value
-        #expect(bands(rising, .tags, session).allSatisfy { $0.rows.isEmpty && $0.reading == .stopped }, "what came late landed nowhere")
+        #expect(answers(rising, .tags, session).allSatisfy { $0.rows.isEmpty && $0.reading == .stopped }, "what came late landed nowhere")
 
         await rising.again(.tags, in: session)
         #expect(rising.ask(of: .tags, in: session) == PageAsking(), "asked again, the stop is said no longer")
-        #expect(bands(rising, .tags, session).map(\.rows.count) == [1, 1])
+        #expect(answers(rising, .tags, session).map(\.rows.count) == [1, 1])
     }
 
     @Test("Whose ask is in front is one decision — the toast's, the mark's and Escape's: a page opened over the stream asks for itself, a hashtag's page too, a list whose source is gone draws the stream and is not, a conversation is the stream's, and on Trends with nothing over it a tab of what is rising is; Stop there stops that tab and nothing else")
@@ -303,7 +455,7 @@ struct RisingTests {
         await tab.value
     }
 
-    @Test("What was asked as one sign-in is not shown to the next, and its answer, come late, lands nowhere — rows, or a word that the address is not there: the band is the reader's who asked since, whose own ask is still out; and a sign-in at one source lets nothing of another go")
+    @Test("What was asked as one sign-in is not shown to the next, and its answer, come late, lands nowhere — rows, or a word that the address is not there: the source's answer is the reader's who asked since, whose own ask is still out; and a sign-in at one source lets nothing of another go")
     func asWhoeverAsked() async throws {
         for late in [Self.tagsAnswer(["old"]), Self.off] {
             let (session, servers, _) = await session([Self.tags: late], [Self.tags: Self.tagsAnswer(["maps"])])
@@ -320,20 +472,20 @@ struct RisingTests {
             await first.arrival(of: Self.tags, by: unsigned)
 
             try signIn(session)
-            #expect(bands(rising, .tags, session)[0] == RisingSaid.Band(source: Self.one), "nobody's band is not the reader's")
+            #expect(answers(rising, .tags, session)[0] == RisingSaid.Answer(source: Self.one), "nobody's answer is not the reader's")
             let signed = Task { await rising.opened(.tags, in: session) }
             await first.arrival(of: Self.tags, times: 2, by: signed)
             await first.releaseOne(Self.tags)
             await unsigned.value
-            let between = bands(rising, .tags, session)
+            let between = answers(rising, .tags, session)
             #expect(between.map(\.source) == [Self.one, Self.two], "a late not-found leaves no source out")
             #expect(between[0].rows.isEmpty && between[0].asking && between[0].reading == .asking)
             #expect(pages.more.hosts.has(.risingTags, at: Self.one) == .unsaid)
-            #expect(between[1].rows.count == 1, "the other source's band is as it was")
+            #expect(between[1].rows.count == 1, "the other source's answer is as it was")
             await first.answer(Self.tags, Self.tagsAnswer(["new"]))
             await first.release(Self.tags)
             await signed.value
-            #expect(bands(rising, .tags, session)[0].rows == [Self.tag("new", at: Self.one)])
+            #expect(answers(rising, .tags, session)[0].rows == [Self.tag("new", at: Self.one)])
             #expect(await servers[Self.two]?.asked.count == 1, "a sign-in at one source asks nothing of another")
         }
     }
@@ -344,12 +496,12 @@ struct RisingTests {
         let (session, _, _) = await session([Self.tags: big], [Self.tags: Self.tagsAnswer(["maps"])])
         let rising = ShellPersonPages().rising
         await rising.opened(.tags, in: session)
-        #expect(bands(rising, .tags, session).map(\.reading) == [.failed, .said] && big.body.utf8.count > SourceReach.smallBody)
+        #expect(answers(rising, .tags, session).map(\.reading) == [.failed, .said] && big.body.utf8.count > SourceReach.smallBody)
     }
 
     // MARK: - A forum
 
-    @Test("A source that is not asked who people are has no band and is asked nothing; where every source is such a one there are no tabs of what is rising on Trends — its posts are drawn as they were — and the files that draw and ask name no kind of source")
+    @Test("A source that is not asked who people are is no part of a tab and is asked nothing; where every source is such a one there are no tabs of what is rising on Trends — its posts are drawn as they were — and the files that draw and ask name no kind of source")
     func aForumReadsTheSame() async throws {
         let (session, servers, work) = await session([:], sources: [Self.forum, Source(host: "talk.example", kind: .discourse)])
         let rising = ShellPersonPages().rising
@@ -391,7 +543,7 @@ struct RisingTests {
         let (session, _, work) = await session([Self.links: Self.story])
         let rising = ShellPersonPages().rising
         await rising.opened(.links, in: session)
-        guard case .link(let link, let source) = try #require(rising.said(.links, in: session)?.rows.first) else {
+        guard case .link(let link, let source) = try #require(rising.said(.links, in: session)?.rows.first?.row) else {
             Issue.record("no link was listed")
             return
         }
@@ -430,8 +582,9 @@ struct RisingTests {
         #expect(!spoofed.title.unicodeScalars.contains("\u{202E}"))
         #expect(RisingSaid.spoken(.link(spoofed, source: Self.one), language: .english).hasPrefix("leads to evil.example, "))
         // A press that opens nothing moves nothing.
-        #expect(ShellRising.lamp(after: false, of: .link(named, source: Self.one), before: "post") == "post")
-        #expect(ShellRising.lamp(after: true, of: .link(named, source: Self.one), before: "post") == RisingRow.link(named, source: Self.one).id)
+        let listed = RisingListed(row: .link(named, source: Self.one), sources: [Self.one])
+        #expect(ShellRising.lamp(after: false, of: listed.id, before: "post") == "post")
+        #expect(ShellRising.lamp(after: true, of: listed.id, before: "post") == listed.id)
     }
 
     @Test("Every sentence of the two pages, the key's line and the sentence for Return are written in each language the app speaks, with the places they fill, no figure through a bare number's place, and the two Chinese tables alike — and Return's sentence says a row, whatever kind it is")
@@ -483,8 +636,8 @@ struct RisingTests {
         let tag = Self.tag(String(repeating: "long", count: 25), at: Self.one)
         for (width, scheme) in [(CGFloat(720), ColorScheme.light), (390, .dark), (320, .light)] {
             for row in [wordy, brief, bare, tag, .tag(RisingTag(tag: PostTag("#a")!), source: Self.one)] {
-                for selected in [false, true] {
-                    let laid = size(RisingRowView(row: row, selected: selected), width, scheme: scheme)
+                for (selected, sources) in [(false, []), (true, [Self.one]), (false, [Self.long, Self.two, Self.one])] {
+                    let laid = size(RisingRowView(row: row, sources: sources, selected: selected), width, scheme: scheme)
                     #expect(laid.width == width && laid.height > 0, "at \(width)")
                 }
             }
@@ -494,12 +647,16 @@ struct RisingTests {
             #expect(size(RisingHead(), width, scheme: scheme).width == width)
         }
         let states = [
-            RisingSaid(which: .tags, bands: [RisingSaid.Band(source: Self.one), RisingSaid.Band(source: Self.two, reading: .failed)]),
-            RisingSaid(which: .tags, bands: [
-                RisingSaid.Band(source: Self.one, reading: .said, asking: true, rows: [tag, Self.tag("birds", at: Self.one)]),
-                RisingSaid.Band(source: Self.two, reading: .said), RisingSaid.Band(source: "o.example", reading: .stopped),
+            RisingSaid(which: .tags, answers: [RisingSaid.Answer(source: Self.one), RisingSaid.Answer(source: Self.two, reading: .failed)]),
+            RisingSaid(which: .tags, answers: [
+                RisingSaid.Answer(source: Self.one, reading: .said, asking: true, rows: [tag, Self.tag("birds", at: Self.one)]),
+                RisingSaid.Answer(source: Self.two, reading: .said), RisingSaid.Answer(source: "o.example", reading: .stopped),
             ]),
-            RisingSaid(which: .links, bands: [RisingSaid.Band(source: Self.one, reading: .said, rows: [wordy, brief, bare])]),
+            RisingSaid(which: .links, answers: [RisingSaid.Answer(source: Self.one, reading: .said, rows: [wordy, brief, bare])]),
+            RisingSaid(which: .tags, answers: [
+                RisingSaid.Answer(source: Self.long, reading: .said, rows: [Self.tag(String(repeating: "long", count: 25), at: Self.long), Self.tag("birds", at: Self.long)]),
+                RisingSaid.Answer(source: Self.two, reading: .said, rows: [Self.tag("Birds", at: Self.two), Self.tag(String(repeating: "long", count: 25), at: Self.two)]),
+            ]),
         ]
         for (layout, width) in [(ShellLayout.wide, CGFloat(720)), (.narrow, 320)] {
             for said in states {

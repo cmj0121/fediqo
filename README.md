@@ -518,8 +518,12 @@ Reading on is said there too, and is not stopped.
 
 Trends is a place of its own, between Timeline and Notices, with three tabs: Posts, Hashtags
 and Links. Posts is what your sources hand over as trending, read as a timeline is read.
-Hashtags and Links are what each source says is rising on it, asked when the tab first comes
-in front; Fediqo ranks nothing and merges nothing. A tab no source has is not drawn, a lone
+Hashtags and Links are what your sources say is rising, asked when the tab first comes in
+front, in one list: every source's first, then every second, each source in its own order. A
+hashtag or a link stands once, where it first comes, naming the sources that said it the way a
+post names its source ("m.example +1"), with their counts added; Fediqo ranks nothing of its
+own. A source still being asked or that failed is said in the toast while the others' rows
+stand. A tab no source has is not drawn, a lone
 tab draws no strip, and where no source has anything trending — a store of Discourse forums alone —
 there is no Trends. `h` brings it in front from anywhere but a field, on the tab and the page
 it was left on, and Tab and ⇧Tab turn its tabs. Timeline and Trends each keep what is

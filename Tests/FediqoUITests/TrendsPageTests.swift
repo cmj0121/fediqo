@@ -376,9 +376,9 @@ struct TrendsPageTests {
         let (session, pages, _) = await session()
         await pages.rising.opened(.tags, in: session)
         let row = try #require(pages.rising.said(.tags, in: session)?.rows.first)
-        guard case .tag(let tag, _) = row else { Issue.record("a hashtag's row"); return }
+        guard case .tag(let tag, _) = row.row else { Issue.record("a hashtag's row"); return }
         var side = StreamSide()
-        side.lamp = ShellRising.lamp(after: true, of: row, before: nil)
+        side.lamp = ShellRising.lamp(after: true, of: row.id, before: nil)
         #expect(side.lamp == row.id)
         let took = side.walk.walk(to: .tag(tag.tag), from: side.lamp)
         #expect(took)
@@ -386,7 +386,7 @@ struct TrendsPageTests {
         let left = try #require(back)
         side.lamp = FediqoRootView.lampBack(left.lamp, onto: side.walk.standing, rows: pages.rising.walked(.tags, in: session))
         #expect(side.walk.isEmpty && side.lamp == row.id)
-        #expect(ShellRising.lamp(after: false, of: row, before: "was") == "was", "a press that opens nothing moves nothing")
+        #expect(ShellRising.lamp(after: false, of: row.id, before: "was") == "was", "a press that opens nothing moves nothing")
     }
 
     @Test("The tab in front gone, the first left comes in front as a turn would: the gone tab's lamp kept, and the one the arrived tab was left with given back where it still has that row")
@@ -464,7 +464,7 @@ struct TrendsPageTests {
             front.tab = first
             await met("\(first) asked of both sources, and landed") {
                 turn(hosted)
-                return first.rising.flatMap { pages.rising.said($0, in: session) }?.bands.allSatisfy { $0.reading == .said } == true
+                return first.rising.flatMap { pages.rising.said($0, in: session) }?.answers.allSatisfy { $0.reading == .said } == true
             }
             for host in [Self.one, Self.two] {
                 #expect(await rising(servers[host]) == [path[first]!], "\(first) in front: \(host) asked nothing of \(then)")
@@ -475,7 +475,7 @@ struct TrendsPageTests {
             front.tab = then
             await met("\(then) asked once in front") {
                 turn(hosted)
-                return then.rising.flatMap { pages.rising.said($0, in: session) }?.bands.allSatisfy { $0.reading == .said } == true
+                return then.rising.flatMap { pages.rising.said($0, in: session) }?.answers.allSatisfy { $0.reading == .said } == true
             }
             for host in [Self.one, Self.two] {
                 #expect(await rising(servers[host]) == [path[first]!, path[then]!], "\(host)")
@@ -505,7 +505,7 @@ struct TrendsPageTests {
         front.tab = .tags
         await met("Hashtags in front, asked and landed") {
             turn(hosted)
-            return pages.rising.said(.tags, in: session)?.bands.allSatisfy { $0.reading == .said } == true
+            return pages.rising.said(.tags, in: session)?.answers.allSatisfy { $0.reading == .said } == true
         }
         for host in [Self.one, Self.two] {
             #expect(await rising(servers[host]) == [Self.links, Self.tags], "\(host)")

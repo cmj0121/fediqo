@@ -12,9 +12,12 @@ import Observation
 // press while a source is being asked asks it nothing, and Stop calls off every source on the
 // wire. Nothing reads on, nothing is asked while neither tab is in front, and nothing by itself.
 //
-// **Each source for itself.** The answers are never merged: a source's rows stand under its own
-// band, in its own order, and a source that fails is named in the tab's toast while the others
-// land.
+// **Each source asked for itself, and one list drawn of them** (decision 22). A source's answer
+// is kept as its own, in its own order; what a tab is handed is those answers woven into one
+// list (`RisingListed.merged`) — every source's first, in the order the sources stand, then
+// every second — a hashtag or an address once, naming every source that said it, its uses
+// added. Fediqo ranks nothing of its own. A source still being asked, or failed, is named in the
+// tab's toast while what the others said is drawn.
 //
 // **With no sign-in, of that source alone.** Anyone is given what is rising, so no token rides
 // on these asks: they go out on the plain client, held to the small body's ceiling and to the
@@ -59,18 +62,87 @@ enum RisingRow: Hashable, Sendable, Identifiable {
         }
     }
 
-    /// The row itself: the same hashtag or address under two sources is two rows.
-    var id: String {
+    /// What it is, whoever listed it: a hashtag folded, a link its address.
+    var key: String {
         switch self {
-        case .tag(let tag, let source): "\(source)\u{1e}rising\u{1e}tag\u{1e}\(MastodonRising.folded(tag.tag))"
-        case .link(let link, let source): "\(source)\u{1e}rising\u{1e}link\u{1e}\(link.link.url.absoluteString)"
+        case .tag(let tag, _): "rising\u{1e}tag\u{1e}\(MastodonRising.folded(tag.tag))"
+        case .link(let link, _): "rising\u{1e}link\u{1e}\(link.link.url.absoluteString)"
+        }
+    }
+
+    /// The row under its source: the same hashtag or address under two sources is two rows, as
+    /// a list of one source's holds them (the hashtags followed).
+    var id: String { "\(source)\u{1e}\(key)" }
+}
+
+/// One row of a tab of what is rising on Trends: a hashtag or a link, once however many
+/// sources say it is rising (decision 22).
+struct RisingListed: Hashable, Sendable, Identifiable {
+    /// It as the first source to name it lists it — and so the door a link goes through — with
+    /// its uses added over every source that named it.
+    let row: RisingRow
+    /// Every source that named it, in the order they came on the list: the first is `row`'s.
+    let sources: [String]
+
+    /// What it is, and of no source: the same row whichever source answered first, and while
+    /// an answer asked again moves it, so the lamp on it stays.
+    var id: String { row.key }
+
+    /// The sources' lists, in the order the sources stand, woven into one: every source's
+    /// first, then every second, and so on — a hashtag or an address once, where it first
+    /// comes, and each later saying of it folded into that row. **The same lists give the same
+    /// list**, whichever of them answered first.
+    static func merged(_ lists: [[RisingRow]]) -> [RisingListed] {
+        var listed: [RisingListed] = []
+        var at: [String: Int] = [:]
+        for rank in 0..<(lists.map(\.count).max() ?? 0) {
+            for list in lists where rank < list.count {
+                let row = list[rank]
+                if let index = at[row.key] {
+                    listed[index] = listed[index].folding(row)
+                } else {
+                    at[row.key] = listed.count
+                    listed.append(RisingListed(row: row, sources: [row.source]))
+                }
+            }
+        }
+        return listed
+    }
+
+    /// It with another source's saying of it folded in: that source named after the others,
+    /// its uses added, and — for a link the first source said nothing of — the first title and
+    /// words a source gave. A source already named adds nothing.
+    private func folding(_ other: RisingRow) -> RisingListed {
+        guard !sources.contains(other.source) else { return self }
+        let sources = sources + [other.source]
+        switch (row, other) {
+        case (.tag(let tag, let source), .tag(let more, _)):
+            return RisingListed(row: .tag(RisingTag(tag: tag.tag, use: tag.use.adding(more.use)), source: source), sources: sources)
+        case (.link(let link, let source), .link(let more, _)):
+            let folded = RisingLink(
+                link: link.link, title: link.title.isEmpty ? more.title : link.title,
+                words: link.words.isEmpty ? more.words : link.words, use: link.use.adding(more.use)
+            )
+            return RisingListed(row: .link(folded, source: source), sources: sources)
+        default:
+            return self
         }
     }
 }
 
-/// What a page of what is rising is handed: one band a source, in the order the sources stand.
+extension RisingUse {
+    /// Two sources' counts of one thing as one: each figure the sum of those said, and nothing
+    /// where neither said it, over the longer of the two stretches of days.
+    func adding(_ other: RisingUse) -> RisingUse {
+        func sum(_ one: Int?, _ two: Int?) -> Int? { one.map { $0 + (two ?? 0) } ?? two }
+        return RisingUse(posts: sum(posts, other.posts), people: sum(people, other.people), days: max(days, other.days))
+    }
+}
+
+/// What a tab of what is rising is handed: what each source answered, in the order the sources
+/// stand, and the one list woven of it.
 struct RisingSaid: Equatable {
-    struct Band: Equatable, Identifiable {
+    struct Answer: Equatable, Identifiable {
         enum Reading: Equatable {
             /// Not answered yet: on the wire, or about to be.
             case asking
@@ -93,10 +165,10 @@ struct RisingSaid: Equatable {
     }
 
     let which: RisingWhich
-    var bands: [Band]
+    var answers: [Answer]
 
-    /// Every row, top to bottom as the page draws them.
-    var rows: [RisingRow] { bands.flatMap(\.rows) }
+    /// The one list, top to bottom as the tab draws it.
+    var rows: [RisingListed] { RisingListed.merged(answers.map(\.rows)) }
 }
 
 /// What every source said is rising on it this run, by page and source.
@@ -111,17 +183,17 @@ final class ShellRising {
     private struct Page {
         let host: String
         var askedAs: AskedAs
-        var reading: RisingSaid.Band.Reading = .asking
+        var reading: RisingSaid.Answer.Reading = .asking
         var rows: [RisingRow] = []
         var asking = false
-        /// The number of the ask whose answer this source's band awaits.
+        /// The number of the ask whose answer this source's row of the page awaits.
         var awaits = 0
     }
 
     private var pages: [String: Page] = [:]
     /// The pages whose last ask was stopped (`stop`), until they are asked again.
     private var halted: Set<RisingWhich> = []
-    /// The ask on the wire for each source's band.
+    /// The ask on the wire for each source of each page.
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private let errands: PageErrands
     @ObservationIgnored private let readers: PageReaders
@@ -184,11 +256,11 @@ final class ShellRising {
     /// What the page `which` is handed, or nothing where no source has such a page: there is
     /// then nothing to draw.
     func said(_ which: RisingWhich, in session: ShellSession) -> RisingSaid? {
-        let bands = sources(of: which, in: session).map { source -> RisingSaid.Band in
-            guard let page = self.standing(which, at: source.host, in: session) else { return RisingSaid.Band(source: source.host) }
-            return RisingSaid.Band(source: source.host, reading: page.reading, asking: page.asking, rows: page.rows)
+        let answers = sources(of: which, in: session).map { source -> RisingSaid.Answer in
+            guard let page = self.standing(which, at: source.host, in: session) else { return RisingSaid.Answer(source: source.host) }
+            return RisingSaid.Answer(source: source.host, reading: page.reading, asking: page.asking, rows: page.rows)
         }
-        return bands.isEmpty ? nil : RisingSaid(which: which, bands: bands)
+        return answers.isEmpty ? nil : RisingSaid(which: which, answers: answers)
     }
 
     /// The rows `j` and `k` walk on the page `which`, top to bottom.
@@ -197,7 +269,7 @@ final class ShellRising {
     }
 
     /// The row `id` of the page `which`, where the page as it is drawn holds it.
-    func row(_ id: String, of which: RisingWhich, in session: ShellSession) -> RisingRow? {
+    func row(_ id: String, of which: RisingWhich, in session: ShellSession) -> RisingListed? {
         said(which, in: session)?.rows.first { $0.id == id }
     }
 
@@ -224,8 +296,8 @@ final class ShellRising {
         )
     }
 
-    /// The tab's Stop, and `Escape` on it: every source of `which` on the wire called off, its
-    /// band as it was — or stopped, where it had not answered — and whatever is on the wire
+    /// The tab's Stop, and `Escape` on it: every source of `which` on the wire called off, what
+    /// it said as it was — or stopped, where it had not answered — and whatever is on the wire
     /// lands nowhere. A stop is never a failure. Whether anything was stopped.
     @discardableResult
     func stop(_ which: RisingWhich) -> Bool {
@@ -244,8 +316,8 @@ final class ShellRising {
 
     /// Where the lamp stands once a row was pressed to open: on the row where it opened, and
     /// where it was where the press opened nothing — a press that opens nothing moves nothing.
-    static func lamp(after opened: Bool, of row: RisingRow, before: String?) -> String? {
-        opened ? row.id : before
+    static func lamp(after opened: Bool, of row: String, before: String?) -> String? {
+        opened ? row : before
     }
 
     // MARK: - Asking
@@ -271,7 +343,7 @@ final class ShellRising {
     }
 
     /// `r`, the mark and a pull: the sources of the page asked again — every one, or the one
-    /// named. What a band holds stays drawn until its answer lands. **A press while a
+    /// named. What a source said stays drawn until its answer lands. **A press while a
     /// source is being asked asks it nothing.**
     func again(_ which: RisingWhich, at host: String? = nil, in session: ShellSession) async {
         // Asked of every source, a source left out for the run is asked afresh too: `r` is
@@ -324,7 +396,7 @@ final class ShellRising {
         } catch {
             guard pages[key]?.awaits == errand else { return }
             if (error as? MastodonHostMoreError) == .noSuchAddress {
-                // The host's own word that the address is not there: no band, for the run.
+                // The host's own word that the address is not there: left out, for the run.
                 hosts.notFound(which.thing, at: host, round: round)
             } else if Cancellation.happened(error) {
                 // Stopped before it answered: what was said before stands, and nothing is.

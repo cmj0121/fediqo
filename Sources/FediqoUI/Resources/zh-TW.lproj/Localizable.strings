@@ -1849,7 +1849,7 @@
 "source.you.media.covered" = "蓋住";
 "source.you.media.open" = "不蓋住";
 "work.purpose.rising" = "讀取來源上正在竄升的內容";
-"rising.line" = "每個來源自己說的竄升內容。Fediqo 不排名，也不合併。";
+"rising.line" = "你的來源說正在竄升的內容，合成一份清單，照每個來源自己的順序。";
 "rising.asking" = "正在詢問 %@…";
 "rising.none.tags" = "%@ 沒有給出任何竄升的主題標籤。";
 "rising.none.links" = "%@ 沒有給出任何竄升的連結。";

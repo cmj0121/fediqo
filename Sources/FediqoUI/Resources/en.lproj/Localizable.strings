@@ -1902,7 +1902,7 @@
 "source.you.media.covered" = "Covered";
 "source.you.media.open" = "Not covered";
 "work.purpose.rising" = "Reading what is rising on a source";
-"rising.line" = "What each source says is rising on it. Fediqo ranks nothing and merges nothing.";
+"rising.line" = "What your sources say is rising, one list, in each source's own order.";
 "rising.asking" = "Asking %@…";
 "rising.none.tags" = "%@ gave no rising hashtags.";
 "rising.none.links" = "%@ gave no rising links.";
