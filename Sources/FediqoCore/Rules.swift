@@ -28,7 +28,9 @@ public enum RuleEffect: String, Hashable, Sendable {
 ///
 /// **Every kind a stored timeline can hold.** A loader meeting a kind it cannot name must refuse
 /// the timelines rather than drop the rule (Decision 15): a dropped include widens a timeline and
-/// a dropped exclude brings back what the reader hid.
+/// a dropped exclude brings back what the reader hid. **Save a category rule on what is
+/// trending**, include or exclude, which a written timeline lets go: Trends is a page of its own
+/// (`WrittenTimelineStore`).
 public enum RuleKind: Hashable, Sendable {
     /// Everything that arrived through this source. Always for that one source.
     case source(host: String)

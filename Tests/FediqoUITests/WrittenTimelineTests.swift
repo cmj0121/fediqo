@@ -43,7 +43,6 @@ struct WrittenTimelineTests {
             try #require(Rule.author("bob@x.example", in: .source(host: "m.example"), effect: .exclude, sources: [])),
             try #require(Rule.keyword("swift", in: .every)),
             try #require(Rule.keyword("spoiler", in: .source(host: "m.example"), effect: .exclude)),
-            try #require(Rule.category(.trends, in: .every, sources: [])),
             try #require(Rule.category(.public, in: .source(host: "m.example"), sources: [])),
             try #require(Rule.category(.home, in: .every, sources: [])),
             try #require(Rule.category(.list(id: "7"), in: .source(host: "m.example"), sources: [])),
@@ -236,7 +235,7 @@ struct WrittenTimelineTests {
         #expect(after.written == before.written)
         #expect(after.written.map(\.name) == ["Second", "First"])
         #expect(after.queries == before.queries)
-        #expect(after.written[1].rules.count == 10)
+        #expect(after.written[1].rules.count == 9)
         #expect(after.written.map(\.desc) == [nil, nil])
     }
 
@@ -248,7 +247,7 @@ struct WrittenTimelineTests {
         #expect(store.load() == .timelines([timeline]))
     }
 
-    @Test("The kept shape is frozen: these kind, effect and category strings read back")
+    @Test("The kept shape is frozen: these kind, effect and category strings read back, and a trends rule is let go")
     func frozenShape() throws {
         let store = freshStore()
         let json = #"""
@@ -271,10 +270,57 @@ struct WrittenTimelineTests {
             .author(handle: "ada@m.example", in: .every),
             .keyword("swift", in: .source(host: "m.example")),
             .category(.board(id: "42"), in: .source(host: "f.example")),
-            .category(.trends, in: .every),
         ])
         #expect(read[0].rules[1].effect == .exclude)
         #expect(read[0].desc == nil)
+    }
+
+    @Test("A kept rule on what is trending is let go without a word; a timeline whose one rule it was loads with none")
+    func trendsRuleLetGo() throws {
+        let store = freshStore()
+        let json = #"""
+        {"version":3,"timelines":[
+          {"id":"11111111-1111-1111-1111-111111111111","name":"Mixed","rules":[
+            {"id":"00000000-0000-0000-0000-000000000001","effect":"include","kind":"keyword","value":"swift"},
+            {"id":"00000000-0000-0000-0000-000000000002","effect":"exclude","kind":"category","category":{"kind":"trends"},"host":"m.example"},
+            {"id":"00000000-0000-0000-0000-000000000003","effect":"include","kind":"category","category":{"kind":"public"}}
+          ]},
+          {"id":"22222222-2222-2222-2222-222222222222","name":"Rising","rules":[
+            {"id":"00000000-0000-0000-0000-000000000004","effect":"include","kind":"category","category":{"kind":"trends"}}
+          ]}
+        ]}
+        """#
+        store.defaults.set(Data(json.utf8), forKey: store.key)
+
+        let session = session(store)
+        #expect(!session.timelinesUnreadable)
+        #expect(session.toast == nil)
+        #expect(session.written.map(\.name) == ["Mixed", "Rising"])
+        #expect(session.written[0].rules.map(\.kind) == [.keyword("swift", in: .every), .category(.public, in: .every)])
+        #expect(session.written[1].rules.isEmpty)
+    }
+
+    @Test("The next save writes the timelines without the trends rule, in the shape a build from before reads")
+    func trendsRuleGoneOnSave() throws {
+        let store = freshStore()
+        let json = #"""
+        {"version":3,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"Mixed","rules":[
+          {"id":"00000000-0000-0000-0000-000000000001","effect":"include","kind":"keyword","value":"swift"},
+          {"id":"00000000-0000-0000-0000-000000000002","effect":"include","kind":"category","category":{"kind":"trends"}}
+        ]}]}
+        """#
+        store.defaults.set(Data(json.utf8), forKey: store.key)
+        let session = session(store)
+        session.commit(draft("Second", in: session))
+
+        let data = try #require(store.defaults.data(forKey: store.key))
+        #expect(!String(decoding: data, as: UTF8.self).contains("trends"))
+        let top = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(top["version"] as? Int == 3)
+        let rows = try #require(top["timelines"] as? [[String: Any]])
+        let rules = try #require(rows.first { $0["name"] as? String == "Mixed" }?["rules"] as? [[String: Any]])
+        #expect(rules.map { $0["kind"] as? String } == ["keyword"])
+        #expect(store.load() == .timelines(session.written))
     }
 
     @Test("What is written carries version 3 and nothing but the known fields")
@@ -453,8 +499,8 @@ struct WrittenTimelineTests {
         let groups = RuleBuilder.categories(in: [microblog, forum], notes: notes, signedIn: { _ in false })
         #expect(groups.map(\.host) == ["m.example", "f.example"])
         // Home is not offered for a signed-out source, but it is where held posts came through it.
-        #expect(groups[0].categories == [.public, .trends, .home])
-        #expect(groups[1].categories == [.trends, .board(id: "42")])
+        #expect(groups[0].categories == [.public, .home])
+        #expect(groups[1].categories == [.board(id: "42")])
         #expect(RuleText.categoryName(.board(id: "42"), host: "f.example", sources: [forum]) == "Dev")
         #expect(RuleBuilder.authors(in: notes) == ["ada@m.example", "kim@f.example"])
     }
@@ -465,10 +511,10 @@ struct WrittenTimelineTests {
                             lists: [ListSubscription(id: "7", name: "Friends"), ListSubscription(id: "9", name: "Work")])
         let sources = [listed, forum]
         let out = RuleBuilder.categories(in: sources, notes: [], signedIn: { _ in false })
-        #expect(out[0].categories == [.public, .trends, .list(id: "7"), .list(id: "9")])
+        #expect(out[0].categories == [.public, .list(id: "7"), .list(id: "9")])
         let signedIn = RuleBuilder.categories(in: sources, notes: [], signedIn: { $0 == "m.example" })
-        #expect(signedIn[0].categories == [.public, .trends, .home, .list(id: "7"), .list(id: "9")])
-        #expect(signedIn[1].categories == [.trends, .board(id: "42")])
+        #expect(signedIn[0].categories == [.public, .home, .list(id: "7"), .list(id: "9")])
+        #expect(signedIn[1].categories == [.board(id: "42")])
 
         #expect(RuleText.categoryName(.list(id: "7"), host: "m.example", sources: sources) == "Friends")
         let friends = try #require(Rule.category(.list(id: "7"), in: .source(host: "m.example"), sources: sources))

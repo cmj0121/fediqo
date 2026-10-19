@@ -666,8 +666,8 @@ struct RuleDraft: Equatable {
     }
 
     /// Picks a target, keeping the scope where it is still one of its choices. A category is
-    /// picked under one source's heading, so it is that source's to begin with — public, trends
-    /// and home too, which every Mastodon offers; `o` widens it.
+    /// picked under one source's heading, so it is that source's to begin with — public and home
+    /// too, which every Mastodon offers; `o` widens it.
     mutating func pick(_ picked: RuleTarget, sources: [Source]) {
         target = picked
         if case .author(let handle) = picked { typed = handle }
