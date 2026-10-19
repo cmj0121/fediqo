@@ -239,7 +239,7 @@ struct FeaturingTests {
         #expect(work.record.filter { $0.reached == Self.host && $0.purpose == .person }.count >= 2)
 
         let said = try #require(features.said(of: Self.ada, said: page, own: false, in: session))
-        #expect(said.tags.map(\.name) == ["swift", "maps"] && !said.tagsAsking && !said.tagsFailed)
+        #expect(said.tags.map(\.name) == ["swift", "maps"] && features.ask(of: Self.ada, said: page, in: session) == PageAsking())
         #expect(said.tagsTitle(language: .english) == "Hashtags they feature")
         #expect(said.said(of: said.tags[0], language: .english) == "41 of their posts, the last on Oct 3")
         #expect(said.said(of: said.tags[1], language: .english) == "None of their posts yet")
@@ -275,7 +275,7 @@ struct FeaturingTests {
         #expect(!bare.blocks.contains(.featuredTags) && !bare.blocks.contains(.featuredPeople))
     }
 
-    @Test("Absent where the host has none: a not-found of the people featured is written down for the run and not asked again; a not-found of somebody's featured hashtags draws no block and is never taken for the host having none; with no sign-in a refusal draws no block and ends no sign-in; a failure says so with the press that asks again")
+    @Test("Absent where the host has none: a not-found of the people featured is written down for the run and not asked again; a not-found of somebody's featured hashtags draws no block and is never taken for the host having none; with no sign-in a refusal draws no block and ends no sign-in; a failure is said in the page's toast, and asked again by `r`")
     func absentOnlyFromItsOwnWord() async throws {
         let (session, server, _) = await session([Self.theirTags: Self.notFound, Self.theirPeople: Self.notFound])
         try await signIn(session)
@@ -294,8 +294,8 @@ struct FeaturingTests {
         await fresh.features.opened(Self.ada, said: page, in: again)
         await server2.answer(Self.theirTags, PageServer.Answer(body: "[\(Self.featured())]"))
         let failed = try #require(fresh.features.said(of: Self.ada, said: page, own: false, in: again))
-        #expect(failed.tagsDrawn && failed.tagsFailed && failed.failedWords(language: .english) == "Could not ask m.example for the hashtags they feature.")
-        #expect(failed.press(on: FeaturedSaid.tagsID) == .again)
+        #expect(!failed.tagsDrawn && fresh.features.ask(of: Self.ada, said: page, in: again).failed == [Self.host], "the miss is the toast's")
+        #expect(failed.press(on: FeaturedSaid.tagsID) == nil)
         await fresh.features.again(Self.ada, said: page, in: again)
         #expect(fresh.features.said(of: Self.ada, said: page, own: false, in: again)?.tags.map(\.name) == ["swift"])
         #expect(await server2.asked.filter { $0 == Self.theirPeople }.count == 1, "absent: asked no more")
@@ -310,7 +310,7 @@ struct FeaturingTests {
         await anyone.features.opened(Self.ada, said: page, in: unsigned)
         #expect(await server3.bearers.allSatisfy(\.isEmpty))
         let refused = try #require(anyone.features.said(of: Self.ada, said: page, own: false, in: unsigned))
-        #expect(!refused.tagsDrawn && !refused.tagsFailed && refused.people == nil)
+        #expect(!refused.tagsDrawn && anyone.features.ask(of: Self.ada, said: page, in: unsigned).failed.isEmpty && refused.people == nil)
         #expect(unsigned.mastodon.ended.isEmpty)
         #expect(anyone.more.hosts.has(.featuredTags, at: Self.host) != .absent)
 
@@ -320,6 +320,157 @@ struct FeaturingTests {
     }
 
     // MARK: - A hashtag featured from its page
+
+    @Test("What they feature, being asked, is About's toast and a wait Stop stops: stopped, nothing is said to have failed, what comes late lands nowhere, and asking again says nothing of the stop")
+    func stopOnWhatTheyFeature() async throws {
+        let (session, server, _) = await session([
+            Self.theirTags: PageServer.Answer(body: "[\(Self.featured())]"), Self.theirPeople: PageServer.Answer(body: "[]"),
+        ])
+        try await signIn(session)
+        let features = ShellPersonPages().features
+        let page = try Self.page()
+        #expect(!features.stop(Self.ada), "nothing on the wire: nothing stopped")
+        await server.hold(Self.theirTags)
+        defer { Task { await server.release(Self.theirTags) } }
+        let tagsGuard = watching("the ask of \(Self.theirTags), held at its server") { await server.release(Self.theirTags) }
+        defer { tagsGuard.cancel() }
+        let opening = Task { await features.opened(Self.ada, said: page, in: session) }
+        await server.arrival(of: Self.theirTags, by: opening)
+        #expect(features.ask(of: Self.ada, said: page, in: session, language: .english)
+            == PageAsking(asking: "Asking m.example for the hashtags they feature…", stoppable: true))
+        #expect(features.stop(Self.ada))
+        #expect(features.ask(of: Self.ada, said: page, in: session) == PageAsking(stopped: true))
+        await server.release(Self.theirTags)
+        await opening.value
+        #expect(features.said(of: Self.ada, said: page, own: false, in: session)?.tags.isEmpty == true, "what came late landed nowhere")
+        await features.again(Self.ada, said: page, in: session)
+        #expect(features.ask(of: Self.ada, said: page, in: session) == PageAsking())
+        #expect(features.said(of: Self.ada, said: page, own: false, in: session)?.tags.count == 1)
+    }
+
+    /// Somebody's whole page as `again` asks it: who they are, how the reader stands, what they
+    /// feature, and their posts and what they pinned.
+    private static func wholePage(stands: PageServer.Answer = said(standing())) -> [String: PageServer.Answer] {
+        [
+            "/api/v1/accounts/lookup?acct=ada": PageServer.Answer(body: #"{"id":"42","acct":"ada","display_name":"Ada","statuses_count":3}"#),
+            "/api/v1/accounts/42/statuses": PageServer.Answer(body: "[]"),
+            "/api/v1/accounts/42/statuses?pinned=true": PageServer.Answer(body: "[]"),
+            Self.stands: stands, Self.theirTags: PageServer.Answer(body: "[\(Self.featured())]"),
+            Self.theirPeople: PageServer.Answer(body: "[]"),
+        ]
+    }
+
+    private static func said(_ standing: String) -> PageServer.Answer { PageServer.Answer(body: "[\(standing)]") }
+
+    private func opened(_ pages: ShellPersonPages, on tab: PersonTab, in session: ShellSession) async {
+        await pages.opened(Self.ada, in: session)
+        await pages.standsOpened(to: Self.ada, in: session)
+        await pages.featuredOpened(Self.ada, in: session)
+        turn(pages, to: tab, in: session)
+        await pages.fronted(Self.ada, in: session)
+    }
+
+    private func turn(_ pages: ShellPersonPages, to tab: PersonTab, in session: ShellSession) {
+        var lamp: String?
+        _ = pages.turn(Self.ada, to: tab, lamp: &lamp, in: session)
+    }
+
+    @Test("Stop pressed while asking again reads how the reader stands, or what they feature, ends the press there: nothing after it is asked — not what they feature, not the tab in front — and the toast says the stop, and stays saying it")
+    func stopEndsThePressAtItsStep() async throws {
+        for held in [Self.stands, Self.theirTags] {
+            let (session, server, _) = await session(Self.wholePage())
+            try await signIn(session)
+            let pages = ShellPersonPages()
+            await opened(pages, on: .posts, in: session)
+            if held == Self.theirTags {
+                // Every tab holds something, so a press that went on past its stop would let it go.
+                turn(pages, to: .pinned, in: session)
+                await pages.fronted(Self.ada, in: session)
+                turn(pages, to: .about, in: session)
+            }
+            let before = await server.asked
+            await server.hold(held)
+            defer { Task { await server.release(held) } }
+            let heldGuard = watching("the ask of \(held), held at its server") { await server.release(held) }
+            defer { heldGuard.cancel() }
+            let pull = Task { await pages.again(Self.ada, in: session) }
+            await server.arrival(of: held, times: 2, by: pull)
+            #expect(pages.ask(of: Self.ada, in: session).stoppable, "\(held)")
+            #expect(pages.stop(Self.ada, in: session))
+            await server.release(held)
+            await pull.value
+            let after = Array(await server.asked.dropFirst(before.count))
+            // The steps up to the one stopped, in the order `again` takes them, and nothing after.
+            let steps = ["/api/v1/accounts/lookup?acct=ada", Self.stands] + (held == Self.stands ? [] : [Self.theirTags, Self.theirPeople])
+            #expect(after.allSatisfy(steps.contains), "nothing after the stopped step was asked: \(after)")
+            #expect(pages.ask(of: Self.ada, in: session) == PageAsking(stopped: true), "\(held)")
+            // And nothing the other tabs held was let go for the press.
+            #expect(pages.said(of: Self.ada, in: session)?.posts != nil, "Posts still holds its stretch: \(held)")
+            if held == Self.theirTags {
+                #expect(pages.pinned(of: Self.ada, in: session)?.answered == true, "Pinned still holds what it was given")
+            }
+        }
+    }
+
+    @Test("A Stop is the page's it was pressed on: Stop on somebody else's page, opened meanwhile, does not end a press still asking on this one, which goes on to its end")
+    func aStopOnAnotherPageEndsNothingHere() async throws {
+        let bo = try #require(DummyPerson(handle: "@bo@m.example", host: Self.host))
+        let boLookup = "/api/v1/accounts/lookup?acct=bo"
+        var routes = Self.wholePage()
+        routes[boLookup] = PageServer.Answer(body: #"{"id":"43","acct":"bo","display_name":"Bo"}"#)
+        let (session, server, _) = await session(routes)
+        try await signIn(session)
+        let pages = ShellPersonPages()
+        await opened(pages, on: .posts, in: session)
+        let tags = await server.arrivals(of: Self.theirTags), posts = await server.arrivals(of: "/api/v1/accounts/42/statuses")
+
+        await server.hold(Self.stands)
+        await server.hold(boLookup)
+        defer { Task { await server.release(Self.stands); await server.release(boLookup) } }
+        let heldGuard = watching("the asks of \(Self.stands) and \(boLookup), held at their server") {
+            await server.release(Self.stands)
+            await server.release(boLookup)
+        }
+        defer { heldGuard.cancel() }
+        let pull = Task { await pages.again(Self.ada, in: session) }
+        await server.arrival(of: Self.stands, times: 2, by: pull)
+        let other = Task { await pages.opened(bo, in: session) }
+        await server.arrival(of: boLookup, by: other)
+        #expect(pages.stop(bo, in: session), "Bo's page had its ask out")
+        await server.release(Self.stands)
+        await pull.value
+        #expect(await server.arrivals(of: Self.theirTags) == tags + 1, "what Ada features was asked again")
+        #expect(await server.arrivals(of: "/api/v1/accounts/42/statuses") == posts + 1, "and her Posts from the top")
+        #expect(!pages.ask(of: Self.ada, in: session).stopped && pages.ask(of: bo, in: session).stopped)
+        await server.release(boLookup)
+        await other.value
+    }
+
+    @Test("How the reader stands is waited on in the toast on every tab, as the head says it on every tab; that it failed is said on About and Posts, and not on a tab of what they pinned or of people")
+    func whereTheStandingIsSaid() async throws {
+        let (session, server, _) = await session(Self.wholePage(stands: Self.down))
+        try await signIn(session)
+        let pages = ShellPersonPages()
+        await opened(pages, on: .posts, in: session)
+        #expect(pages.ask(of: Self.ada, in: session).failed == [Self.host], "Posts")
+        turn(pages, to: .about, in: session)
+        #expect(pages.ask(of: Self.ada, in: session).failed == [Self.host], "About")
+        turn(pages, to: .pinned, in: session)
+        await pages.fronted(Self.ada, in: session)
+        #expect(pages.ask(of: Self.ada, in: session) == PageAsking(), "Pinned says nothing of the standing's miss")
+
+        await server.answer(Self.stands, Self.said(Self.standing()))
+        await server.hold(Self.stands)
+        defer { Task { await server.release(Self.stands) } }
+        let standsGuard = watching("the ask of \(Self.stands), held at its server") { await server.release(Self.stands) }
+        defer { standsGuard.cancel() }
+        let asking = Task { await pages.acts.again(Self.ada, said: pages.said(of: Self.ada, in: session), in: session) }
+        await server.arrival(of: Self.stands, times: 2, by: asking)
+        #expect(pages.ask(of: Self.ada, in: session, language: .english)
+            == PageAsking(asking: "Asking m.example how you stand to them…", stoppable: true), "its wait is said on Pinned too")
+        await server.release(Self.stands)
+        await asking.value
+    }
 
     @Test("A hashtag's About has a feature row under each source's follow row; at a Mastodon whose answer says whether it is featured nothing more is asked; Feature is one post naming it, as the reader, listed as a write; then the row's `…` holds Take off your profile, which reads the reader's own featured hashtags for the featuring's id and takes it off")
     func aHashtagFeatured() async throws {
@@ -424,7 +575,7 @@ struct FeaturingTests {
         let features = ShellPersonPages().features
         let page = try Self.page()
         await features.opened(Self.ada, said: page, in: session)
-        #expect(features.said(of: Self.ada, said: page, own: false, in: session)?.tagsFailed == true)
+        #expect(features.ask(of: Self.ada, said: page, in: session).failed == [Self.host])
 
         features.forget(Self.ada.id)
         #expect(features.said(of: Self.ada, said: page, own: false, in: session) == nil)
@@ -705,7 +856,7 @@ struct FeaturingTests {
             guard prefixes.contains(where: { line.hasPrefix($0) }) else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 33)
+        #expect(keys.count == 31)
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }
@@ -735,10 +886,8 @@ struct FeaturingTests {
         featured.people = PeopleList(featuredBy: person)
         var about = PersonAboutSaid(source: Self.host, view: "As m.example says", person: person)
         about.featured = featured
-        var asking = about
-        asking.featured = FeaturedSaid(source: Self.host, tagsAsking: true)
-        var failed = about
-        failed.featured = FeaturedSaid(source: Self.host, tagsFailed: true)
+        var nothing = about
+        nothing.featured = FeaturedSaid(source: Self.host)
         let follow = TagFollowLine(host: Self.host, tag: Self.swift, standing: .said(true))
         let rows: [[TagFeatureLine]] = [
             [TagFeatureLine(host: Self.host, tag: Self.swift, standing: .said(false))],
@@ -747,7 +896,7 @@ struct FeaturingTests {
             [TagFeatureLine(host: Self.host, tag: Self.swift, standing: .locked(PartWords.Place(kind: .unasked, key: "part.account.unasked")))],
         ]
         for (width, scheme) in [(CGFloat(720), ColorScheme.light), (390, .dark), (320, .light), (320, .dark)] {
-            for said in [about, asking, failed] {
+            for said in [about, nothing] {
                 #expect(size(PersonAbout(said: said) { EmptyView() }, width, scheme).width == width)
             }
             for features in rows {

@@ -101,6 +101,8 @@ final class ShellPersonActs {
     static let kept = ShellPersonPages.kept
 
     private var pages: [String: Page] = [:]
+    /// The pages whose last read of how the reader stands was stopped, until it is read again.
+    private var halted: Set<String> = []
     /// The presses out, each with the act on its way, by the page's own key: the one guard of
     /// a press (`PressGuard`), as a mark on a post has.
     private var presses = PressGuard<String, PersonAct>()
@@ -242,6 +244,36 @@ final class ShellPersonActs {
         return acting
     }
 
+    /// What the page of `who` says in its toast of how the reader stands to them (DESIGN-reload):
+    /// the source being asked — a wait Stop stops — that its last answer did not come, or that
+    /// it was stopped. Nothing where nobody is asked.
+    func ask(of who: DummyPerson, said: PersonSaid?, in session: ShellSession, language: DummyLanguage? = nil) -> PageAsking {
+        guard let person = said?.person, let source = Self.source(of: who, in: session),
+              let page = self.standing(who.id, of: person.accountID, at: source.host, in: session)
+        else { return PageAsking() }
+        return PageAsking(
+            asking: page.asking ? TimelineToast.waiting("person.stands.asking", hosts: [source.host], language: language) : nil,
+            stoppable: page.asking,
+            failed: page.failed && !page.asking ? [source.host] : [],
+            stopped: halted.contains(who.id)
+        )
+    }
+
+    /// Stop on the page of `who`: how the reader stands to them is asked no further, what the
+    /// source said before stands, and whatever is on the wire lands nowhere. Whether a read was
+    /// out.
+    @discardableResult
+    func stop(_ who: DummyPerson) -> Bool {
+        let key = who.id
+        guard pages[key]?.asking == true else { return false }
+        asks[key]?.cancel()
+        asks[key] = nil
+        pages[key]?.awaits = errands.next()
+        pages[key]?.asking = false
+        halted.insert(key)
+        return true
+    }
+
     // MARK: - Letting go
 
     /// Everything of `host` let go, and its reads called off: its reader is no longer who
@@ -282,7 +314,7 @@ final class ShellPersonActs {
         await begin(who.id, of: person.accountID, far: !person.livesHere, at: source, with: held, in: session).value
     }
 
-    /// `r` and a failure's "Try again": the source asked once more. What it said before stays
+    /// `r`, the bar's mark and a pull: the source asked once more. What it said before stays
     /// drawn until the answer lands. **A press while it is being asked asks nothing.**
     func again(_ who: DummyPerson, said: PersonSaid?, in session: ShellSession) async {
         guard let person = said?.person, let source = Self.source(of: who, in: session),
@@ -312,6 +344,7 @@ final class ShellPersonActs {
         let errand = errands.next()
         pages[key]?.awaits = errand
         pages[key]?.asking = true
+        halted.remove(key)
         // One read out a page: a read begun over another supersedes it.
         asks[key]?.cancel()
         let through = session.reach.standing(session.mastodon.authorized(token: held, within: deadline, for: .person))
@@ -708,11 +741,6 @@ extension ShellPersonPages {
         await acts.opened(who, said: said(of: who, in: session), in: session)
     }
 
-    /// A failure's "Try again" under the heading.
-    func standsAgain(to who: DummyPerson, in session: ShellSession) async {
-        await acts.again(who, said: said(of: who, in: session), in: session)
-    }
-
     /// A press on the page of `who`: its heading's Follow, or an item of its `…`. **Featuring
     /// where the sign-in lacks the account part only asks for it**: nothing is sent.
     func act(_ act: PersonAct, on who: DummyPerson, in session: ShellSession) async {
@@ -745,7 +773,7 @@ extension ShellPersonPages {
     func followByKey(
         place: ShellPlace, open: Set<DummyLayer>, person: DummyPerson?, tag: PostTag?, in session: ShellSession
     ) -> Bool {
-        guard place == .timeline, DummyCommand.canWalk(whenOpen: open) else { return false }
+        guard place.isStream, DummyCommand.canWalk(whenOpen: open) else { return false }
         if let person { return followByKey(person, in: session) }
         guard let tag else { return false }
         return tags.followByKey(tag, in: session) != nil

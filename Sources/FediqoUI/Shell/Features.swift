@@ -13,9 +13,6 @@ struct FeaturedSaid: Equatable {
     /// Whether the page is the reader's own: its sentences say "you".
     var own = false
     var tags: [FeaturedTag] = []
-    /// Whether their hashtags are being asked for, and whether that failed.
-    var tagsAsking = false
-    var tagsFailed = false
     /// The list of the people they feature, where the source said there is somebody in it.
     var people: PeopleList?
     /// Whether a row's `…` holds Take off your profile: on the reader's own page alone.
@@ -26,8 +23,9 @@ struct FeaturedSaid: Equatable {
     /// The sentences of a taking off that did not arrive, said under the hashtags.
     var missed: [String] = []
 
-    /// Whether the hashtags have a block: some to draw, or the ask's own sentence.
-    var tagsDrawn: Bool { !tags.isEmpty || tagsAsking || tagsFailed }
+    /// Whether the hashtags have a block: some to draw. Being asked, and an ask that came to
+    /// nothing, are the page's toast to say (DESIGN-reload).
+    var tagsDrawn: Bool { !tags.isEmpty }
 
     static let peopleID = "about.featured.people"
     static let tagsID = "about.featured.tags"
@@ -35,9 +33,8 @@ struct FeaturedSaid: Equatable {
     /// What the lamp calls the row of `tag`.
     static func lamp(of tag: PostTag) -> String { "about.featured.tag:" + HeldUnderTag.folded(tag) }
 
-    /// The rows `j` and `k` walk in the hashtags' block: one a hashtag, or the block itself
-    /// while it says it is asking or could not ask.
-    var tagRows: [String] { tags.isEmpty ? [Self.tagsID] : tags.map { Self.lamp(of: $0.tag) } }
+    /// The rows `j` and `k` walk in the hashtags' block: one a hashtag.
+    var tagRows: [String] { tags.map { Self.lamp(of: $0.tag) } }
 
     func tagsTitle(language: DummyLanguage? = nil) -> String {
         L10n.t(own ? "person.featured.tags.own" : "person.featured.tags", language: language)
@@ -68,14 +65,6 @@ struct FeaturedSaid: Equatable {
             .joined(separator: L10n.t("people.row.between", language: language))
     }
 
-    func askingWords(language: DummyLanguage? = nil) -> String? {
-        tagsAsking && tags.isEmpty ? String(format: L10n.t("person.featured.tags.asking", language: language), source) : nil
-    }
-
-    func failedWords(language: DummyLanguage? = nil) -> String? {
-        tagsFailed ? String(format: L10n.t("person.featured.tags.failed", language: language), source) : nil
-    }
-
     /// The `…` of the row of `featured` (#318), on the reader's own page alone: Take off your
     /// profile, plain and at once — its press is `act` — or dim with the account part's lock,
     /// the part's sentence at the head, its press `act` too where the part may be asked for.
@@ -103,17 +92,14 @@ struct FeaturedSaid: Equatable {
     /// What Return does with the lamp on the row `id`, where that row is one of these.
     func press(on id: String) -> FeaturedPress? {
         if id == Self.peopleID, let people { return .people(people) }
-        if id == Self.tagsID, tagsFailed { return .again }
         return tags.first { Self.lamp(of: $0.tag) == id }.map { .tag($0.tag) }
     }
 }
 
-/// A press on what somebody features: a hashtag's page, the list of the people, or the
-/// hashtags asked again.
+/// A press on what somebody features: a hashtag's page, or the list of the people.
 enum FeaturedPress: Equatable {
     case tag(PostTag)
     case people(PeopleList)
-    case again
     /// Take off your profile, from the `…` of a row of the reader's own (#318).
     case takeOff(PostTag)
 }

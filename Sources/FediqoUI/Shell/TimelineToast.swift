@@ -89,6 +89,30 @@ struct TimelineToast: Equatable, Sendable {
         return String(format: L10n.t("timeline.reload.more", language: language), one, pieces.count - 1)
     }
 
+    /// What a page opened over the stream says of its own asking (DESIGN-reload): `shown`
+    /// under it, so the order is the timeline's own — a wait first, a live note over what is
+    /// left of the last ask, then that ask stopped, then the sources it missed.
+    static func asked(_ ask: PageAsking, note: String?, language: DummyLanguage? = nil) -> TimelineToast? {
+        if let asking = ask.asking { return shown(running: true, line: asking, stopped: false, note: note) }
+        let line = ask.stopped
+            ? L10n.t("timeline.reload.stopped", language: language)
+            : ask.failed.isEmpty ? nil
+            : String(format: L10n.t("timeline.reload.failed", language: language), ask.failed.joined(separator: ", "))
+        return shown(running: false, line: line, stopped: ask.stopped, note: note)
+    }
+
+    /// A page's wait in its own words: the sentence `key` says of the first of `hosts`, with
+    /// `extra` after the host, and how many more are asked as "+2" (`timeline.reload.more`).
+    /// Nothing where nobody is asked.
+    static func waiting(
+        _ key: String, hosts: [String], extra: [String] = [], language: DummyLanguage? = nil
+    ) -> String? {
+        guard let first = hosts.first else { return nil }
+        let one = String(format: L10n.t(key, language: language), arguments: [first] + extra)
+        guard hosts.count > 1 else { return one }
+        return String(format: L10n.t("timeline.reload.more", language: language), one, hosts.count - 1)
+    }
+
     /// The mark beside a wait: a spinner while motion is allowed, an hourglass at rest
     /// when it is not. A wait is not a launch, so this is not the mascot.
     static func waitMark(reduceMotion: Bool) -> WaitMark {
@@ -106,6 +130,50 @@ struct TimelineToast: Equatable, Sendable {
             case .hourglass: "hourglass"
             }
         }
+    }
+}
+
+/// What one page is asking of its sources now, read off its store each pass and never kept
+/// (DESIGN-reload): what the page's bottom toast says, and whether its mark is Stop.
+///
+/// **The store is the one place an ask is known to run**, so this is worked out from the flags
+/// it already keeps, and a page opened over the stream says its own ask and nobody else's.
+struct PageAsking: Equatable, Sendable {
+    /// The wait in the page's own words, or nothing where nothing of the page is on the wire.
+    var asking: String?
+    /// Whether the wait is one the reader pressed for — opening, `r`, the mark, a pull — and
+    /// not a reading-on, which goes on to its end as the timeline's does.
+    var stoppable = false
+    /// The sources the page's last ask missed, in the order they stand.
+    var failed: [String] = []
+    /// The page's last ask was stopped; said until the page asks again.
+    var stopped = false
+}
+
+/// The bottom toast of a page (DESIGN-reload): the capsule, at the foot beside the floating
+/// corner, eased in and out as the timeline's always was. **One for every page**, so a wait on
+/// Notices, on somebody's page or on a tab of Trends comes and goes exactly as the timeline's.
+///
+/// `work` and `reading` are the stream's alone: what its reload has on the wire, piece by piece
+/// (#170). A page's wait is worded by its store.
+struct ReloadToast: ViewModifier {
+    let toast: TimelineToast?
+    var work: SourceWork? = nil
+    var reading: Set<SourceWork.Purpose> = []
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .bottom) {
+                if let toast {
+                    TimelineToastBanner(toast: toast, work: work, reading: reading)
+                        .padding(.bottom, ShellSpace.pad)
+                        // At the foot of the page, beside the compose button where it floats and
+                        // never under it or over it (#302).
+                        .standsBesideFloatingCorner(by: ShellSpace.pad)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: toast)
     }
 }
 

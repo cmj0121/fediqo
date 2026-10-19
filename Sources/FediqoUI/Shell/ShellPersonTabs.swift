@@ -68,6 +68,8 @@ final class ShellPersonTabs {
     /// is read only as a tab is brought in front.
     @ObservationIgnored private var lamps: [String: [PersonTab: String]] = [:]
     private var pinned: [String: Pinned] = [:]
+    /// The pages whose last ask for what they pinned was stopped, until it is asked again.
+    private var halted: Set<String> = []
     @ObservationIgnored private var built = PageRows()
     /// The one ask on the wire for what each person pinned — from the top, or a reading-on.
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
@@ -130,10 +132,11 @@ final class ShellPersonTabs {
         lamps[id] = nil
     }
 
-    /// The walk has ended in one go: every page's tab in front is forgotten.
-    func leftAll() {
-        fronts = [:]
-        lamps = [:]
+    /// The walk has ended in one go: every page's tab in front is forgotten — but those of the
+    /// pages `kept` names, still steps of the other stream place's walk.
+    func leftAll(but kept: Set<String> = []) {
+        fronts = fronts.filter { kept.contains($0.key) }
+        lamps = lamps.filter { kept.contains($0.key) }
     }
 
     /// Everything kept of the page `id` names let go: it is no longer one of the pages kept.
@@ -189,25 +192,57 @@ final class ShellPersonTabs {
         }
         guard let page = self.standing(who.id, of: person.accountID, at: source.host, in: session) else { return handed }
         handed.answered = page.answered
-        handed.failed = page.failed
         handed.posts = page.answered ? built.rows(of: who.id, page.read, in: session) : []
         handed.foot = Self.foot(of: page)
         return handed
     }
 
+    /// What stands under what they pinned. **Nothing while a stretch is on the wire**, and a
+    /// stretch that did not come is the foot that reads on again: both are the toast's to say.
     private static func foot(of page: Pinned) -> PersonSaid.Foot? {
-        guard page.answered else { return nil }
-        if page.readingOn { return .reading }
+        guard page.answered, !page.readingOn else { return nil }
         if page.notPaging { return .stopped }
-        if page.footFailed { return .failed }
         if page.read.next != nil { return .more }
         // Nothing under no posts: what stands there says the source gave none.
         return page.read.posts.isEmpty ? nil : .end
     }
 
+    /// What the Pinned tab of the page of `who` says in its toast (DESIGN-reload): asked from the
+    /// top — a wait Stop stops — or read on, which is not; that the last ask did not come; or
+    /// that it was stopped.
+    func ask(
+        of who: DummyPerson, beside said: PersonSaid?, in session: ShellSession, language: DummyLanguage? = nil
+    ) -> PageAsking {
+        guard let person = said?.person, let source = ShellPersonPages.source(of: who, in: session),
+              let page = self.standing(who.id, of: person.accountID, at: source.host, in: session)
+        else { return PageAsking() }
+        let asking = page.asking
+            ? TimelineToast.waiting("person.pinned.asking", hosts: [source.host], language: language)
+            : page.readingOn ? L10n.t("person.foot.reading", language: language) : nil
+        return PageAsking(
+            asking: asking, stoppable: page.asking,
+            failed: !page.asking && !page.readingOn && (page.failed || page.footFailed) ? [source.host] : [],
+            stopped: halted.contains(who.id)
+        )
+    }
+
+    /// The Pinned tab's Stop: the ask from the top for what the page `id` names pinned called
+    /// off, what the tab held standing, and whatever is on the wire landing nowhere. A
+    /// reading-on is not stopped. Whether anything was.
+    @discardableResult
+    func stopPinned(_ id: String) -> Bool {
+        guard pinned[id]?.asking == true else { return false }
+        asks[id]?.cancel()
+        asks[id] = nil
+        pinned[id]?.awaits = errands.next()
+        pinned[id]?.asking = false
+        halted.insert(id)
+        return true
+    }
+
     /// The Pinned tab of the page of `who` in front: what they pinned is asked for, once.
     /// Brought in front again it is drawn from what was answered — or from the failure, which
-    /// "Try again" asks about; while the ask is on the wire it is waited on. `again` is the
+    /// `r` asks about; while the ask is on the wire it is waited on. `again` is the
     /// person's own press: asked from the top whatever was answered, with what the tab holds
     /// drawn until the answer lands. **A press while it is being asked asks nothing.**
     func asked(_ who: DummyPerson, beside said: PersonSaid?, again: Bool, in session: ShellSession) async {
@@ -232,6 +267,7 @@ final class ShellPersonTabs {
         let errand = errands.next()
         pinned[id]?.awaits = errand
         pinned[id]?.asking = true
+        halted.remove(id)
         // A reading-on still on the wire is this ask's to supersede: it is called off, so one
         // ask is out, and whatever it brings late does not land.
         asks[id]?.cancel()
@@ -297,6 +333,7 @@ final class ShellPersonTabs {
         let errand = errands.next()
         pinned[id]?.awaits = errand
         pinned[id]?.readingOn = true
+        halted.remove(id)
         pinned[id]?.footFailed = false
         let through = self.door(to: source, with: looked.held, in: session)
         let accountID = person.accountID, askedAs = page.askedAs
@@ -372,14 +409,29 @@ extension ShellPersonPages {
     /// their steps goes.
     ///
     /// **A hashtag's page keeps its tab the same way** (F10), and forgets it with the last of
-    /// its steps. **And what is rising and what a search found their tabs' lamps** — the tab in
-    /// front of each is the step's own.
-    func left(_ step: ShellStep, of walk: ShellWalk) {
-        if case .tag(let tag) = step, !walk.holdsTag(tag) { tags.left(tag) }
-        if case .rising = step { rising.left() }
-        if case .found = step { found.left() }
-        guard case .person(let who) = step, !walk.holdsPerson(who.id) else { return }
+    /// its steps. **And what a search found its tabs' lamps** — the tab in front is the step's
+    /// own. **`besides` is the other stream place's walk** (DESIGN-trends): a page still one of
+    /// its steps keeps its tab there.
+    func left(_ step: ShellStep, of walk: ShellWalk, besides other: ShellWalk = ShellWalk()) {
+        if case .tag(let tag) = step, !walk.holdsTag(tag), !other.holdsTag(tag) { tags.left(tag) }
+        if case .found = step, !other.steps.contains(where: \.isFound) { found.left() }
+        guard case .person(let who) = step, !walk.holdsPerson(who.id), !other.holdsPerson(who.id) else { return }
         tabs.left(who.id)
+    }
+
+    /// A walk ended in one go — `keeping` the hashtag's page left standing on it, where one is
+    /// (#197) — with `other`, the other stream place's walk, still as it was: every page's tab
+    /// in front forgotten but those still steps of `other`.
+    func leftAll(keeping kept: PostTag? = nil, besides other: ShellWalk = ShellWalk()) {
+        tabs.leftAll(but: Set(other.steps.compactMap { step in
+            if case .person(let who) = step { return who.id }
+            return nil
+        }))
+        tags.leftAll(but: [kept].compactMap { $0 } + other.steps.compactMap { step in
+            if case .tag(let tag) = step { return tag }
+            return nil
+        })
+        if !other.steps.contains(where: \.isFound) { found.left() }
     }
 
     // MARK: - What each part of the page is handed
@@ -502,7 +554,6 @@ extension ShellPersonPages {
         case .home(let asked): Task { await homePressed(asked, on: who, in: session) }
         case .askFollows: session.askFor([PersonAct.follow.needs], host: who.host)
         case .act(let pressed): Task { await act(pressed, on: who, in: session) }
-        case .featured(.again): Task { await features.again(who, said: said(of: who, in: session), in: session) }
         // A hashtag's page and the list of people are steps of the walk: whoever holds it takes them.
         case .featured(.tag), .featured(.people), .featured(.takeOff): return false
         }

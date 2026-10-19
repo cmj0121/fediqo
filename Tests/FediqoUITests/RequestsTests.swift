@@ -109,7 +109,8 @@ struct RequestsTests {
 
         try await signIn(session)
         let before = try #require(lists.said(of: Self.requests, in: session))
-        #expect(before.reading == .asking && before.stateLine(language: en) == "Asking m.example who asks to follow you…")
+        #expect(before.reading == .asking && before.stateLine() == nil)
+        #expect(TimelineToast.waiting(PeopleSaid.words(Self.requests.which) + ".asking", hosts: ["m.example"], language: en) == "Asking m.example who asks to follow you…")
         #expect(PeopleSaid.title(Self.requests, language: en) == "Who asks to follow you at m.example")
         #expect(PeopleSaid.title(Self.requests, language: .taiwanese) == "在 m.example 請求跟隨你的人")
         await lists.opened(Self.requests, in: session)
@@ -476,7 +477,7 @@ struct RequestsTests {
             "person.act.accept", "person.act.accept.spoken", "person.act.refuse", "person.act.removeFollower", "person.act.accept.failed",
             "person.act.refuse.failed", "person.act.removeFollower.failed", "person.refuse.ask.title", "person.refuse.ask.line",
             "person.removeFollower.ask.title", "person.removeFollower.ask.line", "people.requests.entry", "people.title.requests",
-            "people.requests.asking", "people.requests.failed", "people.requests.none", "people.requests.entry.count",
+            "people.requests.asking", "people.requests.none", "people.requests.entry.count",
         ]
         func places(_ text: String) -> [String] { text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted() }
         let tables = try ["en", "zh-TW", "zh-Hant"].map { name in

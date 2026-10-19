@@ -198,13 +198,14 @@ struct TimelineWindowTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let left = await walk(session, past: 400)
         session.timelineLeft(.all, at: left)
-        session.timelineID = .trends
+        session.stream = .trends
         _ = session.timelineItems(latest: nil)
         let asked = Asked()
         session.readPage = { query, ask, limit in
             await asked.ask()
             return try await file.page(query, ask, limit: limit)
         }
+        session.stream = .timeline
         session.timelineID = .all
         let items = session.timelineItems(latest: nil)
         let at = try #require(items.firstIndex { $0.id == left })
@@ -228,7 +229,7 @@ struct TimelineWindowTests {
         let left = await walk(session, past: 300)
         let number = try #require(session.timelineItems(latest: nil).first { $0.id == left }.flatMap(Self.number))
         session.timelineLeft(.all, at: left)
-        session.timelineID = .trends
+        session.stream = .trends
         _ = session.timelineItems(latest: nil)
         // Between two rows ten below the place, by a hand the pool never heard of.
         let late = Note(
@@ -236,6 +237,7 @@ struct TimelineWindowTests {
             postedAt: Self.at.addingTimeInterval(-Double(number + 10) * 60 + 30), categories: [.home]
         )
         try await file.save(RowChanges(upserts: [late]))
+        session.stream = .timeline
         session.timelineID = .all
         #expect(!session.timelineItems(latest: nil).contains { $0.noteID == "late" })
         await session.cover(latest: nil)

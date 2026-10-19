@@ -113,13 +113,14 @@ struct FoldHostedTests {
     }
 
     /// The narrow arrangement's switch, as `FediqoRootView.narrow` writes it, under the real
-    /// measurement.
+    /// measurement: the tabs' names measured and drawn, and every place in the pop-up.
     private static func narrow(
-        _ places: [ShellPlace], _ language: DummyLanguage = .english, measured: Measured? = nil
+        _ offered: ShellAvailability, _ language: DummyLanguage = .english, measured: Measured? = nil
     ) -> some View {
-        ShellArranged { _ in
-            ShellNarrow(titles: titles(places, language)) {
-                tabs(places, language)
+        let places = offered.enabledPlaces
+        return ShellArranged { _ in
+            ShellNarrow(titles: titles(offered.tabbedPlaces, language)) {
+                tabs(offered.tabbedPlaces, language)
             } folded: {
                 FoldedPlaces(place: .constant(places[0]), places: places, language: language) { Marker() }
             }
@@ -128,13 +129,21 @@ struct FoldHostedTests {
         }
     }
 
-    /// The sets of places a reader can have: everything; no sign-in, so no Notices; and no
-    /// source at all, so no Timeline and no Notices.
-    private static let offered: [[ShellPlace]] = [
-        ShellPlace.allCases,
-        ShellPlace.allCases.filter { $0 != .notices },
-        [.account, .usage, .preferences],
+    /// What a reader can hold: everything; a store with nothing rising (a forum alone), so no
+    /// Trends; and no source at all, so no Timeline either. Notices is always there (#323).
+    ///
+    /// **The strip is the tabs', and the tabs hold no Usage** (decision 9): a phone's bar holds
+    /// five, so Usage is drawn in Preferences' tab. Those five names are what the fold measures,
+    /// with Trends standing where Usage stood, so the line stays where it was; folded, the pop-up
+    /// lists every place, Usage among them.
+    private static let offered: [ShellAvailability] = [
+        ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: TrendsTab.allCases),
+        ShellAvailability(queryIDs: ["all"]),
+        .empty,
     ]
+
+    /// The reader holding everything, whose names are the ones that fold.
+    private static var full: ShellAvailability { offered[0] }
 
     private static let languages: [DummyLanguage] = [.english, .taiwanese]
 
@@ -154,7 +163,7 @@ struct FoldHostedTests {
     @Test("The strip's width the rule measures is the width the hosted strip wants")
     func theMeasuredWidthIsTheStrips() async throws {
         for language in Self.languages {
-            for places in Self.offered {
+            for places in Self.offered.map(\.tabbedPlaces) {
                 let view = await Self.host(Self.tabs(places, language), width: ShellLayout.breakpoint - 1)
                 let strip = try #require(Self.all(NSSegmentedControl.self, in: view).first)
                 #expect(strip.segmentCount == places.count)
@@ -174,7 +183,7 @@ struct FoldHostedTests {
     func theRuleFoldsWhereTheStripIsSqueezed() async throws {
         var asked = 0
         for language in Self.languages {
-            for places in Self.offered {
+            for places in Self.offered.map(\.tabbedPlaces) {
                 let titles = Self.titles(places, language)
                 let needed = ShellFold.stripWidth(titles)
                 let view = await Self.host(Self.tabs(places, language), width: ShellLayout.breakpoint - 1)
@@ -192,8 +201,8 @@ struct FoldHostedTests {
         }
         // Not vacuous: the English window at the floor with every place really does fold, the
         // Chinese one really does not, and the line was crossed in at least one set.
-        #expect(ShellFold.folds(width: ShellLayout.floor, titles: Self.titles(ShellPlace.allCases, .english)))
-        #expect(!ShellFold.folds(width: ShellLayout.floor, titles: Self.titles(ShellPlace.allCases, .taiwanese)))
+        #expect(ShellFold.folds(width: ShellLayout.floor, titles: Self.titles(Self.full.tabbedPlaces, .english)))
+        #expect(!ShellFold.folds(width: ShellLayout.floor, titles: Self.titles(Self.full.tabbedPlaces, .taiwanese)))
         #expect(asked > Self.languages.count * Self.offered.count * 2)
     }
 
@@ -203,10 +212,9 @@ struct FoldHostedTests {
     /// the named pop-up where it does not. Never both, and never neither.
     @Test("The narrow arrangement draws the tabs or the pop-up, as the rule says")
     func eitherTheTabsOrThePopUp() async {
-        let places = ShellPlace.allCases
-        let titles = Self.titles(places, .english)
+        let titles = Self.titles(Self.full.tabbedPlaces, .english)
         let measured = Measured()
-        let view = await Self.host(Self.narrow(places, measured: measured), width: ShellLayout.breakpoint - 1)
+        let view = await Self.host(Self.narrow(Self.full, measured: measured), width: ShellLayout.breakpoint - 1)
         for width in Self.deciding(ShellFold.stripWidth(titles)).reversed() {
             view.frame.size.width = width
             await Self.settle(view, measured: measured)
@@ -216,23 +224,26 @@ struct FoldHostedTests {
         }
     }
 
-    /// **Every place is still reachable through it**, by name, in the order the tabs drew them.
-    /// A pop-up is pressed with a pointer or a finger and worked with the arrow keys and Return,
-    /// and ⌃Tab reads the place rather than the strip, so it walks the same places it did.
-    @Test("The pop-up holds every place, by name, in the tabs' order")
+    /// **Every place is still reachable through it**, by name, in the rail's order — Usage too,
+    /// which the tabs drew in Preferences' tab and the pop-up names as its own. A pop-up is
+    /// pressed with a pointer or a finger and worked with the arrow keys and Return, and ⌃Tab
+    /// reads the place rather than the strip, so it walks the same places it did.
+    @Test("The pop-up holds every place, by name, in the rail's order, Usage among them")
     func thePopUpHoldsEveryPlace() async throws {
         var folded = 0
-        for places in Self.offered {
-            let view = await Self.host(Self.narrow(places), width: ShellLayout.floor)
-            guard ShellFold.folds(width: ShellLayout.floor, titles: Self.titles(places, .english)) else {
-                // Four English names fit at the floor, and three do, so there is nothing folded
-                // to reach.
+        for offered in Self.offered {
+            let places = offered.enabledPlaces
+            let view = await Self.host(Self.narrow(offered), width: ShellLayout.floor)
+            guard ShellFold.folds(width: ShellLayout.floor, titles: Self.titles(offered.tabbedPlaces, .english)) else {
+                // The four tabs of a store with nothing rising fit at the floor in English, and
+                // the three of an empty one do, so there is nothing folded to reach.
                 #expect(Self.all(NSPopUpButton.self, in: view).isEmpty, "\(places)")
                 continue
             }
             folded += 1
             let popUp = try #require(Self.all(NSPopUpButton.self, in: view).first, "\(places)")
             #expect(popUp.itemTitles == Self.titles(places, .english))
+            #expect(popUp.itemTitles.contains(ShellPlace.usage.title(language: .english)))
             #expect(popUp.titleOfSelectedItem == places[0].title(language: .english))
         }
         // Not vacuous: the reader with every place is the one whose names do not fit.
@@ -244,7 +255,7 @@ struct FoldHostedTests {
     /// the label says is `shell.places.fold`; that it is drawn is read off where the pop-up is.
     @Test("Something is written before the pop-up, where the strip's middle was")
     func theLabelIsWrittenBeforeThePopUp() async throws {
-        let view = await Self.host(Self.narrow(ShellPlace.allCases), width: ShellLayout.floor)
+        let view = await Self.host(Self.narrow(Self.full), width: ShellLayout.floor)
         let popUp = try #require(Self.all(NSPopUpButton.self, in: view).first)
         let frame = popUp.convert(popUp.bounds, to: view)
         // Centred as a pair, so the pop-up is pushed past the middle by what stands before it.
@@ -257,11 +268,10 @@ struct FoldHostedTests {
     /// through a marker drawn as the page.
     @Test("The folded page stands exactly where the tabs' page stood")
     func thePageDoesNotMove() async throws {
-        let places = ShellPlace.allCases
         let width = ShellLayout.floor
-        let tabbed = await Self.host(Self.tabs(places, .english), width: width)
+        let tabbed = await Self.host(Self.tabs(Self.full.tabbedPlaces, .english), width: width)
         let folded = await Self.host(
-            FoldedPlaces(place: .constant(.timeline), places: places, language: .english) { Marker() },
+            FoldedPlaces(place: .constant(.timeline), places: Self.full.enabledPlaces, language: .english) { Marker() },
             width: width
         )
         let before = try #require(Self.all(Mark.self, in: tabbed).first)

@@ -33,17 +33,16 @@ struct RuleOffersPinTests {
         )
     }
 
-    @Test("The scopes a rule on a category may have: public and Home for every source, or any one with timelines; what is rising, or any one that has it; a board or a list its own source alone")
+    @Test("The scopes a rule on a category may have: public and Home for every source, or any one with timelines; a board or a list its own source alone")
     func scopesOfACategory() {
         let s = Self.self
         #expect(RuleBuilder.scopes(for: .category(.public, on: "m.example"), sources: s.all) == [.every, s.scope(s.mastodon), s.scope(s.pleroma)])
         #expect(RuleBuilder.scopes(for: .category(.home, on: "m.example"), sources: s.all) == [.every, s.scope(s.mastodon), s.scope(s.pleroma)])
-        #expect(RuleBuilder.scopes(for: .category(.trends, on: "m.example"), sources: s.all)
-            == [.every, s.scope(s.mastodon), s.scope(s.pleroma), s.scope(s.discuz)])
+        #expect(RuleBuilder.scopes(for: .category(.board(id: "2"), on: "z.example"), sources: s.all) == [s.scope(s.discuz)])
         #expect(RuleBuilder.scopes(for: .category(.board(id: "42"), on: "z.example"), sources: s.all) == [s.scope(s.discuz)])
         #expect(RuleBuilder.scopes(for: .category(.list(id: "7"), on: "m.example"), sources: s.all) == [s.scope(s.mastodon)])
         #expect(RuleBuilder.scopes(for: .category(.public, on: "m.example"), sources: [s.discuz, s.discourse, s.unknown]) == [.every])
-        #expect(RuleBuilder.scopes(for: .category(.trends, on: "z.example"), sources: [s.discourse, s.unknown]) == [.every])
+        #expect(RuleBuilder.scopes(for: .category(.home, on: "m.example"), sources: [s.discuz, s.discourse, s.unknown]) == [.every])
     }
 
     @Test("The scopes a rule on an author may have: a forum's author is that forum's alone, on either forum; anybody else is for every source or any one; a source rule has none and a keyword every one")
@@ -99,7 +98,7 @@ struct RuleOffersPinTests {
         ])
     }
 
-    @Test("The categories each source is picked by, in order: public, what is rising, Home where signed in, its lists, its boards, then any other its held posts arrived through by name — and a source with none is not listed")
+    @Test("The categories each source is picked by, in order: public, Home where signed in, its lists, its boards, then any other its held posts arrived through by name — and a source with none is not listed")
     func categoriesOfEachSource() {
         let s = Self.self
         func listed(_ sources: [Source], notes: [Note] = [], signedIn: Set<String> = []) -> [String: [FediqoCore.Category]] {
@@ -108,16 +107,16 @@ struct RuleOffersPinTests {
             return Dictionary(uniqueKeysWithValues: groups.map { ($0.host, $0.categories) })
         }
         let out = listed(s.all)
-        #expect(out["m.example"] == [.public, .trends, .list(id: "7"), .list(id: "3")])
-        #expect(out["p.example"] == [.public, .trends])
-        #expect(out["z.example"] == [.trends, .board(id: "42"), .board(id: "2")])
+        #expect(out["m.example"] == [.public, .list(id: "7"), .list(id: "3")])
+        #expect(out["p.example"] == [.public])
+        #expect(out["z.example"] == [.board(id: "42"), .board(id: "2")])
         #expect(out["d.example"] == nil && out["u.example"] == nil, "nothing to pick it by")
         #expect(RuleBuilder.categories(in: s.all, notes: [], signedIn: { _ in false }).map(\.host) == ["m.example", "p.example", "z.example"])
 
         let signed = listed(s.all, signedIn: ["m.example", "p.example", "z.example", "d.example", "u.example"])
-        #expect(signed["m.example"] == [.public, .trends, .home, .list(id: "7"), .list(id: "3")])
-        #expect(signed["p.example"] == [.public, .trends, .home])
-        #expect(signed["z.example"] == [.trends, .board(id: "42"), .board(id: "2")], "a forum has no Home, signed in or not")
+        #expect(signed["m.example"] == [.public, .home, .list(id: "7"), .list(id: "3")])
+        #expect(signed["p.example"] == [.public, .home])
+        #expect(signed["z.example"] == [.board(id: "42"), .board(id: "2")], "a forum has no Home, signed in or not")
         #expect(signed["d.example"] == nil && signed["u.example"] == nil)
 
         // What held posts arrived through and the source no longer offers by itself: after
@@ -128,12 +127,12 @@ struct RuleOffersPinTests {
             s.note("6", s.discuz, [.home]),
         ]
         let with = listed(s.all, notes: held)
-        #expect(with["m.example"] == [.public, .trends, .list(id: "7"), .list(id: "3"), .home, .list(id: "9")])
-        #expect(with["z.example"] == [.trends, .board(id: "42"), .board(id: "2"), .board(id: "7"), .home])
+        #expect(with["m.example"] == [.public, .list(id: "7"), .list(id: "3"), .home, .list(id: "9")])
+        #expect(with["z.example"] == [.board(id: "42"), .board(id: "2"), .board(id: "7"), .home])
         #expect(with["d.example"] == [.board(id: "5")] && with["u.example"] == [.public])
-        #expect(with["p.example"] == [.public, .trends])
+        #expect(with["p.example"] == [.public], "what is trending is never offered, held or not")
         #expect(listed(s.all, notes: held, signedIn: ["m.example"])["m.example"]
-            == [.public, .trends, .home, .list(id: "7"), .list(id: "3"), .list(id: "9")])
+            == [.public, .home, .list(id: "7"), .list(id: "3"), .list(id: "9")])
     }
 
     @Test("What the picker lists for each kind of rule is made of those: the sources, the authors held, the categories source by source, a field's values")
@@ -145,10 +144,10 @@ struct RuleOffersPinTests {
         await session.reloadFromStore()
         #expect(TimelineEditor.choices(for: RuleDraft(.source), in: session) == s.all.map { .source($0.host) })
         #expect(TimelineEditor.choices(for: RuleDraft(.category), in: session) == [
-            .category(.public, on: "m.example"), .category(.trends, on: "m.example"),
+            .category(.public, on: "m.example"),
             .category(.list(id: "7"), on: "m.example"), .category(.list(id: "3"), on: "m.example"),
-            .category(.public, on: "p.example"), .category(.trends, on: "p.example"),
-            .category(.trends, on: "z.example"), .category(.board(id: "42"), on: "z.example"), .category(.board(id: "2"), on: "z.example"),
+            .category(.public, on: "p.example"),
+            .category(.board(id: "42"), on: "z.example"), .category(.board(id: "2"), on: "z.example"),
         ])
         #expect(TimelineEditor.choices(for: RuleDraft(field: .language), in: session) == [.field("language", .option("ja"))])
         #expect(TimelineEditor.choices(for: RuleDraft(field: .covered), in: session) == [.field("covered", .flag(true)), .field("covered", .flag(false))])

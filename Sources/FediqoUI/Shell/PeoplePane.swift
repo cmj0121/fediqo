@@ -23,20 +23,17 @@ struct PeopleSaid: Equatable {
 
     /// What stands under the rows.
     enum Foot: Equatable {
-        /// The source named a next stretch: a press reads it.
+        /// The source named a next stretch: a press reads it — and reads it again where the
+        /// last did not come, which the toast says (DESIGN-reload).
         case more
-        /// A stretch is on the wire.
-        case reading
         /// The source named no next: the end of what it gives whoever asked.
         case end
-        /// The last stretch asked for did not come. A press asks again.
-        case failed
         /// The source stopped handing the list on in order. It ends here, and no press asks again.
         case stopped
         /// A directory read as far as one is read here: the source may have more, and none is asked for.
         case farthest
 
-        var presses: Bool { self == .more || self == .failed }
+        var presses: Bool { self == .more }
     }
 
     let list: PeopleList
@@ -46,9 +43,6 @@ struct PeopleSaid: Equatable {
     /// Whether the list is the signed-in reader's own.
     var own = false
     var reading: Reading = .asking
-    /// Asking from the top again came to a failure, on a list the source had already given:
-    /// said in a line of its own, above who it gave then — who stand.
-    var againFailed = false
     var people: [Person] = []
     /// How the reader stands to the people listed, as the source last said, by the id it knows
     /// each by. **Only whom it has said of**: nobody where nobody was asked — no sign-in, one
@@ -187,10 +181,9 @@ struct PeopleSaid: Equatable {
         }
     }
 
-    /// What is said above the rows: that the list is being asked for, that it could not be —
-    /// or, once the source has given it, what asking again came to.
-    func stateLine(language: DummyLanguage? = nil) -> String? {
-        let asked = switch list.which {
+    /// The first part of the keys a list's own sentences are under, by which list it is.
+    static func words(_ which: PeopleList.Which) -> String {
+        switch which {
         case .directory: "people.directory"
         case .found: "people.found"
         case .suggested: "people.suggested"
@@ -198,18 +191,20 @@ struct PeopleSaid: Equatable {
         case .featured: "people.featured"
         case .following, .followers: "people"
         }
-        return switch reading {
-        case .asking: String(format: L10n.t("\(asked).asking", language: language), source)
-        case .failed: String(format: L10n.t("\(asked).failed", language: language), source)
-        // Only a list a host may not have is ever absent, and each says so in its own words.
-        case .absent: String(format: L10n.t("\(asked).absent", language: language), source)
-        case .said: againFailed ? String(format: L10n.t("people.again.failed", language: language), source) : nil
-        }
     }
 
-    /// Whether the line above the rows offers the press that asks again. Beside a directory
-    /// the source says it has not, too: nothing stays absent until the app is quit.
-    var offersAgain: Bool { reading == .failed || reading == .absent || againFailed }
+    /// What is said above the rows: that the source says it has no such list at all — a state
+    /// of the list, and no failure. Being asked, and an ask that came to nothing, are the
+    /// page's toast to say (DESIGN-reload), and nothing here.
+    func stateLine(language: DummyLanguage? = nil) -> String? {
+        // Only a list a host may not have is ever absent, and each says so in its own words.
+        guard reading == .absent else { return nil }
+        return String(format: L10n.t("\(Self.words(list.which)).absent", language: language), source)
+    }
+
+    /// Whether the line above the rows offers the press that asks again: beside a list the
+    /// source says it has not, since nothing stays absent until the app is quit.
+    var offersAgain: Bool { reading == .absent }
 
     /// How many the source counts beyond who it gave, where the list has ended short of its
     /// own figure — or nothing where it has not ended, said no figure, or gave as many.
@@ -221,9 +216,7 @@ struct PeopleSaid: Equatable {
     func footSymbol(_ foot: Foot) -> String {
         switch foot {
         case .more: "arrow.down.circle"
-        case .reading: "ellipsis"
         case .end: short == nil ? "checkmark.circle" : "circle.dotted"
-        case .failed: "exclamationmark.arrow.circlepath"
         case .stopped: "exclamationmark.circle"
         case .farthest: "circle.dotted"
         }
@@ -235,8 +228,6 @@ struct PeopleSaid: Equatable {
     func footWords(_ foot: Foot, language: DummyLanguage? = nil) -> String {
         switch foot {
         case .more: return L10n.t("people.foot.more", language: language)
-        case .reading: return L10n.t("people.foot.reading", language: language)
-        case .failed: return String(format: L10n.t("people.foot.failed", language: language), source)
         case .stopped: return String(format: L10n.t("people.foot.stopped", language: language), source)
         case .farthest:
             let key = switch list.which {
@@ -369,12 +360,14 @@ struct PeoplePane: View {
     var canReload = false
     /// A row opened: that person's page, answered by the root under the walk's own rule.
     var onOpen: (Person) -> Void
-    /// "Try again": the list asked from the top.
+    /// "Ask again", beside a list the source says it has not: the list asked from the top.
     var onAskAgain: () -> Void = {}
     /// The bar's mark: what `r` does.
     var onReload: () -> Void = {}
     /// The same, pulled for: it returns when the answer has landed.
     var onPull: () async -> Void = {}
+    /// What stops the list's ask while it runs: the bar's mark is then Stop.
+    var onStop: (() -> Void)?
     /// The foot's press: the next stretch.
     var onReadOn: () -> Void = {}
     /// A directory's order chosen, or only the people who live there: asked from the top.
@@ -395,7 +388,7 @@ struct PeoplePane: View {
     var body: some View {
         OpenedPage(
             slide: slide, reload: Self.reloadName(of: said, canReload: canReload), onBack: onBack, onReload: onReload,
-            onPull: onPull,
+            onPull: onPull, onStop: onStop,
             head: {
                 PeopleHead(said: said, onChoose: onChoose)
                 ShellRule()

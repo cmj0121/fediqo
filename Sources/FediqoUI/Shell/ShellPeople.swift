@@ -7,7 +7,8 @@ import Observation
 //
 // **Asked when the list opens, and when the person presses** — a person's page's own rules
 // (`ShellPersonPages`), kept here for a list. Opening asks one stretch; the foot's press asks
-// the next, by the place the source named and no other; `r` and "Try again" ask from the top.
+// the next, by the place the source named and no other; `r`, the mark and a pull ask from the
+// top, and Stop calls that ask off.
 // **One ask a press, and never two on the wire for one list**: a source allows a few hundred in
 // five minutes, shared with everything else the sign-in does there. A press while the list is
 // being asked asks nothing; asking from the top calls off a reading-on still out, and whatever
@@ -300,6 +301,8 @@ final class ShellPeoplePages {
     static let stretchLength = 80
 
     private var pages: [String: Page] = [:]
+    /// The lists whose last ask from the top was stopped (`stop`), until they are asked again.
+    private var halted: Set<String> = []
     /// The account check at each host whose count of who asks to follow the reader a request
     /// answered here has made old (`MastodonSessions.askingCheck`). **Kept for the host, not
     /// the page**: a page let go and made again does not bring the old figure back; the next
@@ -419,7 +422,6 @@ final class ShellPeoplePages {
         }
         guard let page else { return handed }
         handed.reading = page.answered ? .said : page.failed ? .failed : .asking
-        handed.againFailed = page.answered && page.failed
         handed.people = page.read.people.filter { person in
             page.gone[person.accountID] == nil && dismissing.shown(Self.dismissKey(list, person.accountID)) == nil
                 && acts?.isLeaving(DummyPerson(person).id, from: list.which, at: source.host, in: session) != true
@@ -434,13 +436,13 @@ final class ShellPeoplePages {
         return handed
     }
 
+    /// What stands under the rows. **Nothing while a stretch is on the wire**, and a stretch
+    /// that did not come is the foot that reads on again: both are the toast's to say.
     private static func foot(of page: Page) -> PeopleSaid.Foot? {
-        guard page.answered else { return nil }
-        if page.readingOn { return .reading }
+        guard page.answered, !page.readingOn else { return nil }
         if page.notPaging { return .stopped }
         // A directory read as far as one is read: more may be there, and no press reads it.
         if page.farthest, page.read.next == nil { return .farthest }
-        if page.footFailed { return .failed }
         if page.read.next != nil { return .more }
         // Nothing under nobody: what stands there says what the source gave.
         return page.read.people.isEmpty ? nil : .end
@@ -627,6 +629,40 @@ final class ShellPeoplePages {
         ShellPersonPages.source(at: list.host, in: session) != nil
     }
 
+    /// What the page of `list` says in its toast (DESIGN-reload), in the words its kind of list
+    /// has: asked from the top — a wait Stop stops — or read on, which is not; that the last
+    /// ask did not come; or that it was stopped. A list the source says it has not is no
+    /// failure: that is said over its rows.
+    func ask(of list: PeopleList, in session: ShellSession, language: DummyLanguage? = nil) -> PageAsking {
+        guard let source = ShellPersonPages.source(at: list.host, in: session),
+              let page = self.standing(list, at: source, in: session)
+        else { return PageAsking() }
+        let asking = page.asking
+            ? TimelineToast.waiting(PeopleSaid.words(list.which) + ".asking", hosts: [source.host], language: language)
+            : page.readingOn ? L10n.t("people.foot.reading", language: language) : nil
+        return PageAsking(
+            asking: asking, stoppable: page.asking,
+            failed: !page.asking && !page.readingOn && (page.failed || page.footFailed) ? [source.host] : [],
+            stopped: halted.contains(list.id)
+        )
+    }
+
+    /// The list's Stop, and `Escape` on it: the ask from the top called off, the list as it was
+    /// asked before, and whatever is on the wire landing nowhere. A stop is never a failure,
+    /// and a reading-on is not stopped. Whether anything was.
+    @discardableResult
+    func stop(_ list: PeopleList) -> Bool {
+        let id = list.id
+        guard pages[id]?.asking == true else { return false }
+        asks[id]?.cancel()
+        asks[id] = nil
+        pages[id]?.awaits = errands.next()
+        pages[id]?.asking = false
+        pages[id]?.wanted = nil
+        halted.insert(id)
+        return true
+    }
+
     // MARK: - Asking
 
     /// The list opening. Asked once: opened again, it is drawn from what was answered; opened
@@ -651,7 +687,7 @@ final class ShellPeoplePages {
         await begin(list, at: source, with: held, in: session).value
     }
 
-    /// `r` and "Try again": the list asked from the top. What the page holds stays drawn until
+    /// `r`, the mark and a pull: the list asked from the top. What the page holds stays drawn until
     /// the answer lands, and is then replaced by it. **A press while the list is being asked
     /// asks nothing.**
     func again(_ list: PeopleList, in session: ShellSession) async {
@@ -699,6 +735,7 @@ final class ShellPeoplePages {
         let errand = errands.next()
         pages[id]?.awaits = errand
         pages[id]?.asking = true
+        halted.remove(id)
         // A reading-on still on the wire is this ask's to supersede: it is called off, so one
         // ask is out for the list, and whatever it brings late does not land.
         asks[id]?.cancel()
@@ -881,6 +918,7 @@ final class ShellPeoplePages {
         let errand = errands.next()
         pages[id]?.awaits = errand
         pages[id]?.readingOn = true
+        halted.remove(id)
         pages[id]?.footFailed = false
         // On in the way the people that stand were asked for.
         let through = self.door(to: list, asked: page.choice, at: source, with: looked.held, in: session)

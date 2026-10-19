@@ -33,14 +33,11 @@ struct PersonSaid: Equatable {
 
     /// What stands under their posts.
     enum Foot: Equatable {
-        /// Older posts can be asked for: a press reads them.
+        /// Older posts can be asked for: a press reads them — and reads them again where the
+        /// last stretch did not come, which the toast says (DESIGN-reload).
         case more
-        /// An older stretch is on the wire.
-        case reading
         /// The source named no next: it has sent all it gives this reader.
         case end
-        /// The last stretch asked for did not come. A press asks again.
-        case failed
         /// The source stopped handing its posts on in order — it named a place it had named
         /// before, or went on with nothing new. The list ends here, and no press asks again.
         case stopped
@@ -48,21 +45,17 @@ struct PersonSaid: Equatable {
         var symbol: String {
             switch self {
             case .more: "arrow.down.circle"
-            case .reading: "ellipsis"
             case .end: "checkmark.circle"
-            case .failed: "exclamationmark.arrow.circlepath"
             case .stopped: "exclamationmark.circle"
             }
         }
 
-        var presses: Bool { self == .more || self == .failed }
+        var presses: Bool { self == .more }
 
         func words(_ source: String, language: DummyLanguage? = nil) -> String {
             switch self {
             case .more: L10n.t("person.foot.more", language: language)
-            case .reading: L10n.t("person.foot.reading", language: language)
             case .end: String(format: L10n.t("person.foot.end", language: language), source)
-            case .failed: String(format: L10n.t("person.foot.failed", language: language), source)
             case .stopped: String(format: L10n.t("person.foot.stopped", language: language), source)
             }
         }
@@ -100,25 +93,16 @@ struct PersonSaid: Equatable {
         return String(format: L10n.t("person.said.by", language: language), source)
     }
 
-    /// What is said above everything: where the asking stands while the source has not said
-    /// who they are, and — once it has — what asking again came to.
-    ///
-    /// **`named` is a stranger's word set inside a sentence of ours** — a handle or a name a
-    /// row carried — so it is made fit to stand in one here, where the sentence is made.
-    func stateLine(of named: String, language: DummyLanguage? = nil) -> String? {
-        let named = LineText.oneLine(named)
+    /// What is said above everything: that the source has not heard of them — on asking, or
+    /// on asking again. A state of the page and no failure; being asked, and an ask that came
+    /// to nothing, are the page's toast to say (DESIGN-reload).
+    func stateLine(language: DummyLanguage? = nil) -> String? {
         switch (reading, again) {
-        case (.asking, _): return String(format: L10n.t("person.asking", language: language), source, named)
-        case (.unheardOf, _): return String(format: L10n.t("person.unheardOf", language: language), source)
-        case (.failed, _): return String(format: L10n.t("person.failed", language: language), source, named)
-        case (.said, .failed): return String(format: L10n.t("person.again.failed", language: language), source)
-        case (.said, .unheardOf): return String(format: L10n.t("person.again.unheardOf", language: language), source)
-        case (.said, nil): return nil
+        case (.unheardOf, _): String(format: L10n.t("person.unheardOf", language: language), source)
+        case (.said, .unheardOf): String(format: L10n.t("person.again.unheardOf", language: language), source)
+        case (.asking, _), (.failed, _), (.said, .failed), (.said, nil): nil
         }
     }
-
-    /// Whether the line above everything offers the press that asks again.
-    var offersAgain: Bool { reading == .failed || again != nil }
 
     /// One thing the source says of the account that the page says in a line of its own.
     struct Line: Equatable, Identifiable {
@@ -395,8 +379,8 @@ struct PersonFootRow: View {
     }
 }
 
-/// What somebody pinned at a source, as the Pinned tab of their page is handed it: where the
-/// asking has got to, and the posts as far as the tab has read them.
+/// What somebody pinned at a source, as the Pinned tab of their page is handed it: whether the
+/// source has answered, and the posts as far as the tab has read them.
 ///
 /// **In the source's own order**, which is not newest first, and never sorted here. **None
 /// pinned is what the source gave, said as that**: whether anything is pinned is not known
@@ -407,17 +391,8 @@ struct PersonPinnedSaid: Equatable {
     let source: String
     /// Whether the source has answered: what is drawn is then its word.
     var answered = false
-    /// Whether asking from the top last came to a failure. With nothing answered that is the
-    /// tab; with posts already given, it is said over them, and they stand.
-    var failed = false
     var posts: [DummyItem] = []
     var foot: PersonSaid.Foot?
-
-    /// What is said over the rows: that the pinned posts are being asked for, or could not be.
-    func stateLine(language: DummyLanguage? = nil) -> String? {
-        if failed { return String(format: L10n.t("person.pinned.failed", language: language), source) }
-        return answered ? nil : String(format: L10n.t("person.pinned.asking", language: language), source)
-    }
 
     /// What stands where rows would, once the source has answered with none.
     func nothing(language: DummyLanguage? = nil) -> String? {
@@ -426,12 +401,12 @@ struct PersonPinnedSaid: Equatable {
     }
 
     /// What the foot says: of more to read and of the end in the tab's own words, and of a
-    /// stretch on its way, one that did not come and a source that stopped as under any posts.
+    /// source that stopped as under any posts.
     func footWords(_ foot: PersonSaid.Foot, language: DummyLanguage? = nil) -> String {
         switch foot {
         case .more: L10n.t("person.pinned.foot.more", language: language)
         case .end: String(format: L10n.t("person.pinned.foot.end", language: language), source)
-        case .reading, .failed, .stopped: foot.words(source, language: language)
+        case .stopped: foot.words(source, language: language)
         }
     }
 }

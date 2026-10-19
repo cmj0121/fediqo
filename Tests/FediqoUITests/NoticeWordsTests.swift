@@ -330,18 +330,14 @@ struct NoticeWordsTests {
         #expect(refused.line == "No sign-in on this device may read notices.")
         // Which source is which is a line each under it: all of them, whatever is true of each.
         let named = NoticesLine.lines(
-            reading: [], failures: [], askable: [],
             hosts: [("a.example", .unasked), ("b.example", .unasked), ("c.example", .unavailable)]
         )
         #expect(named == [.unasked(host: "a.example"), .unasked(host: "b.example"), .refused(host: "c.example")])
     }
 
-    @Test("Above the lines: who is on the wire, who failed and whether asking again may help, who was never asked")
+    @Test("Above the lines: who could not be asked and who was never asked — and never who is on the wire or who failed, which are the toast's")
     func sourceLines() {
         let lines = NoticesLine.lines(
-            reading: ["a.example", "b.example"],
-            failures: [("c.example", .unreachable), ("d.example", .refused), ("e.example", .refused)],
-            askable: ["c.example", "e.example"],
             hosts: [
                 ("a.example", .allowed), ("b.example", .allowed), ("c.example", .allowed), ("d.example", .unavailable),
                 ("e.example", .allowed), ("f.example", .unasked), ("g.example", .unavailable), ("h.example", .allowed),
@@ -349,27 +345,21 @@ struct NoticeWordsTests {
             locked: ["h.example"], unread: ["i.example"]
         )
         #expect(lines == [
-            .reading(["a.example", "b.example"]),
-            .failed(host: "c.example", why: .unreachable, again: true),
-            .failed(host: "d.example", why: .refused, again: false),
-            .failed(host: "e.example", why: .refused, again: true),
             .locked(host: "h.example"),
             .unread(host: "i.example"),
+            .refused(host: "d.example"),
             .unasked(host: "f.example"),
             .refused(host: "g.example"),
         ])
         #expect(lines.map { $0.words(language: .english) } == [
-            "Reading notices from a.example, b.example…",
-            "Could not read notices from c.example. What it sent before is still here.",
-            "d.example would not let this sign-in read notices. What it sent before is still here.",
-            "e.example would not let this sign-in read notices. What it sent before is still here.",
             "This device could not read the sign-in for h.example, so it was not asked.",
             "i.example was not read: the read was stopped before it answered. Press the reload mark, or r, to read again.",
+            "d.example was asked for your notices and gave none.",
             "f.example has not been asked for your notices.",
             "g.example was asked for your notices and gave none.",
         ])
         #expect(Set(lines.map(\.id)).count == lines.count)
-        #expect(NoticesLine.lines(reading: [], failures: [], askable: [], hosts: [("a.example", .allowed)]).isEmpty)
+        #expect(NoticesLine.lines(hosts: [("a.example", .allowed)]).isEmpty)
     }
 
     @Test("With no line to draw the page says why: nothing happened, or lines are hidden and how many; and nothing while a source is unread")
@@ -423,16 +413,15 @@ struct NoticeWordsTests {
         #expect(FediqoRootView.noticesStep(in: [], from: nil, by: -1, hasMore: true) == .nothing)
     }
 
-    @Test("The foot says there is more, that it is on its way, where the list is held, or that there is no more")
+    @Test("The foot says there is more, where the list is held, or that there is no more — and a stretch on its way is the toast's, never a row")
     func foot() {
         let floor = Self.at
-        #expect(NoticesFoot.foot(hasMore: true, isReading: false, floor: floor) == .more)
-        #expect(NoticesFoot.foot(hasMore: false, isReading: true, floor: floor) == .reading)
-        #expect(NoticesFoot.foot(hasMore: false, isReading: false, floor: floor) == .held)
-        #expect(NoticesFoot.foot(hasMore: false, isReading: false, floor: nil) == .end)
+        #expect(NoticesFoot.foot(hasMore: true, floor: floor) == .more)
+        #expect(NoticesFoot.foot(hasMore: false, floor: floor) == .held)
+        #expect(NoticesFoot.foot(hasMore: false, floor: nil) == .end)
         #expect(NoticesFoot.more.words(language: .english) == "Older notices can be read. Press here, or scroll to here, to read them.")
         #expect(NoticesFoot.end.words(language: .english) == "No older notices: every source has sent all it has.")
-        for foot in [NoticesFoot.more, .reading, .held, .end] {
+        for foot in [NoticesFoot.more, .held, .end] {
             #expect(!foot.words(language: .taiwanese).hasPrefix("notices."))
         }
     }
@@ -535,12 +524,11 @@ struct NoticeWordsTests {
 
     @Test("Where a source is held to the most kept of one for a run, the foot says that and not that there are no more")
     func theFootSaysTheBoundWasReached() {
-        #expect(NoticesFoot.foot(hasMore: false, isReading: false, floor: nil, full: true) == .full)
-        #expect(NoticesFoot.foot(hasMore: false, isReading: false, floor: nil, full: false) == .end)
-        // What is still to be read, or held up by a source named above, is said first.
-        #expect(NoticesFoot.foot(hasMore: true, isReading: false, floor: nil, full: true) == .more)
-        #expect(NoticesFoot.foot(hasMore: false, isReading: true, floor: nil, full: true) == .reading)
-        #expect(NoticesFoot.foot(hasMore: false, isReading: false, floor: Self.at, full: true) == .held)
+        #expect(NoticesFoot.foot(hasMore: false, floor: nil, full: true) == .full)
+        #expect(NoticesFoot.foot(hasMore: false, floor: nil, full: false) == .end)
+        // What is still to be read, or held up by a source the toast named, is said first.
+        #expect(NoticesFoot.foot(hasMore: true, floor: nil, full: true) == .more)
+        #expect(NoticesFoot.foot(hasMore: false, floor: Self.at, full: true) == .held)
         #expect(NoticesFoot.full.words(language: .english)
             == "Older notices are not read: Fediqo holds as many of one source as it keeps. They are read again once there is room — when notices are dismissed, or the months limit lets old ones go.")
         #expect(NoticesFoot.full.words(language: .english) != NoticesFoot.end.words(language: .english))

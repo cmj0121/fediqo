@@ -113,6 +113,38 @@ struct TimelineToastTests {
         ) == nil)
     }
 
+    @Test("A page's toast is the timeline's own order: its wait first, then a live note, then its stop, then the sources it missed — and nothing where it has nothing to say")
+    func aPagesAskInTheTimelinesOrder() {
+        let en = DummyLanguage.english
+        let waiting = PageAsking(asking: "Asking m.example…", stoppable: true, failed: ["n.example"], stopped: true)
+        #expect(TimelineToast.asked(waiting, note: "Copied.", language: en) == TimelineToast(kind: .loading, text: "Asking m.example…"))
+        let missed = PageAsking(failed: ["m.example", "n.example"])
+        #expect(TimelineToast.asked(missed, note: "Copied.", language: en) == TimelineToast(kind: .note, text: "Copied."))
+        #expect(TimelineToast.asked(missed, note: nil, language: en) == TimelineToast(kind: .error, text: "Could not reload m.example, n.example."))
+        let stopped = PageAsking(failed: ["m.example"], stopped: true)
+        #expect(TimelineToast.asked(stopped, note: nil, language: en) == TimelineToast(kind: .warning, text: "Reload stopped."))
+        #expect(TimelineToast.asked(PageAsking(), note: nil) == nil)
+        #expect(TimelineToast.asked(PageAsking(), note: "Copied.")?.stays == false)
+    }
+
+    @Test("A page's wait names the first source it asks in its own words, and how many more as the timeline's does")
+    func aPagesWaitIsWorded() {
+        #expect(TimelineToast.waiting("rising.asking", hosts: [], language: .english) == nil)
+        #expect(TimelineToast.waiting("rising.asking", hosts: ["m.example"], language: .english) == "Asking m.example…")
+        #expect(TimelineToast.waiting("rising.asking", hosts: ["m.example", "n.example", "o.example"], language: .english) == "Asking m.example… +2")
+        #expect(
+            TimelineToast.waiting("person.asking", hosts: ["m.example"], extra: ["@ada@m.example"], language: .taiwanese)
+                == String(format: L10n.t("person.asking", language: .taiwanese), "m.example", "@ada@m.example")
+        )
+        #expect(
+            TimelineToast.waiting("notices.reading", hosts: ["a.example", "b.example"], language: .taiwanese)
+                == String(
+                    format: L10n.t("timeline.reload.more", language: .taiwanese),
+                    String(format: L10n.t("notices.reading", language: .taiwanese), "a.example"), 1
+                )
+        )
+    }
+
     @Test("A wait is a spinner, or an hourglass when motion is asked to stop")
     func aWaitIsASpinnerOrAnHourglass() {
         #expect(TimelineToast.waitMark(reduceMotion: false) == .spinner)

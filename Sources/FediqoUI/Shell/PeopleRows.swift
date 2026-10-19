@@ -1,8 +1,8 @@
 import FediqoCore
 import SwiftUI
 
-/// The people a source gave for a list, as one list that scrolls together: where the asking
-/// stands, each of them on a row, what stands where they would where it gave nobody, and the
+/// The people a source gave for a list, as one list that scrolls together: that the source has
+/// no such list, where it says so, each of them on a row, what stands where they would where it gave nobody, and the
 /// foot.
 ///
 /// **One list for a page of people and for a tab of somebody's page** (`PeoplePane`, and the
@@ -13,7 +13,7 @@ struct PeopleRows<Lead: View>: View {
     @Binding var selectedID: String?
     /// A row opened: that person's page, answered by the root under the walk's own rule.
     var onOpen: (Person) -> Void
-    /// "Try again": the list asked from the top.
+    /// "Ask again", beside a list the source says it has not: the list asked from the top.
     var onAskAgain: () -> Void = {}
     /// The foot's press: the next stretch.
     var onReadOn: () -> Void = {}
@@ -80,15 +80,12 @@ struct PeopleRows<Lead: View>: View {
         }
     }
 
-    /// Where the asking stands, and beside a failure the press that asks again.
+    /// That the source has no such list, and beside it the press that asks again.
     private func stateLine(_ line: String) -> some View {
         WordsThenPress(
             words: Text(line)
                 .shellFont(.meta)
-                .foregroundStyle(
-                    said.reading == .asking || said.reading == .absent
-                        ? ShellChrome.inkFaint(colorScheme) : ShellChrome.ink(colorScheme)
-                ),
+                .foregroundStyle(ShellChrome.inkFaint(colorScheme)),
             press: Group {
                 if said.offersAgain {
                     let again = Self.again(said)
@@ -102,11 +99,11 @@ struct PeopleRows<Lead: View>: View {
         )
     }
 
-    /// The press that asks the list again beside a failure: its words as drawn, which are its
-    /// name to a listener and to Voice Control, and whom it asks, told after them.
+    /// The press that asks the list again beside a list the source says it has not: its words
+    /// as drawn, which are its name to a listener and to Voice Control, and whom it asks, told
+    /// after them.
     static func again(_ said: PeopleSaid, language: DummyLanguage? = nil) -> (words: String, hint: String) {
-        (L10n.t(said.reading == .absent ? "source.more.again" : "person.retry", language: language),
-         PersonPage.reloadName(said.source, language: language))
+        (L10n.t("source.more.again", language: language), PersonPage.reloadName(said.source, language: language))
     }
 
     /// One of them. A press lights the row, and a second on the row it is already on opens

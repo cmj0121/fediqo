@@ -161,7 +161,7 @@ struct TagPageTests {
         #expect(TagPageSaid.made(of: Self.swift, held: 41, reach: "Asked m.example.").reach == "Asked m.example.")
     }
 
-    @Test("The head is worked out from what each source said and nothing else: a mark only for a source that said followed, Follow only where exactly one source offers it, the figure whole and of this device's own count; the page's line names the sources while they are asked, and says a failure and which were asked together")
+    @Test("The head is worked out from what each source said and nothing else: a mark only for a source that said followed, Follow only where exactly one source offers it, the figure whole and of this device's own count; the page's line says which were asked once they have answered, failed or not — the asking and the failure are the toast's")
     func whatTheHeadSays() throws {
         let en = DummyLanguage.english
         let followed = Self.line(.said(true)), not = Self.line(.said(false), at: Self.other)
@@ -186,14 +186,12 @@ struct TagPageTests {
         #expect(TagPageSaid.made(of: Self.swift, held: 0, asking: [Self.host], language: en).none == nil)
         #expect(TagPageSaid.made(of: Self.swift, held: 2, language: en).none == nil)
 
-        // The page's line: asking · failed with its press · which sources were asked.
+        // The page's line: which sources were asked, once the toast no longer names them.
         let reach = "Asked m.example."
-        let asking = TagPageSaid.made(of: Self.swift, held: 0, asking: [Self.host], failed: [Self.other], reach: reach, language: en)
-        #expect(asking.line == .asking("Asking m.example for #swift…") && asking.reach == nil)
-        let failed = TagPageSaid.made(of: Self.swift, held: 0, failed: [Self.other], reach: reach, language: en)
-        #expect(failed.line == .failed("Could not ask two.example for #swift.") && failed.reach == reach, "a failure, and which were asked: both are said")
+        let asking = TagPageSaid.made(of: Self.swift, held: 0, asking: [Self.host], reach: reach, language: en)
+        #expect(asking.reach == nil, "while they are asked, the toast names them")
         let landed = TagPageSaid.made(of: Self.swift, held: 0, reach: reach, language: en)
-        #expect(landed.line == nil && landed.reach == reach)
+        #expect(landed.reach == reach)
         // With an About the reach is its last block, and the line says only how the ask stands.
         let withAbout = TagPageSaid.made(of: Self.swift, held: 0, reach: reach, follows: [followed], language: en)
         #expect(withAbout.reach == nil && withAbout.about == TagAboutSaid(follows: [followed], reach: reach))
@@ -279,11 +277,9 @@ struct TagPageTests {
         let twice = TagPageSaid.troubles(of: [Self.line(.unknown), Self.line(.unknown, at: Self.other)], language: en).compactMap(\.spoken)
         #expect(twice == ["Ask m.example again whether you follow #swift", "Ask two.example again whether you follow #swift"])
         #expect(Self.line(.unknown).pressSpoken(language: .taiwanese) == "再問 m.example 一次你是否追蹤 #swift")
-        let asked = TagPageSaid.made(of: Self.swift, held: 0, failed: [Self.host, Self.other], language: en)
-        #expect(asked.retrySpoken == "Ask m.example, two.example again for #swift")
-        #expect(TagPageSaid.made(of: Self.swift, held: 0, failed: [Self.host], language: .taiwanese).retrySpoken == "再向 m.example 詢問 #swift")
-        #expect(TagPageSaid.made(of: Self.swift, held: 0, language: en).retrySpoken == nil)
-        #expect(TagPageSaid.made(of: Self.swift, held: 0, asking: [Self.host], failed: [Self.other], language: en).retrySpoken == nil, "no press while they are asked")
+        // The bar's mark that asks the sources again says whom it asks, and for what.
+        #expect(TagPane.reloadName(Self.swift, asking: [Self.host, Self.other], canReload: true, language: en) == "Ask m.example, two.example again for #swift")
+        #expect(TagPane.reloadName(Self.swift, asking: [Self.host], canReload: true, language: .taiwanese) == "再向 m.example 詢問 #swift")
         #expect(TagPageSaid.made(of: Self.swift, held: 0, follows: [Self.line(.unknown), late], front: .about, language: en).troubles.isEmpty)
         #expect(TagPageSaid.troubles(of: [Self.line(.absent), Self.line(.asking), Self.line(.said(false)), Self.line(.doing(true))]).isEmpty)
     }
@@ -354,6 +350,32 @@ struct TagPageTests {
     }
 
     // MARK: - The tab in front
+
+    @Test("A hashtag's page still a step of the other stream place's walk keeps its tab when this side leaves it, or ends in one go; once neither side holds it, it is forgotten")
+    func theTabStaysWhileEitherSideHoldsIt() async throws {
+        let (session, _) = await session([Self.asked: Self.answer(true)])
+        try signIn(session)
+        let people = ShellPersonPages()
+        let tags = people.tags
+        var lamp: String?
+        #expect(tags.turn(Self.swift, to: .about, lamp: &lamp, in: session))
+        var here = ShellWalk(), there = ShellWalk()
+        _ = here.walk(to: .tag(Self.swift), from: "row")
+        _ = there.walk(to: .tag(Self.swift), from: "rising-row")
+        let left = here.back()
+        people.left(try #require(left).step, of: here, besides: there)
+        #expect(tags.front(of: Self.swift, in: session) == .about, "the other side still holds the page")
+        people.leftAll(besides: there)
+        #expect(tags.front(of: Self.swift, in: session) == .about, "ended in one go, the other side's page keeps its tab")
+        people.left(try #require(left).step, of: here, besides: ShellWalk())
+        #expect(tags.front(of: Self.swift, in: session) == .posts, "neither side holds it: forgotten")
+        #expect(tags.turn(Self.swift, to: .about, lamp: &lamp, in: session))
+        people.leftAll(keeping: nil, besides: ShellWalk())
+        #expect(tags.front(of: Self.swift, in: session) == .posts)
+        #expect(tags.turn(Self.swift, to: .about, lamp: &lamp, in: session))
+        people.leftAll(keeping: Self.swift, besides: ShellWalk())
+        #expect(tags.front(of: Self.swift, in: session) == .about, "the page left standing keeps it")
+    }
 
     @Test("The tab in front is kept with the page, by the hashtag whatever case it was written in, each tab with its own lamp; Tab goes round the two; the walk leaving the page's last step forgets it, and a page opened afresh opens on Posts")
     func theTabInFrontIsKeptWithThePage() async throws {
@@ -463,8 +485,8 @@ struct TagPageTests {
         let forms: [(String, TagPageSaid)] = [
             ("posts in front", TagPageSaid.made(of: Self.swift, held: 1_204_000, asking: [Self.host], follows: lines, language: en)),
             ("about in front", TagPageSaid.made(of: Self.swift, held: 41, reach: "Asked m.example.", follows: lines, front: .about, language: en)),
-            ("a read that failed", TagPageSaid.made(of: Self.swift, held: 41, failed: [Self.host], follows: [Self.line(.unknown)], language: en)),
-            ("one list", TagPageSaid.made(of: Self.swift, held: 41, failed: [Self.host], reach: "Asked m.example.", language: en)),
+            ("a follow that could not be found out", TagPageSaid.made(of: Self.swift, held: 41, follows: [Self.line(.unknown)], language: en)),
+            ("one list", TagPageSaid.made(of: Self.swift, held: 41, reach: "Asked m.example.", language: en)),
             ("one list, its reach", TagPageSaid.made(of: Self.swift, held: 0, reach: "Asked m.example. Not asked, as they keep no tags: forum.example.", language: en)),
         ]
         for scheme in [ColorScheme.light, .dark] {
@@ -493,7 +515,7 @@ struct TagPageTests {
         }
     }
 
-    @Test("With a hashtag in front the timelines' head is not drawn and the sideways swipe is the page's own: with two tabs it goes to the tab beside and on the first leaves, and with its posts alone it leaves; nothing on the page asks again from its bar")
+    @Test("With a hashtag in front the timelines' head is not drawn and the sideways swipe is the page's own: with two tabs it goes to the tab beside and on the first leaves, and with its posts alone it leaves; its bar asks again where a source of the timeline keeps tags")
     func theTimelinesHeadIsNotDrawn() throws {
         let step = ShellStep.tag(Self.swift)
         #expect(!TimelinePane.headDrawn(over: step) && TimelinePane.drawn(step, of: nil, in: ShellSession(http: FixtureHTTP([:]), store: ItemStore())).drawn, "a hashtag's page can always be drawn")
@@ -509,8 +531,13 @@ struct TagPageTests {
         #expect(TimelineSwipe.tabStep(from: 1, count: two.tabs.count, step: -1, leaves: true) == .tab(0), "from About the swipe goes to Posts, and only then leaves")
         #expect(TimelineSwipe.tabStep(from: 1, count: two.tabs.count, step: 1, leaves: true) == nil)
         #expect(TimelineSwipe.tabStep(from: 0, count: one.tabs.count, step: 1, leaves: true) == nil)
-        // A hashtag's posts are asked for as its page opens: `r` has nothing to ask, and the bar no mark.
-        #expect(!FediqoRootView.canReload(place: .timeline, editing: false, hasSources: true, open: [.tag, .selection]))
+        // `r`, the bar's mark and a pull ask its sources again (decision 11) — where the timeline
+        // in front has one that keeps tags, and on Trends as on the timeline.
+        for place in [ShellPlace.timeline, .trends] {
+            #expect(FediqoRootView.canReload(place: place, editing: false, hasSources: true, open: [.tag, .selection], tagAsked: true))
+            #expect(!FediqoRootView.canReload(place: place, editing: false, hasSources: true, open: [.tag, .selection]), "nobody keeps tags: no mark")
+        }
+        #expect(!FediqoRootView.canReload(place: .timeline, editing: true, hasSources: true, open: [.tag], tagAsked: true))
 
         let ui = try Self.ui()
         // The page keeps no bar of its own, and the files that draw it learn no kind of source.

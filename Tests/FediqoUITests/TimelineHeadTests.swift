@@ -208,7 +208,7 @@ struct TimelineHeadTests {
         session.goToTimeline(own)
         #expect(session.timelineList.offersEdit)
         #expect(session.timelineList.position == session.queries.count - 1)
-        session.goToTimeline(.trends)
+        session.goToTimeline(.all)
         #expect(!session.timelineList.offersEdit)
         let none = TimelineList.offered([], current: .all, name: { _ in "" }, rule: { _ in "" }, missing: { _ in false })
         #expect(!none.offersNew && !none.offersEdit && none.entries.isEmpty && none.position == nil)
@@ -217,7 +217,7 @@ struct TimelineHeadTests {
     @Test("One function puts a timeline in front, by itself or by its place; one that is not among them, or a place past either end, is refused and moves nothing")
     func goingToATimeline() throws {
         let session = try session(timelines: ["Ada"])
-        #expect(session.goToTimeline(.trends) && session.currentTimeline == .trends)
+        #expect(!session.goToTimeline(.trends), "Trends is a place of its own, not a timeline")
         #expect(session.goToTimeline(at: 0) && session.currentTimeline == .all)
         #expect(session.goToTimeline(at: session.queries.count - 1))
         #expect(session.currentTimeline == session.queries.last)
@@ -246,7 +246,7 @@ struct TimelineHeadTests {
     @Test("Changing a timeline pressed in the list opens the editor on that timeline, though another is in front by the time the list has gone; and it is done once")
     func theEditIsForTheTimelinePressed() throws {
         let session = try session(timelines: ["Ada", "Bob"])
-        let ada = session.queries[2], bob = session.queries[3]
+        let ada = session.queries[1], bob = session.queries[2]
         session.goToTimeline(ada)
         session.timelineHeadShown = true
         session.timelineListPressed = .edit(ada)
@@ -290,8 +290,8 @@ struct TimelineHeadTests {
     @Test("Where the timeline in front stands is read without building the list")
     func thePosition() throws {
         let session = try session(timelines: ["Ada"])
-        session.goToTimeline(at: 2)
-        #expect(session.timelinePosition.index == 2 && session.timelinePosition.count == 3)
+        session.goToTimeline(at: 1)
+        #expect(session.timelinePosition.index == 1 && session.timelinePosition.count == 2)
     }
 
     // MARK: - What is said
@@ -488,6 +488,9 @@ struct TimelineHeadTests {
         let session: ShellSession
         let layout: ShellLayout
         let probe: PaneProbe
+        /// Usage folded into Preferences' tab, as the narrow tabs hand it down (decision 19).
+        var opens: OpensUsage? = nil
+        var stepProbe: UsageStepProbe? = nil
         @State private var prefs = DummyPrefs(defaults: HeadDefaults())
 
         var body: some View {
@@ -504,6 +507,37 @@ struct TimelineHeadTests {
             .environment(\.shellLayout, layout)
             .environment(\.shellSlides, true)
             .environment(\.shellPaneProbe, probe)
+            .environment(\.shellOpensUsage, opens)
+            .environment(\.usageStepProbe, stepProbe)
+        }
+    }
+
+    /// Decisions 9 and 19. Where the narrow tabs have folded Usage into Preferences' tab, the
+    /// head of Preferences is a row into Usage and the head of Usage a row back, over the page's
+    /// own tabs; where nothing was handed down — the rail, the fold's pop-up — neither is drawn.
+    @Test("Usage's way in heads Preferences, and its way back heads Usage, over their tabs and only where the tabs folded Usage in",
+          arguments: [TabbedPage.preferences, .usage])
+    func usageStepHeadsThePage(_ page: TabbedPage) async throws {
+        for folded in [false, true] {
+            let session = try session()
+            let probe = PaneProbe(), step = UsageStepProbe()
+            let host = TabbedHost(
+                page: page, session: session, layout: .narrow, probe: probe,
+                opens: folded ? OpensUsage(go: { _ in }) : nil, stepProbe: step
+            )
+            let hosted = NSHostingView(rootView: host)
+            hosted.frame = NSRect(x: 0, y: 0, width: 390, height: 700)
+            for _ in 0 ..< 3 {
+                turn(hosted)
+                await Task.yield()
+            }
+            #expect(probe.head.height > 0, "\(page): the tabs' head was laid out")
+            if folded {
+                #expect(step.frame.height > 0, "\(page): the row was laid out")
+                #expect(step.frame.maxY <= probe.head.minY + 0.5, "\(page): row \(step.frame) over the tabs \(probe.head)")
+            } else {
+                #expect(step.frame == .zero, "\(page): a row at \(step.frame) with nothing handed down")
+            }
         }
     }
 

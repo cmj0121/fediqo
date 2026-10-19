@@ -22,7 +22,6 @@ struct TimelineEditorListTests {
             try #require(Rule.keyword("#rust", in: .every, effect: .exclude)),
             try #require(Rule.category(.public, in: .every, sources: sources)),
             try #require(Rule.category(.home, in: .source(host: "m.example"), sources: sources)),
-            try #require(Rule.category(.trends, in: .source(host: "f.example"), sources: sources)),
             try #require(Rule.category(.board(id: "42"), in: .source(host: "f.example"), sources: sources)),
         ]
     }
@@ -120,12 +119,12 @@ struct TimelineEditorListTests {
 
     @Test("A category for every source opens under the first host whose choices list it")
     func everySourceCategoryOpensWhereListed() throws {
-        let rule = try #require(Rule.category(.trends, in: .every, sources: sources))
+        let rule = try #require(Rule.category(.public, in: .every, sources: sources))
         let choices: [RuleTarget] = [
-            .category(.public, on: "m.example"), .category(.trends, on: "f.example"), .category(.trends, on: "m.example"),
+            .category(.home, on: "m.example"), .category(.public, on: "p.example"), .category(.public, on: "m.example"),
         ]
         let opened = RuleDraft(editing: rule, sources: sources, choices: choices)
-        #expect(opened.target == .category(.trends, on: "f.example"))
+        #expect(opened.target == .category(.public, on: "p.example"))
         #expect(opened.scope == .every)
         #expect(opened.rule(sources, id: rule.id) == rule)
     }

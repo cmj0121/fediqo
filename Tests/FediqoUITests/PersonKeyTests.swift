@@ -116,10 +116,10 @@ struct PersonKeyTests {
     /// Keys are read above either arrangement, so the width is not an input to this rule at all —
     /// which is the whole of "at every width" a test can say. The place is: somebody is a step of
     /// the timeline's walk, and Account has no rows to stand on.
-    @Test("Only on the timeline, whatever the width")
+    @Test("Only on a stream place — the timeline, Trends — whatever the width")
     func onlyOnTheTimeline() {
         for place in ShellPlace.allCases {
-            #expect(FediqoRootView.canOpenAuthor(place: place, open: [.selection]) == (place == .timeline))
+            #expect(FediqoRootView.canOpenAuthor(place: place, open: [.selection]) == place.isStream)
         }
     }
 }

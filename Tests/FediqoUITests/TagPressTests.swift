@@ -116,7 +116,7 @@ struct TagPressTests {
         #expect(session.reload.tagFailed.isEmpty)
     }
 
-    @Test("While on its way the page says so and shows what was held; a failure says so there, and a retry asks again")
+    @Test("While on its way the page's toast says so and the page shows what was held; a failure is the toast's, and `r` asks again")
     func onItsWayFailingAndRetry() async throws {
         let gated = GatedHTTP([Self.tagAddress: .text("oops", status: 500)], holding: "/api/v1/timelines/tag/Swift")
         let guardTask = watching(gated.gate, "the posts under the hashtag, held on the wire")
@@ -126,18 +126,19 @@ struct TagPressTests {
         let asking = Task { await session.reload.tag(Self.swift, timeline: .all, in: session) }
         await met("the source is asked for the hashtag", by: asking) { await gated.asks == 1 }
         #expect(session.reload.tagAsking == [Self.one])
-        #expect(TagPane.said(asking: session.reload.tagAsking, failed: [], tag: Self.swift)
-            == .asking("Asking one.example for #Swift…"))
+        #expect(session.reload.tagPageAsk(of: Self.swift, on: .timeline, language: .english)
+            == PageAsking(asking: "Asking one.example for #Swift…", stoppable: true))
         #expect(session.heldPosts(under: Self.swift, latest: nil).count == 1, "what was held, not waiting")
 
         await gated.gate.open()
         await asking.value
         #expect(session.reload.tagAsking.isEmpty)
         #expect(session.reload.tagFailed == [Self.one])
-        #expect(TagPane.said(asking: [], failed: session.reload.tagFailed, tag: Self.swift)
-            == .failed("Could not ask one.example for #Swift."))
+        let failed = session.reload.tagPageAsk(of: Self.swift, on: .timeline)
+        #expect(failed == PageAsking(failed: [Self.one]))
+        #expect(TimelineToast.asked(failed, note: nil, language: .english)?.text == "Could not reload one.example.")
 
-        await session.reload.tag(Self.swift, timeline: .all, in: session)
+        await session.reload.tagAgain(Self.swift, timeline: .all, in: session)
         #expect(await gated.asks == 2, "tried again")
     }
 
@@ -149,7 +150,7 @@ struct TagPressTests {
         await session.reload.tag(nothing, timeline: .all, in: session)
         #expect(session.heldPosts(under: nothing, latest: nil).isEmpty)
         #expect(session.reload.tagAsking.isEmpty)
-        #expect(TagPane.said(asking: [], failed: session.reload.tagFailed, tag: nothing) == nil)
+        #expect(session.reload.tagPageAsk(of: nothing, on: .timeline) == PageAsking(), "nothing for the toast to say")
         #expect(TagPane.none(nothing) == "Nothing under #nothing has reached this device.")
     }
 
@@ -172,6 +173,111 @@ struct TagPressTests {
         #expect(await session.store.note(Self.fromTheWire) == nil)
     }
 
+    // MARK: - Asked again, and stopped (decision 11)
+
+    @Test("Stop on a hashtag's page calls its ask off: the toast says the wait, then that the reload stopped — never a failure — the page and whom it asked stay, what comes late lands nowhere, a second press then asks again and says nothing of the stop")
+    func stopCallsTheAskOff() async throws {
+        let gated = GatedHTTP([Self.tagAddress: Self.underTag], holding: "/api/v1/timelines/tag/Swift")
+        let guardTask = watching(gated.gate, "the posts under the hashtag, held on the wire")
+        defer { guardTask.cancel() }
+        let session = await shell(gated)
+        #expect(!session.reload.stopTag(Self.swift, on: .timeline), "nothing on the wire: nothing stopped")
+
+        let asking = Task { await session.reload.tag(Self.swift, timeline: .all, in: session) }
+        await met("the source is asked for the hashtag", by: asking) { await gated.asks == 1 }
+        let ask = session.reload.tagPageAsk(of: Self.swift, on: .timeline)
+        #expect(ask.stoppable && ReloadMark.shown(canReload: true, stoppable: ask.stoppable) == .stop, "the mark is Stop mid-ask")
+        // A press while it runs asks nothing.
+        await session.reload.tagAgain(Self.swift, timeline: .all, in: session)
+        #expect(await gated.asks == 1)
+
+        #expect(session.reload.stopTag(Self.swift, on: .timeline))
+        await asking.value
+        #expect(session.reload.tagPageAsk(of: Self.swift, on: .timeline) == PageAsking(stopped: true))
+        #expect(TimelineToast.asked(PageAsking(stopped: true), note: nil, language: .english)?.text == "Reload stopped.")
+        #expect(session.reload.tagFailed.isEmpty && session.reload.tagAsk?.reach.asked == [Self.one], "the page stays, and whom it asked")
+        #expect(!session.reload.stopped && session.reload.line == nil, "the stream's toast says nothing of it")
+        #expect(ReloadMark.shown(canReload: true, stoppable: false) == .reload)
+
+        await gated.gate.open()
+        // No `by:`: the read that was stopped is the reload's own task, which no check can name.
+        await met("the ask stopped is answered past the gate") { await gated.requested().contains(Self.tagAddress) }
+        for _ in 0..<2_000 { await Task.yield() }
+        #expect(await session.store.note(Self.fromTheWire) == nil, "what came late landed nowhere")
+
+        await session.reload.tagAgain(Self.swift, timeline: .all, in: session)
+        #expect(await gated.asks == 2, "asked again after the stop")
+        #expect(await session.store.note(Self.fromTheWire) != nil)
+        #expect(session.reload.tagPageAsk(of: Self.swift, on: .timeline) == PageAsking(), "and the stop is said no longer")
+    }
+
+    @Test("A hashtag's ask is its own page's and its side's: Escape and Stop on it leave a reload of the stream running, and its toast is the page's; the same hashtag open on Trends is not told of the timeline's ask, nor stops it")
+    func theStopIsThePages() async throws {
+        let gated = GatedHTTP([Self.tagAddress: Self.underTag], holding: "/api/v1/timelines/tag/Swift")
+        let guardTask = watching(gated.gate, "the posts under the hashtag, held on the wire")
+        defer { guardTask.cancel() }
+        let session = await shell(gated)
+        let running = Gate()
+        let runningGuard = watching(running, "the stream's reload that is to run on")
+        defer { runningGuard.cancel() }
+        let stream = Task { await session.reload.run(.timeline) { await running.wait() } }
+        await met("the stream's reload is running", by: stream) { session.reload.stoppable }
+        let asking = Task { await session.reload.tag(Self.swift, timeline: .all, in: session) }
+        await met("the source is asked for the hashtag", by: asking) { await gated.asks == 1 }
+
+        let pages = ShellPersonPages()
+        let front = try #require(TimelinePane.askInFront(.tag(Self.swift), rising: nil, of: pages, in: session))
+        #expect(front == .tag(Self.swift))
+        let toast = TimelinePane.banner(TimelinePane.ask(front, of: pages, in: session), note: nil, in: session)
+        #expect(toast?.kind == .loading && toast?.text == "Asking one.example for #Swift…", "the page's words, not the stream's")
+        #expect(TimelinePane.askInFront(nil, rising: nil, of: pages, in: session) == nil, "the stream in front: its own")
+
+        session.stream = .trends
+        #expect(TimelinePane.ask(front, of: pages, in: session) == PageAsking(), "Trends' page of it is not told")
+        #expect(!TimelinePane.stop(front, of: pages, in: session), "nor stops it")
+        session.stream = .timeline
+
+        #expect(TimelinePane.stop(front, of: pages, in: session))
+        await asking.value
+        #expect(session.reload.stoppable && session.reload.running, "the stream's reload runs on")
+        #expect(TimelinePane.ask(front, of: pages, in: session).stopped && !session.reload.stopped)
+        #expect(session.reload.stop())
+        await running.open()
+        await stream.value
+        await gated.gate.open()
+    }
+
+    @Test("The bar's mark and `r` are where a source of the timeline in front keeps tags, named for whom they ask; a pull is the press and then the wait")
+    func theMarkAndThePull() async throws {
+        let session = await shell(FixtureHTTP([Self.tagAddress: Self.underTag]))
+        let reach = session.reload.tagReach(of: .all, in: session)
+        #expect(reach.asked == [Self.one] && reach.tagless == [Self.forum], "the forum keeps no tags")
+        #expect(TagPane.reloadName(Self.swift, asking: reach.asked, canReload: true, language: .english) == "Ask one.example again for #Swift")
+        #expect(TagPane.reloadName(Self.swift, asking: reach.asked, canReload: true, language: .taiwanese) == "再向 one.example 詢問 #Swift")
+        #expect(TagPane.reloadName(Self.swift, asking: reach.asked, canReload: false) == nil)
+        #expect(TagPane.reloadName(Self.swift, asking: [], canReload: true) == nil, "nobody to ask: no mark")
+        let onlyForum = ItemStore()
+        await onlyForum.add(Source(host: Self.forum, kind: .discuz, boards: [BoardSubscription(fid: 1, name: "Dev")]))
+        let forum = ShellSession(http: FixtureHTTP([:]), store: onlyForum)
+        await forum.reloadFromStore()
+        #expect(forum.reload.tagReach(of: .all, in: forum).asked.isEmpty)
+
+        var stopped = 0
+        let acts = TagPane.acts(TagPageActs(onStop: { stopped += 1 }))
+        acts.onStop?()
+        #expect(stopped == 1 && TagPane.acts(TagPageActs()).onStop == nil, "Stop only where the page hands one")
+
+        await PullsToReload.pull(
+            offered: true, reload: {},
+            settled: {
+                await session.reload.tagAgain(Self.swift, timeline: .all, in: session)
+                await session.reload.settled(.tag)
+            }
+        ) { _ in }
+        #expect(session.reload.tagAsk?.tag == Self.swift && !session.reload.tagPageAsk(of: Self.swift, on: .timeline).stoppable)
+        #expect(await session.store.note(Self.fromTheWire) != nil, "the pull asked, and it landed")
+    }
+
     // MARK: - The press, by key and by touch
 
     @Test("t is the key, a pill's press is its touch path, and both walk the same step")
@@ -184,7 +290,7 @@ struct TagPressTests {
         #expect(DummyCommand.walk.contains(.tag))
         #expect(DummyCommand.canWalk(whenOpen: [.tag]), "a row on a tag's page opens further")
         #expect(!DummyCommand.canWalk(whenOpen: [.viewer]))
-        for key in ["shortcut.tag", "tag.asking", "tag.failed", "tag.retry", "tag.none"] {
+        for key in ["shortcut.tag", "tag.asking", "tag.retry", "tag.retry.spoken", "tag.none"] {
             for language in [DummyLanguage.english, .taiwanese] {
                 #expect(L10n.t(key, language: language) != key, "\(key) is missing in \(language)")
             }
@@ -259,12 +365,12 @@ struct TagPressTests {
         #expect(EmojiText.tags(in: cut) == [Self.swift])
     }
 
-    @Test("The page draws in light and dark: on its way, failed with a retry, and empty")
+    @Test("The page draws in light and dark: on its way, with its mark, and empty")
     func thePageDraws() throws {
         for scheme in [ColorScheme.light, .dark] {
-            for (asking, failed) in [([Self.one], [String]()), ([], [Self.one]), ([], [])] {
+            for (asking, reload) in [([Self.one], "Ask one.example again for #Swift"), ([], nil)] {
                 let pane = TagPane(
-                    said: TagPageSaid.made(of: Self.swift, held: 0, asking: asking, failed: failed), items: [],
+                    said: TagPageSaid.made(of: Self.swift, held: 0, asking: asking), items: [], reload: reload,
                     catalogues: EmojiCatalogueStore(), posts: ForumPosts(http: FixtureHTTP([:])),
                     selectedID: .constant(nil),
                     decks: .constant(ShellDecks()), playback: ShellPlayback(),

@@ -19,6 +19,11 @@ import Foundation
 /// (Decision 15): a missing or other version, a field or a kind this build does not know, is
 /// reported as unreadable and never written over, because dropping one rule would widen a
 /// timeline or bring back what the reader hid.
+///
+/// **Save for a rule on what is trending**, which a timeline no longer holds: Trends is a page of
+/// its own. Read, it is let go without a word, and the timeline loads without it — a timeline
+/// whose one rule it was loads with none. The next save writes the rest in the same shape, so
+/// a build from before still reads it.
 struct WrittenTimelineStore {
     enum Loaded: Equatable {
         case timelines([TimelineDefinition])
@@ -118,11 +123,12 @@ private struct TimelineRow: Codable {
         desc = timeline.desc
     }
 
-    /// Nothing where any one rule cannot be read.
+    /// Nothing where any one rule cannot be read. A rule on what is trending is read and let go.
     var definition: TimelineDefinition? {
         var read: [Rule] = []
         for row in rules {
             guard let rule = row.rule else { return nil }
+            if case .category(.trends, _) = rule.kind { continue }
             read.append(rule)
         }
         return TimelineDefinition(id: id, name: name, rules: read, desc: desc)

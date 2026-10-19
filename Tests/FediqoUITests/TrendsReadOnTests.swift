@@ -50,7 +50,7 @@ struct TrendsReadOnTests {
         )
         session.deadlinesUnturned()
         await session.reloadFromStore()
-        session.timelineID = .trends
+        session.stream = .trends
         return session
     }
 
@@ -276,7 +276,7 @@ struct TrendsReadOnTests {
         )
         session.deadlinesUnturned()
         await session.reloadFromStore()
-        session.timelineID = .trends
+        session.stream = .trends
         await session.reload.timeline(.trends, in: session)
 
         await session.reload.more(.trends, in: session)

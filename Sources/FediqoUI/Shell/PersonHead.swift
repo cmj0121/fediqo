@@ -123,8 +123,6 @@ struct PersonHead: View {
     var onAct: (PersonAct) -> Void = { _ in }
     /// The press on the lock of a sign-in that was not asked for following.
     var onAskFollows: () -> Void = {}
-    /// "Try again", where the source could not be asked how the reader stands to them.
-    var onStandingAgain: () -> Void = {}
     /// Change pressed, on the reader's own page: the sheet, or the question for the account part.
     var onChange: () -> Void = {}
 
@@ -441,15 +439,9 @@ struct PersonHead: View {
         standsPresses(stood, whole: whole)
     }
 
-    /// What stands with the marks and is a press: asking again, and the sign-in asked for more.
+    /// What stands with the marks and is a press: the sign-in asked for more.
     @ViewBuilder
     private func standsPresses(_ stood: PersonActing, whole: Bool) -> some View {
-        if let failed = stood.failedWords() {
-            ShellLinkButton(L10n.t("person.retry"), symbol: Self.failedSymbol, action: onStandingAgain)
-                .help(failed)
-                .accessibilityLabel(ShellMark.said(L10n.t("person.retry"), failed))
-                .fixedSize()
-        }
         if let words = stood.lockWords() { lock(words, asks: stood.lock?.asks == true, whole: whole) }
     }
 

@@ -765,7 +765,7 @@ struct ViewerTests {
             case .person: personOpen != nil
             case .tag: walk.openedTag != nil
             case .people: walk.openedPeople != nil
-            case .rising: walk.openedRising != nil
+            case .rising: walk.openedFoundTags != nil || walk.openedFollowedTags != nil
             case .thread: threadOpen
             case .link: walk.openedLink != nil
             case .search: searchOpen

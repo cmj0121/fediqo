@@ -36,8 +36,9 @@ import SwiftUI
 //
 // **The fifth is a hashtag's** (#124): a tag pressed asks the sources of the timeline in front that
 // keep tags — a Mastodon, a Discourse with tagging on (#197) — for their posts under it, held
-// as a search's are. It is said on the tag's own page, where the answer would be, and not in the
-// toast; leaving the page ends it, and switching timeline under it asks the new one's sources.
+// as a search's are. It is said in the toast of the tag's own page, and not in the stream's; its
+// page's Stop stops it, leaving the page ends it, and switching timeline under it asks the new
+// one's sources.
 
 /// One reload of each kind at a time, and the sources the last one could not read.
 @MainActor
@@ -104,8 +105,8 @@ final class ShellReload {
 
     /// How often `settled` looks at whether its read is still running.
     static let look: Duration = .milliseconds(80)
-    /// Whether any reload the toast speaks for is on the wire. Not a tag's ask, which its own
-    /// page speaks for (#124), nor an open thread's renewal, which its foot does (#198).
+    /// Whether any reload the stream's toast speaks for is on the wire. Not a tag's ask, which
+    /// its own page's toast speaks for (#124), nor an open thread's renewal, which its foot does (#198).
     var running: Bool { !asking.subtracting([.tag, .renew]).isEmpty }
     /// Whether the only reload on the wire is the wait's, which nobody pressed for (#95).
     var onlyWaiting: Bool { asking.subtracting([.tag, .renew]) == [.held] }
@@ -136,8 +137,9 @@ final class ShellReload {
     /// Each kind's own `unspoken`, as `failures` is kept: a wait starting does not take back what
     /// the timeline's `r` found, nor the reverse (#95).
     private var unspokens: [Ask: Unspoken] = [:]
-    /// The last reload of some kind was stopped by the reader before it finished.
-    var stopped: Bool { !halted.isEmpty }
+    /// The last reload of some kind was stopped by the reader before it finished — not a tag's,
+    /// which its own page's toast says (`tagPageAsk`).
+    var stopped: Bool { !halted.subtracting([.tag]).isEmpty }
     /// The kinds whose last reload was stopped, each cleared as that kind starts again. Never
     /// `.held`: Esc stops what was pressed, and nobody pressed for that one.
     private var halted: Set<Ask> = []
@@ -391,8 +393,12 @@ final class ShellReload {
     private(set) var tagAsk: TagAsk?
     /// The sources the tag's ask could not reach.
     var tagFailed: [String] { failures[.tag] ?? [] }
-    /// The sources the tag's ask is waiting on now, or nothing once it has finished.
-    var tagAsking: [String] { asking.contains(.tag) ? tagAsk?.reach.asked ?? [] : [] }
+    /// The sources the tag's ask is waiting on now, in the order they were asked — each let go
+    /// of as it answers — or nothing once it has finished.
+    var tagAsking: [String] { asking.contains(.tag) ? tagWaiting : [] }
+    /// `tagAsking`'s own fact: filled as the ask sets out, a host taken off as it answers, and
+    /// emptied as the ask ends, however it ends (`finish`).
+    private var tagWaiting: [String] = []
     /// What the sources sent under each tag this run, by the tag as `HeldUnderTag` folds it
     /// (#197). A forum's topic carries its tags beside its words and not in them, so the page
     /// finds what a source filed under the tag by this as well as by the words.
@@ -458,11 +464,10 @@ final class ShellReload {
     /// that answers that it keeps no tags is said to. Ends the last tag's ask first.
     func tag(_ tag: PostTag, timeline query: TimelineQuery, in session: ShellSession) async {
         endTag()
-        let asks = CompiledTimeline(query.definition(among: session.written), sources: session.sources)
-            .sourcesToAsk()
-        let reach = TagReach.of(asks, in: session, tagsOff: tagsTurnedOff)
+        let reach = tagReach(of: query, in: session)
         tagAsk = TagAsk(tag: tag, timeline: query, reach: reach)
         guard !reach.asked.isEmpty else { return }
+        tagWaiting = reach.asked
         await run(.tag) {
             var came: [String: Tagged] = [:]
             await withTaskGroup(of: (String, Tagged).self) { group in
@@ -471,6 +476,8 @@ final class ShellReload {
                 }
                 for await (host, answer) in group {
                     came[host] = answer
+                    // An ask called off says nothing of who answered it: the next may be out.
+                    if !Task.isCancelled { self.tagWaiting.removeAll { $0 == host } }
                     await session.reloadFromStore()
                 }
             }
@@ -487,6 +494,56 @@ final class ShellReload {
         }
     }
 
+    /// Which of `query`'s sources a tag's page would ask now, and why not the rest (`TagReach.of`):
+    /// whether `r` on the page has anybody to ask, and whom its mark is named for.
+    func tagReach(of query: TimelineQuery, in session: ShellSession) -> TagReach {
+        let asks = CompiledTimeline(query.definition(among: session.written), sources: session.sources)
+            .sourcesToAsk()
+        return TagReach.of(asks, in: session, tagsOff: tagsTurnedOff)
+    }
+
+    /// The ask of `tag`'s page on `stream`'s side, or nothing where the last ask was another
+    /// hashtag's, or made of the other stream place's timeline: **a tag's ask belongs to the
+    /// side it was made on** (`FediqoRootView.cleared`), and the same hashtag open on the other
+    /// is not told of it.
+    func tagAsk(of tag: PostTag, on stream: ShellStream) -> TagAsk? {
+        guard let tagAsk, tagAsk.tag == tag, ShellStream(of: tagAsk.timeline) == stream else { return nil }
+        return tagAsk
+    }
+
+    /// What `tag`'s page on `stream`'s side says in its toast (DESIGN-reload): the sources it is
+    /// asking — a wait Stop stops — that its last ask missed some, or that it was stopped.
+    func tagPageAsk(of tag: PostTag, on stream: ShellStream, language: DummyLanguage? = nil) -> PageAsking {
+        guard tagAsk(of: tag, on: stream) != nil else { return PageAsking() }
+        let asking = tagAsking.sorted()
+        return PageAsking(
+            asking: TimelineToast.waiting("tag.asking", hosts: asking, extra: [tag.text], language: language),
+            stoppable: !asking.isEmpty,
+            failed: asking.isEmpty ? tagFailed : [],
+            stopped: halted.contains(.tag)
+        )
+    }
+
+    /// The Stop of `tag`'s page on `stream`'s side, and `Escape` there: its ask called off, landing
+    /// as stopped and never as a miss, and what it had not brought landing nowhere. The page and
+    /// what it said of whom it asked stay. **Only that page's**: the stream's reload, and a tag
+    /// asked for the other side, go on. Whether anything was stopped.
+    @discardableResult
+    func stopTag(_ tag: PostTag, on stream: ShellStream) -> Bool {
+        guard asking.contains(.tag), tagAsk(of: tag, on: stream) != nil else { return false }
+        halted.insert(.tag)
+        end(.tag)
+        return true
+    }
+
+    /// `r`, the mark and a pull on `tag`'s page: its sources asked again, of the timeline in front
+    /// as the press that opened it asked them. **A press while that page's ask runs asks
+    /// nothing**; one left by a stop, a miss or an answer asks afresh.
+    func tagAgain(_ tag: PostTag, timeline query: TimelineQuery, in session: ShellSession) async {
+        if asking.contains(.tag), tagAsk(of: tag, on: ShellStream(of: query)) != nil { return }
+        await self.tag(tag, timeline: query, in: session)
+    }
+
     /// The timeline under an open tag's page changed (#197): the tag is asked again of the new
     /// one's sources, and the reach follows. `searchSwitched`'s guard: a switch answered late —
     /// another since — asks nothing of a timeline no longer in front.
@@ -501,10 +558,10 @@ final class ShellReload {
         case tagsOff
     }
 
-    /// The tag's page left: its ask ends where it is, and what it said goes.
+    /// The tag's page left: its ask ends where it is, and what it said goes — a stop with it.
     func endTag() {
         end(.tag)
-        failures[.tag] = nil
+        forget(.tag)
         tagAsk = nil
     }
 
@@ -814,7 +871,7 @@ final class ShellReload {
     /// land. The ask on a wait goes on: nobody started it, and Esc has a thread or a search to
     /// close instead of being spent on it once a minute (#95). A search's goes when Esc closes
     /// the search (`endSearch`). Nor the ask for more: scrolling started it, not a key (#87).
-    /// Nor a tag's: leaving its page ends it (#124). Nor an open thread's renewal, which is the
+    /// Nor a tag's: its own page's Stop does (`stopTag`), and leaving it ends it (#124). Nor an open thread's renewal, which is the
     /// wait's and ends as the thread is left (#198).
     @discardableResult
     func stop() -> Bool {
@@ -915,6 +972,7 @@ final class ShellReload {
         runs[ask] = nil
         asking.remove(ask)
         readingHosts[ask] = nil
+        if ask == .tag { tagWaiting = [] }
         if ask == .timeline { landed += 1 }
         run.waiter.resume()
         if ask == .more { readOnPending() }
@@ -928,7 +986,7 @@ final class ShellReload {
         // None, so the toast says the search's own line rather than naming its pieces as a
         // reload's; they are still listed under Preferences as a search's.
         case .search: []
-        // None: its own page says it, and the toast is not the tag's.
+        // None: its own page's toast says it, in the page's words (`tagPageAsk`).
         case .tag: []
         case .more: [.timeline]
         // None: the thread's foot says it, and the toast is not the thread's.

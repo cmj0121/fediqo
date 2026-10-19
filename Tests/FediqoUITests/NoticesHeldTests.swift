@@ -169,7 +169,8 @@ struct NoticesHeldTests {
         #expect(await again.server.asked.sorted() == [F.get(Self.a), F.get(Self.b)], "each asked the way it answered last run")
         #expect(ids(list.lines) == ["a4", "b8", "a3"], "what is held stays drawn while they are asked")
         #expect(list.readingHosts == [Self.a, Self.b])
-        #expect(NoticesPane.foot(in: again.session) == .asking, "nobody is named above, so nobody is waited for")
+        #expect(NoticesPane.foot(in: again.session) == nil, "no foot while they are asked: the toast says so")
+        #expect(list.ask(language: .english) == PageAsking(asking: "Reading notices from a.example… +1", stoppable: true))
 
         await gateA.open()
         await met("the first source has been read", by: reading) { list.standing(host: Self.a) == .read }

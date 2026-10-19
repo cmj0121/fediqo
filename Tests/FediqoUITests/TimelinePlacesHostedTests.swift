@@ -167,6 +167,15 @@ struct TimelinePlacesHostedTests {
         draft.name = "Ada"
         draft.rules = [try #require(Rule.author("@ada@m.example", in: .every, sources: []))]
         session.commit(draft)
+        // The timeline beside All that holds what is trending, now Trends is a place of its own.
+        var others = TimelineDraft(new: 2)
+        others.name = "Cy and Dee"
+        others.position = 1
+        others.rules = [
+            try #require(Rule.author("@cy@m.example", in: .every, sources: [])),
+            try #require(Rule.author("@dee@m.example", in: .every, sources: [])),
+        ]
+        session.commit(others)
         session.timelineID = .all
         let lamp = Lamp()
         let search = ShellSearch()
@@ -179,6 +188,11 @@ struct TimelinePlacesHostedTests {
 
     private func written(_ session: ShellSession) throws -> TimelineQuery {
         .written(try #require(session.written.first).id)
+    }
+
+    /// The written timeline of what is trending: Cy's and Dee's posts.
+    private func second(_ session: ShellSession) throws -> TimelineQuery {
+        .written(try #require(session.written.first { $0.name == "Cy and Dee" }).id)
     }
 
     /// The rows of one timeline that no other timeline in this pairing holds, so a lamp that
@@ -194,7 +208,7 @@ struct TimelinePlacesHostedTests {
     func theFourSteps() async throws {
         let h = try await harness()
         let x = TimelineQuery.all
-        let y = TimelineQuery.trends
+        let y = try second(h.session)
         await h.press(x)
         let post1 = try #require(own(x, against: y, in: h).last)
         await h.stand(on: post1)
@@ -221,16 +235,24 @@ struct TimelinePlacesHostedTests {
         return try #require(h.rows(of: query).dropFirst().first)
     }
 
-    /// X → Y → X → Y → X → Y, every arrival checked, for each pairing of All, Trends and a
-    /// written timeline, by both ways of switching. One order per pairing: the trips go both
+    /// X → Y → X → Y → X → Y, every arrival checked, for each pairing of All and two written
+    /// timelines, by both ways of switching. One order per pairing: the trips go both
     /// ways already, so the reversed order would ask each switch a second time.
     @Test("Going back and forth lands, every time, on the post each was left on", arguments: [false, true])
     func backAndForth(byTab: Bool) async throws {
+        // `nil` is the reader's first timeline, and `.trends` stands for the second.
         let pairings: [(TimelineQuery?, TimelineQuery?)] = [(.all, .trends), (.all, nil), (nil, .trends)]
         for (a, b) in pairings {
             let h = try await harness()
-            let x = try a ?? written(h.session)
-            let y = try b ?? written(h.session)
+            func resolved(_ query: TimelineQuery?) throws -> TimelineQuery {
+                switch query {
+                case nil: try written(h.session)
+                case .trends?: try second(h.session)
+                case let query?: query
+                }
+            }
+            let x = try resolved(a)
+            let y = try resolved(b)
             func go(_ query: TimelineQuery) async {
                 if byTab { await h.tab(to: query) } else { await h.press(query) }
             }
@@ -254,19 +276,20 @@ struct TimelinePlacesHostedTests {
     @Test("Passing through a third timeline changes neither of the other two")
     func aThirdChangesNeither() async throws {
         let h = try await harness()
+        let others = try second(h.session)
         let mine = try written(h.session)
-        let allPost = try post(in: .all, against: .trends, in: h)
-        let trendPost = try post(in: .trends, against: mine, in: h)
+        let allPost = try post(in: .all, against: others, in: h)
+        let trendPost = try post(in: others, against: mine, in: h)
         await h.press(.all)
         await h.stand(on: allPost)
-        await h.press(.trends)
+        await h.press(others)
         await h.stand(on: trendPost)
         await h.press(mine)
         await h.stand(on: try #require(h.rows(of: mine).last))
         await h.press(.all)
         await h.gives(allPost)
         await h.press(mine)
-        await h.press(.trends)
+        await h.press(others)
         await h.gives(trendPost)
     }
 
@@ -275,22 +298,23 @@ struct TimelinePlacesHostedTests {
     @Test("A post that has since left its timeline is not lit, on the second trip or the third")
     func aPostThatLeftIsNotLit() async throws {
         let h = try await harness()
-        let allPost = try post(in: .all, against: .trends, in: h)
-        let trendPost = try post(in: .trends, against: .all, in: h)
+        let others = try second(h.session)
+        let allPost = try post(in: .all, against: others, in: h)
+        let trendPost = try post(in: others, against: .all, in: h)
         await h.press(.all)
         await h.stand(on: allPost)
-        await h.press(.trends)
+        await h.press(others)
         await h.stand(on: trendPost)
         await h.press(.all)
         await h.gives(allPost)
-        // A reload lands without the Trends post the reader was on.
+        // A reload lands without the trending post the reader was on.
         h.session.notes = h.session.notes.filter { $0.id != String(trendPost.split(separator: "\u{1E}").last ?? "") }
         await h.settle()
-        await h.press(.trends)
+        await h.press(others)
         #expect(h.lamp.seen == nil)
         await h.press(.all)
         await h.gives(allPost)
-        await h.press(.trends)
+        await h.press(others)
         #expect(h.lamp.seen == nil)
     }
 
@@ -299,21 +323,22 @@ struct TimelinePlacesHostedTests {
     @Test("With the search open a switch writes no place, and closing gives the parked post back")
     func theSearchStillParks() async throws {
         let h = try await harness()
-        let allPost = try post(in: .all, against: .trends, in: h)
-        let trendPost = try post(in: .trends, against: .all, in: h)
-        await h.press(.trends)
+        let others = try second(h.session)
+        let allPost = try post(in: .all, against: others, in: h)
+        let trendPost = try post(in: others, against: .all, in: h)
+        await h.press(others)
         await h.stand(on: trendPost)
         await h.press(.all)
         await h.stand(on: allPost)
         // `/`, as the root opens it: the lamp parked in the search and put out.
         h.search.open(from: h.lamp.seen, over: h.session.notes)
         await h.stand(on: nil)
-        await h.press(.trends)
+        await h.press(others)
         await h.press(.all)
         // Closed, as the root closes it: the parked post back on the lamp.
         await h.stand(on: h.search.close())
         await h.gives(allPost)
-        await h.press(.trends)
+        await h.press(others)
         await h.gives(trendPost)
     }
 
@@ -323,10 +348,11 @@ struct TimelinePlacesHostedTests {
     @Test("Switched with the search open, closing gives back the place of the timeline arrived at")
     func switchedUnderTheSearch() async throws {
         let h = try await harness()
+        let others = try second(h.session)
         let mine = try written(h.session)
-        let allPost = try post(in: .all, against: .trends, in: h)
-        let trendPost = try post(in: .trends, against: .all, in: h)
-        await h.press(.trends)
+        let allPost = try post(in: .all, against: others, in: h)
+        let trendPost = try post(in: others, against: .all, in: h)
+        await h.press(others)
         await h.stand(on: trendPost)
         await h.press(.all)
         await h.stand(on: allPost)
@@ -336,22 +362,22 @@ struct TimelinePlacesHostedTests {
         h.search.text = "*"
         h.search.settle("*")
         await h.settle()
-        // A result lit on All, then Trends in front: the pattern is kept and Trends is searched.
+        // A result lit on All, then the other in front: the pattern is kept and it is searched.
         let result = try #require(h.session.searched(h.search, latest: nil)?.first?.id)
         await h.stand(on: result)
-        await h.press(.trends)
+        await h.press(others)
         #expect(h.search.text == "*")
         let found = try #require(h.session.searched(h.search, latest: nil)).map(\.id)
-        #expect(found == h.rows(of: .trends))
+        #expect(found == h.rows(of: others))
         if let lit = h.lamp.seen { #expect(found.contains(lit)) }
-        // Through a written timeline and back to Trends, still searching.
+        // Through a written timeline and back to the other, still searching.
         await h.press(mine)
-        await h.press(.trends)
+        await h.press(others)
         await h.stand(on: h.search.close())
-        await h.gives(trendPost, "Trends' own place, not All's")
+        await h.gives(trendPost, "its own place, not All's")
         await h.press(.all)
         await h.gives(allPost, "All's place was written down, not the result")
-        await h.press(.trends)
+        await h.press(others)
         await h.gives(trendPost)
     }
 }

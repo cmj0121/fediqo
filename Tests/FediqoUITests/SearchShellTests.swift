@@ -149,15 +149,17 @@ struct SearchShellTests {
         #expect(search.close() == "row-b")
     }
 
-    @Test("Leaving the Timeline page closes the search")
+    @Test("Leaving the page the search was opened on closes it — the Timeline's, or Trends' — and the other stream is another page")
     func leavingCloses() async {
         let search = await searching("swift", over: [note("a", "swift")])
-        #expect(!search.closes(leavingFor: .timeline))
-        for place in ShellPlace.allCases where place != .timeline {
-            #expect(search.closes(leavingFor: place), "\(place)")
+        for from in [ShellPlace.timeline, .trends] {
+            #expect(!search.closes(leaving: from, for: from))
+            for place in ShellPlace.allCases where place != from {
+                #expect(search.closes(leaving: from, for: place), "\(from) → \(place)")
+            }
         }
         _ = search.close()
-        #expect(!search.closes(leavingFor: .account))
+        #expect(!search.closes(leaving: .timeline, for: .account))
     }
 
     @Test("The notes are folded when the search opens, not while typing")

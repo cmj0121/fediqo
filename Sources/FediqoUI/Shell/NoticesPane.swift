@@ -18,8 +18,9 @@ import SwiftUI
 ///
 /// **What it says before any line**, in this order: that nobody is signed in to a source that
 /// has notices, and what would make the page fill; that somebody is, and no sign-in may read
-/// them; and then the lines, with what each source has to say above them — on the wire, failed,
-/// never asked, asked and refused.
+/// them; and then the lines, with what each source has to say above them — not read, held to
+/// the most kept, never asked, asked and refused. **A read on the wire, a source that failed
+/// and a read stopped are its bottom toast's**, as the timeline's are (DESIGN-reload).
 struct NoticesPane: View {
     let session: ShellSession
     /// The line the lamp is on, with a keyboard or a pointer. Held by the app, where `j`, `k`
@@ -96,9 +97,6 @@ struct NoticesPane: View {
     ) -> [NoticesLine] {
         let list = session.noticeList
         return NoticesLine.lines(
-            reading: list.readingHosts.filter { list.reaches[$0]?.readingOn != true },
-            failures: list.failures,
-            askable: Set(list.reaches.filter(\.value.askable).keys),
             hosts: hosts,
             locked: list.locked,
             unread: unread,
@@ -123,23 +121,17 @@ struct NoticesPane: View {
     static func notAllowedLines(
         _ hosts: [(host: String, notices: NoticeStanding)], in session: ShellSession
     ) -> [NoticesLine] {
-        NoticesLine.lines(reading: [], failures: [], askable: [], hosts: hosts, places: places(among: hosts, in: session))
+        NoticesLine.lines(hosts: hosts, places: places(among: hosts, in: session))
     }
 
-    /// What stands under the last line now.
-    static func foot(in session: ShellSession) -> NoticesFoot {
+    /// What stands under the last line now, or nothing while a read is on the wire: the
+    /// toast says so (DESIGN-reload), and no row of the list.
+    static func foot(in session: ShellSession) -> NoticesFoot? {
         let list = session.noticeList
-        let foot = NoticesFoot.foot(
-            hasMore: list.hasMore(in: session),
-            isReading: list.readingHosts.contains { list.reaches[$0]?.readingOn == true },
-            floor: list.floor, full: list.isFull
-        )
-        // "Wait for the source named above" is said only where one is named: with what this
-        // device holds drawn and every source being asked for its newest, nobody is, and the
-        // foot says that they are being read.
-        if foot == .held, list.isReading, list.failures.isEmpty, list.locked.isEmpty { return .asking }
+        guard !list.isReading else { return nil }
+        let foot = NoticesFoot.foot(hasMore: list.hasMore(in: session), floor: list.floor, full: list.isFull)
         // And where what stops the list is the months limit, that is what is said.
-        if foot == .held || foot == .end, !list.isReading, list.failures.isEmpty, list.locked.isEmpty, list.isAtLimit {
+        if foot == .held || foot == .end, list.failures.isEmpty, list.locked.isEmpty, list.isAtLimit {
             return .limit
         }
         return foot
@@ -194,6 +186,8 @@ struct NoticesPane: View {
             await acts.readPage(in: session)
         }
         .modifier(ShellMoreAsks(asked: asked))
+        // The read's wait, miss and stop at the foot of the page, as the timeline's (DESIGN-reload).
+        .modifier(ReloadToast(toast: TimelineToast.asked(list.ask(), note: nil)))
     }
 
     // MARK: - Nobody may read notices
@@ -309,11 +303,11 @@ struct NoticesPane: View {
         .fixedSize()
     }
 
-    /// `r`'s mark, and Stop in its place while a read is on the wire — a timeline's own mark
-    /// and rule (`ReloadMark`), under this page's names for the two.
+    /// `r`'s mark, and Stop in its place while the newest are read — a timeline's own mark and
+    /// rule (`ReloadMark`), under this page's names for the two. A reading-on is not stopped.
     @ViewBuilder
     private var reloadMark: some View {
-        if let shown = ReloadMark.shown(canReload: canReload, stoppable: list.isReading) {
+        if let shown = ReloadMark.shown(canReload: canReload, stoppable: list.ask().stoppable) {
             ShellIconButton(shown.symbol, name: Self.reloadName(shown)) {
                 switch ReloadMark.press(shown, at: Date(), pressedAt: reloadPressed) {
                 case .begins:
@@ -433,8 +427,7 @@ struct NoticesPane: View {
         }
     }
 
-    /// One source's word above the lines: where the answer would have been, as a tag's page
-    /// says an ask that is on its way or failed.
+    /// One source's word above the lines: where the answer would have been.
     ///
     /// On one line with its press where both fit whole; the press under the words where they
     /// do not, and the words wrapped. Neither is cut.
@@ -466,52 +459,24 @@ struct NoticesPane: View {
             .modifier(NoticesProbed(.lineWords(line.id), probe: probe))
     }
 
-    /// What is pressed beside a source's word. **Asking a failed source again waits for the
-    /// read on the wire**, and says so: the list takes one read at a time, and a press that
-    /// did nothing would say nothing.
+    /// What is pressed beside a source's word: the press that asks a source never asked.
     @ViewBuilder
     private func linePress(_ line: NoticesLine) -> some View {
         switch line {
-        case .failed(let host, _, true):
-            let waits = list.isReading
-            ShellLinkButton(L10n.t("notices.retry")) { retry(host) }
-                .disabled(waits)
-                .opacity(waits ? Self.waiting : 1)
-                .help(Self.retryHint(waits: waits))
-                .accessibilityHint(Self.retryHint(waits: waits))
-                .fixedSize()
-                .modifier(NoticesProbed(.linePress(line.id), says: Self.retryHint(waits: waits), probe: probe))
         case .unasked(let host):
             NoticeAskSlot(host: host, session: session)
-        case .reading, .failed, .refused, .locked, .unread, .full, .declined, .asking:
+        case .refused, .locked, .unread, .full, .declined, .asking:
             EmptyView()
         }
     }
 
-    /// How a press that waits is drawn: there, and not to be pressed yet.
-    static let waiting: Double = 0.4
-
-    /// Why asking again waits, or nothing where it does not.
-    static func retryHint(waits: Bool, language: DummyLanguage? = nil) -> String {
-        waits ? L10n.t("notices.retry.waits", language: language) : ""
-    }
-
-    static func isFailure(_ line: NoticesLine) -> Bool {
-        if case .failed = line { true } else { false }
-    }
-
-    /// Whether a line is drawn in the page's full ink: a failure, and a source whose older
-    /// notices are not shown — each says something is missing from the list under it.
+    /// Whether a line is drawn in the page's full ink: a source whose older notices are not
+    /// shown, which says something is missing from the list under it.
     static func standsOut(_ line: NoticesLine) -> Bool {
         switch line {
-        case .failed, .full: true
-        case .reading, .unasked, .refused, .locked, .unread, .declined, .asking: false
+        case .full: true
+        case .unasked, .refused, .locked, .unread, .declined, .asking: false
         }
-    }
-
-    /// The press beside a source named as failed.
-    func retry(_ host: String) {
-        Task { await list.retry(host: host, in: session) }
     }
 
     /// The foot pressed: the next, older stretch.
@@ -548,10 +513,12 @@ struct NoticesPane: View {
         if case .narrowed = said { foot }
     }
 
+    @ViewBuilder
     private var foot: some View {
-        let foot = Self.foot(in: session)
-        return NoticesFootRow(foot: foot, hand: hand, onPress: readOn)
-            .modifier(NoticesProbed(.foot, says: foot.words(), probe: probe))
+        if let foot = Self.foot(in: session) {
+            NoticesFootRow(foot: foot, hand: hand, onPress: readOn)
+                .modifier(NoticesProbed(.foot, says: foot.words(), probe: probe))
+        }
     }
 
     private func rows(_ shown: [Notice], holding open: [String]) -> some View {

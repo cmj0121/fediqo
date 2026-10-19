@@ -24,11 +24,12 @@ struct PlaceErrand: Hashable, Sendable {
     ///
     /// **Nothing where the walk already stands on `step`**: no step was taken, so there is none
     /// to come back by. That step is the timeline's own, and leaving it is leaving it there.
-    /// And nothing from the timeline place itself, where a step is only a step.
+    /// And nothing from a stream place itself — the timeline, Trends — where a step is only a
+    /// step of that place's own walk.
     static func setOut(
         to step: ShellStep, from place: ShellPlace, line: String? = nil, on walk: inout ShellWalk, lamp: String?
     ) -> PlaceErrand? {
-        guard place != .timeline else { return nil }
+        guard !place.isStream else { return nil }
         let base = walk.depth
         guard walk.walk(to: step, from: lamp) else { return nil }
         return PlaceErrand(from: place, line: line, base: base)

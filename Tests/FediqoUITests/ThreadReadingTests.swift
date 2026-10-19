@@ -489,8 +489,8 @@ struct ThreadReadingTests {
         #expect(DummyCommand.from("r") == .reload)
         // `o` opens a quoted post since #214.
         #expect(DummyCommand.from("o") == .openQuote)
-        // `h` opens the rising hashtags since #320.
-        #expect(DummyCommand.from("h") == .openRising)
+        // `h` opened the rising hashtags since #320, and brings Trends in front since it is a place.
+        #expect(DummyCommand.from("h") == .openTrends)
         // `l` follows whoever's page, or the hashtag whose page, is in front since #313.
         #expect(DummyCommand.from("l") == .follow)
     }

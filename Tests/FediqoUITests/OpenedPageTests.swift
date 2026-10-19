@@ -298,24 +298,26 @@ struct OpenedPageTests {
 
     @Test("A tab that is the step's own value replaces the step in front: the walk is no deeper, and leaving gives back the row the page was opened from")
     func aTabTurnedInPlace() {
+        let found = FoundAt(source: "m.example", words: "swift", gave: FoundWhich.allCases)
+        let people = ShellStep.found(found, .people), tags = ShellStep.found(found, .tags)
         var walk = ShellWalk()
-        let onTheStream = walk.turned(to: .rising(.links))
+        let onTheStream = walk.turned(to: tags)
         #expect(!onTheStream && walk.isEmpty)
         _ = walk.walk(to: .person(Self.ada), from: "row-1")
-        _ = walk.walk(to: .rising(.tags), from: "row-7")
-        let turned = walk.turned(to: .rising(.links))
-        #expect(turned && walk.standing == .rising(.links) && walk.depth == 2)
+        _ = walk.walk(to: people, from: "row-7")
+        let turned = walk.turned(to: tags)
+        #expect(turned && walk.standing == tags && walk.depth == 2)
         // The tab already in front is not turned to.
-        let again = walk.turned(to: .rising(.links))
+        let again = walk.turned(to: tags)
         #expect(!again && walk.depth == 2)
-        let there = walk.turned(to: .rising(.tags)), back = walk.turned(to: .rising(.links))
+        let there = walk.turned(to: people), back = walk.turned(to: tags)
         #expect(there && back && walk.depth == 2)
         // The step beneath is not turned to: the reader is never twice on one step.
         let beneath = walk.turned(to: .person(Self.ada))
-        #expect(!beneath && walk.standing == .rising(.links) && walk.depth == 2)
+        #expect(!beneath && walk.standing == tags && walk.depth == 2)
         // Leaving never passes through the other tab, and the step under it is as it was left.
         let left = walk.back()
-        #expect(left?.step == .rising(.links) && left?.lamp == "row-7")
+        #expect(left?.step == tags && left?.lamp == "row-7")
         #expect(walk.standing == .person(Self.ada) && walk.depth == 1)
         let first = walk.back()
         #expect(first?.lamp == "row-1" && walk.isEmpty)
@@ -335,8 +337,6 @@ struct OpenedPageTests {
         let tag = try #require(PostTag("#swift"))
         // A hashtag's page answers for itself: its tabs where it has two, and taken where one.
         #expect(ShellStep.tag(tag).tabKey == .tag(tag))
-        // What is rising answers with its tab, the step's own value (F10).
-        #expect(ShellStep.rising(.links).tabKey == .rising(.links))
         // And so does what a search found (F10).
         let found = FoundAt(source: "m.example", words: "swift", gave: FoundWhich.allCases)
         #expect(ShellStep.found(found, .tags).tabKey == .found(found, .tags))
@@ -347,7 +347,7 @@ struct OpenedPageTests {
         // The root asks the walk once, before any place's own tabs, and names no page there.
         let ui = try Self.sources()
         let root = try String(contentsOf: ui.appending(path: "FediqoRootView.swift"), encoding: .utf8)
-        let asked = "private func rotatePlaceTab(by step: Int) -> Bool {\n        if place == .timeline, let key = walk.tabKey {\n            switch Self.stepTab(key, drawn: standingDrawn, open: openLayers) {\n            case .page: return rotateStepTab(key, by: step)\n            case .covered: return false\n            case .timelines: break\n            }\n        }\n        return switch place {"
+        let asked = "private func rotatePlaceTab(by step: Int) -> Bool {\n        if place.isStream, let key = walk.tabKey {\n            switch Self.stepTab(key, drawn: standingDrawn, open: openLayers) {\n            case .page: return rotateStepTab(key, by: step)\n            case .covered: return false\n            case .timelines: break\n            }\n        }\n        return switch place {"
         #expect(root.components(separatedBy: asked).count == 2)
         // The frame and the figure draw, and learn no kind of source.
         for file in ["OpenedPage.swift", "PageBar.swift", "PageFigure.swift"] {

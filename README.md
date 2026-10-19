@@ -220,11 +220,12 @@ text being sent is not put away by any of that: it goes when it lands, or at its
 
 ### Timelines you write
 
-All and Trends are built in. Beside them you write your own. The header is `+`, then the
-tabs, then the rule for the one in front. Tab goes All, Trends, then yours, in the order you
-gave them; while an opened page is in front it turns that page's tabs instead, or does nothing
-on a page with none — see Reading, below. `e` opens the editor for the selected timeline; on
-All or Trends it says they cannot be edited. Double-click or long-press a tab to edit it. To add one, press `+`. In the
+All is built in. Beside it you write your own. The header is `+`, then the tabs, then the
+rule for the one in front. Tab goes All, then yours, in the order you gave them; while an
+opened page is in front it turns that page's tabs instead, or does nothing on a page with
+none — see Reading, below. What is trending is not one of these tabs: it is Trends, a place of
+its own. `e` opens the editor for the selected timeline; on All it says it cannot be edited.
+Double-click or long-press a tab to edit it. To add one, press `+`. In the
 editor you name, reorder, and remove a timeline, and the editor shows its own keys. Edits
 apply on Done; Esc leaves the timeline as it was. Your timelines stay on this device across a
 relaunch. A change this device would not keep is said on the strip at the foot of the page:
@@ -314,6 +315,10 @@ what it serves, and you do not make, rename, or delete them in Fediqo.
 
 - Mastodon: public, trends, Home, and each of your lists.
 - A forum: each board.
+
+Trends is read on its own page, so a rule does not name it. A rule on trends kept from an
+earlier build — Show or Hide, on any source — is let go when your timelines are read, without
+a word, and a timeline whose only rule it was shows everything.
 
 A category means a post arrived through it, so a post can carry several — Home and a list at
 once, say. What arrived before you signed in has no Home. A list is made on the Mastodon
@@ -488,21 +493,42 @@ on Preferences, and the question before removing says which it will do.
 
 | Key | What it does                                                    |
 | --- | --------------------------------------------------------------- |
-| `r` | reload the selected timeline, or ask the page in front again    |
+| `r` | reload the page in front, wherever it can be asked again        |
 | `e` | write or change the selected timeline                           |
 | `/` | search everything this device holds                             |
 | `l` | follow whoever's page, or the hashtag whose page, is in front   |
-| `h` | on Trends, open what is rising on your sources                  |
-| Tab | on an opened page, the tab beside; ⇧Tab the one before         |
+| `h` | go to Trends from anywhere, on the tab it was left on           |
+| Tab | the tab beside on the page in front; ⇧Tab the one before       |
 | `?` | show the keys list                                              |
 
-`r` asks exactly the sources the selected timeline draws from. All asks every source; Trends
-asks the sources that have trends, for their trends; a timeline you wrote asks the sources
+`r` asks exactly the sources the selected timeline draws from. All asks every source; Posts
+on Trends asks the sources that have trends, for their trends; a timeline you wrote asks the sources
 and categories its rules name, and a rule for every source asks every source. With a post
 open, `r` reloads that post and its thread, from any source, and not the timeline under it.
 On any other opened page it asks again what that page shows, where the page can be asked again.
 Pressing `r` again while a reload runs does not start a second one; Esc stops it. A source that fails says
 so, and the others still land. The selected post stays selected.
+
+Every page that reads says so the same way. A toast at the foot of the page names the sources
+still being asked, each let go as it answers, and the reload mark is Stop while it runs. Esc or
+Stop ends only the ask of the page in front — a page opened over a timeline that is reloading
+stops its own and leaves the timeline's — and an ask ended so is said as stopped, not as a
+failure. A source that fails is said in that toast, and `r`, the mark or a pull asks again.
+Reading on is said there too, and is not stopped.
+
+Trends is a place of its own, between Timeline and Notices, with three tabs: Posts, Hashtags
+and Links. Posts is what your sources hand over as trending, read as a timeline is read.
+Hashtags and Links are what your sources say is rising, asked when the tab first comes in
+front, in one list: every source's first, then every second, each source in its own order. A
+hashtag or a link stands once, where it first comes, naming the sources that said it the way a
+post names its source ("m.example +1"), with their counts added; Fediqo ranks nothing of its
+own. A source still being asked or that failed is said in the toast while the others' rows
+stand. A tab no source has is not drawn, a lone
+tab draws no strip, and where no source has anything trending — a store of Discourse forums alone —
+there is no Trends. `h` brings it in front from anywhere but a field, on the tab and the page
+it was left on, and Tab and ⇧Tab turn its tabs. Timeline and Trends each keep what is
+opened over them and where they were read, so going between them gives each back as it was;
+a link read in place is the one exception, and is closed when you go to the other.
 
 `l` is the press on Follow on the page in front, and it only ever follows; on your own page,
 where Follow would stand, it is the press on Change. On somebody's page
@@ -514,14 +540,14 @@ asks first, naming the hashtag and the source.
 
 Reading toward the end of a timeline reads the next page of what this device holds, with no
 key pressed, and the foot of the timeline says it is reading further down. Once this device
-has no more for it, reading on asks its sources for the next stretch. On Trends that is the
-next stretch of what is rising on each Mastodon source: what arrives carries the trends
+has no more for it, reading on asks its sources for the next stretch. On Trends' Posts that is
+the next stretch of what is rising on each Mastodon source: what arrives carries the trends
 category and stands at its publish time like every other post —
 nothing here ranks it. A source that has no more to give is named at the foot of the timeline
 for as long as that is so, and is not asked again until `r` reads from the top; the wait
 reading the same sources between times changes none of that. One that fails says so, the
-others still land, and it is asked again. A forum's trends are its ranking lists, which have no next. A timeline that does not
-ask for trends by name reads on through time only.
+others still land, and it is asked again. A forum's trends are its ranking lists, which have no next. Every other timeline
+reads on through time only.
 
 `/` opens one search field. Its pattern is matched anywhere in every field a post is known by:
 who wrote it, who boosted it, its text, its hashtags, its source, and its categories, by
@@ -621,7 +647,8 @@ not offered where they have blocked you, where you block them, or where they hav
 since the source refuses it. Each is drawn at the press and the source asked after, as a mark
 on a post is: a read already on its way does not undo it, and a press that did not arrive
 puts the page back to what the source last said and says so. Where the source cannot be asked
-how you stand, the page says it could not ask and offers to try again, and draws no standing.
+how you stand, the toast says it could not ask, on About and Posts, and no standing is drawn;
+`r`, the mark or a pull asks again.
 
 What is taken from somebody you follow can be narrowed. For them, About says two things more,
 as the source last said them: whether their boosts are shown to you, and whether you are sent
@@ -717,7 +744,7 @@ page reads the source again, and says "asked" until their server agrees.
 
 Every other page opened over the timelines is drawn as somebody's page is. It takes the
 whole place, under a bar of its own: Back, its title, and asking again where the page can be
-asked, which is Stop while a read runs where that read can be stopped. A figure is a mark and a
+asked, which is Stop while it reads. A figure is a mark and a
 number; one that brings its tab in front is a press, and one that opens nothing is not, and says
 what it counts to a pointer and to VoiceOver. What a kind of source does not have is not drawn.
 
@@ -726,19 +753,18 @@ what it counts to a pointer and to VoiceOver. What a kind of source does not hav
 | a conversation                  | none                                                  |
 | a hashtag                       | Posts · About, where a signed-in source keeps follows |
 | a list of people opened alone   | none                                                  |
-| what is rising                  | Hashtags · Links, the one pressed in front            |
 | what a search found at a source | People · Hashtags, the one pressed in front           |
 | the hashtags you follow         | none                                                  |
 
 A hashtag's head counts the posts under it that this device has read lately — at least so
 many, marked + — and marks each source that says you follow it; About says how it stands at
 each of them, with Follow where you do not, and Unfollow behind that row's three dots where
-you do, which asks first; a hashtag read where nothing keeps follows is one list. What is
-rising opens from Trends, by `h` or the line at its head, and a tab never brought in front
-asks nothing. What a search found opens from either "All" press under the search's results;
-People is there only where a sign-in at that source may search. A kind of which a source gave
-none has no tab, and a page left with one tab draws no strip. On a page with no tabs Tab does
-nothing: leave the page to change timeline. Esc or `q` leaves any of them in one press, from any tab.
+you do, which asks first; a hashtag read where nothing keeps follows is one list. A hashtag's
+page is asked again by `r`, its mark or a pull, as any other. What a search found opens from
+either "All" press under the search's results; People is there only where a sign-in at that
+source may search. A kind of which a source gave none has no tab, and a page left with one
+tab draws no strip. On a page with no tabs Tab does nothing: leave the page to change
+timeline. Esc or `q` leaves any of them in one press, from any tab.
 
 What a post refers to is read for it. When a post first arrives and the post it answers is
 not on this device — or a post it quotes that did not come with it — Fediqo asks the source
@@ -795,7 +821,7 @@ the forum gives no date for is in no timeline and no search, since nothing but t
 was read could place it: it stays part of its topic, read there and counted with everything
 held. A topic stays for as long as a reply of it is held.
 
-Preferences can set a latest date. Every timeline — All, Trends, yours, and a search — then
+Preferences can set a latest date. Every timeline — All, yours, Trends' Posts, and a search — then
 shows nothing posted after 23:59:59 of that day, in this device's time zone, and the timeline
 says so. Newer posts stay on this device; turning the date off shows them again without a
 fetch. The date survives a relaunch.
@@ -857,8 +883,9 @@ Notices are read when the page is opened, at its reload mark, at `r` and at a pu
 by a clock: nothing is asked while the page is closed. A read can be stopped. Reading on is
 yours too — a press on the foot of the list, `j` on the last line, or a scroll by hand that
 ends at the foot. A line never stands below a stretch another source has not been asked for:
-what is older is held and shown as reading on reaches it. A source that fails is named above
-the list with a way to ask again, and the others still land.
+what is older is held and shown as reading on reaches it. A source that fails is said in the
+toast, as on every page, and the others still land; its older notices wait, and the foot says
+so, until a read from the top reaches it again.
 
 At most 2,000 notices are held of one source. At that limit the newest are kept and reading
 on ends for that source for as long as it holds that many. Meanwhile it is named above the
@@ -916,6 +943,11 @@ With no keyboard attached, Preferences has a Gestures page that lists what a fin
 one attached that page is gone and the keys are the list. Two things stay a keyboard's: the
 list of keys itself, and replaying the landing.
 
+A phone's tab bar holds five places, so on a narrow screen Usage is not one of them: Preferences
+opens with a row that leads to it, and Usage, drawn under Preferences, opens with a row back.
+A key, or anything else that lands on Usage, lights Preferences and draws Usage there. The
+wide rail, and a Mac's folded list of places, keep all six.
+
 A narrow screen names the one timeline it shows: its name, its rules in one line, and a dot for
 where it stands among yours. Press the name for the list of every timeline, where a new one is
 made and this one changed. A page with tabs is headed the same way: the tab in front by name,
@@ -932,8 +964,8 @@ and one its source does not offer is grey and says why. The dots open what press
 opens; taking back a post of your own is there and nowhere else, and asks first. A timeline you come back to
 is where you left it.
 
-Pull a timeline down to read it again, or an opened page that can be asked again. While a timeline
-reads, the reload mark is Stop. Press the top of the screen to go to the top of the list. On an
+Pull a timeline down to read it again, or Trends, Notices, or an opened page that can be asked
+again. While any of them reads, the reload mark is Stop. Press the top of the screen to go to the top of the list. On an
 opened page with no tabs, or a row's detail, a sideways swipe goes back; on a page with tabs it
 goes to the tab beside, and on its first tab the swipe back leaves the page.
 

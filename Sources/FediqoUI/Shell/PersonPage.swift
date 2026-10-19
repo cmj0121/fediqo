@@ -2,28 +2,23 @@ import FediqoCore
 import SwiftUI
 
 /// The one line of somebody's page that stands between its head and its tabs, seen from every
-/// tab: where asking who they are stands, or what the source says has become of the account.
+/// tab: that the source has not heard of them, or what it says has become of the account.
 ///
-/// **One at a time, the first that applies**: asking · could not ask, with the press that
-/// asks again · not heard of · asked again and it failed · suspended · moved, with the press
-/// that opens where they went.
+/// **One at a time, the first that applies**: not heard of · not heard of on asking again ·
+/// suspended · moved, with the press that opens where they went. Being asked, and an ask that
+/// came to nothing, are the page's toast to say (DESIGN-reload).
 struct PersonLineSaid: Equatable {
     let words: String
     /// A glyph before the words, where the line is about the account.
     var symbol: String?
-    /// Whether it is said quietly: an ask on its way, and nothing that went wrong.
-    var faint = false
-    /// Whether "Try again" stands beside it, and whether that press is taken now.
-    var again = false
-    var busy = false
     /// Where they went, on the line that says they moved: what its press opens.
     var moved: Person.Moved?
 
-    /// The line of the page of somebody a row called `named`, or nothing where the source has
-    /// said who they are and nothing has become of the account.
-    static func made(of said: PersonSaid, named: String, language: DummyLanguage? = nil) -> PersonLineSaid? {
-        if let words = said.stateLine(of: named, language: language) {
-            return PersonLineSaid(words: words, faint: said.reading == .asking, again: said.offersAgain, busy: said.asking)
+    /// The line of the page, or nothing where the source has said who they are and nothing
+    /// has become of the account.
+    static func made(of said: PersonSaid, language: DummyLanguage? = nil) -> PersonLineSaid? {
+        if let words = said.stateLine(language: language) {
+            return PersonLineSaid(words: words)
         }
         guard let person = said.person,
               let line = PersonSaid.standing(of: person, source: said.source, language: language)
@@ -42,8 +37,9 @@ struct PersonPageActs {
     var onReload: () -> Void = {}
     /// The same, pulled for: it returns when the answers have landed.
     var onPull: () async -> Void = {}
-    /// "Try again", where the source could not be asked who they are.
-    var onAskAgain: () -> Void = {}
+    /// What stops the page's asks while one the reader pressed for runs: the bar's mark is
+    /// then Stop.
+    var onStop: (() -> Void)?
     var onLookUp: (SearchLookUpLine.Press) -> Void = { _ in }
     var onHome: (PersonHomeLine.Press) -> Void = { _ in }
     /// The press beside "They moved to …".
@@ -59,15 +55,13 @@ struct PersonPageActs {
     var onAct: (PersonAct) -> Void = { _ in }
     /// The press on the lock of a sign-in that was not asked for following.
     var onAskFollows: () -> Void = {}
-    /// "Try again", where the source could not be asked how the reader stands to them.
-    var onStandingAgain: () -> Void = {}
     /// Change, on the reader's own page.
     var onChange: () -> Void = {}
-    /// The foot under their posts, and under what they pinned; and "Try again" over those.
+    /// The foot under their posts, and under what they pinned.
     var onReadOn: () -> Void = {}
-    var onPinnedAgain: () -> Void = {}
     var onPinnedReadOn: () -> Void = {}
-    /// A row of the list in front opened, that list asked again, and its foot.
+    /// A row of the list in front opened, that list asked again where its source says it has
+    /// none such, and its foot.
     var onOpenListed: (Person) -> Void = { _ in }
     var onListAgain: () -> Void = {}
     var onListReadOn: () -> Void = {}
@@ -132,7 +126,7 @@ struct PersonPage: View {
     }
 
     private var line: PersonLineSaid? {
-        said.flatMap { PersonLineSaid.made(of: $0, named: person.handle ?? person.name) }
+        said.flatMap { PersonLineSaid.made(of: $0) }
     }
 
     /// The line about their own server, where it stands over the tabs: where the source has
@@ -144,7 +138,9 @@ struct PersonPage: View {
             tabs: tabs, front: front, slide: slide,
             // Whom the bar's mark asks again, where there is anybody to ask.
             reload: canReload ? Self.reloadName(head.whose ?? person.host) : nil,
-            acts: OpenedPageActs(onBack: acts.onBack, onTab: acts.onTab, onReload: acts.onReload, onPull: acts.onPull),
+            acts: OpenedPageActs(
+                onBack: acts.onBack, onTab: acts.onTab, onReload: acts.onReload, onPull: acts.onPull, onStop: acts.onStop
+            ),
             head: { heading },
             inFront: { lead in inFront { lead } }
         )
@@ -155,7 +151,7 @@ struct PersonPage: View {
     private var heading: some View {
         PersonHead(
             head: head, front: PageFrame.stripDrawn(tabs) ? front : nil, onTab: acts.onTab, onAct: acts.onAct,
-            onAskFollows: acts.onAskFollows, onStandingAgain: acts.onStandingAgain, onChange: acts.onChange
+            onAskFollows: acts.onAskFollows, onChange: acts.onChange
         )
         ShellRule()
         if line != nil || lookUp != nil || homeOverTabs != nil {
@@ -173,14 +169,10 @@ struct PersonPage: View {
                     Text(line.words)
                 }
                 .shellFont(.meta)
-                .foregroundStyle(line.faint ? ShellChrome.inkFaint(colorScheme) : ShellChrome.ink(colorScheme))
+                .foregroundStyle(ShellChrome.ink(colorScheme))
                 .accessibilityElement(children: .combine),
                 press: Group {
-                    if line.again {
-                        ShellLinkButton(L10n.t("person.retry"), action: acts.onAskAgain)
-                            .disabled(line.busy)
-                            .fixedSize()
-                    } else if let moved = line.moved {
+                    if let moved = line.moved {
                         ShellLinkButton(PersonSaid.openMoved()) { acts.onOpenMoved(moved) }.fixedSize()
                     }
                 }
@@ -202,7 +194,7 @@ struct PersonPage: View {
             if let about {
                 PersonAbout(
                     said: about, lit: selectedID, jumpToTop: jumpToTop, onHome: acts.onHome, onFollowed: acts.onFollowed,
-                    onAskFollows: acts.onAskFollows, onStandingAgain: acts.onStandingAgain, onAct: acts.onAct, onRequests: acts.onRequests,
+                    onAskFollows: acts.onAskFollows, onAct: acts.onAct, onRequests: acts.onRequests,
                     onFeatured: acts.onFeatured,
                     lead: lead
                 )
@@ -216,20 +208,20 @@ struct PersonPage: View {
                 )
             }
         case .pinned:
-            if let pinned { postRows(pinned, again: acts.onPinnedAgain, readOn: acts.onPinnedReadOn, lead: lead) }
+            if let pinned { postRows(pinned, readOn: acts.onPinnedReadOn, lead: lead) }
         case .posts:
-            postRows(posts, again: {}, readOn: acts.onReadOn, lead: lead)
+            postRows(posts, readOn: acts.onReadOn, lead: lead)
         }
     }
 
     private func postRows<Lead: View>(
-        _ said: PostRowsSaid, again: @escaping () -> Void, readOn: @escaping () -> Void, @ViewBuilder lead: () -> Lead
+        _ said: PostRowsSaid, readOn: @escaping () -> Void, @ViewBuilder lead: () -> Lead
     ) -> some View {
         PersonPane(
             said: said, catalogues: rows.catalogues, catalogueSettled: rows.catalogueSettled, posts: rows.posts,
             selectedID: $selectedID, acting: rows.acting, decks: $decks, playback: rows.playback,
             onPlayRow: rows.onPlayRow, onViewRow: rows.onViewRow, onTurnRow: rows.onTurnRow,
-            onOpenThread: rows.onOpenThread, jumpToTop: jumpToTop, onAskAgain: again, onReadOn: readOn, lead: lead
+            onOpenThread: rows.onOpenThread, jumpToTop: jumpToTop, onReadOn: readOn, lead: lead
         )
     }
 }

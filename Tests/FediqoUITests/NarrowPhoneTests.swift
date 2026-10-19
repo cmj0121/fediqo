@@ -473,13 +473,15 @@ struct NarrowPhoneTests {
         // A long one uses the room it has: it is narrower beside the button than alone, by the corner.
         let beside = Self.placed(long, width: width, corner: corner), alone = Self.placed(long, width: width, corner: .zero)
         #expect(beside.width < alone.width, "\(beside.width) beside the button, \(alone.width) alone")
-        // And the timeline places it so.
-        let pane = try String(
-            contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-                .deletingLastPathComponent().appendingPathComponent("Sources/FediqoUI/Shell/TimelinePane.swift"),
-            encoding: .utf8
-        )
-        #expect(pane.contains(".padding(.bottom, ShellSpace.pad)\n                    // At the foot of the page, beside the compose button where it floats and\n                    // never under it or over it (#302).\n                    .standsBesideFloatingCorner(by: ShellSpace.pad)"))
+        // And every page's toast places it so: the timeline's, and each page's own (DESIGN-reload).
+        let shell = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Sources/FediqoUI/Shell")
+        let toast = try String(contentsOf: shell.appendingPathComponent("TimelineToast.swift"), encoding: .utf8)
+        #expect(toast.contains(".padding(.bottom, ShellSpace.pad)\n                        // At the foot of the page, beside the compose button where it floats and\n                        // never under it or over it (#302).\n                        .standsBesideFloatingCorner(by: ShellSpace.pad)"))
+        for page in ["TimelinePane.swift", "NoticesPane.swift"] {
+            let drawn = try String(contentsOf: shell.appendingPathComponent(page), encoding: .utf8)
+            #expect(drawn.contains(".modifier(ReloadToast(") && !drawn.contains(".overlay(alignment: .bottom) {\n            if let banner"), "\(page)")
+        }
     }
 
     // MARK: - The head of an opened post

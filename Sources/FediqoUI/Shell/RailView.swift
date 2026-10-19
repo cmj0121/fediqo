@@ -69,7 +69,7 @@ struct RailView: View {
             )
             .padding(.bottom, Metrics.side)
 
-            ForEach(ShellPlace.allCases) { item in
+            ForEach(availability.railPlaces) { item in
                 // A place that cannot be entered is marked as closed at every width,
                 // and says why wherever there is room for a sentence: the label beside
                 // the glyph when the bar is open, the tooltip and the accessibility

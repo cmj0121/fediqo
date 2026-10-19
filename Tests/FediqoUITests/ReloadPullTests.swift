@@ -259,6 +259,22 @@ struct ReloadPullTests {
         #expect(ReloadMark.shown(canReload: true, stoppable: held.reload.stoppable) == .reload, "and the mark is the reload mark again")
     }
 
+    @Test("Escape and Stop on a page opened over the stream are that page's: a reload of the stream running under it runs on, and its toast is not the page's; with the stream in front they are the stream's")
+    func theStopInFrontIsThePages() async throws {
+        let held = session(FixtureHTTP(Self.routes))
+        held.reload.press(thread: nil, timeline: .all, in: held)
+        await met("the pressed reload is running") { held.reload.stoppable }
+        let pages = ShellPersonPages()
+        let ada = try #require(DummyPerson(handle: "@ada@m.example", host: "m.example"))
+        let front = try #require(TimelinePane.askInFront(.person(ada), rising: nil, of: pages, in: held))
+        #expect(!TimelinePane.stop(front, of: pages, in: held), "the page has nothing on the wire")
+        #expect(held.reload.stoppable, "and the stream's reload under it runs on")
+        #expect(TimelinePane.banner(TimelinePane.ask(front, of: pages, in: held), note: nil, in: held) == nil, "nor is it the page's toast")
+        #expect(TimelinePane.askInFront(nil, rising: nil, of: pages, in: held) == nil, "the stream in front: its own")
+        #expect(TimelinePane.banner(nil, note: nil, in: held)?.kind == .loading)
+        #expect(held.reload.stop())
+    }
+
     @Test("A wait whose list has gone ends with it, though the reload runs on")
     func theWaitIsCancelled() async {
         let reload = ShellReload()

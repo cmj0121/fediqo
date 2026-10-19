@@ -276,13 +276,10 @@ enum NoticesStanding: Equatable {
     }
 }
 
-/// One thing the page says of its sources, above its lines.
+/// One thing the page says of its sources, above its lines. **Never that a source is being read
+/// or that its read did not come back**: the wait and the miss are the page's toast to say
+/// (DESIGN-reload), and asking again is `r`, the mark or a pull.
 enum NoticesLine: Equatable, Identifiable {
-    /// On the wire, and which sources.
-    case reading([String])
-    /// A source whose last ask did not come back. `again` where asking it again may help: its
-    /// sign-in may still read notices.
-    case failed(host: String, why: ShellNoticeList.Absence, again: Bool)
     /// Signed in, and never asked for notices.
     case unasked(host: String)
     /// Asked for notices, and gave none.
@@ -304,8 +301,6 @@ enum NoticesLine: Equatable, Identifiable {
         case .locked(let host): "locked:" + host
         case .unread(let host): "unread:" + host
         case .full(let host): "full:" + host
-        case .reading: "reading"
-        case .failed(let host, _, _): "failed:" + host
         case .unasked(let host): "unasked:" + host
         case .refused(let host): "refused:" + host
         case .declined(let host): "declined:" + host
@@ -313,27 +308,19 @@ enum NoticesLine: Equatable, Identifiable {
         }
     }
 
-    /// The lines, in the order they are drawn: what is happening now, what went wrong, what
-    /// is not shown, then what was never asked.
-    ///
-    /// **A source named as failed is not also named as refused**: one whose read was turned
-    /// away is both, and says so once, as the failure it was.
+    /// The lines, in the order they are drawn: what is not shown, then what was never asked.
     ///
     /// `places` is what each source's sign-in draws where its notices would be
     /// (`PartWords.place`): refused on its own page, and being asked for something now, are
     /// each a line of their own in the place of "not asked", which is what both still are.
     static func lines(
-        reading: [String], failures: [(host: String, why: ShellNoticeList.Absence)], askable: Set<String>,
         hosts: [(host: String, notices: NoticeStanding)], locked: Set<String> = [], unread: [String] = [],
         full: [String] = [], places: [String: PartWords.Place.Kind] = [:]
     ) -> [NoticesLine] {
-        let failed = Set(failures.map(\.host))
-        var lines: [NoticesLine] = reading.isEmpty ? [] : [.reading(reading)]
-        lines += failures.map { .failed(host: $0.host, why: $0.why, again: askable.contains($0.host)) }
-        lines += full.map { .full(host: $0) }
-        lines += locked.subtracting(failed).subtracting(reading).sorted().map { .locked(host: $0) }
+        var lines: [NoticesLine] = full.map { .full(host: $0) }
+        lines += locked.sorted().map { .locked(host: $0) }
         lines += unread.map { .unread(host: $0) }
-        for (host, notices) in hosts where !failed.contains(host) {
+        for (host, notices) in hosts {
             switch notices {
             // One ask a source at a time: while it is out, the line that would ask says so.
             case .unasked where places[host] == .asking: lines.append(.asking(host: host))
@@ -351,12 +338,6 @@ enum NoticesLine: Equatable, Identifiable {
         switch self {
         case .unread(let host):
             String(format: L10n.t(touch ? "notices.source.unread.touch" : "notices.source.unread", language: language), host)
-        case .reading(let hosts):
-            String(format: L10n.t("notices.reading", language: language), Self.joined(hosts, language: language))
-        case .failed(let host, .unreachable, _):
-            String(format: L10n.t("notices.failed.unreachable", language: language), host)
-        case .failed(let host, .refused, _):
-            String(format: L10n.t("notices.failed.refused", language: language), host)
         case .unasked(let host):
             String(format: L10n.t("notices.source.unasked", language: language), host)
         case .refused(let host):
@@ -370,10 +351,6 @@ enum NoticesLine: Equatable, Identifiable {
         case .full(let host):
             String(format: L10n.t("notices.source.full", language: language), host)
         }
-    }
-
-    static func joined(_ hosts: [String], language: DummyLanguage? = nil) -> String {
-        hosts.joined(separator: L10n.t("item.source.join", language: language))
     }
 }
 
@@ -412,17 +389,13 @@ enum NoticesNone: Equatable {
     }
 }
 
-/// What stands under the last line.
+/// What stands under the last line, while nothing is on the wire: a read in progress is the
+/// page's toast to say (DESIGN-reload), and no row of its own.
 enum NoticesFoot: Equatable {
     /// Older notices can be asked for: reaching or pressing this reads them.
     case more
-    /// An older stretch is on the wire.
-    case reading
-    /// The list stops where a source could not be read further, and that source is named above.
+    /// The list stops where a source could not be read further, and the toast named it.
     case held
-    /// What this device holds is drawn, and every source is being asked for its newest: older
-    /// notices can be read once they have answered.
-    case asking
     /// A source has been read down to the months limit: older notices are beyond what this
     /// device keeps, and are not asked for.
     case limit
@@ -434,9 +407,8 @@ enum NoticesFoot: Equatable {
     case end
 
     /// `full` is whether a source reached that bound (`ShellNoticeList.isFull`). Said only
-    /// where nothing else is: a source named above still says why the list stops there.
-    static func foot(hasMore: Bool, isReading: Bool, floor: Date?, full: Bool = false) -> NoticesFoot {
-        if isReading { return .reading }
+    /// where nothing else is: a source the toast names still says why the list stops there.
+    static func foot(hasMore: Bool, floor: Date?, full: Bool = false) -> NoticesFoot {
         if hasMore { return .more }
         if floor != nil { return .held }
         return full ? .full : .end
@@ -454,9 +426,7 @@ enum NoticesFoot: Equatable {
     func words(language: DummyLanguage? = nil) -> String {
         switch self {
         case .more: L10n.t("notices.foot.more", language: language)
-        case .reading: L10n.t("notices.foot.reading", language: language)
         case .held: L10n.t("notices.foot.held", language: language)
-        case .asking: L10n.t("notices.foot.asking", language: language)
         case .limit: L10n.t("notices.foot.limit", language: language)
         case .full: L10n.t("notices.foot.full", language: language)
         case .end: L10n.t("notices.foot.end", language: language)
@@ -466,9 +436,7 @@ enum NoticesFoot: Equatable {
     var symbol: String {
         switch self {
         case .more: "arrow.down.circle"
-        case .reading: "ellipsis"
         case .held: "exclamationmark.triangle"
-        case .asking: "ellipsis"
         case .limit: "calendar"
         case .full: "tray.full"
         case .end: "checkmark.circle"

@@ -223,7 +223,7 @@ struct SearchSourcesTests {
         let session = try await shell(Searchable([Self.one: Self.found]))
         await session.reload.search("cats", timeline: .all, in: session)
 
-        session.timelineID = .trends
+        session.stream = .trends
         let fromTrends = await searching("cats", in: session)
         #expect(found(fromTrends, in: session).isEmpty, "a search's find is no trend")
 
@@ -231,6 +231,7 @@ struct SearchSourcesTests {
         draft.name = "Wire"
         draft.rules = [try #require(Rule.keyword("wire", in: .every))]
         session.commit(draft)
+        session.stream = .timeline
         session.timelineID = .written(draft.id)
         let fromMine = await searching("cats", in: session)
         #expect(found(fromMine, in: session) == [Self.foundKey.rowID], "a keyword rule reads what the search brought")
@@ -303,14 +304,15 @@ struct SearchSourcesTests {
     func switchingReasks() async throws {
         let server = Searchable([Self.one: Self.found])
         let session = try await shell(server)
-        session.timelineID = .trends
+        session.stream = .trends
         await session.reload.searchSwitched(to: .trends, pattern: "cats", in: session)
         #expect(await server.asked.isEmpty, "no Return made yet: nothing to send again")
 
+        session.stream = .timeline
         session.timelineID = .all
         await session.reload.search("cats", timeline: .all, in: session)
         #expect(await server.asked.count == 1)
-        session.timelineID = .trends
+        session.stream = .trends
         await session.reload.searchSwitched(to: .trends, pattern: "cats", in: session)
         #expect(await server.asked.count == 1, "Trends' sources cannot be searched")
         #expect(session.reload.reach?.asked == [], "the line is Trends', not All's")
@@ -319,6 +321,7 @@ struct SearchSourcesTests {
         draft.name = "Wire"
         draft.rules = [try #require(Rule.keyword("wire", in: .every))]
         session.commit(draft)
+        session.stream = .timeline
         session.timelineID = .written(draft.id)
         await session.reload.searchSwitched(to: .written(draft.id), pattern: "cats", in: session)
         #expect(await server.asked.count == 2, "sent again, to the new timeline's sources")
@@ -354,7 +357,7 @@ struct SearchSourcesTests {
         session.timelineID = .all
         await session.reload.search("cats", timeline: .all, in: session)
 
-        session.timelineID = .trends
+        session.stream = .trends
         await session.reload.searchSwitched(to: .written(draft.id), pattern: "cats", in: session)
         #expect(await server.asked.count == 1)
         #expect(session.reload.reach?.asked == [Self.one], "the last search's line, untouched")

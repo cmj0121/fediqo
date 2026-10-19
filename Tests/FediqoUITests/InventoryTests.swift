@@ -397,7 +397,7 @@ struct InventoryTests {
         await session.reloadFromStore()
         #expect(session.sources.map(\.host) == [alpha.host])
         #expect(session.notes.map(\.id) == [first.id])
-        #expect(session.queries.map(\.id) == ["all", "trends"])
+        #expect(session.queries.map(\.id) == ["all"] && session.availability.trendsTabs.contains(.posts))
     }
 
     // MARK: Helpers

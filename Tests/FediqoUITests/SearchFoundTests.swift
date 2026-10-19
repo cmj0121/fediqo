@@ -680,7 +680,7 @@ struct SearchFoundTests {
         let list = PeopleList(foundAt: Self.one, words: "cats")
         #expect(list.id != PeopleList(foundAt: Self.one, words: "dogs").id && list.id != PeopleList(directoryAt: Self.one).id)
         #expect(PeopleSaid.counts(list, language: .english) == nil)
-        #expect(pages.lists.said(of: list, in: session)?.stateLine(language: .english) == "Asking m.example for the people it found…")
+        #expect(TimelineToast.waiting(PeopleSaid.words(list.which) + ".asking", hosts: [Self.one], language: .english) == "Asking m.example for the people it found…", "the toast's words for the wait")
         await pages.lists.opened(list, in: session)
         #expect(await server.asked == [Self.people("cats")])
         #expect(await server.bearers == ["Bearer tok"])
@@ -699,7 +699,7 @@ struct SearchFoundTests {
         var far = PeopleSaid(list: list, reading: .said, people: said.people, foot: .farthest)
         #expect(far.footWords(.farthest, language: .english) == "Fediqo reads the first 40 people a search finds. m.example may have found more.")
         far.reading = .failed
-        #expect(far.stateLine(language: .english) == "Could not ask m.example for the people it found.")
+        #expect(far.stateLine() == nil, "a miss is the toast's to say")
 
         // The hashtags: what the Return's answer held.
         let found = pages.found, page = FoundTags(source: Self.one, words: "cats")
@@ -765,7 +765,7 @@ struct SearchFoundTests {
         var walk = ShellWalk()
         let page = FoundTags(source: Self.one, words: "a\u{202E}b\nc")
         let at = FoundAt(source: page.source, words: page.words, gave: [.tags])
-        #expect(walk.walk(to: .found(at, .tags), from: page.id) && walk.openedFoundTags == page && walk.openedRising == nil)
+        #expect(walk.walk(to: .found(at, .tags), from: page.id) && walk.openedFoundTags == page)
         let named: String = "found:\(at.id)\u{1e}tags"
         #expect(TimelinePane.page(walk.standing) == .tabbed && TimelinePane.openedID(walk.standing) == named)
         var jump = 0
@@ -790,7 +790,7 @@ struct SearchFoundTests {
             guard ours.contains(where: line.hasPrefix) else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 28 && keys.contains("search.lookup.found.other") && keys.contains("search.lookup.offer") && keys.contains("people.found.none"))
+        #expect(keys.count == 27 && keys.contains("search.lookup.found.other") && keys.contains("search.lookup.offer") && keys.contains("people.found.none"))
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }

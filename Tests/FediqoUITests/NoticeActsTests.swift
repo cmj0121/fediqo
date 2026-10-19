@@ -994,7 +994,7 @@ struct NoticeActsTests {
         // The next read of its newest stretch that lands takes the words down, whatever it
         // brings: it does not stand for the rest of the run.
         await server.set(F.get(Self.a), F.page(F.one(4, by: "Ada", minutes: 2), F.one(3, "follow", by: "Bo", minutes: 9)))
-        await session.noticeList.retry(host: Self.a, in: session)
+        await session.noticeList.read(in: session)
         #expect(acts.onItsWay.isEmpty)
         #expect(session.noticeList.standing(host: Self.a) == .read)
     }

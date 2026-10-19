@@ -163,12 +163,14 @@ struct PersonTests {
 
     /// The press's own guard, asked the way the root asks it. One guard for both steps: a face
     /// and a row ask the same question about how far out the reader already is.
-    @Test("A face may be pressed on the timeline and nowhere else")
+    @Test("A face may be pressed on a stream place — the timeline, Trends — and nowhere else")
     func aFaceMayBePressedOnTheTimeline() {
-        #expect(FediqoRootView.canWalk(place: .timeline, open: []))
-        #expect(FediqoRootView.canWalk(place: .timeline, open: [.thread, .selection]))
-        #expect(!FediqoRootView.canWalk(place: .timeline, open: [.viewer]))
-        for place in ShellPlace.allCases where place != .timeline {
+        for place in [ShellPlace.timeline, .trends] {
+            #expect(FediqoRootView.canWalk(place: place, open: []))
+            #expect(FediqoRootView.canWalk(place: place, open: [.thread, .selection]))
+            #expect(!FediqoRootView.canWalk(place: place, open: [.viewer]))
+        }
+        for place in ShellPlace.allCases where !place.isStream {
             #expect(!FediqoRootView.canWalk(place: place, open: []), "\(place)")
         }
     }
@@ -199,7 +201,7 @@ struct PersonTests {
     /// sharpest way to say so is that the rail did not grow a sixth destination.
     @Test("A person is not a place on the rail, and not a source")
     func aPersonIsNotASource() {
-        #expect(ShellPlace.allCases == [.timeline, .notices, .account, .usage, .preferences])
+        #expect(ShellPlace.allCases == [.timeline, .trends, .notices, .account, .usage, .preferences])
         // What a person is identified by is a host and a name — never a `Source`, which is what a
         // page that had quietly become a source page would have had to carry.
         let person = DummyPerson(Self.row(Self.note()))!

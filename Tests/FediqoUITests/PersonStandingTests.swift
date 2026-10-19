@@ -281,8 +281,8 @@ struct PersonStandingTests {
         let again = self.acts()
         await again.opened(Self.ada, said: page, in: other)
         let failed = try #require(again.acting(of: Self.ada, said: page, in: other))
-        #expect(failed.reading == .failed && failed.offersAgain && failed.press == nil && failed.pills().isEmpty)
-        #expect(failed.failedWords(language: .english) == "Could not ask m.example how you stand to them.")
+        #expect(failed.reading == .failed && !failed.standsInHead && failed.press == nil && failed.pills().isEmpty)
+        #expect(again.ask(of: Self.ada, said: page, in: other).failed == [Self.host], "the miss is the toast's")
         #expect(other.mastodon.signedInHosts.contains(Self.host), "a failed read signs nobody out")
         await failing.answer(Self.stands, Self.said(Self.standing()))
         await again.again(Self.ada, said: page, in: other)
@@ -521,11 +521,10 @@ struct PersonStandingTests {
             await server.answer(Self.stands, failing)
             await acts.press(.follow, on: far, said: page, in: session)
             let unread = try #require(acts.acting(of: far, said: page, in: session))
-            #expect(unread.reading == .failed && unread.offersAgain, "\(String(describing: failing?.body))")
+            #expect(unread.reading == .failed && acts.ask(of: far, said: page, in: session).failed == [Self.host], "\(String(describing: failing?.body))")
             #expect(unread.pills().isEmpty && unread.more.isEmpty && unread.press == nil && unread.doing == nil)
             #expect(unread.missed == nil, "the press arrived: it is not said to have failed")
-            #expect(unread.failedWords(language: .english) == "Could not ask m.example how you stand to them.")
-            #expect(unread.standsInHead && unread.marks().isEmpty && unread.headWords().isEmpty)
+            #expect(!unread.standsInHead && unread.marks().isEmpty && unread.headWords().isEmpty)
             #expect(session.mastodon.signedInHosts.contains(Self.host))
 
             // Try again, and the source's own word stands: asked. Withdrawn, to press once more.
@@ -798,7 +797,7 @@ struct PersonStandingTests {
             pages.followByKey(place: place, open: open, person: person, tag: tag, in: session)
         }
         // Not from another place, and not under the viewer or the keys' own list.
-        for place in ShellPlace.allCases where place != .timeline {
+        for place in ShellPlace.allCases where !place.isStream {
             #expect(!key(place, [.person], person: Self.ada), "\(place)")
             #expect(!key(place, [.tag], tag: swift), "\(place)")
         }
@@ -1213,7 +1212,7 @@ struct PersonStandingTests {
     func everySentenceIsWritten() {
         let keys = [
             "person.stands.followsYou", "person.stands.following", "person.stands.asked", "person.stands.muted",
-            "person.stands.mutedUntil", "person.stands.blocked", "person.stands.blockedBy", "person.stands.failed",
+            "person.stands.mutedUntil", "person.stands.blocked", "person.stands.blockedBy",
             "person.posts.noneGiven", "person.act.follow", "person.act.askToFollow", "person.act.unfollow", "person.act.withdraw",
             "person.act.follow.spoken", "person.act.askToFollow.spoken", "person.act.follow.failed", "person.act.unfollow.failed",
             "person.act.withdraw.failed", "person.unfollow.ask.title", "person.unfollow.ask.line", "shortcut.follow",

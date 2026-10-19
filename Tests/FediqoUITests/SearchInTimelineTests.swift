@@ -75,7 +75,7 @@ struct SearchInTimelineTests {
     @Test("From Trends, only what Trends shows is found")
     func fromTrends() async {
         let session = session()
-        session.timelineID = .trends
+        session.stream = .trends
         let search = await searching("swift", in: session)
         #expect(found(search, in: session) == ["trend"])
         #expect(found(search, in: session) == shown(session))
@@ -130,7 +130,7 @@ struct SearchInTimelineTests {
         ]
         let search = await searching("swift", in: session)
         #expect(found(search, in: session, latest: latest) == ["before", "trend-before"])
-        session.timelineID = .trends
+        session.stream = .trends
         #expect(found(search, in: session, latest: latest) == ["trend-before"])
     }
 
@@ -141,9 +141,10 @@ struct SearchInTimelineTests {
         session.timelineID = .all
         let search = await searching("swift", in: session)
         #expect(found(search, in: session)?.count == 4)
-        session.timelineID = .trends
+        session.stream = .trends
         #expect(search.text == "swift")
         #expect(found(search, in: session) == ["trend"])
+        session.stream = .timeline
         session.timelineID = mine
         #expect(found(search, in: session) == ["pub", "trend", "board"])
         session.timelineID = .all
@@ -153,7 +154,7 @@ struct SearchInTimelineTests {
     @Test("Closed, the search finds nothing and the timeline is drawn as it was")
     func closedIsNothing() async {
         let session = session()
-        session.timelineID = .trends
+        session.stream = .trends
         let search = await searching("swift", in: session)
         _ = search.close()
         #expect(session.searched(search, latest: nil) == nil)

@@ -142,10 +142,6 @@ struct DummyItemRow: View {
     /// caption beside it, so the box and the glyph in it climb together — `ShellMetric`'s
     /// whole point.
     @ShellMetric(relativeTo: .callout) private var vis: CGFloat = Box.vis
-    /// The room inside the source pill, on the pill's own rung so the capsule grows with the
-    /// host in it rather than closing round it as the letters climb.
-    @ShellMetric(relativeTo: .caption2) private var pillSideways: CGFloat = Box.pillSideways
-    @ShellMetric(relativeTo: .caption2) private var pillUpright: CGFloat = Box.pillUpright
     @ShellMetric(relativeTo: .caption) private var glyph: CGFloat = 17
     @ShellMetric(relativeTo: .caption) private var countBox: CGFloat = 20
     /// What a finger gets, whatever the glyph drawn inside it measures.
@@ -957,7 +953,7 @@ struct DummyItemRow: View {
     @ViewBuilder
     private func sourcePill(_ fit: HeadFit?) -> some View {
         if let said = Self.pillSays(item, fit: fit) {
-            pill(said)
+            SourcePill(said: said, spoken: Self.spokenSource(item))
         }
     }
 
@@ -971,20 +967,6 @@ struct DummyItemRow: View {
         }
     }
 
-    private func pill(_ said: String) -> some View {
-        Text(said)
-            .shellFont(.mark)
-            .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            .lineLimit(1)
-            .padding(.horizontal, pillSideways)
-            .padding(.vertical, pillUpright)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(ShellChrome.well(colorScheme))
-            )
-            .help(Self.spokenSource(item))
-            .accessibilityLabel(Self.spokenSource(item))
-    }
 
     /// What the pill names, and so what a listener hears where the headline combines it in.
     ///
@@ -996,20 +978,28 @@ struct DummyItemRow: View {
     /// **Every source, by name, where a post came through more than one** (#114): a listener
     /// cannot see a count and look further, so what the drawing shortens this says in full.
     static func spokenSource(_ item: DummyItem, language: DummyLanguage? = nil) -> String {
-        let others = item.otherCopies.map(\.source.host)
-        guard !others.isEmpty else { return item.source.host }
-        return String(
-            format: L10n.t("item.source.also", language: language),
-            item.source.host, others.joined(separator: L10n.t("item.source.join", language: language))
-        )
+        spokenSource(item.source.host, others: item.otherCopies.map(\.source.host), language: language)
     }
 
     /// What the pill draws: the host, and how many other servers carried the same post.
     static func drawnSource(_ item: DummyItem, language: DummyLanguage? = nil) -> String {
-        guard !item.otherCopies.isEmpty else { return item.source.host }
+        drawnSource(item.source.host, others: item.otherCopies.map(\.source.host), language: language)
+    }
+
+    /// `first` and every one of `others` by name — what a listener hears of whatever came
+    /// through more than one source: a post, or a row of what is rising (decision 22).
+    static func spokenSource(_ first: String, others: [String], language: DummyLanguage? = nil) -> String {
+        guard !others.isEmpty else { return first }
         return String(
-            format: L10n.t("item.source.more", language: language), item.source.host, item.otherCopies.count
+            format: L10n.t("item.source.also", language: language),
+            first, others.joined(separator: L10n.t("item.source.join", language: language))
         )
+    }
+
+    /// `first`, and how many of `others` there are — what the pill draws of the same.
+    static func drawnSource(_ first: String, others: [String], language: DummyLanguage? = nil) -> String {
+        guard !others.isEmpty else { return first }
+        return String(format: L10n.t("item.source.more", language: language), first, others.count)
     }
 
     /// What came attached sits beside the words, never under them, and against the
@@ -2214,5 +2204,34 @@ struct LeastIdeal: Layout {
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+    }
+}
+
+/// The capsule a post row names its source in, and a row of what is rising names its sources
+/// in (decision 22): `said` drawn, `spoken` to a pointer and to a listener — see
+/// `DummyItemRow.sourcePill` for why the room is laid as it is.
+struct SourcePill: View {
+    let said: String
+    let spoken: String
+
+    @Environment(\.colorScheme) private var colorScheme
+    /// The room inside it, on the pill's own rung so the capsule grows with the host in it
+    /// rather than closing round it as the letters climb.
+    @ShellMetric(relativeTo: .caption2) private var sideways: CGFloat = DummyItemRow.Box.pillSideways
+    @ShellMetric(relativeTo: .caption2) private var upright: CGFloat = DummyItemRow.Box.pillUpright
+
+    var body: some View {
+        Text(verbatim: said)
+            .shellFont(.mark)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .lineLimit(1)
+            .padding(.horizontal, sideways)
+            .padding(.vertical, upright)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(ShellChrome.well(colorScheme))
+            )
+            .help(spoken)
+            .accessibilityLabel(spoken)
     }
 }
