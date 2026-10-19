@@ -315,7 +315,7 @@ struct NoticeListTests {
         #expect(await server.asked.filter { $0.contains(Self.v2) }.count == 2, "a source was asked twice which read it has")
     }
 
-    @Test("A second reading on while one is on the wire asks nothing")
+    @Test("A second reading on while one is on the wire asks nothing; the toast says it is reading on, and it is no Stop's")
     func readingOnTwiceAsksOnce() async throws {
         let gate = Gate()
         let (session, server, _) = try await shell(Self.two)
@@ -326,6 +326,7 @@ struct NoticeListTests {
         let first = Task { await list.readOn(in: session) }
         await met("the next stretch is asked for", by: first) { await server.reads.last == "\(Self.a)\(Self.v1)?3" }
         #expect(!list.hasMore(in: session), "the foot offered to ask while it was asking")
+        #expect(list.ask(language: .english) == PageAsking(asking: "Reading older notices…"), "a reading-on is not stoppable, as the timeline's")
         await list.readOn(in: session)
         await gate.open()
         await first.value
@@ -710,7 +711,7 @@ struct NoticeListTests {
         #expect(drawn(list.lines) == ["b8", "b7"])
     }
 
-    @Test("A read that is stopped leaves every source as it was")
+    @Test("A read that is stopped leaves every source as it was, and the toast says the stop — never a failure — until the next read sets out")
     func aStoppedReadChangesNothing() async throws {
         let gate = Gate()
         let (session, server, _) = try await shell(Self.two)
@@ -722,14 +723,21 @@ struct NoticeListTests {
 
         let reading = Task { await list.read(in: session) }
         await met("the second read of both sources is on the wire", by: reading) { await server.reads.count == 4 }
+        #expect(list.ask().stoppable, "the newest, asked for, are a wait Stop stops")
         #expect(list.stop())
         #expect(list.reaches == before && !list.isReading)
+        #expect(list.ask() == PageAsking(stopped: true))
+        #expect(TimelineToast.asked(list.ask(), note: nil, language: .english) == TimelineToast(kind: .warning, text: "Reload stopped."))
         await gate.open()
         await reading.value
 
         #expect(list.reaches == before, "an answer to a stopped read landed")
         #expect(drawn(list.lines) == ["a4", "b8", "a3"])
         #expect(!list.stop())
+        await server.set("\(Self.a)\(Self.v1)", .body(Self.body([Self.one(5, at: 58)])))
+        await server.set("\(Self.b)\(Self.v1)", .body(Self.body([Self.one(9, at: 59)])))
+        await list.read(in: session)
+        #expect(!list.ask().stopped, "read again, the stop is said no longer")
     }
 
     @Test("The reader walking away from a read is not a source failing")
@@ -997,7 +1005,7 @@ struct NoticeListTests {
         #expect(list.fullHosts == [Self.a])
         #expect(NoticesPane.lines(in: session) == [.full(host: Self.a)])
         #expect(NoticesPane.foot(in: session) == .more)
-        #expect(NoticesPane.standsOut(.full(host: Self.a)) && !NoticesPane.isFailure(.full(host: Self.a)))
+        #expect(NoticesPane.standsOut(.full(host: Self.a)))
         #expect(
             NoticesLine.full(host: Self.a).words(language: .english)
                 == "Fediqo holds as many notices from a.example as it keeps of one source: its older notices are not shown, and may belong among the lines below. They are read again once there is room — when notices are dismissed, or the months limit lets old ones go."
@@ -1012,12 +1020,9 @@ struct NoticeListTests {
         await list.readOn(in: session)
         #expect(NoticesPane.lines(in: session) == [.full(host: Self.a)] && NoticesPane.foot(in: session) == .full)
 
-        // Named after what failed, before what was never asked.
-        let lines = NoticesLine.lines(
-            reading: [], failures: [(Self.b, .unreachable)], askable: [Self.b],
-            hosts: [("c.example", .unasked)], full: [Self.a]
-        )
-        #expect(lines == [.failed(host: Self.b, why: .unreachable, again: true), .full(host: Self.a), .unasked(host: "c.example")])
+        // Named before what was never asked.
+        let lines = NoticesLine.lines(hosts: [("c.example", .unasked)], full: [Self.a])
+        #expect(lines == [.full(host: Self.a), .unasked(host: "c.example")])
 
         // Read afresh from a top joined to nothing held, the source starts again, unnamed.
         await server.set("\(Self.a)\(Self.v1)", Self.page(Self.one(20, at: 58)))

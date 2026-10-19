@@ -71,6 +71,8 @@ final class ShellFeatures {
     }
 
     private var theirs: [String: Theirs] = [:]
+    /// The pages whose last ask of what they feature was stopped, until it is asked again.
+    private var halted: Set<String> = []
     private var own: [String: Own] = [:]
     /// Whether a hashtag is featured at a source as a press there was answered, by the key of
     /// both: the newer word than any read.
@@ -176,8 +178,6 @@ final class ShellFeatures {
                 let key = Self.key(featured.tag, source.host)
                 return presses.shown(key) != false && (takenOff[key].map { $0 < page.awaits } ?? true)
             }
-            handed.tagsAsking = page.tagsAsking
-            handed.tagsFailed = page.tagsFailed && !page.tagsAsking
             if isOwn {
                 handed.takesOff = true
                 if !Self.features(at: source.host, in: session) {
@@ -195,6 +195,36 @@ final class ShellFeatures {
         return handed
     }
 
+    /// What About of the page of `who` says in its toast of the hashtags they feature
+    /// (DESIGN-reload): being asked — a wait Stop stops — that the ask did not come, or that it
+    /// was stopped.
+    func ask(of who: DummyPerson, said: PersonSaid?, in session: ShellSession, language: DummyLanguage? = nil) -> PageAsking {
+        guard let person = said?.person, let source = ShellPersonPages.source(of: who, in: session),
+              let page = standing(who.id, of: person.accountID, at: source.host, in: session)
+        else { return PageAsking() }
+        return PageAsking(
+            asking: page.tagsAsking
+                ? TimelineToast.waiting("person.featured.tags.asking", hosts: [source.host], language: language) : nil,
+            stoppable: page.tagsAsking,
+            failed: page.tagsFailed && !page.tagsAsking ? [source.host] : [],
+            stopped: halted.contains(who.id)
+        )
+    }
+
+    /// Stop on About: what they feature is asked no further, what was said before stands, and
+    /// whatever is on the wire lands nowhere. Whether an ask was out.
+    @discardableResult
+    func stop(_ who: DummyPerson) -> Bool {
+        let id = who.id
+        guard theirs[id]?.tagsAsking == true else { return false }
+        asks[id]?.cancel()
+        asks[id] = nil
+        theirs[id]?.awaits = errands.next()
+        theirs[id]?.tagsAsking = false
+        halted.insert(id)
+        return true
+    }
+
     /// The page of `who` has said who they are: what they feature is asked, once a page.
     func opened(_ who: DummyPerson, said: PersonSaid?, in session: ShellSession) async {
         guard let person = said?.person, !person.suspended, let source = ShellPersonPages.source(of: who, in: session)
@@ -207,7 +237,7 @@ final class ShellFeatures {
         await begin(who.id, of: person, at: source, with: held, in: session).value
     }
 
-    /// "Try again" beside a failure to ask for their hashtags: asked once more.
+    /// `r`, the bar's mark and a pull: what they feature asked once more.
     func again(_ who: DummyPerson, said: PersonSaid?, in session: ShellSession) async {
         guard let person = said?.person, let source = ShellPersonPages.source(of: who, in: session),
               let page = standing(who.id, of: person.accountID, at: source.host, in: session), !page.tagsAsking
@@ -226,6 +256,7 @@ final class ShellFeatures {
             under: ShellPersonPages.signIns(at: source.host, in: session)
         )
         page.awaits = errand
+        halted.remove(id)
         let tagsWanted = hosts.has(.featuredTags, at: source.host) != .absent
         let peopleWanted = hosts.has(.featuredPeople, at: source.host) != .absent
         page.tagsAsking = tagsWanted

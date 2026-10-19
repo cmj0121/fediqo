@@ -145,17 +145,99 @@ struct TimelinePane: View {
     /// Running first; a live note replaces a leftover line; otherwise the reload
     /// line. Loading and a miss do not auto-dismiss: a 2s flash is a fact the
     /// reader has to act on, gone.
-    private var banner: TimelineToast? {
-        TimelineToast.shown(
+    ///
+    /// **The page in front's, and nobody else's** (decision 17): where a page of its own asks
+    /// (`askInFront`), its ask is the toast, and a reload of the stream running under it is out
+    /// of sight and unsaid. Where the stream is in front, the stream's reload, as it always was.
+    static func banner(_ ask: PageAsking?, note: String?, in session: ShellSession) -> TimelineToast? {
+        if let ask { return TimelineToast.asked(ask, note: note) }
+        return TimelineToast.shown(
             running: session.reload.running,
             waiting: session.reload.onlyWaiting,
             line: session.reload.line,
             stopped: session.reload.stopped,
-            note: toast
+            note: note
         )
     }
 
+    /// Whose asking is in front of the stream (DESIGN-reload): what the toast says, what the
+    /// mark stops, and what `Escape` stops — **the one decision of it**, so the three cannot
+    /// come to name different asks.
+    enum AskInFront: Equatable {
+        case person(DummyPerson)
+        case people(PeopleList)
+        case followed(FollowedTags)
+        /// A tab of Trends that lists what is rising, with nothing drawn over it.
+        case rising(RisingWhich)
+        /// A page that asks nothing of its own: the hashtags a search found.
+        case quiet
+    }
+
+    /// What is in front of the stream that asks for itself, or nothing where the stream is in
+    /// front — the timeline, Posts, a conversation, a hashtag's page, and any step that cannot
+    /// be drawn, since the stream is drawn in its stead. `rising` is Trends' tab in front where
+    /// it lists what is rising.
+    static func askInFront(
+        _ standing: ShellStep?, rising: RisingWhich?, of people: ShellPersonPages?, in session: ShellSession
+    ) -> AskInFront? {
+        guard let people else { return nil }
+        let shown = drawn(standing, of: people, in: session)
+        switch standing {
+        case .person(let who): return .person(who)
+        case .people(let list) where shown.drawn: return .people(list)
+        case .found where shown.drawn:
+            guard let found = shown.found else { return nil }
+            return found.which == .people ? .people(found.at.people) : .quiet
+        case .followedTags(let page) where shown.drawn: return .followed(page)
+        case .thread where shown.drawn, .tag: return nil
+        case .people, .found, .followedTags, .thread, .link, nil: break
+        }
+        // What stands in the stream's place on Trends, where a tab of what is rising is drawn.
+        guard let rising, people.rising.said(rising, in: session) != nil else { return nil }
+        return .rising(rising)
+    }
+
+    /// What the page in front is asking now, as its store says it.
+    static func ask(_ front: AskInFront, of people: ShellPersonPages, in session: ShellSession) -> PageAsking {
+        switch front {
+        case .person(let who): people.ask(of: who, in: session)
+        case .people(let list): people.lists.ask(of: list, in: session)
+        case .followed(let page): people.followed.ask(of: page, in: session)
+        case .rising(let which): people.rising.ask(of: which, in: session)
+        case .quiet: PageAsking()
+        }
+    }
+
+    /// Stop on the page in front, and `Escape` there: its own ask called off, landing as
+    /// stopped, and nothing else — a reload of the stream under it goes on. Whether anything
+    /// was stopped.
+    @discardableResult
+    static func stop(_ front: AskInFront, of people: ShellPersonPages, in session: ShellSession) -> Bool {
+        switch front {
+        case .person(let who): people.stop(who, in: session)
+        case .people(let list): people.lists.stop(list)
+        case .followed(let page): people.followed.stop(page)
+        case .rising(let which): people.rising.stop(which)
+        case .quiet: false
+        }
+    }
+
+    /// The stream's Stop, while a reload the reader pressed for runs (#307).
+    private var streamStop: (() -> Void)? {
+        session.reload.stoppable ? { _ = session.reload.stop() } : nil
+    }
+
+    /// The page in front's Stop, where what it asks now is a wait the reader pressed for, and
+    /// nothing otherwise: the bar's mark is then Stop.
+    private func onStop(_ front: AskInFront) -> (() -> Void)? {
+        guard let people, Self.ask(front, of: people, in: session).stoppable else { return nil }
+        return { Self.stop(front, of: people, in: session) }
+    }
+
     var body: some View {
+        // What the page in front asks of its own, where it does: its toast (decision 17).
+        let asked = Self.askInFront(standing, rising: trends?.front.rising, of: people, in: session)
+            .flatMap { front in people.map { Self.ask(front, of: $0, in: session) } }
         // What is drawn of the step in front, asked once a pass: the head, the page and the
         // swipe all read this one answer.
         let shown = Self.drawn(standing, of: people, in: session)
@@ -239,17 +321,11 @@ struct TimelinePane: View {
         // One asker for the `…` of every row under this pane — the timeline, a conversation, a
         // person's page, a tag's.
         .modifier(RowAsks(session: session))
-        .overlay(alignment: .bottom) {
-            if let banner {
-                TimelineToastBanner(toast: banner, work: session.work, reading: session.reload.reading)
-                    .padding(.bottom, ShellSpace.pad)
-                    // At the foot of the page, beside the compose button where it floats and
-                    // never under it or over it (#302).
-                    .standsBesideFloatingCorner(by: ShellSpace.pad)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .animation(.easeInOut(duration: 0.2), value: banner)
+        .modifier(ReloadToast(
+            toast: Self.banner(asked, note: toast, in: session),
+            // The pieces on the wire are the stream's reload's alone (#170).
+            work: asked == nil ? session.work : nil, reading: asked == nil ? session.reload.reading : []
+        ))
         // The timeline in front read from this device as it shows (#357).
         .modifier(CoversTimeline(session: session, latest: prefs.latestDate))
         .task(id: catalogueHosts) { await waitForCatalogues() }
@@ -601,7 +677,8 @@ struct TimelinePane: View {
             onTab: { tab in _ = people?.turn(person, to: tab, lamp: &selectedID, in: session) },
             onReload: ways.onReload,
             onPull: { await people?.again(person, in: session) },
-            onAskAgain: { Task { await people?.again(person, in: session) } },
+            // While what the page asks runs, the bar's mark stops it, and nothing else.
+            onStop: onStop(.person(person)),
             onLookUp: onLookUp,
             onHome: { press in Task { await people?.homePressed(press, on: person, in: session) } },
             // Where they moved to is somebody this same source names: their page is
@@ -613,8 +690,6 @@ struct TimelinePane: View {
             onRequests: onRequests,
             onFeatured: { press in
                 switch press {
-                case .again:
-                    Task { await people?.features.again(person, said: people?.said(of: person, in: session), in: session) }
                 case .takeOff(let tag):
                     Task { await people?.features.takeOff(tag, of: person, said: people?.said(of: person, in: session), in: session) }
                 case .tag, .people:
@@ -628,10 +703,8 @@ struct TimelinePane: View {
             },
             onAct: { act in Task { await people?.act(act, on: person, in: session) } },
             onAskFollows: { session.askFor([PersonAct.follow.needs], host: person.host) },
-            onStandingAgain: { Task { await people?.standsAgain(to: person, in: session) } },
             onChange: { people?.changeOwn(person, in: session) },
             onReadOn: { Task { await people?.readOn(person, in: session) } },
-            onPinnedAgain: { Task { await people?.tabs.asked(person, beside: people?.said(of: person, in: session), again: true, in: session) } },
             onPinnedReadOn: { Task { await people?.pinnedReadOn(person, in: session) } },
             onOpenListed: onOpenListed,
             onListAgain: { Task { await people?.fronted(person, again: true, in: session) } },
@@ -723,6 +796,8 @@ struct TimelinePane: View {
             onReload: ways.onReload,
             // Pulled down, the list is asked from the top as `r` asks it.
             onPull: { await people.lists.again(list, in: session) },
+            // While it is asked, the bar's mark stops that ask.
+            onStop: onStop(.people(list)),
             onReadOn: { Task { await people.lists.readOn(list, in: session) } },
             onChoose: { choice in Task { await people.lists.choose(choice, for: list, in: session) } },
             onAct: { act, person in Task { await people.lists.press(act, on: person, of: list, in: session) } },
@@ -740,7 +815,7 @@ struct TimelinePane: View {
     /// What a search found at a source (F10): the whole height of the pane, in the frame every
     /// opened page stands in, handed its tabs and what the tab in front lists — worked out where
     /// the answer is held. Its bar's mark is on People alone, where `r` asks the source for the
-    /// people again; **never Stop**, as on what is rising.
+    /// people again — and Stop while they are asked, stopping that ask and nothing else.
     ///
     /// The walk stood on `standing`'s tab: where the page draws the other one — that tab lost
     /// everything its source gave — the walk is turned to it, so Tab, the keys and leaving all
@@ -757,7 +832,8 @@ struct TimelinePane: View {
                 onTab: onTurnFound,
                 onReload: ways.onReload,
                 // Pulled down on People, the list is asked from the top as `r` asks it.
-                onPull: { await lists.again(list, in: session) }
+                onPull: { await lists.again(list, in: session) },
+                onStop: which == .people ? onStop(.people(list)) : nil
             ),
             onOpenPerson: onOpenListed,
             onOpenRow: onOpenFound,
@@ -782,7 +858,7 @@ struct TimelinePane: View {
 
     /// The hashtags followed (F10): the whole height of the pane, in the frame every opened page
     /// stands in, with no tabs, handed what its source listed. Its bar's mark is where `r` asks
-    /// the list again from the top; **never Stop**, as on what is rising.
+    /// the list again from the top — and Stop while it is asked, stopping that ask alone.
     private func followedPage(_ page: FollowedTags, said: FollowedTagsSaid, in followed: ShellFollowedTags) -> some View {
         FollowedTagsPane(
             said: said,
@@ -790,10 +866,10 @@ struct TimelinePane: View {
             slide: session.slide("followed"),
             reload: FollowedTagsPane.reloadName(of: said, canReload: ways.canReload),
             onOpen: onOpenRisingRow,
-            onAskAgain: { Task { await followed.again(page, in: session) } },
             onReload: ways.onReload,
             // Pulled down, the list is asked from the top as `r` asks it.
             onPull: { await followed.again(page, in: session) },
+            onStop: onStop(.followed(page)),
             onReadOn: { Task { await followed.readOn(page, in: session) } },
             onAct: { row, to in Task { await followed.press(row.id, on: page, only: to, in: session) } },
             onAsk: { session.askFor([.follows], host: page.host) },
@@ -919,9 +995,7 @@ struct TimelinePane: View {
             RisingHead()
             ShellRule()
             RisingPane(
-                said: said, selectedID: $selectedID, onOpen: onOpenRisingRow,
-                onAskAgain: { host in Task { await rising.again(which, at: host, in: session) } },
-                jumpToTop: jumpToTop
+                said: said, selectedID: $selectedID, onOpen: onOpenRisingRow, jumpToTop: jumpToTop
             ) { EmptyView() }
         }
         // One list per tab, so a tab brought in front is drawn afresh at its own lamp.
@@ -1424,15 +1498,21 @@ struct TimelinePane: View {
     /// on it as it flips, and the header does not shift. **And a press on Stop within
     /// `ReloadMark.settle` of the press that began the reload is not heard**: a second press of
     /// a quick double would otherwise cancel what the first had just started.
+    ///
+    /// **On a tab of Trends that lists what is rising the mark is that tab's** (decision 17):
+    /// Stop while its sources are asked, stopping them and nothing else — never the Posts'
+    /// reload running out of sight under it.
     @ViewBuilder
     private var reloadMark: some View {
-        if let shown = ReloadMark.shown(canReload: ways.canReload, stoppable: session.reload.stoppable) {
+        let front = Self.askInFront(standing, rising: trends?.front.rising, of: people, in: session)
+        let stop: (() -> Void)? = if let front { onStop(front) } else { streamStop }
+        if let shown = ReloadMark.shown(canReload: ways.canReload, stoppable: stop != nil) {
             ShellIconButton(shown.symbol, name: shown.name) {
                 switch ReloadMark.press(shown, at: Date(), pressedAt: reloadPressed) {
                 case .begins:
                     reloadPressed = Date()
                     ways.onReload()
-                case .stops: session.reload.stop()
+                case .stops: stop?()
                 case .unheard: break
                 }
             }

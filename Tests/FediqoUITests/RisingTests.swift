@@ -88,7 +88,7 @@ struct RisingTests {
         )
         let rising = ShellPersonPages().rising
         #expect(bands(rising, .tags, session) == [RisingSaid.Band(source: Self.one), RisingSaid.Band(source: Self.two)], "before anything answered")
-        #expect(bands(rising, .tags, session).allSatisfy { $0.stateLine(.tags, language: .english) == "Asking \($0.source)…" })
+        #expect(bands(rising, .tags, session).allSatisfy { $0.stateLine(.tags) == nil }, "being asked is the tab's toast to say")
 
         await rising.opened(.tags, in: session)
         for host in [Self.one, Self.two] {
@@ -123,15 +123,16 @@ struct RisingTests {
         #expect(Set(work.record.map(\.reached)) == [Self.one, Self.two])
     }
 
-    @Test("A source that fails says so under its own band while the others land; its Try again asks that source and no other, and asking again from the keys asks every source; a source that gave none says it gave none — never that it has none or that it is switched off")
+    @Test("A source that fails is named in the tab's toast while the others land; asking one source again asks it and no other, and asking again from the keys asks every source; a source that gave none says it gave none — never that it has none or that it is switched off")
     func oneFailsAndTheOthersLand() async throws {
         let (session, servers, _) = await session([Self.tags: PageServer.Answer(body: "", status: 503)], [Self.tags: Self.none])
         let rising = ShellPersonPages().rising
         await rising.opened(.tags, in: session)
         let said = bands(rising, .tags, session)
-        #expect(said[0].reading == .failed && said[0].offersAgain && said[0].rows.isEmpty)
-        #expect(said[0].stateLine(.tags, language: .english) == "Could not ask m.example for its rising hashtags.")
-        #expect(said[1].reading == .said && !said[1].offersAgain && said[1].stateLine(.tags, language: .english) == "n.example gave no rising hashtags.")
+        #expect(said[0].reading == .failed && said[0].rows.isEmpty && said[0].stateLine(.tags) == nil)
+        #expect(rising.ask(of: .tags, in: session) == PageAsking(failed: [Self.one]), "the miss is the toast's, and nobody else's")
+        #expect(TimelineToast.asked(rising.ask(of: .tags, in: session), note: nil, language: .english) == TimelineToast(kind: .error, text: "Could not reload m.example."))
+        #expect(said[1].reading == .said && said[1].stateLine(.tags, language: .english) == "n.example gave no rising hashtags.")
         for language in DummyLanguage.allCases {
             let line = try #require(said[1].stateLine(.tags, language: language)).lowercased()
             #expect(!line.contains("switched") && !line.contains("關閉") && !line.contains("停用"), "\(line)")
@@ -143,7 +144,8 @@ struct RisingTests {
         await servers[Self.one]?.answer(Self.tags, Self.tagsAnswer(["birds"]))
         await rising.again(.tags, at: Self.one, in: session)
         #expect(await servers[Self.one]?.asked.count == 2)
-        #expect(await servers[Self.two]?.asked.count == 1, "Try again asks the source it stands under")
+        #expect(await servers[Self.two]?.asked.count == 1, "one source asked again asks that source")
+        #expect(rising.ask(of: .tags, in: session).failed.isEmpty)
         #expect(bands(rising, .tags, session)[0].rows == [Self.tag("birds", at: Self.one)])
         await rising.again(.tags, in: session)
         #expect(await servers[Self.one]?.asked.count == 3)
@@ -196,9 +198,15 @@ struct RisingTests {
         let again = Task { await rising.opened(.tags, in: session) }
         await rising.again(.tags, at: Self.one, in: session)
         #expect(await first.asked.count == 1, "a press while the source is being asked asks nothing")
-        #expect(!rising.canAskAgain(.tags, in: session) && rising.canAskAgain(.links, in: session), "a reload is refused while the page's asks are out")
+        #expect(rising.canAskAgain(.tags, in: session) && rising.canAskAgain(.links, in: session), "the mark keeps its place while the page's asks are out")
+        // And it is Stop meanwhile: `r`'s answer and the tab's own wait, as the head's mark reads them.
+        let canReload = FediqoRootView.canReload(
+            place: .trends, editing: false, hasSources: true, open: [], risingAsked: rising.canAskAgain(.tags, in: session)
+        )
+        #expect(ReloadMark.shown(canReload: canReload, stoppable: rising.ask(of: .tags, in: session).stoppable) == .stop)
         let midway = bands(rising, .tags, session)
-        #expect(midway[0].asking && midway[0].reading == .asking && midway[0].stateLine(.tags, language: .english) == "Asking m.example…")
+        #expect(midway[0].asking && midway[0].reading == .asking && midway[0].stateLine(.tags) == nil)
+        #expect(rising.ask(of: .tags, in: session, language: .english).asking == "Asking m.example…", "the toast says who is on the wire")
         await first.release(Self.tags)
         await again.value
         await pane.value
@@ -209,18 +217,87 @@ struct RisingTests {
         #expect(await servers[Self.two]?.asked.count == 1)
     }
 
-    @Test("An ask that was stopped before it answered leaves nothing saying Asking: its band says it was not asked to the end, with the press that asks again, and it is asked again when the page next opens")
+    @Test("An ask that was stopped before it answered leaves nothing saying Asking: its band says nothing, it is no failure, and it is asked again when the page next opens")
     func aStoppedAskIsAskedAgain() async throws {
         let (session, servers, _) = await session([Self.tags: PageServer.Answer(body: "", cancelled: true)], [Self.tags: Self.none])
         let rising = ShellPersonPages().rising
         await rising.opened(.tags, in: session)
         let stopped = bands(rising, .tags, session)[0]
-        #expect(stopped.reading == .stopped && !stopped.asking && stopped.offersAgain)
-        #expect(stopped.stateLine(.tags, language: .english) == "m.example was not asked to the end.")
+        #expect(stopped.reading == .stopped && !stopped.asking && stopped.stateLine(.tags) == nil)
+        #expect(rising.ask(of: .tags, in: session).failed.isEmpty)
         await servers[Self.one]?.answer(Self.tags, Self.tagsAnswer(["birds"]))
         await rising.opened(.tags, in: session)
         #expect(bands(rising, .tags, session)[0].rows.count == 1)
         #expect(await servers[Self.two]?.asked.count == 1, "the source that answered is not asked again")
+    }
+
+    @Test("Stop on a tab of what is rising calls off every source of it on the wire: the toast says each was asked and then that the reload stopped — never a failure — what comes late lands nowhere, the other tab and nothing else is touched, and asking again says nothing of the stop")
+    func stopCallsTheTabOff() async throws {
+        let (session, servers, _) = await session([Self.tags: Self.tagsAnswer(["Swift"])], [Self.tags: Self.tagsAnswer(["birds"])])
+        let first = try #require(servers[Self.one]), second = try #require(servers[Self.two])
+        let rising = ShellPersonPages().rising
+        #expect(!rising.stop(.tags), "nothing on the wire: nothing stopped")
+        for server in [first, second] { await server.hold(Self.tags) }
+        defer { Task { for server in [first, second] { await server.release(Self.tags) } } }
+        let heldGuard = watching("the asks of \(Self.tags), held at their servers") {
+            for server in [first, second] { await server.release(Self.tags) }
+        }
+        defer { heldGuard.cancel() }
+        let pane = Task { await rising.opened(.tags, in: session) }
+        await first.arrival(of: Self.tags, by: pane)
+        await second.arrival(of: Self.tags, by: pane)
+        let asking = rising.ask(of: .tags, in: session, language: .english)
+        #expect(asking == PageAsking(asking: "Asking m.example… +1", stoppable: true), "both on the wire, the first named")
+        #expect(TimelineToast.asked(asking, note: nil)?.kind == .loading)
+
+        #expect(rising.stop(.tags))
+        let stopped = rising.ask(of: .tags, in: session)
+        #expect(stopped == PageAsking(stopped: true), "nothing on the wire, no failure, and the stop said")
+        #expect(TimelineToast.asked(stopped, note: nil, language: .english) == TimelineToast(kind: .warning, text: "Reload stopped."))
+        #expect(rising.ask(of: .links, in: session) == PageAsking(), "the other tab is not this one's")
+        #expect(rising.canAskAgain(.tags, in: session), "stopped, it may be asked again")
+        for server in [first, second] { await server.release(Self.tags) }
+        await pane.value
+        #expect(bands(rising, .tags, session).allSatisfy { $0.rows.isEmpty && $0.reading == .stopped }, "what came late landed nowhere")
+
+        await rising.again(.tags, in: session)
+        #expect(rising.ask(of: .tags, in: session) == PageAsking(), "asked again, the stop is said no longer")
+        #expect(bands(rising, .tags, session).map(\.rows.count) == [1, 1])
+    }
+
+    @Test("Whose ask is in front is one decision — the toast's, the mark's and Escape's: a page opened over the stream asks for itself, a list whose source is gone draws the stream and is not, a conversation and a hashtag's page are the stream's, and on Trends with nothing over it a tab of what is rising is; Stop there stops that tab and nothing else")
+    func whoseAskIsInFront() async throws {
+        let (session, servers, _) = await session([Self.tags: Self.none], [Self.tags: Self.none])
+        let pages = ShellPersonPages()
+        let ada = try #require(DummyPerson(handle: "@ada@m.example", host: Self.one))
+        let list = PeopleList(directoryAt: Self.one)
+        func front(_ step: ShellStep?, _ rising: RisingWhich? = nil) -> TimelinePane.AskInFront? {
+            TimelinePane.askInFront(step, rising: rising, of: pages, in: session)
+        }
+        #expect(front(.person(ada), .tags) == .person(ada), "the page over Trends' tab, and not the tab")
+        #expect(front(.people(list), .tags) == .people(list))
+        #expect(front(.people(PeopleList(directoryAt: "gone.example")), .tags) == .rising(.tags), "undrawn, the stream's place is in front")
+        #expect(front(.followedTags(FollowedTags(host: Self.one))) == nil, "nobody signed in: the stream is drawn in its stead")
+        let birds = try #require(PostTag("#birds"))
+        #expect(front(.thread("nowhere")) == nil && front(.tag(birds)) == nil)
+        #expect(front(nil) == nil, "the stream: its own reload")
+        #expect(front(nil, .links) == .rising(.links))
+        #expect(TimelinePane.askInFront(.person(ada), rising: nil, of: nil, in: session) == nil, "with no pages, nobody's")
+
+        let first = try #require(servers[Self.one])
+        await first.hold(Self.tags)
+        defer { Task { await first.release(Self.tags) } }
+        let heldGuard = watching("the ask of \(Self.tags), held at its server") { await first.release(Self.tags) }
+        defer { heldGuard.cancel() }
+        let tab = Task { await pages.rising.opened(.tags, in: session) }
+        await first.arrival(of: Self.tags, by: tab)
+        #expect(TimelinePane.ask(.rising(.tags), of: pages, in: session).stoppable)
+        #expect(!TimelinePane.stop(.person(ada), of: pages, in: session), "another page's Stop stops nothing here")
+        #expect(TimelinePane.stop(.rising(.tags), of: pages, in: session))
+        #expect(TimelinePane.ask(.rising(.tags), of: pages, in: session).stopped && !session.reload.stopped, "the stream's reload is not told")
+        #expect(TimelinePane.banner(TimelinePane.ask(.quiet, of: pages, in: session), note: nil, in: session) == nil, "a page that asks nothing says nothing")
+        await first.release(Self.tags)
+        await tab.value
     }
 
     @Test("What was asked as one sign-in is not shown to the next, and its answer, come late, lands nowhere — rows, or a word that the address is not there: the band is the reader's who asked since, whose own ask is still out; and a sign-in at one source lets nothing of another go")
@@ -293,7 +370,8 @@ struct RisingTests {
         #expect(asked.contains("ShellPersonPages.source(at:"), "the one fact is read where a person's page reads it")
         // The pane draws a tab of what is rising only where Trends has it in front, and the stream otherwise.
         let pane = try String(contentsOf: Self.shell.appending(path: "TimelinePane.swift"), encoding: .utf8)
-        #expect(pane.components(separatedBy: "trends?.front.rising").count == 2 && pane.contains("} else {\n            stream\n        }"))
+        #expect(pane.contains("if let which = trends?.front.rising, let rising = people?.rising, let said = rising.said(which, in: session) {"))
+        #expect(pane.contains("} else {\n            stream\n        }"))
         #expect(!pane.contains("offers.") && !pane.contains(".kind == "))
     }
 

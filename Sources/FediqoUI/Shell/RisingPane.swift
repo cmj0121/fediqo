@@ -5,8 +5,9 @@ import SwiftUI
 // them.
 //
 // **One band a source, and nothing merged.** What is rising is each source's own ranking: its
-// rows stand under its name, in its order, and where it gave none, could not be asked, or is
-// still being asked, that is said under its name too — while the others stand as they are.
+// rows stand under its name, in its order, and where it gave none that is said under its name
+// too — while the others stand as they are. Being asked, failing and being stopped are the
+// tab's toast's to say.
 //
 // **A hashtag opens its page; a link opens as any link does.** A hashtag's row is the hashtag
 // as a post's words would carry it, and opens the page such a hashtag opens. A link's row is
@@ -71,31 +72,13 @@ extension RisingSaid {
 }
 
 extension RisingSaid.Band {
-    /// What is said under a source's name in place of rows, or nothing where it has rows:
-    /// that it is being asked, that it could not be, or — once it has answered with nothing —
-    /// that it gave none. **Never that it has none, or that it is switched off**: a source
-    /// answers the same either way.
+    /// What is said under a source's name in place of rows, once it has answered with
+    /// nothing: that it gave none — **never that it has none, or that it is switched off**: a
+    /// source answers the same either way. An ask on the wire, failed or stopped is the tab's
+    /// toast to say (DESIGN-reload), and nothing here.
     func stateLine(_ which: RisingWhich, language: DummyLanguage? = nil) -> String? {
-        switch reading {
-        case .failed:
-            return String(format: L10n.t("rising.failed.\(which.rawValue)", language: language), source)
-        case .said:
-            return rows.isEmpty ? String(format: L10n.t("rising.none.\(which.rawValue)", language: language), source) : nil
-        case .asking:
-            return String(format: L10n.t("rising.asking", language: language), source)
-        case .stopped:
-            return String(format: L10n.t("rising.stopped", language: language), source)
-        }
-    }
-
-    /// Whether the line under the source's name offers the press that asks it again: after a
-    /// failure, and where an ask was stopped before it answered.
-    var offersAgain: Bool { reading == .failed || reading == .stopped }
-
-    /// That press: its words as drawn, which are its name to a listener and to Voice Control,
-    /// and whom it asks, told after them — two bands' "Try again" are not one press.
-    func again(language: DummyLanguage? = nil) -> (words: String, hint: String) {
-        (L10n.t("person.retry", language: language), PersonPage.reloadName(source, language: language))
+        guard reading == .said, rows.isEmpty else { return nil }
+        return String(format: L10n.t("rising.none.\(which.rawValue)", language: language), source)
     }
 }
 
@@ -111,8 +94,6 @@ struct RisingPane<Lead: View>: View {
     /// A row opened, answered by the root: a hashtag's page, or a link through the door a
     /// post's link goes through.
     var onOpen: (RisingRow) -> Void
-    /// A band's "Try again": that source asked again.
-    var onAskAgain: (String) -> Void = { _ in }
     var jumpToTop: Int = 0
     /// The page's head, where it is the first rows of the list.
     @ViewBuilder var lead: Lead
@@ -129,7 +110,7 @@ struct RisingPane<Lead: View>: View {
                     ForEach(said.bands) { band in
                         ShellBandHead(band.source, pinned: true)
                         if let line = band.stateLine(said.which) {
-                            stateLine(line, of: band)
+                            stateLine(line)
                         }
                         ForEach(Array(band.rows.enumerated()), id: \.element.id) { index, row in
                             rowView(row)
@@ -156,25 +137,15 @@ struct RisingPane<Lead: View>: View {
         }
     }
 
-    /// What stands under a source's name where it has no rows, and beside a failure the press
-    /// that asks that source again.
-    private func stateLine(_ line: String, of band: RisingSaid.Band) -> some View {
-        WordsThenPress(
-            words: Text(line)
-                .shellFont(.meta)
-                .foregroundStyle(band.reading == .failed ? ShellChrome.ink(colorScheme) : ShellChrome.inkFaint(colorScheme)),
-            press: Group {
-                if band.offersAgain {
-                    let again = band.again()
-                    ShellLinkButton(again.words) { onAskAgain(band.source) }
-                        .disabled(band.asking)
-                        .fixedSize()
-                        // Called by its words, as Voice Control hears them; whom it asks, told after.
-                        .accessibilityHint(again.hint)
-                        .help(again.hint)
-                }
-            }
-        )
+    /// What stands under a source's name where it gave no rows.
+    private func stateLine(_ line: String) -> some View {
+        Text(line)
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, ShellSpace.pad)
+            .padding(.vertical, ShellSpace.snug)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// One row. A press lights it, and a second on the row it is already on opens it —

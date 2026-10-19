@@ -115,26 +115,21 @@ struct FollowedTagsPageTests {
         #expect(list.said(of: Self.page, in: session)?.rows.first?.standing == .unfollowed)
     }
 
-    @Test("The bar's mark asks the list's source again, named by it, where `r` would ask; with nobody to ask there is no mark; the bar never holds Stop")
+    @Test("The bar's mark asks the list's source again, named by it, where `r` would ask; with nobody to ask there is no mark; the bar holds Stop only where it is handed one — the list's own")
     func theBarsMark() {
         let said = FollowedTagsSaid(page: Self.page)
         #expect(FollowedTagsPane.reloadName(of: said, canReload: true, language: .english) == "Ask m.example again")
         #expect(FollowedTagsPane.reloadName(of: said, canReload: true, language: .taiwanese) == "再問 m.example 一次")
         #expect(FollowedTagsPane.reloadName(of: said, canReload: false) == nil)
-        #expect(FollowedTagsPane.acts(onBack: {}, onReload: {}, onPull: {}).onStop == nil, "its asks are not the timeline's reload")
+        #expect(FollowedTagsPane.acts(onBack: {}, onReload: {}, onPull: {}).onStop == nil, "nothing to stop, no Stop")
+        var stopped = false
+        FollowedTagsPane.acts(onBack: {}, onReload: {}, onPull: {}, onStop: { stopped = true }).onStop?()
+        #expect(stopped, "the list's own Stop is the bar's")
         // `r` and the mark are one answer: the root's, for the list in front.
         for asked in [true, false] {
             #expect(FediqoRootView.canReload(place: .timeline, editing: false, hasSources: true, open: [Self.step.layer, .selection], personAsked: asked) == asked)
         }
         #expect(!FediqoRootView.canReload(place: .timeline, editing: false, hasSources: true, open: [.shortcuts, Self.step.layer], personAsked: true), "not under the keys list")
-    }
-
-    @Test("The press beside a failure is called by its words, as Voice Control hears them, and tells a listener after them whom it asks")
-    func thePressBesideAFailure() {
-        let failed = FollowedTagsPane.again(FollowedTagsSaid(page: Self.page, reading: .failed), language: .english)
-        #expect(failed.words == "Try again" && failed.hint == "Ask m.example again")
-        let tw = FollowedTagsPane.again(FollowedTagsSaid(page: Self.page, reading: .failed), language: .taiwanese)
-        #expect(tw.words == L10n.t("person.retry", language: .taiwanese) && tw.hint == "再問 m.example 一次")
     }
 
     // MARK: - Where it stands
@@ -207,7 +202,6 @@ struct FollowedTagsPageTests {
             ("asking", FollowedTagsSaid(page: Self.page)),
             ("failed", FollowedTagsSaid(page: Self.page, reading: .failed)),
             ("none", FollowedTagsSaid(page: Self.page, reading: .said)),
-            ("asked again and failed", FollowedTagsSaid(page: Self.page, reading: .said, againFailed: true, rows: rows, foot: .end)),
             ("a sign-in that only sees", FollowedTagsSaid(page: Self.page, reading: .said, rows: rows, foot: .end, changing: PartWords.Place(kind: .none, key: "part.ask.partly"))),
         ]
         for scheme in [ColorScheme.light, .dark] {

@@ -15,7 +15,8 @@ import SwiftUI
 //
 // **Asked when the list opens, and when the person presses** — a list of people's own rules
 // (`ShellPeoplePages`). Opening asks one stretch; the foot's press asks the next, by the place
-// the source named and no other; `r` and "Try again" ask from the top. One ask a press, never
+// the source named and no other; `r`, the mark and a pull ask from the top, and Stop calls that
+// ask off. One ask a press, never
 // two on the wire, and **no more shown than `most`**: reached, the foot says so and is no
 // press, and what a stretch brought past it is not drawn.
 //
@@ -138,21 +139,18 @@ struct FollowedTagsSaid: Equatable {
     }
 
     enum Foot: Equatable {
-        /// The source named a next stretch: a press reads it.
+        /// The source named a next stretch: a press reads it — and reads it again where the
+        /// last did not come, which the toast says (DESIGN-reload).
         case more
-        /// A stretch is on the wire.
-        case reading
         /// The source named no next: the end of the list.
         case end
-        /// The last stretch asked for did not come. A press asks again.
-        case failed
         /// The source stopped handing the list on in order. It ends here.
         case stopped
         /// Read as far as such a list is read here: the source has more, and none is asked for.
         case farthest
 
         /// Whether the foot is a press.
-        var presses: Bool { self == .more || self == .failed }
+        var presses: Bool { self == .more }
     }
 
     /// What a row's `…` holds.
@@ -165,8 +163,6 @@ struct FollowedTagsSaid: Equatable {
 
     let page: FollowedTags
     var reading = Reading.asking
-    /// Asking from the top came to a failure with a list already given, which stands.
-    var againFailed = false
     var rows: [FollowedTagRow] = []
     /// Whether the list is being asked from the top.
     var asking = false
@@ -216,19 +212,6 @@ struct FollowedTagsSaid: Equatable {
         L10n.t("followed.tags.title", language: language)
     }
 
-    /// What is said above the rows: that the list is being asked for, that it could not be —
-    /// or, once the source has given it, what asking again came to.
-    func stateLine(language: DummyLanguage? = nil) -> String? {
-        switch reading {
-        case .asking: String(format: L10n.t("followed.tags.asking", language: language), page.host)
-        case .failed: String(format: L10n.t("followed.tags.failed", language: language), page.host)
-        case .said: againFailed ? String(format: L10n.t("followed.tags.again.failed", language: language), page.host) : nil
-        }
-    }
-
-    /// Whether the line above the rows offers the press that asks again.
-    var offersAgain: Bool { reading == .failed || againFailed }
-
     /// What stands where rows would, once the source has answered with none and named no
     /// next: a sentence about the source, never about the reader.
     func nothing(language: DummyLanguage? = nil) -> String? {
@@ -239,9 +222,7 @@ struct FollowedTagsSaid: Equatable {
     func footSymbol(_ foot: Foot) -> String {
         switch foot {
         case .more: "arrow.down.circle"
-        case .reading: "ellipsis"
         case .end: "checkmark.circle"
-        case .failed: "exclamationmark.arrow.circlepath"
         case .stopped: "exclamationmark.circle"
         case .farthest: "circle.dotted"
         }
@@ -250,9 +231,7 @@ struct FollowedTagsSaid: Equatable {
     func footWords(_ foot: Foot, language: DummyLanguage? = nil) -> String {
         switch foot {
         case .more: L10n.t("followed.tags.foot.more", language: language)
-        case .reading: L10n.t("followed.tags.foot.reading", language: language)
         case .end: String(format: L10n.t("followed.tags.foot.end", language: language), page.host)
-        case .failed: String(format: L10n.t("followed.tags.foot.failed", language: language), page.host)
         case .stopped: String(format: L10n.t("followed.tags.foot.stopped", language: language), page.host)
         case .farthest:
             String(
@@ -313,6 +292,8 @@ final class ShellFollowedTags {
 
     /// The lists, by the host of their source.
     private var pages: [String: Page] = [:]
+    /// The lists whose last ask from the top was stopped (`stop`), until they are asked again.
+    private var halted: Set<String> = []
     /// The one ask on the wire for each list — from the top, or a reading-on.
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private let errands: PageErrands
@@ -391,7 +372,6 @@ final class ShellFollowedTags {
         if session.mastodon.standing(.follows, host: page.host) != .held { handed.changing = Self.place(at: page.host, in: session) }
         guard let stood = self.standing(page.host, in: session) else { return handed }
         handed.reading = stood.answered ? .said : stood.failed ? .failed : .asking
-        handed.againFailed = stood.answered && stood.failed
         handed.asking = stood.asking
         let pressable = handed.changing == nil
         handed.rows = stood.read.tags.prefix(most).map { row(of: $0, on: stood, at: source, pressable: pressable, in: session) }
@@ -415,11 +395,11 @@ final class ShellFollowedTags {
         return row
     }
 
+    /// What stands under the rows. **Nothing while a stretch is on the wire**, and a stretch
+    /// that did not come is the foot that reads on again: both are the toast's to say.
     private func foot(of page: Page) -> FollowedTagsSaid.Foot? {
-        guard page.answered else { return nil }
-        if page.readingOn { return .reading }
+        guard page.answered, !page.readingOn else { return nil }
         if page.notPaging { return .stopped }
-        if page.footFailed { return .failed }
         // More than is shown — a stretch ran past `most` — is not the end, whatever the source named.
         if page.read.tags.count > most { return .farthest }
         if page.read.next != nil { return page.read.tags.count >= most ? .farthest : .more }
@@ -440,6 +420,36 @@ final class ShellFollowedTags {
     /// Whether the page has anybody to ask again — what `r` and its mark go by.
     func canAskAgain(_ page: FollowedTags, in session: ShellSession) -> Bool {
         source(of: page, in: session) != nil
+    }
+
+    /// What the page says in its toast (DESIGN-reload): the list asked from the top — a wait
+    /// Stop stops — or read on, which is not; that the last ask did not come; or that it was
+    /// stopped.
+    func ask(of page: FollowedTags, in session: ShellSession, language: DummyLanguage? = nil) -> PageAsking {
+        guard source(of: page, in: session) != nil, let stood = self.standing(page.host, in: session) else { return PageAsking() }
+        let asking = stood.asking
+            ? TimelineToast.waiting("followed.tags.asking", hosts: [page.host], language: language)
+            : stood.readingOn ? L10n.t("followed.tags.foot.reading", language: language) : nil
+        return PageAsking(
+            asking: asking, stoppable: stood.asking,
+            failed: !stood.asking && !stood.readingOn && (stood.failed || stood.footFailed) ? [page.host] : [],
+            stopped: halted.contains(page.host)
+        )
+    }
+
+    /// The page's Stop, and `Escape` on it: the ask from the top called off, the list as it
+    /// was, and whatever is on the wire landing nowhere. A stop is never a failure, and a
+    /// reading-on is not stopped. Whether anything was.
+    @discardableResult
+    func stop(_ page: FollowedTags) -> Bool {
+        let host = page.host
+        guard pages[host]?.asking == true else { return false }
+        asks[host]?.cancel()
+        asks[host] = nil
+        pages[host]?.awaits = errands.next()
+        pages[host]?.asking = false
+        halted.insert(host)
+        return true
     }
 
     // MARK: - Letting go
@@ -479,7 +489,7 @@ final class ShellFollowedTags {
         await begin(at: source, with: held, in: session).value
     }
 
-    /// `r` and "Try again": the list asked from the top. What the page holds stays drawn until
+    /// `r`, the mark and a pull: the list asked from the top. What the page holds stays drawn until
     /// the answer lands, and is then replaced by it. **A press while the list is being asked
     /// asks nothing.**
     func again(_ page: FollowedTags, in session: ShellSession) async {
@@ -502,6 +512,7 @@ final class ShellFollowedTags {
         let errand = errands.next()
         pages[host]?.awaits = errand
         pages[host]?.asking = true
+        halted.remove(host)
         // A reading-on still on the wire is this ask's to supersede: one ask is out for the
         // list, and whatever the other brings late does not land.
         asks[host]?.cancel()
@@ -576,6 +587,7 @@ final class ShellFollowedTags {
         let errand = errands.next()
         pages[host]?.awaits = errand
         pages[host]?.readingOn = true
+        halted.remove(host)
         pages[host]?.footFailed = false
         let through = door(with: held, in: session)
         let length = stretch

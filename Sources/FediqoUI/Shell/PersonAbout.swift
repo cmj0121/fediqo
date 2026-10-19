@@ -81,7 +81,7 @@ struct PersonAboutSaid: Equatable {
     /// Whether there is anything to say of how the reader stands to them.
     var standsDrawn: Bool {
         guard let standing else { return false }
-        return standing.shown != nil || standing.stillAsked || standing.offersAgain || standing.lock != nil
+        return standing.shown != nil || standing.lock != nil
     }
 
     /// One of the two things taken from somebody followed (#313), where About has a row of it:
@@ -178,13 +178,11 @@ struct PersonAbout<Lead: View>: View {
     var onFollowed: ((FollowedTagsEntry) -> Void)?
     /// The press on the lock of a sign-in that was not asked for following.
     var onAskFollows: () -> Void = {}
-    /// "Try again", where the source could not be asked how the reader stands to them.
-    var onStandingAgain: () -> Void = {}
     /// A switch of what is taken from them, pressed.
     var onAct: (PersonAct) -> Void = { _ in }
     /// The way to the people who ask to follow the reader, pressed.
     var onRequests: (RequestsEntry) -> Void = { _ in }
-    /// A hashtag they feature, the way to the people they feature, or asking again (#315, #318).
+    /// A hashtag they feature, or the way to the people they feature (#315, #318).
     var onFeatured: (FeaturedPress) -> Void = { _ in }
     /// What stands over the blocks and scrolls away with them: the page's head, at a text
     /// size where it would fill the page.
@@ -342,7 +340,7 @@ struct PersonAbout<Lead: View>: View {
     }
 
     /// How the reader stands to them, in words: a line for each way, beside the glyph the
-    /// head draws alone; that it is neither, is being asked, or could not be; and how the
+    /// head draws alone; that it is neither; and how the
     /// sign-in stands where it holds less than following needs — the whole sentence, a press
     /// where it asks.
     @ViewBuilder
@@ -351,11 +349,6 @@ struct PersonAbout<Lead: View>: View {
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 ForEach(standing.marks()) { marked($0.symbol, $0.words, ink: ShellChrome.ink(colorScheme)) }
                 if let neither = standing.neitherWords() { quiet(neither) }
-                if let asking = standing.askingWords() { quiet(asking) }
-                if let failed = standing.failedWords() {
-                    marked(PersonHead.failedSymbol, failed, ink: ShellChrome.ink(colorScheme))
-                    ShellLinkButton(L10n.t("person.retry"), action: onStandingAgain).fixedSize()
-                }
                 if let words = standing.lockWords() { locked(words, asks: standing.lock?.asks == true, press: onAskFollows) }
             }
         }
@@ -394,8 +387,8 @@ struct PersonAbout<Lead: View>: View {
     }
 
     /// The hashtags they feature: a head, and each a row the lamp stops on — the hashtag, and
-    /// what the source says of it — whose press opens the hashtag's page; or the ask's own
-    /// sentence, with "Try again" beside a failure.
+    /// what the source says of it — whose press opens the hashtag's page. Being asked, and an
+    /// ask that came to nothing, are the page's toast to say (DESIGN-reload).
     @ViewBuilder
     private var featuredTags: some View {
         if let featured = said.featured {
@@ -404,11 +397,6 @@ struct PersonAbout<Lead: View>: View {
                     .shellFont(.meta, weight: .semibold)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .accessibilityAddTraits(.isHeader)
-                if let asking = featured.askingWords() { quiet(asking) }
-                if let failed = featured.failedWords() {
-                    marked(PersonHead.failedSymbol, failed, ink: ShellChrome.ink(colorScheme))
-                    ShellLinkButton(L10n.t("person.retry")) { onFeatured(.again) }.fixedSize()
-                }
                 ForEach(featured.tags, id: \.self) { tag in featuredRow(tag, of: featured) }
                 ForEach(featured.missed, id: \.self) { missed in
                     Text(missed)

@@ -187,7 +187,7 @@ struct FollowedTagsTests {
         try signIn(session)
         let list = ShellPersonPages().followed
         #expect(list.said(of: Self.page, in: session)?.reading == .asking, "before anything answered")
-        #expect(list.said(of: Self.page, in: session)?.stateLine(language: .english) == "Asking m.example for the hashtags you follow…")
+        #expect(list.ask(of: Self.page, in: session).asking == nil, "nothing on the wire before it opens")
 
         await list.opened(Self.page, in: session)
         #expect(await asked(server) == [Self.first])
@@ -196,7 +196,7 @@ struct FollowedTagsTests {
         #expect(work.record.allSatisfy { $0.reached == Self.host && $0.source == Self.host })
         #expect(shown(list, in: session) == Array(Self.names.prefix(2)), "the one followed last first")
         var said = try #require(list.said(of: Self.page, in: session))
-        #expect(said.reading == .said && said.foot == .more && said.stateLine() == nil)
+        #expect(said.reading == .said && said.foot == .more && list.ask(of: Self.page, in: session) == PageAsking())
         #expect(said.rows.count == 2)
         #expect(said.footWords(.more, language: .english) == "More hashtags can be read. Press here to read them.")
 
@@ -224,7 +224,7 @@ struct FollowedTagsTests {
         #expect(session.notes.isEmpty, "nothing is held")
     }
 
-    @Test("A source that lists none is said in a sentence about the source; a list that could not be asked for says so with the press that asks again, which asks from the top; a stretch that does not come is said at the foot and changes nothing drawn; a source that names the same next twice ends the list where it is and says so")
+    @Test("A source that lists none is said in a sentence about the source; a list that could not be asked for says so in the page's toast, and `r` asks from the top; a stretch that does not come is said in the toast and changes nothing drawn; a source that names the same next twice ends the list where it is and says so")
     func theStatesOfThePage() async throws {
         let (session, server, _) = await session([Self.first: Self.stretch([])])
         try signIn(session)
@@ -237,16 +237,16 @@ struct FollowedTagsTests {
         await server.answer(Self.first, Self.down)
         await list.again(Self.page, in: session)
         said = try #require(list.said(of: Self.page, in: session))
-        #expect(said.reading == .said && said.againFailed && said.offersAgain, "what it said before stands")
-        #expect(said.stateLine(language: .english) == "Could not ask m.example again. What it listed before is still here.")
+        #expect(said.reading == .said, "what it said before stands")
+        #expect(list.ask(of: Self.page, in: session).failed == [Self.host], "and the toast says the miss")
 
         let (other, down, _) = await self.session([Self.first: Self.down])
         try signIn(other)
         let failed = ShellPersonPages().followed
         await failed.opened(Self.page, in: other)
         said = try #require(failed.said(of: Self.page, in: other))
-        #expect(said.reading == .failed && said.offersAgain && said.rows.isEmpty && said.nothing() == nil)
-        #expect(said.stateLine(language: .english) == "Could not ask m.example for the hashtags you follow.")
+        #expect(said.reading == .failed && said.rows.isEmpty && said.nothing() == nil)
+        #expect(failed.ask(of: Self.page, in: other).failed == [Self.host])
         await failed.opened(Self.page, in: other)
         #expect(await asked(down).count == 1, "a failure is not asked again by being drawn")
         await down.answer(Self.first, Self.stretch(["a", "b"], next: 5))
@@ -256,8 +256,8 @@ struct FollowedTagsTests {
         // The next stretch does not come.
         await failed.readOn(Self.page, in: other)
         said = try #require(failed.said(of: Self.page, in: other))
-        #expect(said.foot == .failed && said.rows.map(\.tag.name) == ["a", "b"])
-        #expect(said.footWords(.failed, language: .english) == "Could not read more hashtags from m.example. Press here to try again.")
+        #expect(said.foot == .more && said.rows.map(\.tag.name) == ["a", "b"], "the foot reads on again")
+        #expect(failed.ask(of: Self.page, in: other).failed == [Self.host])
         // It names the place it was asked by as its next: not paging.
         await down.answer(Self.after(5), Self.stretch(["c"], next: 5))
         await failed.readOn(Self.page, in: other)
@@ -267,6 +267,33 @@ struct FollowedTagsTests {
         let before = await asked(down).count
         await failed.readOn(Self.page, in: other)
         #expect(await asked(down).count == before, "a list that stopped is not read on")
+    }
+
+    @Test("Stop on the hashtags followed calls the ask from the top off: the toast says the wait, then that the reload stopped — never a failure — what the list held stands, what comes late lands nowhere, and asking again says nothing of the stop")
+    func stopCallsTheListOff() async throws {
+        let (session, server, _) = await session([Self.first: Self.stretch(["a", "b"])])
+        try signIn(session)
+        let list = ShellPersonPages().followed
+        #expect(!list.stop(Self.page), "nothing on the wire: nothing stopped")
+        await list.opened(Self.page, in: session)
+        await server.hold(Self.first)
+        defer { Task { await server.release(Self.first) } }
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
+        await server.answer(Self.first, Self.stretch(["c"]))
+        let pull = Task { await list.again(Self.page, in: session) }
+        await server.arrival(of: Self.first, times: 2, by: pull)
+        #expect(list.ask(of: Self.page, in: session, language: .english) == PageAsking(asking: "Asking m.example for the hashtags you follow…", stoppable: true))
+
+        #expect(list.stop(Self.page))
+        #expect(list.ask(of: Self.page, in: session) == PageAsking(stopped: true))
+        #expect(shown(list, in: session) == ["a", "b"] && list.said(of: Self.page, in: session)?.asking == false)
+        await server.release(Self.first)
+        await pull.value
+        #expect(shown(list, in: session) == ["a", "b"], "what came late landed nowhere")
+
+        await list.again(Self.page, in: session)
+        #expect(shown(list, in: session) == ["c"] && list.ask(of: Self.page, in: session) == PageAsking())
     }
 
     @Test("No more is read than the most a list is read to: reached, the foot says so and is no press, and nothing more is asked")
@@ -587,7 +614,8 @@ struct FollowedTagsTests {
         defer { after12Guard.cancel() }
         let one = Task { await list.readOn(Self.page, in: session) }
         await server.arrival(of: Self.after(12), by: one)
-        #expect(list.said(of: Self.page, in: session)?.foot == .reading)
+        #expect(list.said(of: Self.page, in: session)?.foot == nil, "the stretch on its way is the toast's to say")
+        #expect(list.ask(of: Self.page, in: session, language: .english) == PageAsking(asking: "Reading more hashtags…"))
         await list.readOn(Self.page, in: session)
         #expect(await asked(server) == [Self.first, Self.after(12)], "pressed twice: one ask")
 

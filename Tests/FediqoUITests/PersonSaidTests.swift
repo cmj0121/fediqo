@@ -208,12 +208,12 @@ struct PersonSaidTests {
         await pages.readOn(Self.ada, in: session)
         #expect(await server.asked.count == 4, "nothing is asked past the end")
 
-        // A stretch that does not come is said at the foot, changes nothing drawn, and a press asks again.
+        // A stretch that does not come is said in the toast, changes nothing drawn, and the foot asks again.
         let (other, flaky, _) = await self.session(Self.served())
         let again = ShellPersonPages()
         await again.openedOnPosts(Self.ada, in: other)
         await again.readOn(Self.ada, in: other)
-        #expect(again.said(of: Self.ada, in: other)?.foot == .failed)
+        #expect(again.said(of: Self.ada, in: other)?.foot == .more && again.ask(of: Self.ada, in: other).failed == [Self.host])
         #expect(again.said(of: Self.ada, in: other)?.posts?.count == 3)
         await flaky.answer("\(Self.statuses)?max_id=7", Self.stretch([6]))
         await again.readOn(Self.ada, in: other)
@@ -221,7 +221,7 @@ struct PersonSaidTests {
         #expect(again.said(of: Self.ada, in: other)?.foot == .end)
     }
 
-    @Test("A source that has not heard of them says so and is asked nothing more; one that fails says it failed, keeps what it said before, and is asked again by the press — and reading the newest again puts what is newer on top")
+    @Test("A source that has not heard of them says so and is asked nothing more; one that fails says so in the toast, keeps what it said before, and is asked again by the press — and reading the newest again puts what is newer on top")
     func unheardOfFailedAndAgain() async throws {
         let (session, server, _) = await session([Self.lookup: PageServer.Answer(body: #"{"error":"Record not found"}"#, status: 404)])
         let pages = ShellPersonPages()
@@ -238,11 +238,12 @@ struct PersonSaidTests {
         await server.answer(Self.statuses, Self.stretch([9, 8]))
         await pages.again(Self.ada, in: session)
         #expect(pages.said(of: Self.ada, in: session)?.posts?.map(\.statusID) == ["9", "8"])
-        // Their posts fail while who they are answers: the person stands, and the foot says so.
+        // Their posts fail while who they are answers: the person stands, and the toast says so.
         await server.answer(Self.statuses, nil)
         await pages.again(Self.ada, in: session)
         let said = try #require(pages.said(of: Self.ada, in: session))
-        #expect(said.person != nil && said.posts?.count == 2 && said.foot == .failed && said.again == nil)
+        #expect(said.person != nil && said.posts?.count == 2 && said.foot == .end && said.again == nil)
+        #expect(pages.ask(of: Self.ada, in: session).failed == [Self.host])
         // Newer posts, reaching what is held: on top, and nothing twice.
         await server.answer(Self.statuses, Self.stretch([11, 10, 9]))
         await pages.again(Self.ada, in: session)
@@ -250,27 +251,28 @@ struct PersonSaidTests {
         #expect(session.notes.isEmpty)
     }
 
-    @Test("Once a source has said who somebody is, asking again and failing — or being told it no longer knows them — keeps what it said and says the trouble in a line of its own, never that what is below is only what this device holds; asking again and being answered takes the line away")
+    @Test("Once a source has said who somebody is, asking again and failing — or being told it no longer knows them — keeps what it said, and says the failure in the toast and that it no longer knows them in a line of its own, never that what is below is only what this device holds; asking again and being answered takes both away")
     func troubleAfterAnAnswer() async throws {
         let en = DummyLanguage.english
         let (session, server, _) = await session(Self.served())
         let pages = ShellPersonPages()
         await pages.openedOnPosts(Self.ada, in: session)
         for (answer, trouble, words) in [
-            (nil, PersonSaid.Trouble.failed, "Could not ask m.example again. What it said before is still here."),
+            (nil, PersonSaid.Trouble.failed, nil),
             (PageServer.Answer(body: "{}", status: 404), .unheardOf, "m.example no longer knows them. What it said before is still here."),
-        ] as [(PageServer.Answer?, PersonSaid.Trouble, String)] {
+        ] as [(PageServer.Answer?, PersonSaid.Trouble, String?)] {
             await server.answer(Self.lookup, answer)
             await pages.again(Self.ada, in: session)
             let said = try #require(pages.said(of: Self.ada, in: session))
             #expect(said.person?.accountID == "42" && said.again == trouble && said.posts?.count == 3 && said.foot == .more)
-            #expect(said.stateLine(of: "@ada@m.example", language: en) == words && said.offersAgain)
+            #expect(said.stateLine(language: en) == words)
+            #expect(pages.ask(of: Self.ada, in: session).failed == (trouble == .failed ? [Self.host] : []))
             #expect(said.emptyLine(held: 0, language: en) == nil)
         }
         await server.answer(Self.lookup, PageServer.Answer(body: Self.account()))
         await pages.again(Self.ada, in: session)
         let said = try #require(pages.said(of: Self.ada, in: session))
-        #expect(said.again == nil && said.stateLine(of: "@ada@m.example") == nil && !said.offersAgain)
+        #expect(said.again == nil && said.stateLine() == nil && pages.ask(of: Self.ada, in: session) == PageAsking())
     }
 
     // MARK: - What happens while an ask is on the wire
@@ -355,7 +357,8 @@ struct PersonSaidTests {
         defer { olderGuard.cancel() }
         let reading = Task { await pages.readOn(Self.ada, in: session) }
         await server.arrival(of: older, by: reading)
-        #expect(pages.said(of: Self.ada, in: session)?.foot == .reading)
+        #expect(pages.said(of: Self.ada, in: session)?.foot == nil, "the stretch on its way is the toast's to say")
+        #expect(pages.ask(of: Self.ada, in: session, language: .english) == PageAsking(asking: "Reading older posts…"), "and is not stopped")
         await pages.readOn(Self.ada, in: session)
         #expect(await server.asked.count == 5, "one stretch at a time")
         await pages.again(Self.ada, in: session)
@@ -367,6 +370,51 @@ struct PersonSaidTests {
         // And the foot reads on as it did.
         await pages.readOn(Self.ada, in: session)
         #expect(pages.said(of: Self.ada, in: session)?.posts?.map(\.statusID) == ["9", "8", "7", "6", "5"])
+    }
+
+    @Test("Stop on somebody's page calls off what it asks — who they are, and their newest posts — leaving what it held: the toast says the wait, then that the reload stopped, never a failure; what comes late lands nowhere; the press that was out asks nothing more; and asking again says nothing of the stop")
+    func stopCallsThePageOff() async throws {
+        let (session, server, _) = await session(Self.served())
+        let pages = ShellPersonPages()
+        #expect(!pages.stop(Self.ada, in: session), "nothing on the wire: nothing stopped")
+        await pages.openedOnPosts(Self.ada, in: session)
+        #expect(pages.ask(of: Self.ada, in: session) == PageAsking())
+
+        // Who they are, asked again and stopped: nothing of the tabs is asked for the press.
+        await server.hold(Self.lookup)
+        defer { Task { await server.release(Self.lookup) } }
+        let lookupGuard = watching("the ask of \(Self.lookup), held at its server") { await server.release(Self.lookup) }
+        defer { lookupGuard.cancel() }
+        let pull = Task { await pages.again(Self.ada, in: session) }
+        await server.arrival(of: Self.lookup, times: 2, by: pull)
+        let asking = pages.ask(of: Self.ada, in: session, language: .english)
+        #expect(asking == PageAsking(asking: "Asking m.example for @ada@m.example…", stoppable: true))
+        #expect(pages.stop(Self.ada, in: session))
+        #expect(pages.ask(of: Self.ada, in: session) == PageAsking(stopped: true), "nothing on the wire, and no failure")
+        await server.release(Self.lookup)
+        await pull.value
+        let said = try #require(pages.said(of: Self.ada, in: session))
+        #expect(said.person?.accountID == "42" && said.posts?.count == 3 && said.again == nil, "what it held stands")
+        #expect(await server.asked == [Self.lookup, Self.statuses, Self.lookup], "their posts were not asked for the press stopped")
+
+        // Their newest posts, stopped on their way.
+        await server.hold(Self.statuses)
+        defer { Task { await server.release(Self.statuses) } }
+        let statusesGuard = watching("the ask of \(Self.statuses), held at its server") { await server.release(Self.statuses) }
+        defer { statusesGuard.cancel() }
+        await server.answer(Self.statuses, Self.stretch([11, 10]))
+        let posts = Task { await pages.postsAsked(Self.ada, again: true, in: session) }
+        await server.arrival(of: Self.statuses, times: 2, by: posts)
+        #expect(pages.ask(of: Self.ada, in: session, language: .english).stoppable)
+        #expect(pages.stop(Self.ada, in: session))
+        await server.release(Self.statuses)
+        await posts.value
+        #expect(pages.said(of: Self.ada, in: session)?.posts?.map(\.statusID) == ["9", "8", "7"], "what came late landed nowhere")
+        #expect(pages.ask(of: Self.ada, in: session).stopped)
+
+        await pages.again(Self.ada, in: session)
+        #expect(pages.ask(of: Self.ada, in: session) == PageAsking(), "asked again, the stop is said no longer")
+        #expect(pages.said(of: Self.ada, in: session)?.posts?.first?.statusID == "11")
     }
 
     @Test("A page is what the source gave whoever asked: read with no sign-in it is not there for a reader who has since signed in, nor a signed-in reader's for somebody signed out or another reader — each is asked afresh, as themself, and an answer to the one before, come late, lands nowhere and asks nothing more")
@@ -907,8 +955,8 @@ struct PersonSaidTests {
         #expect(unheard.said(of: there, in: session)?.reading == .unheardOf)
 
         // It is the page's line, over every tab, and carries where its press opens.
-        let over = try #require(PersonLineSaid.made(of: PersonSaid(source: Self.host, reading: .said(moved)), named: "@ada@m.example"))
-        #expect(over.moved == line.moved && over.words == line.words && !over.again && !over.faint)
+        let over = try #require(PersonLineSaid.made(of: PersonSaid(source: Self.host, reading: .said(moved))))
+        #expect(over.moved == line.moved && over.words == line.words)
         #expect(PersonSaid.sentences(of: moved, source: Self.host).allSatisfy { $0.moved == nil }, "and is not said a second time on About")
     }
 
@@ -970,8 +1018,8 @@ struct PersonSaidTests {
         }
         var said = PersonSaid(source: Self.host, reading: .said(try person("")), posts: [])
         #expect(said.emptyLine(held: 5, language: en) == "m.example counts 10 posts of theirs and gave none of them here.")
-        said.foot = .failed
-        #expect(said.emptyLine(held: 0, language: en) == nil, "a stretch that did not come is the foot's to say")
+        said.foot = .more
+        #expect(said.emptyLine(held: 0, language: en) == nil, "more to read is the foot's to say")
         said = PersonSaid(source: Self.host, reading: .said(try person(#","suspended":true"#)), posts: [])
         #expect(said.emptyLine(held: 0, language: en) == nil, "its line has said so")
         #expect(PersonSaid(source: Self.host, reading: .asking).emptyLine(held: 0, language: en) == nil)
@@ -982,28 +1030,27 @@ struct PersonSaidTests {
         }
     }
 
-    @Test("Each state of the asking has its sentence, about the source by name: asking, not heard of — which is no failure — and failed; and each foot its own, with a press only where a press reads")
+    @Test("Not heard of — which is no failure — is the page's sentence, about the source by name; being asked is the toast's, in its own sentence with the name asked for made fit for it; failing is the toast's too; and each foot has its own words, with a press only where a press reads")
     func theStatesSaid() {
         let en = DummyLanguage.english
         func line(_ reading: PersonSaid.Reading) -> String? {
-            PersonSaid(source: "m.example", reading: reading).stateLine(of: "@ada@m.example", language: en)
+            PersonSaid(source: "m.example", reading: reading).stateLine(language: en)
         }
-        #expect(line(.asking) == "Asking m.example for @ada@m.example…")
+        #expect(line(.asking) == nil && line(.failed) == nil)
         #expect(line(.unheardOf) == "m.example has not heard of them. What this device holds of theirs is under Posts.")
-        #expect(line(.failed) == "Could not ask m.example for @ada@m.example. What this device holds of theirs is under Posts.")
         #expect(line(.said(Person(source: Self.source, accountID: "1", handle: "@a@m.example", name: "a"))) == nil)
         // The name asked for is a stranger's word, and is made fit for the sentence it is set in.
-        let turned = PersonSaid(source: "m.example", reading: .failed).stateLine(of: "@a\u{202E}da\nx@m.example", language: en)
-        #expect(turned == "Could not ask m.example for @ada x@m.example. What this device holds of theirs is under Posts.")
-        let long = PersonSaid(source: "m.example", reading: .asking).stateLine(of: String(repeating: "a", count: 5_000), language: en) ?? ""
-        #expect(long.count < 200)
-        #expect(PersonSaid(source: "m.example", reading: .failed).offersAgain && !PersonSaid(source: "m.example", reading: .unheardOf).offersAgain)
+        func asking(_ named: String) -> String? {
+            TimelineToast.waiting("person.asking", hosts: ["m.example"], extra: [LineText.oneLine(named)], language: en)
+        }
+        #expect(asking("@ada@m.example") == "Asking m.example for @ada@m.example…")
+        #expect(asking("@a\u{202E}da\nx@m.example") == "Asking m.example for @ada x@m.example…")
+        #expect((asking(String(repeating: "a", count: 5_000)) ?? "").count < 200)
 
         #expect(PersonSaid.Foot.more.words("m.example", language: en) == "Older posts can be read. Press here to read them.")
         #expect(PersonSaid.Foot.end.words("m.example", language: en) == "No older posts: m.example has sent all it gives.")
-        #expect(PersonSaid.Foot.failed.words("m.example", language: en).hasPrefix("Could not read older posts from m.example."))
-        let feet = [PersonSaid.Foot.more, .reading, .end, .failed, .stopped]
-        #expect(feet.map(\.presses) == [true, false, false, true, false] && Set(feet.map(\.symbol)).count == 5)
+        let feet = [PersonSaid.Foot.more, .end, .stopped]
+        #expect(feet.map(\.presses) == [true, false, false] && Set(feet.map(\.symbol)).count == 3)
     }
 
     @Test("Every sentence of the page is written in each language the app speaks, with the places it fills")
@@ -1084,7 +1131,7 @@ struct PersonSaidTests {
     func theFeetLaidOut() {
         for scheme in [ColorScheme.light, .dark] {
             for (layout, width) in [(ShellLayout.wide, CGFloat(720)), (.narrow, 390), (.narrow, 320)] {
-                for foot in [PersonSaid.Foot.more, .reading, .end, .failed, .stopped] {
+                for foot in [PersonSaid.Foot.more, .end, .stopped] {
                     #expect(height(PersonFootRow(foot: foot, source: Self.host, onPress: {}), width: width, layout: layout, scheme: scheme) > 0)
                 }
             }

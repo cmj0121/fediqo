@@ -72,7 +72,7 @@ struct DirectoryTests {
         let pages = ShellPersonPages().lists
         let before = try #require(pages.said(of: Self.directory, in: session))
         #expect(before == PeopleSaid(list: Self.directory, signedIn: true, sorting: DirectoryChoice()), "before anything answered")
-        #expect(before.stateLine(language: .english) == "Asking m.example for its directory…")
+        #expect(before.stateLine() == nil, "being asked is the page's toast to say")
 
         await pages.opened(Self.directory, in: session)
         #expect(await server.asked == [Self.first])
@@ -110,7 +110,7 @@ struct DirectoryTests {
         defer { after3Guard.cancel() }
         let press = Task { await pages.readOn(Self.directory, in: session) }
         await server.arrival(of: Self.after(3), by: press)
-        #expect(pages.said(of: Self.directory, in: session)?.foot == .reading)
+        #expect(pages.said(of: Self.directory, in: session)?.foot == nil, "the stretch on its way is the toast's to say")
         await pages.readOn(Self.directory, in: session)
         #expect(await server.asked == [Self.first, Self.after(3)], "one on the wire, and no second")
         await server.release(Self.after(3))
@@ -229,12 +229,12 @@ struct DirectoryTests {
         await pages.choose(localNew, for: Self.directory, in: session)
         #expect(await server.asked.last == Self.newest + "&local=true")
         let failed = try #require(pages.said(of: Self.directory, in: session))
-        #expect(failed.sorting == new && failed.people.map(\.accountID) == ["7", "8"] && failed.againFailed && !failed.asking)
-        #expect(failed.stateLine(language: .english) == "Could not ask m.example again. Who it gave before is still here.")
-        #expect(failed.offersAgain && failed.choosesSorting)
+        #expect(failed.sorting == new && failed.people.map(\.accountID) == ["7", "8"] && !failed.asking)
+        #expect(failed.stateLine() == nil && pages.ask(of: Self.directory, in: session).failed == [Self.host])
+        #expect(!failed.offersAgain && failed.choosesSorting)
 
         await pages.choose(PeopleSaid.choosing(.active, from: new), for: Self.directory, in: session)
-        #expect(ids(pages, session) == ["3", "2", "1"] && pages.said(of: Self.directory, in: session)?.againFailed == false)
+        #expect(ids(pages, session) == ["3", "2", "1"] && pages.ask(of: Self.directory, in: session).failed.isEmpty)
         await pages.readOn(Self.directory, in: session)
         #expect(await server.asked.last == Self.after(3))
         // A list of somebody's has no such choice, and choosing for one asks nobody.
@@ -356,8 +356,8 @@ struct DirectoryTests {
             let fresh = ShellPersonPages()
             await fresh.lists.opened(Self.directory, in: other)
             let failed = try #require(fresh.lists.said(of: Self.directory, in: other))
-            #expect(failed.reading == .failed && failed.offersAgain && fresh.more.hosts.has(.directory, at: Self.host) == .unsaid)
-            #expect(failed.stateLine(language: .english) == "Could not ask m.example for its directory.")
+            #expect(failed.reading == .failed && !failed.offersAgain && fresh.more.hosts.has(.directory, at: Self.host) == .unsaid)
+            #expect(failed.stateLine() == nil && fresh.lists.ask(of: Self.directory, in: other).failed == [Self.host])
             #expect(fresh.more.said(at: Self.host, in: other)?.directory == true)
             #expect(await failing.asked == [Self.first])
         }
@@ -514,16 +514,16 @@ struct DirectoryTests {
         var said = PeopleSaid(list: Self.directory, reading: .said, sorting: DirectoryChoice(localOnly: true))
         #expect(said.nothing(language: .english) == "m.example gave nobody who lives there from its directory.")
         said.reading = .failed
-        #expect(said.stateLine(language: .english) == "Could not ask m.example for its directory." && said.nothing() == nil)
+        #expect(said.stateLine() == nil && said.nothing() == nil, "a miss is the toast's to say")
         // Read as far as a directory is read: said as that, and never as the source having no more.
         let far = PeopleSaid(list: Self.directory, reading: .said, people: [], foot: .farthest, sorting: DirectoryChoice())
         #expect(far.footWords(.farthest, language: .english) == "Fediqo reads the first 0 people of a directory. m.example may list more.")
         #expect(!PeopleSaid.Foot.farthest.presses)
         said.reading = .absent
         #expect(said.stateLine(language: .taiwanese) == "m.example 沒有提供人的名錄。")
-        // A list of somebody's says what it said before.
+        // A list of somebody's says nothing over its rows while it is asked.
         let followers = PeopleList(.followers, of: Person(source: Self.source, accountID: "42", handle: "@ada@m.example", name: "Ada"))
-        #expect(PeopleSaid(list: followers).stateLine(language: .english) == "Asking m.example for this list…")
+        #expect(PeopleSaid(list: followers).stateLine() == nil)
         #expect(PeopleSaid.title(followers, language: .english) == "Who follows @ada@m.example")
     }
 
@@ -567,7 +567,7 @@ struct DirectoryTests {
         states.append(PeopleSaid(list: Self.directory, reading: .said, sorting: DirectoryChoice(localOnly: true)))
         states.append(PeopleSaid(list: Self.directory, reading: .failed, sorting: DirectoryChoice()))
         states.append(PeopleSaid(list: Self.directory, reading: .absent, sorting: DirectoryChoice()))
-        states.append(PeopleSaid(list: Self.directory, reading: .said, againFailed: true, people: people, asking: true, foot: .end, sorting: DirectoryChoice()))
+        states.append(PeopleSaid(list: Self.directory, reading: .said, people: people, asking: true, foot: .end, sorting: DirectoryChoice()))
         for (width, scheme) in [(CGFloat(720), ColorScheme.light), (390, .dark), (320, .light), (320, .dark)] {
             for said in states {
                 let pane = PeoplePane(said: said, selectedID: .constant(nil), onOpen: { _ in }, onBack: {})

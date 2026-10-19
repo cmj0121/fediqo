@@ -235,9 +235,6 @@ struct PersonActing: Equatable {
         act == .removeFollower ? ShellQuestion.about(act, named, at: source) : ShellQuestion.unfollow(named, at: source)
     }
 
-    /// Whether "Try again" stands beside the line: the source could not be asked.
-    var offersAgain: Bool { reading == .failed }
-
     // MARK: - Words
 
     /// The pills of how the reader stands to them, in the order they are drawn: they follow the
@@ -296,11 +293,11 @@ struct PersonActing: Equatable {
     /// The mark of somebody the reader features on their profile (#315).
     static let featuredSymbol = "person.crop.rectangle.stack"
 
-    /// Whether the head of their page has anything to draw where the marks stand: a mark, the
-    /// press that asks again where the source could not be asked, or the lock of a sign-in
-    /// that holds less than following needs. Nothing while it is being asked, and nothing
-    /// where the source answered with nothing about them.
-    var standsInHead: Bool { !marks().isEmpty || offersAgain || lock != nil }
+    /// Whether the head of their page has anything to draw where the marks stand: a mark, or
+    /// the lock of a sign-in that holds less than following needs. Nothing while it is being
+    /// asked, where it could not be — the page's toast says both (DESIGN-reload) — and where
+    /// the source answered with nothing about them.
+    var standsInHead: Bool { !marks().isEmpty || lock != nil }
 
     /// What the head says in full ink under the figures, for what no glyph may say: that
     /// they block the reader, and a press that did not arrive.
@@ -332,10 +329,6 @@ struct PersonActing: Equatable {
         return L10n.t("person.stands.neither", language: language)
     }
 
-    func askingWords(language: DummyLanguage? = nil) -> String? {
-        stillAsked ? String(format: L10n.t("person.stands.asking", language: language), source) : nil
-    }
-
     /// The sentence that they block the reader, in full ink — or nothing where they do not, or
     /// the source has not said.
     func blockedWords(language: DummyLanguage? = nil) -> String? {
@@ -345,11 +338,6 @@ struct PersonActing: Equatable {
     /// The line under the heading where the sign-in holds less than following needs.
     func lockWords(language: DummyLanguage? = nil) -> String? {
         lock.map { String(format: L10n.t($0.key, language: language), source) }
-    }
-
-    /// The line under the heading where the source could not be asked how the reader stands.
-    func failedWords(language: DummyLanguage? = nil) -> String? {
-        reading == .failed ? String(format: L10n.t("person.stands.failed", language: language), source) : nil
     }
 
     /// The sentence of a press that did not arrive, or nothing.

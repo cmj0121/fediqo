@@ -82,9 +82,17 @@ struct SuggestedTests {
         let before = try #require(pages.said(of: Self.suggested, in: session))
         #expect(before == PeopleSaid(list: Self.suggested, signedIn: true, dismissing: before.dismissing), "before anything answered")
         #expect(before.dismissing != nil, "Don't suggest stands on the people suggested, and on no other list")
-        #expect(before.stateLine(language: .english) == "Asking m.example for the people it suggests…")
+        #expect(before.stateLine() == nil, "being asked is the page's toast to say, and no line of the list")
 
-        await pages.opened(Self.suggested, in: session)
+        await server.hold(Self.first)
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
+        let opening = Task { await pages.opened(Self.suggested, in: session) }
+        await server.arrival(of: Self.first, by: opening)
+        let asking = pages.ask(of: Self.suggested, in: session, language: .english)
+        #expect(asking.asking == "Asking m.example for the people it suggests…" && asking.stoppable, "the toast says the wait, and Stop stops it")
+        await server.release(Self.first)
+        await opening.value
         #expect(await server.asked == [Self.first])
         #expect(await server.bearers == ["Bearer tok"])
         let acts = work.record.filter { $0.reached == Self.host }
@@ -135,7 +143,9 @@ struct SuggestedTests {
         defer { after80Guard.cancel() }
         let press = Task { await pages.readOn(Self.suggested, in: session) }
         await server.arrival(of: Self.after(80), by: press)
-        #expect(pages.said(of: Self.suggested, in: session)?.foot == .reading)
+        #expect(pages.said(of: Self.suggested, in: session)?.foot == nil, "a stretch on its way is the toast's to say")
+        let readingOn = pages.ask(of: Self.suggested, in: session, language: .english)
+        #expect(readingOn.asking == "Reading more people…" && !readingOn.stoppable, "a reading-on is said, and not stopped")
         await pages.readOn(Self.suggested, in: session)
         #expect(await server.asked == [Self.first, Self.after(80)], "one on the wire, and no second")
         await server.release(Self.after(80))
@@ -199,7 +209,7 @@ struct SuggestedTests {
         #expect(unsigned.reading == .failed)
         #expect(!unsigned.signedIn)
         #expect(unsigned.people.isEmpty)
-        #expect(unsigned.stateLine(language: .english) == "Could not ask m.example for the people it suggests.")
+        #expect(unsigned.stateLine() == nil && pages.ask(of: Self.suggested, in: session).failed == [Self.host], "the miss is the toast's")
 
         try signIn(session)
         #expect(all.more.said(at: Self.host, in: session)?.suggested == true)
@@ -308,9 +318,9 @@ struct SuggestedTests {
             await fresh.lists.opened(Self.suggested, in: other)
             let failed = try #require(fresh.lists.said(of: Self.suggested, in: other))
             #expect(failed.reading == .failed)
-            #expect(failed.offersAgain)
+            #expect(!failed.offersAgain, "asking again is `r`, the mark or a pull")
             #expect(fresh.more.hosts.has(.suggestions, at: Self.host) == .unsaid)
-            #expect(failed.stateLine(language: .english) == "Could not ask m.example for the people it suggests.")
+            #expect(failed.stateLine() == nil && fresh.lists.ask(of: Self.suggested, in: other).failed == [Self.host])
             #expect(fresh.more.said(at: Self.host, in: other)?.suggested == true && other.mastodon.ended.isEmpty)
             #expect(await failing.asked == [Self.first])
         }
@@ -586,7 +596,7 @@ struct SuggestedTests {
         states.append(PeopleSaid(list: Self.suggested, signedIn: true, reading: .said))
         states.append(PeopleSaid(list: Self.suggested, signedIn: true, reading: .failed))
         states.append(PeopleSaid(list: Self.suggested, signedIn: true, reading: .absent))
-        states.append(PeopleSaid(list: Self.suggested, signedIn: true, reading: .said, againFailed: true, people: people, asking: true, foot: .end))
+        states.append(PeopleSaid(list: Self.suggested, signedIn: true, reading: .said, people: people, asking: true, foot: .end))
         for (width, scheme) in [(CGFloat(720), ColorScheme.light), (390, .dark), (320, .light), (320, .dark)] {
             for said in states {
                 let pane = PeoplePane(said: said, selectedID: .constant(nil), onOpen: { _ in }, onBack: {})

@@ -744,11 +744,12 @@ public struct FediqoRootView: View {
         case .dismiss:
             // A running reload is the first thing Escape stops (#29); the next one leaves.
             // So is a thread's next page on its way (#177), before the thread itself closes.
-            if place.isStream, session.reload.stop() { return true }
-            if place.isStream, session.stopReadingFurther() { return true }
+            // **The page in front's, and nobody else's** (decision 17).
+            if place.isStream, stopInFront() { return true }
             // On Notices: the read on the wire, then that page's own lamp.
             if Self.noticesInFront(place: place, open: openLayers) {
-                if session.noticeList.stop() { return true }
+                // A reading-on goes on to its end, as the timeline's does (DESIGN-reload).
+                if session.noticeList.ask().stoppable, session.noticeList.stop() { return true }
                 if noticeSelectedID != nil {
                     noticeSelectedID = nil
                     return true
@@ -1637,7 +1638,7 @@ public struct FediqoRootView: View {
         if let person = walk.openedPerson, people.front(of: person, in: session) == .about {
             if let entry = people.followedEntry(of: person, in: session), entry.id == id { return followedPressed(entry) }
             if id == RequestsEntry.id, let entry = people.requestsEntry(of: person, in: session) { return requestsPressed(entry) }
-            if let press = people.featured(of: person, in: session)?.press(on: id), press != .again {
+            if let press = people.featured(of: person, in: session)?.press(on: id) {
                 return featuredPressed(press, from: id)
             }
             return people.pressAbout(id, of: person, in: session)
@@ -1753,6 +1754,19 @@ public struct FediqoRootView: View {
     /// `drawnLayers` of what is open now.
     private var drawnOpenLayers: Set<DummyLayer> {
         Self.drawnLayers(openLayers, standing: walk.standing, drawn: standingDrawn)
+    }
+
+    /// `Escape`'s stop on a stream place (decision 17): the ask of the page in front — somebody's
+    /// page, a list, the hashtags followed, a tab of Trends that lists what is rising — and
+    /// nothing under it; where the stream is in front, its reload, and a thread's next page on
+    /// its way. **The pane's own decision of what is in front** (`TimelinePane.askInFront`), so
+    /// `Escape` stops what the toast says and the mark stops. Whether anything was stopped.
+    private func stopInFront() -> Bool {
+        let rising = place == .trends ? trendsTab?.rising : nil
+        if let front = TimelinePane.askInFront(walk.beneath, rising: rising, of: people, in: session) {
+            return TimelinePane.stop(front, of: people, in: session)
+        }
+        return session.reload.stop() || session.stopReadingFurther()
     }
 
     /// `r`: the open thread, or else the selected timeline — and only on what the reader can see,
@@ -2120,7 +2134,7 @@ public struct FediqoRootView: View {
             else { return false }
             selectedItemID = nil
             return true
-        case .again, .takeOff:
+        case .takeOff:
             return false
         }
     }

@@ -77,7 +77,7 @@ struct PeopleTests {
         let (session, server, work) = await session([Self.first: Self.stretch([3, 2, 1], next: 19)])
         let pages = ShellPersonPages().lists
         #expect(pages.said(of: Self.followers, in: session) == PeopleSaid(list: Self.followers), "before anything answered")
-        #expect(pages.said(of: Self.followers, in: session)?.stateLine(language: .english) == "Asking m.example for this list…")
+        #expect(pages.said(of: Self.followers, in: session)?.stateLine() == nil, "being asked is the page's toast to say")
 
         await pages.opened(Self.followers, in: session)
         #expect(await server.asked == [Self.first] && ShellPeoplePages.stretchLength == 80)
@@ -123,28 +123,28 @@ struct PeopleTests {
         await pages.readOn(Self.followers, in: session)
         #expect(await server.asked.count == 3, "nothing is asked past the end")
 
-        // A stretch that does not come is said at the foot, changes nothing drawn, and a press asks again.
+        // A stretch that does not come is said in the toast, changes nothing drawn, and the foot asks again.
         let (other, flaky, _) = await self.session([Self.first: Self.stretch([3, 2], next: 19)])
         let again = ShellPersonPages().lists
         await again.opened(Self.followers, in: other)
         await again.readOn(Self.followers, in: other)
-        #expect(again.said(of: Self.followers, in: other)?.foot == .failed && ids(again, other) == ["3", "2"])
-        #expect(PeopleSaid.Foot.failed.presses)
+        #expect(again.said(of: Self.followers, in: other)?.foot == .more && ids(again, other) == ["3", "2"])
+        #expect(again.ask(of: Self.followers, in: other).failed == [Self.host])
         await flaky.answer(Self.after(19), Self.stretch([1]))
         await again.readOn(Self.followers, in: other)
         #expect(ids(again, other) == ["3", "2", "1"] && again.said(of: Self.followers, in: other)?.foot == .end)
         #expect(await flaky.asked == [Self.first, Self.after(19), Self.after(19)])
     }
 
-    @Test("Asked again, a list is read from the top and what was read before is replaced by what comes; one that fails before anything answered says so with a press, and one that fails after says so beside who it gave, who stand")
+    @Test("Asked again, a list is read from the top and what was read before is replaced by what comes; one that fails before anything answered or after says so in the page's toast, and who it gave stand")
     func againIsFromTheTop() async throws {
         let (session, server, _) = await session([:])
         let pages = ShellPersonPages().lists
         await pages.opened(Self.followers, in: session)
         var said = try #require(pages.said(of: Self.followers, in: session))
-        #expect(said.reading == .failed && said.offersAgain && said.foot == nil && said.nothing() == nil)
-        #expect(said.stateLine(language: .english) == "Could not ask m.example for this list.")
-        // Failed, it is not asked again by being opened: the press asks.
+        #expect(said.reading == .failed && !said.offersAgain && said.foot == nil && said.nothing() == nil)
+        #expect(said.stateLine() == nil && pages.ask(of: Self.followers, in: session).failed == [Self.host])
+        // Failed, it is not asked again by being opened: `r`, the mark or a pull asks.
         await pages.opened(Self.followers, in: session)
         #expect(await server.asked.count == 1)
 
@@ -157,13 +157,13 @@ struct PeopleTests {
         await server.answer(Self.first, nil)
         await pages.again(Self.followers, in: session)
         said = try #require(pages.said(of: Self.followers, in: session))
-        #expect(said.reading == .said && said.againFailed && said.offersAgain && said.people.count == 3 && said.foot == .end)
-        #expect(said.stateLine(language: .english) == "Could not ask m.example again. Who it gave before is still here.")
+        #expect(said.reading == .said && said.people.count == 3 && said.foot == .end && said.stateLine() == nil)
+        #expect(pages.ask(of: Self.followers, in: session).failed == [Self.host], "who it gave stand, and the toast says the miss")
 
         await server.answer(Self.first, Self.stretch([5, 3], next: 23))
         await pages.again(Self.followers, in: session)
         said = try #require(pages.said(of: Self.followers, in: session))
-        #expect(said.people.map(\.accountID) == ["5", "3"] && said.foot == .more && !said.againFailed && said.stateLine() == nil)
+        #expect(said.people.map(\.accountID) == ["5", "3"] && said.foot == .more && pages.ask(of: Self.followers, in: session).failed.isEmpty)
         // And reading on goes by the place the new top named.
         await server.answer(Self.after(23), Self.stretch([2]))
         await pages.readOn(Self.followers, in: session)
@@ -191,6 +191,44 @@ struct PeopleTests {
         let said = try #require(pages.said(of: Self.followers, in: session))
         #expect(said.people.count == 3 && !said.asking && said.foot == .end)
         #expect(await server.asked == [Self.first], "asked once, whoever came and went")
+    }
+
+    @Test("Stop on a list calls its ask from the top off: the toast says the wait and then that the reload stopped — never a failure — who stood still stand, what comes late lands nowhere, a reading-on is not stopped, and asking again says nothing of the stop")
+    func stopCallsTheListOff() async throws {
+        let (session, server, _) = await session([Self.first: Self.stretch([3, 2], next: 19), Self.after(19): Self.stretch([1])])
+        let pages = ShellPersonPages().lists
+        #expect(!pages.stop(Self.followers), "nothing on the wire: nothing stopped")
+        await pages.opened(Self.followers, in: session)
+        await server.hold(Self.first)
+        defer { Task { await server.release(Self.first) } }
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
+        await server.answer(Self.first, Self.stretch([9, 8]))
+        let pull = Task { await pages.again(Self.followers, in: session) }
+        await server.arrival(of: Self.first, times: 2, by: pull)
+        #expect(pages.ask(of: Self.followers, in: session, language: .english) == PageAsking(asking: "Asking m.example for this list…", stoppable: true))
+
+        #expect(pages.stop(Self.followers))
+        #expect(pages.ask(of: Self.followers, in: session) == PageAsking(stopped: true), "nothing on the wire, and no failure")
+        #expect(ids(pages, session) == ["3", "2"] && pages.said(of: Self.followers, in: session)?.asking == false, "who stood still stand")
+        await server.release(Self.first)
+        await pull.value
+        #expect(ids(pages, session) == ["3", "2"], "what came late landed nowhere")
+
+        // A reading-on is the toast's to say, and no Stop's.
+        await server.hold(Self.after(19))
+        let after19Guard = watching("the ask of \(Self.after(19)), held at its server") { await server.release(Self.after(19)) }
+        defer { after19Guard.cancel() }
+        let reading = Task { await pages.readOn(Self.followers, in: session) }
+        await server.arrival(of: Self.after(19), by: reading)
+        #expect(pages.ask(of: Self.followers, in: session, language: .english) == PageAsking(asking: "Reading more people…"), "the stop is said no longer")
+        #expect(!pages.stop(Self.followers))
+        await server.release(Self.after(19))
+        await reading.value
+        #expect(ids(pages, session) == ["3", "2", "1"])
+
+        await pages.again(Self.followers, in: session)
+        #expect(ids(pages, session) == ["9", "8"] && pages.ask(of: Self.followers, in: session) == PageAsking())
     }
 
     @Test("An ask that was stopped before it answered leaves a list that is asked again when it is opened, and never one that says Asking for the rest of the run")
@@ -238,7 +276,8 @@ struct PeopleTests {
         defer { after19Guard.cancel() }
         let reading = Task { await pages.readOn(Self.followers, in: session) }
         await server.arrival(of: Self.after(19), by: reading)
-        #expect(pages.said(of: Self.followers, in: session)?.foot == .reading)
+        #expect(pages.said(of: Self.followers, in: session)?.foot == nil, "the stretch on its way is the toast's to say")
+        #expect(pages.ask(of: Self.followers, in: session, language: .english) == PageAsking(asking: "Reading more people…"))
         await pages.readOn(Self.followers, in: session)
         #expect(await server.asked == [Self.first, Self.after(19)], "one stretch at a time")
 
@@ -253,7 +292,7 @@ struct PeopleTests {
         await server.releaseOne(Self.after(19))
         await reading.value
         #expect(ids(pages, session) == ["3", "2"], "what the stretch called off brings late does not land")
-        #expect(pages.said(of: Self.followers, in: session)?.foot == .reading, "nor take the foot off the stretch now out")
+        #expect(pages.said(of: Self.followers, in: session)?.foot == nil, "nor put the foot back under the stretch now out")
         // And the foot reads on as it did.
         await server.release(Self.after(19))
         await second.value
@@ -359,7 +398,7 @@ struct PeopleTests {
         await server.releaseOne(Self.after(19))
         await old.value
         let reading = try #require(pages.said(of: Self.followers, in: session))
-        #expect(reading.people.map(\.accountID) == ["3", "2"] && reading.foot == .reading, "the old stretch lands nowhere, and the new one is still out")
+        #expect(reading.people.map(\.accountID) == ["3", "2"] && reading.foot == nil, "the old stretch lands nowhere, and the new one is still out")
         await server.answer(Self.after(19), Self.stretch([1]))
         await server.release(Self.after(19))
         await new.value
@@ -710,7 +749,7 @@ struct PeopleTests {
         }
         // The reader's own hidden list, given empty, is not its being hidden.
         #expect(said(Self.ada(hides: true), signedIn: true, own: true).nothing(language: en) == "m.example gives this sign-in none of them.")
-        #expect(said(Self.ada(hides: true), foot: .more).nothing() == nil && said(Self.ada(hides: true), foot: .failed).nothing() == nil)
+        #expect(said(Self.ada(hides: true), foot: .more).nothing() == nil && said(Self.ada(hides: true), foot: .stopped).nothing() == nil)
         #expect(PeopleSaid(list: Self.followers).nothing() == nil && PeopleSaid(list: Self.followers, reading: .failed).nothing() == nil)
         var some = said(Self.ada(hides: true), foot: .end)
         some.people = [Self.ada()]
@@ -729,17 +768,15 @@ struct PeopleTests {
         #expect(said.footWords(.end, language: en) == "m.example gave 41. It counts 2,811: the rest it does not hold, or does not give.")
         said.foot = .more
         #expect(said.short == nil && said.footWords(.more, language: en) == "More people can be read. Press here to read them.")
-        #expect(said.footWords(.reading, language: en) == "Reading more people…")
-        #expect(said.footWords(.failed, language: en) == "Could not read more people from m.example. Press here to try again.")
 
         for counted in [41, 12, nil] as [Int?] {
             let whole = PeopleSaid(list: PeopleList(.followers, of: Self.ada(followers: counted)), reading: .said, people: given, foot: .end)
             #expect(whole.short == nil && whole.footWords(.end, language: en) == "No more people: m.example has sent all it gives.")
         }
-        let feet = [PeopleSaid.Foot.more, .reading, .end, .failed, .stopped]
-        #expect(feet.map(\.presses) == [true, false, false, true, false])
+        let feet = [PeopleSaid.Foot.more, .end, .stopped]
+        #expect(feet.map(\.presses) == [true, false, false])
         said.foot = .end
-        #expect(Set(feet.map(said.footSymbol)).count == 5 && said.footSymbol(.end) != PeopleSaid(list: Self.followers).footSymbol(.end))
+        #expect(Set(feet.map(said.footSymbol)).count == 3 && said.footSymbol(.end) != PeopleSaid(list: Self.followers).footSymbol(.end))
     }
 
     @Test("Every sentence of the page is written in each language the app speaks, with the places it fills, no figure through a bare number's place, and the two Chinese tables alike")
@@ -913,11 +950,11 @@ struct PeopleTests {
         let states = [
             PeopleSaid(list: Self.followers),
             PeopleSaid(list: Self.followers, reading: .failed),
-            PeopleSaid(list: Self.followers, signedIn: true, reading: .said, againFailed: true, people: given, asking: true, foot: .more),
+            PeopleSaid(list: Self.followers, signedIn: true, reading: .said, people: given, asking: true, foot: .more),
             PeopleSaid(list: Self.followers, reading: .said, people: given, foot: .end),
             PeopleSaid(list: Self.followers, reading: .said, people: given, foot: .stopped),
             PeopleSaid(list: PeopleList(.followers, of: Self.ada(hides: true)), reading: .said),
-            PeopleSaid(list: longList, reading: .said, people: given, foot: .reading),
+            PeopleSaid(list: longList, reading: .said, people: given, foot: .farthest),
         ]
         for (layout, width) in [(ShellLayout.wide, CGFloat(720)), (.narrow, 320)] {
             for said in states {

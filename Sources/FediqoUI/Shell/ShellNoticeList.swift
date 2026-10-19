@@ -204,6 +204,8 @@ final class ShellNoticeList {
     @ObservationIgnored private var asking: Set<String> = []
     /// Counts the reads started and stopped, so an answer to one that was stopped is dropped.
     @ObservationIgnored private var generation = 0
+    /// The last read was stopped (`stop`): said in the page's toast until the next one sets out.
+    private(set) var halted = false
     /// The lines each source has dismissed, by host and line, each with the moment its
     /// source's yes landed here in the run's order of reads (`ReadMoment`) — #291's guard, for
     /// notices: a stretch sent before that moment was asked for before the dismissal and may
@@ -275,12 +277,25 @@ final class ShellNoticeList {
         reaches.filter { $0.value.standing == .reading }.keys.sorted()
     }
 
-    /// The sources whose last ask did not come back, in host order, and why — named above the
-    /// list while the others' notices stand in it.
+    /// The sources whose last ask did not come back, in host order, and why — named in the
+    /// page's toast while the others' notices stand in the list.
     var failures: [(host: String, why: Absence)] {
         reaches.compactMap { host, reach -> (host: String, why: Absence)? in
             if case .failed(let why) = reach.standing { (host, why) } else { nil }
         }.sorted { $0.host < $1.host }
+    }
+
+    /// What the page says in its toast (DESIGN-reload): the sources asked for their newest, in
+    /// host order — a wait Stop stops — or an older stretch on its way, which is not, as the
+    /// timeline's read-on is not; the sources whose last ask did not come back; and whether
+    /// the last read was stopped.
+    func ask(language: DummyLanguage? = nil) -> PageAsking {
+        let reading = readingHosts
+        let newest = reading.filter { reaches[$0]?.readingOn != true }
+        let asking = newest.isEmpty
+            ? reading.isEmpty ? nil : L10n.t("notices.foot.reading", language: language)
+            : TimelineToast.waiting("notices.reading", hosts: newest, language: language)
+        return PageAsking(asking: asking, stoppable: !newest.isEmpty, failed: failures.map(\.host), stopped: halted)
     }
 
     func standing(host: String) -> Standing {
@@ -364,6 +379,8 @@ final class ShellNoticeList {
             return
         }
         stop()
+        // A reading-on ended for this read is no stop of the reader's.
+        halted = false
         settle(in: session)
         let asks = Self.asked(in: session).map {
             Ask(source: $0, before: nil, gathered: reaches[$0.host.lowercased()]?.gathered)
@@ -416,9 +433,9 @@ final class ShellNoticeList {
     }
 
     /// A source named as failed, asked again for what it did not hand over: the older stretch
-    /// where reading on failed, from where it stood, and its newest where that did. The press
-    /// beside its name, and nothing else. Nothing while another read is on the wire, and
-    /// nothing for a source whose sign-in may no longer read notices.
+    /// where reading on failed, from where it stood, and its newest where that did — that
+    /// source by name, and nothing else. Nothing while another read is on the wire, and nothing
+    /// for a source whose sign-in may no longer read notices.
     func retry(host raw: String, in session: ShellSession) async {
         let host = raw.lowercased()
         guard work == nil, let reach = reaches[host], case .failed = reach.standing,
@@ -441,6 +458,7 @@ final class ShellNoticeList {
         asking = []
         generation += 1
         self.work = nil
+        halted = true
         rebuild()
         return true
     }
@@ -710,6 +728,7 @@ final class ShellNoticeList {
         }
         guard !doors.isEmpty else { return }
         generation += 1
+        halted = false
         let mine = generation
         asking = Set(sent.keys)
         let task = Task { @MainActor [sent, was, doors] in

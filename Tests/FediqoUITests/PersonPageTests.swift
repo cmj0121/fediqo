@@ -270,34 +270,29 @@ struct PersonPageTests {
         // A way the reader does not stand has no glyph: there is no glyph for "not".
         #expect(PersonActing.marks(of: PersonStanding(accountID: "42"), language: en).isEmpty)
         let asking = PersonActing(source: Self.host, named: "@ada", reading: .asking, changes: true)
-        #expect(asking.marks().isEmpty && asking.askingWords(language: en) == "Asking m.example how you stand to them…")
+        #expect(asking.marks().isEmpty && !asking.standsInHead, "being asked is the toast's to say")
         let neither = PersonActing(source: Self.host, named: "@ada", reading: .said(PersonStanding(accountID: "42")), changes: true)
         #expect(neither.neitherWords(language: en) == "Neither of you follows the other." && asking.neitherWords() == nil)
         #expect(PersonPage.reloadName("m.example", language: en) == "Ask m.example again")
     }
 
-    @Test("The page's line is one at a time, the first that applies: asking, could not ask with the press that asks again, not heard of, asked again and failed, suspended, moved with where its press opens — and nothing once the source has said who an ordinary account is")
+    @Test("The page's line is one at a time, the first that applies: not heard of, not heard of on asking again, suspended, moved with where its press opens — and nothing while it is asked, where an ask came to nothing, or once the source has said who an ordinary account is: those are the toast's")
     func thePagesLine() throws {
         let en = DummyLanguage.english
-        func line(_ said: PersonSaid) -> PersonLineSaid? { PersonLineSaid.made(of: said, named: "@ada@m.example", language: en) }
-        let asking = try #require(line(PersonSaid(source: Self.host, reading: .asking)))
-        #expect(asking.faint && !asking.again && asking.words == "Asking m.example for @ada@m.example…")
-        let failed = try #require(line(PersonSaid(source: Self.host, reading: .failed)))
-        #expect(!failed.faint && failed.again && failed.words == "Could not ask m.example for @ada@m.example. What this device holds of theirs is under Posts.")
+        func line(_ said: PersonSaid) -> PersonLineSaid? { PersonLineSaid.made(of: said, language: en) }
+        #expect(line(PersonSaid(source: Self.host, reading: .asking)) == nil, "being asked is the toast's to say")
+        #expect(line(PersonSaid(source: Self.host, reading: .failed)) == nil, "and a miss")
         let unheard = try #require(line(PersonSaid(source: Self.host, reading: .unheardOf)))
-        #expect(!unheard.again && unheard.words == "m.example has not heard of them. What this device holds of theirs is under Posts.")
+        #expect(unheard.words == "m.example has not heard of them. What this device holds of theirs is under Posts.")
         #expect(line(PersonSaid(source: Self.host, reading: .said(try person()))) == nil)
 
         let gone = try person(#","suspended":true,"moved":{"id":"7","acct":"ada@new.example"}"#)
         let suspended = try #require(line(PersonSaid(source: Self.host, reading: .said(gone))))
         #expect(suspended.words == "m.example says this account is suspended." && suspended.symbol == PersonSaid.gone && suspended.moved == nil)
-        // Asked again and failed comes before what has become of the account.
-        let troubled = try #require(line(PersonSaid(source: Self.host, reading: .said(gone), again: .failed)))
-        #expect(troubled.again && troubled.words == "Could not ask m.example again. What it said before is still here.")
+        // Asked again and failed is the toast's: what has become of the account stands.
+        #expect(line(PersonSaid(source: Self.host, reading: .said(gone), again: .failed)) == suspended)
         let moved = try #require(line(PersonSaid(source: Self.host, reading: .said(try person(#","moved":{"id":"7","acct":"ada@new.example"}"#)))))
         #expect(moved.moved?.handle == "@ada@new.example" && moved.words == "They moved to @ada@new.example.")
-        // The ask being out is said to the press: it is drawn, and takes none.
-        #expect(line(PersonSaid(source: Self.host, reading: .failed, asking: true))?.busy == true)
     }
 
     // MARK: - About
@@ -339,9 +334,9 @@ struct PersonPageTests {
         func acting(_ reading: PersonActing.Reading?, lock: PartWords.Place? = nil) -> PersonActing {
             PersonActing(source: Self.host, named: "@ada@m.example", reading: reading, lock: lock, changes: lock == nil)
         }
-        #expect(!about(plain).standsDrawn && about(plain, standing: acting(.asking)).standsDrawn)
+        #expect(!about(plain).standsDrawn && !about(plain, standing: acting(.asking)).standsDrawn, "being asked is the toast's")
         #expect(about(plain, standing: acting(.said(PersonStanding(accountID: "42")))).standsDrawn, "neither is said in words")
-        #expect(!about(plain, standing: acting(.unsaid)).standsDrawn && about(plain, standing: acting(.failed)).standsDrawn)
+        #expect(!about(plain, standing: acting(.unsaid)).standsDrawn && !about(plain, standing: acting(.failed)).standsDrawn, "and a miss")
         let locked = about(plain, standing: acting(nil, lock: PartWords.Place(kind: .unasked, key: "part.follows.unasked")))
         #expect(locked.standsDrawn && locked.standing?.lockWords(language: en)?.isEmpty == false)
         #expect((locked.press(on: "about.stands") == .askFollows) == (locked.standing?.lock?.asks == true))
@@ -407,13 +402,15 @@ struct PersonPageTests {
         let fronted = Task { await bring(.posts, in: pages, session) }
         await server.arrival(of: Self.statuses, by: fronted)
         let out = try #require(pages.said(of: Self.ada, in: session))
-        #expect(out.askingPosts && out.posts == nil && out.foot == .reading)
+        #expect(out.askingPosts && out.posts == nil && out.foot == nil, "the stretch on its way is the toast's to say")
+        #expect(pages.ask(of: Self.ada, in: session, language: .english) == PageAsking(asking: "Asking m.example for @ada@m.example…", stoppable: true))
         #expect(pages.walked(of: Self.ada, in: session) == held, "what is held stays drawn, and is what the keys walk")
         await server.release(Self.statuses)
         await fronted.value
 
         let failed = try #require(pages.said(of: Self.ada, in: session))
-        #expect(!failed.askingPosts && failed.posts == nil && failed.foot == .failed && pages.walked(of: Self.ada, in: session) == held)
+        #expect(!failed.askingPosts && failed.posts == nil && failed.foot == nil && pages.walked(of: Self.ada, in: session) == held)
+        #expect(pages.ask(of: Self.ada, in: session).failed == [Self.host], "the miss is the toast's")
         #expect(PostRowsSaid.posts(of: failed, held: held, standing: nil).items == held)
         await bring(.about, in: pages, session)
         await bring(.posts, in: pages, session)
@@ -424,7 +421,7 @@ struct PersonPageTests {
         #expect(pages.said(of: Self.ada, in: session)?.posts?.map(\.statusID) == ["9", "8"])
     }
 
-    @Test("What they pinned is drawn in the source's own order, never sorted; none pinned is said as what the source gave; a source that passes the word over has no such thing — said the same, written down for the run, and not asked again, by the tab or by asking again; and one that fails says so with a press that asks again")
+    @Test("What they pinned is drawn in the source's own order, never sorted; none pinned is said as what the source gave; a source that passes the word over has no such thing — said the same, written down for the run, and not asked again, by the tab or by asking again; and one that fails says so in the page's toast")
     func whatTheyPinned() async throws {
         let en = DummyLanguage.english
         let (session, _) = await session()
@@ -432,16 +429,16 @@ struct PersonPageTests {
         #expect(pages.pinned(of: Self.ada, in: session) == nil, "nothing until the source has said who they are")
         await pages.opened(Self.ada, in: session)
         let before = try #require(pages.pinned(of: Self.ada, in: session))
-        #expect(!before.answered && before.stateLine(language: en) == "Asking m.example for what they pinned…" && before.nothing() == nil)
+        #expect(!before.answered && before.nothing() == nil)
         await bring(.pinned, in: pages, session)
         let said = try #require(pages.pinned(of: Self.ada, in: session))
-        #expect(said.answered && said.posts.map(\.statusID) == ["3", "9", "5"] && said.foot == .end && said.stateLine() == nil)
+        #expect(said.answered && said.posts.map(\.statusID) == ["3", "9", "5"] && said.foot == .end)
         #expect(said.footWords(.end, language: en) == "No more pinned posts: m.example has sent all it gives.")
         #expect(said.footWords(.more, language: en) == "More pinned posts can be read. Press here to read them.")
         #expect(pages.walkedIDs(of: Self.ada, in: session) == said.posts.map(\.id) && pages.walked(of: Self.ada, in: session) == said.posts)
         #expect(pages.isOnlyOnPage(said.posts[0].id, of: Self.ada, in: session), "a pinned post is held when it is opened, as any post of the page")
         let rows = PostRowsSaid.pinned(said, language: en)
-        #expect(rows.items == said.posts && rows.line == nil && rows.quiet == nil && rows.foot?.presses == false)
+        #expect(rows.items == said.posts && rows.quiet == nil && rows.foot?.presses == false)
 
         // None pinned.
         let (empty, _) = await self.session(Self.served([Self.pinned: Self.posts([])]))
@@ -466,20 +463,44 @@ struct PersonPageTests {
         await absent.again(Self.ada, in: deaf)
         #expect(await asked(other) == [Self.lookup, Self.pinned, Self.lookup], "that host is not asked for it again this run")
 
-        // A failure, and the press that asks again.
+        // A failure, said in the page's toast.
         let (broken, flaky) = await self.session(Self.served([Self.pinned: PageServer.Answer(body: "<html>", status: 500)]))
         let failing = ShellPersonPages()
         await failing.opened(Self.ada, in: broken)
         await bring(.pinned, in: failing, broken)
         let failed = try #require(failing.pinned(of: Self.ada, in: broken))
-        #expect(failed.failed && failed.stateLine(language: en) == "Could not ask m.example for what they pinned.")
-        #expect(PostRowsSaid.pinned(failed, language: en).line == PostRowsSaid.Line(words: "Could not ask m.example for what they pinned.", failed: true, again: true))
+        #expect(!failed.answered && PostRowsSaid.pinned(failed, language: en).items.isEmpty)
+        #expect(failing.ask(of: Self.ada, in: broken).failed == [Self.host])
         await bring(.about, in: failing, broken)
         await bring(.pinned, in: failing, broken)
         #expect(await asked(flaky) == [Self.lookup, Self.pinned], "not asked again by looking")
         await flaky.answer(Self.pinned, Self.posts([5]))
         await failing.tabs.asked(Self.ada, beside: failing.said(of: Self.ada, in: broken), again: true, in: broken)
         #expect(failing.pinned(of: Self.ada, in: broken)?.posts.map(\.statusID) == ["5"])
+    }
+
+    @Test("Stop on the Pinned tab stops what they pinned and says the tab stopped, and no other tab: Posts brought in front says nothing of it, and Pinned brought back asks again, lands and says nothing of it either")
+    func stopOnATabIsThatTabs() async throws {
+        let (session, server) = await session()
+        let pages = ShellPersonPages()
+        await pages.opened(Self.ada, in: session)
+        await server.hold(Self.pinned)
+        defer { Task { await server.release(Self.pinned) } }
+        let pinnedGuard = watching("the ask of \(Self.pinned), held at its server") { await server.release(Self.pinned) }
+        defer { pinnedGuard.cancel() }
+        let pinning = Task { await bring(.pinned, in: pages, session) }
+        await server.arrival(of: Self.pinned, by: pinning)
+        #expect(pages.ask(of: Self.ada, in: session, language: .english) == PageAsking(asking: "Asking m.example for what they pinned…", stoppable: true))
+        #expect(pages.stop(Self.ada, in: session))
+        #expect(pages.ask(of: Self.ada, in: session) == PageAsking(stopped: true), "the tab stopped, and no failure")
+
+        await bring(.posts, in: pages, session)
+        #expect(pages.ask(of: Self.ada, in: session) == PageAsking(), "Posts says nothing of Pinned's stop")
+        await server.release(Self.pinned)
+        await pinning.value
+        await bring(.pinned, in: pages, session)
+        #expect(pages.pinned(of: Self.ada, in: session)?.answered == true, "brought back, it asked again and landed")
+        #expect(pages.ask(of: Self.ada, in: session) == PageAsking(), "and says nothing of the stop")
     }
 
     @Test("Asking again asks who they are and the tab in front from its top; every other tab forgets what it held and asks when it is next in front; and a press while an ask is out asks nothing")
@@ -605,7 +626,7 @@ struct PersonPageTests {
         defer { moreGuard.cancel() }
         let reading = Task { await pages.pinnedReadOn(Self.ada, in: session) }
         await server.arrival(of: more, by: reading)
-        #expect(pages.pinned(of: Self.ada, in: session)?.foot == .reading)
+        #expect(pages.pinned(of: Self.ada, in: session)?.foot == nil, "the stretch on its way is the toast's to say")
         try signIn(session, as: "third")
         await pages.opened(Self.ada, in: session)
         await server.release(more)

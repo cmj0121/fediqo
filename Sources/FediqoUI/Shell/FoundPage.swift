@@ -20,7 +20,7 @@ struct FoundPage: View {
     var onOpenPerson: (Person) -> Void = { _ in }
     /// A row of the hashtags opened: that hashtag's page, answered by the root.
     var onOpenRow: (SearchFoundRow) -> Void = { _ in }
-    /// The people's "Try again": their list asked from the top.
+    /// The people's "Ask again", beside a list their source says it has not.
     var onAskAgain: () -> Void = {}
     /// The people's foot: the next stretch.
     var onReadOn: () -> Void = {}
@@ -36,14 +36,14 @@ struct FoundPage: View {
         said.which == .people && canReload ? PersonPage.reloadName(said.at.source, language: language) : nil
     }
 
-    /// What the frame presses on this page. **No Stop**: the page's asks are its source's and
-    /// never the timeline's reload, so a Stop in its bar could only stop a reload running out of
-    /// sight under it.
+    /// What the frame presses on this page. **Stop is the page's own** (decision 10): handed
+    /// while the people are asked of its source, it stops that ask and nothing else — never a
+    /// reload of the stream running out of sight under the page.
     static func acts(
         onBack: @escaping () -> Void, onTab: @escaping (FoundWhich) -> Void, onReload: @escaping () -> Void,
-        onPull: @escaping () async -> Void
+        onPull: @escaping () async -> Void, onStop: (() -> Void)? = nil
     ) -> OpenedPageActs<FoundWhich> {
-        OpenedPageActs(onBack: onBack, onTab: onTab, onReload: onReload, onPull: onPull, onStop: nil)
+        OpenedPageActs(onBack: onBack, onTab: onTab, onReload: onReload, onPull: onPull, onStop: onStop)
     }
 
     var body: some View {

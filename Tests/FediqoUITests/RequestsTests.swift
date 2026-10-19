@@ -109,7 +109,8 @@ struct RequestsTests {
 
         try await signIn(session)
         let before = try #require(lists.said(of: Self.requests, in: session))
-        #expect(before.reading == .asking && before.stateLine(language: en) == "Asking m.example who asks to follow you…")
+        #expect(before.reading == .asking && before.stateLine() == nil)
+        #expect(TimelineToast.waiting(PeopleSaid.words(Self.requests.which) + ".asking", hosts: ["m.example"], language: en) == "Asking m.example who asks to follow you…")
         #expect(PeopleSaid.title(Self.requests, language: en) == "Who asks to follow you at m.example")
         #expect(PeopleSaid.title(Self.requests, language: .taiwanese) == "在 m.example 請求跟隨你的人")
         await lists.opened(Self.requests, in: session)

@@ -2,31 +2,21 @@ import AVKit
 import FediqoCore
 import SwiftUI
 
-/// The posts a tab of somebody's page lists, as it is handed them: the rows, what is said
-/// over them, what stands where they would, and what stands under them.
+/// The posts a tab of somebody's page lists, as it is handed them: the rows, what stands where
+/// they would, and what stands under them.
 ///
 /// **A value for both tabs that list posts** — their posts, and the ones they pinned — so one
 /// list draws either, and neither tab's words are worked out where they are drawn.
 struct PostRowsSaid: Equatable {
-    /// Where the asking stands, over the rows.
-    struct Line: Equatable {
-        let words: String
-        /// Whether it says an ask came to nothing, and so is in full ink.
-        var failed = false
-        /// Whether the press that asks again stands beside it.
-        var again = false
-    }
-
     /// What stands under the rows.
     struct Foot: Equatable {
         let symbol: String
         let words: String
-        /// Whether it is a press: it reads on, or asks again for a stretch that did not come.
+        /// Whether it is a press: it reads on.
         let presses: Bool
     }
 
     var items: [DummyItem] = []
-    var line: Line?
     /// What stands where rows would and none are drawn.
     var quiet: String?
     var foot: Foot?
@@ -54,7 +44,6 @@ struct PostRowsSaid: Equatable {
     static func pinned(_ said: PersonPinnedSaid, language: DummyLanguage? = nil) -> PostRowsSaid {
         PostRowsSaid(
             items: said.posts,
-            line: said.stateLine(language: language).map { Line(words: $0, failed: said.failed, again: said.failed) },
             quiet: said.nothing(language: language),
             foot: said.foot.map { Foot(symbol: $0.symbol, words: said.footWords($0, language: language), presses: $0.presses) }
         )
@@ -94,8 +83,8 @@ extension PersonSaid {
     }
 }
 
-/// The posts of a tab of somebody's page, drawn: a list of post rows, with what is said over
-/// them, what stands where they would, and the foot (#99, #310).
+/// The posts of a tab of somebody's page, drawn: a list of post rows, with what stands where
+/// they would, and the foot (#99, #310).
 ///
 /// **The list alone.** The bar, the head and the tabs are the page's (`PersonPage`); this is
 /// what stands under them on the Posts tab and on the Pinned one, and the whole of what a
@@ -131,8 +120,6 @@ struct PersonPane<Lead: View>: View {
     /// walk's own rule (#122) — the same closure the stream's rows are given.
     var onOpenThread: (String) -> Void
     var jumpToTop: Int
-    /// "Try again", beside a line that says the list could not be asked for.
-    var onAskAgain: () -> Void = {}
     /// The foot's press: the stretch after what is drawn.
     var onReadOn: () -> Void = {}
     /// What stands over the rows and scrolls away with them: the page's head, at a text size
@@ -152,10 +139,6 @@ struct PersonPane<Lead: View>: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     Color.clear.frame(height: 0).id(Self.top).accessibilityHidden(true)
                     lead
-                    if let line = said.line {
-                        stateLine(line)
-                        ShellRule()
-                    }
                     ForEach(Array(said.items.enumerated()), id: \.element.id) { index, item in
                         row(item)
                             .id(item.id)
@@ -183,18 +166,6 @@ struct PersonPane<Lead: View>: View {
                 withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(Self.top, anchor: .top) }
             }
         }
-    }
-
-    /// Where the asking stands, and beside a failure the press that asks again.
-    private func stateLine(_ line: PostRowsSaid.Line) -> some View {
-        WordsThenPress(
-            words: Text(line.words)
-                .shellFont(.meta)
-                .foregroundStyle(line.failed ? ShellChrome.ink(colorScheme) : ShellChrome.inkFaint(colorScheme)),
-            press: Group {
-                if line.again { ShellLinkButton(L10n.t("person.retry"), action: onAskAgain).fixedSize() }
-            }
-        )
     }
 
     private func quiet(_ sentence: String) -> some View {

@@ -84,14 +84,13 @@ struct PeoplePageTests {
         }
     }
 
-    @Test("The press beside a failure is called by its words, as Voice Control hears them, and tells a listener after them whom it asks")
-    func thePressBesideAFailure() {
-        let failed = PeopleRows<EmptyView>.again(PeopleSaid(list: Self.found, reading: .failed), language: .english)
-        #expect(failed.words == "Try again" && failed.hint == "Ask m.example again")
+    @Test("The press beside a list its source says it has not is called by its words, as Voice Control hears them, and tells a listener after them whom it asks — and a failure has none: it is the toast's")
+    func thePressBesideAnAbsentList() {
         let absent = PeopleRows<EmptyView>.again(PeopleSaid(list: Self.directory, reading: .absent), language: .english)
         #expect(absent.words == "Ask again" && absent.hint == "Ask m.example again")
-        let tw = PeopleRows<EmptyView>.again(PeopleSaid(list: Self.found, reading: .failed), language: .taiwanese)
-        #expect(tw.words == L10n.t("person.retry", language: .taiwanese) && tw.hint == "再問 m.example 一次")
+        let tw = PeopleRows<EmptyView>.again(PeopleSaid(list: Self.directory, reading: .absent), language: .taiwanese)
+        #expect(tw.words == L10n.t("source.more.again", language: .taiwanese) && tw.hint == "再問 m.example 一次")
+        #expect(!PeopleSaid(list: Self.found, reading: .failed).offersAgain && PeopleSaid(list: Self.found, reading: .failed).stateLine() == nil)
     }
 
     @Test("Who asks to follow the reader is counted as the sign-in's own check last said, while that holds: it stands while nobody is answered here, and is gone — not counted down — once one is, read from the top again or not")

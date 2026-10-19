@@ -278,7 +278,7 @@ struct FoundPageTests {
         #expect(TimelineSwipe.tabStep(from: 0, count: 1, step: -1, leaves: true) == .leave, "one tab: the swipe leaves")
     }
 
-    @Test("The bar's mark asks the source again on People where `r` would, named by the source to a pointer and a listener, and is absent — not dim — on Hashtags and where `r` would not; no Stop; the page's words are written in every language")
+    @Test("The bar's mark asks the source again on People where `r` would, named by the source to a pointer and a listener, and is absent — not dim — on Hashtags and where `r` would not; Stop only where the page hands one; the page's words are written in every language")
     func theBarsMarkAndTheWords() {
         let at = FoundAt(source: Self.one, words: "cats", gave: [.people, .tags])
         let onPeople = FoundSaid(at: at, tabs: [.people, .tags], which: .people, people: PeopleSaid(list: at.people))
@@ -288,6 +288,8 @@ struct FoundPageTests {
         #expect(FoundPage.reloadName(of: onTags, canReload: true) == nil)
         let acts = FoundPage.acts(onBack: {}, onTab: { _ in }, onReload: {}, onPull: {})
         #expect(acts.onStop == nil && ReloadMark.shown(canReload: true, stoppable: acts.onStop != nil) == .reload)
+        let stops = FoundPage.acts(onBack: {}, onTab: { _ in }, onReload: {}, onPull: {}, onStop: {})
+        #expect(ReloadMark.shown(canReload: true, stoppable: stops.onStop != nil) == .stop, "the people's ask, stopped from the bar")
 
         #expect(FoundAt.title(Self.one, language: .english) == "What m.example found" && FoundAt.title(Self.one, language: .taiwanese) == "m.example 找到的")
         #expect(at.headLine(language: .english) == "Its answer to “cats”.")

@@ -216,8 +216,10 @@ struct ConversationPageTests {
         let pane = try String(contentsOf: ui.appending(path: "Shell/TimelinePane.swift"), encoding: .utf8)
         #expect(pane.components(separatedBy: "onStop: session.reload.stoppable ? { session.reload.stop() } : nil,").count == 2)
         #expect(ShellReload.stoppable([.thread]) == [.thread], "a conversation's read is one the reader may stop")
+        // Somebody's page has a Stop of its own, handed by the pane, and never the stream's.
         let person = try String(contentsOf: ui.appending(path: "Shell/PersonPage.swift"), encoding: .utf8)
-        #expect(!person.contains("onStop"))
+        #expect(person.contains("onStop: acts.onStop") && !person.contains("session.reload"))
+        #expect(pane.contains("onStop: onStop(.person(person)),"))
     }
 
     // MARK: - Where it stands

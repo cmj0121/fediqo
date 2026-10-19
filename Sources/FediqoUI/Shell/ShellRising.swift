@@ -8,12 +8,13 @@ import Observation
 // **Asked when a tab comes in front, and when the person presses.** The two are tabs of Trends
 // (F10, decision 2); bringing Hashtags in front asks each source that has them for one stretch, and
 // Links likewise: one ask a source, and none when the tab comes in front again this run. **A
-// tab never in front has asked nothing.** `r` asks every source again,
-// and a failure's "Try again" asks that source; a press while a source is being asked asks it
-// nothing. Nothing reads on, nothing is asked while neither tab is in front, and nothing by itself.
+// tab never in front has asked nothing.** `r`, the mark and a pull ask every source again; a
+// press while a source is being asked asks it nothing, and Stop calls off every source on the
+// wire. Nothing reads on, nothing is asked while neither tab is in front, and nothing by itself.
 //
 // **Each source for itself.** The answers are never merged: a source's rows stand under its own
-// band, in its own order, and a source that fails says so under its band while the others land.
+// band, in its own order, and a source that fails is named in the tab's toast while the others
+// land.
 //
 // **With no sign-in, of that source alone.** Anyone is given what is rising, so no token rides
 // on these asks: they go out on the plain client, held to the small body's ceiling and to the
@@ -118,6 +119,8 @@ final class ShellRising {
     }
 
     private var pages: [String: Page] = [:]
+    /// The pages whose last ask was stopped (`stop`), until they are asked again.
+    private var halted: Set<RisingWhich> = []
     /// The ask on the wire for each source's band.
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private let errands: PageErrands
@@ -199,11 +202,44 @@ final class ShellRising {
     }
 
     /// Whether the page `which` has anybody to ask again — what `r` and its mark go by: a
-    /// source that says who people are, one left out for the run among them, **and nothing of
-    /// the page on the wire**: a reload pressed while its asks are out is refused.
+    /// source that says who people are, one left out for the run among them. **Still true while
+    /// its asks are out**, as every page's is (`TimelineWays.canReload`): the mark keeps its
+    /// place and is Stop meanwhile, and a press then asks no source already being asked.
     func canAskAgain(_ which: RisingWhich, in session: ShellSession) -> Bool {
-        let any = session.sources.contains { ShellPersonPages.source(at: $0.host, in: session) != nil }
-        return any && !pages.contains { $0.key.hasPrefix(which.rawValue + "\u{1e}") && $0.value.asking }
+        session.sources.contains { ShellPersonPages.source(at: $0.host, in: session) != nil }
+    }
+
+    /// What the tab `which` says in its toast (DESIGN-reload): the sources on the wire, in host
+    /// order; the ones whose last ask failed; and whether the last was stopped. **Every ask of
+    /// it was pressed for** — the tab coming in front, `r`, the mark, a pull — so a wait is
+    /// one Stop stops.
+    func ask(of which: RisingWhich, in session: ShellSession, language: DummyLanguage? = nil) -> PageAsking {
+        let standing = sources(of: which, in: session).compactMap { self.standing(which, at: $0.host, in: session) }
+        let asking = standing.filter(\.asking).map(\.host).sorted()
+        return PageAsking(
+            asking: TimelineToast.waiting("rising.asking", hosts: asking, language: language),
+            stoppable: !asking.isEmpty,
+            failed: standing.filter { $0.reading == .failed && !$0.asking }.map(\.host),
+            stopped: halted.contains(which)
+        )
+    }
+
+    /// The tab's Stop, and `Escape` on it: every source of `which` on the wire called off, its
+    /// band as it was — or stopped, where it had not answered — and whatever is on the wire
+    /// lands nowhere. A stop is never a failure. Whether anything was stopped.
+    @discardableResult
+    func stop(_ which: RisingWhich) -> Bool {
+        let running = pages.filter { $0.key.hasPrefix(which.rawValue + "\u{1e}") && $0.value.asking }.keys
+        for key in running {
+            asks[key]?.cancel()
+            asks[key] = nil
+            pages[key]?.awaits = errands.next()
+            pages[key]?.asking = false
+            if pages[key]?.reading == .asking { pages[key]?.reading = .stopped }
+        }
+        guard !running.isEmpty else { return false }
+        halted.insert(which)
+        return true
     }
 
     /// Where the lamp stands once a row was pressed to open: on the row where it opened, and
@@ -234,8 +270,8 @@ final class ShellRising {
         for task in waited { await task.value }
     }
 
-    /// `r`, and a band's "Try again": the sources of the page asked again — every one, or the
-    /// one named. What a band holds stays drawn until its answer lands. **A press while a
+    /// `r`, the mark and a pull: the sources of the page asked again — every one, or the one
+    /// named. What a band holds stays drawn until its answer lands. **A press while a
     /// source is being asked asks it nothing.**
     func again(_ which: RisingWhich, at host: String? = nil, in session: ShellSession) async {
         // Asked of every source, a source left out for the run is asked afresh too: `r` is
@@ -265,6 +301,7 @@ final class ShellRising {
         let errand = errands.next()
         pages[key]?.awaits = errand
         pages[key]?.asking = true
+        halted.remove(which)
         let through = reaching?(host) ?? session.reach.unsignedRising(host, for: .rising, within: deadline)
         let round = hosts.round(at: host)
         let task = Task { await self.ask(which, at: host, of: through, errand: errand, round: round) }

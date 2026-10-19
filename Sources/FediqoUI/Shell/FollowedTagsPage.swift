@@ -20,12 +20,12 @@ struct FollowedTagsPane: View {
     var reload: String?
     /// A row opened: that hashtag's page, answered by the root under the walk's own rule.
     var onOpen: (RisingRow) -> Void
-    /// "Try again": the list asked from the top.
-    var onAskAgain: () -> Void = {}
     /// The bar's mark: what `r` does.
     var onReload: () -> Void = {}
     /// The same, pulled for: it returns when the answer has landed.
     var onPull: () async -> Void = {}
+    /// What stops the list's ask while it runs: the bar's mark is then Stop.
+    var onStop: (() -> Void)?
     /// The foot's press: the next stretch.
     var onReadOn: () -> Void = {}
     /// The item of a row's `…` that follows (true) or unfollows (false): what it offered when
@@ -45,25 +45,20 @@ struct FollowedTagsPane: View {
         canReload ? PersonPage.reloadName(said.page.host, language: language) : nil
     }
 
-    /// What the frame presses on this page. **No Stop**: the list's asks are its source's and
-    /// never the timeline's reload, so a Stop in its bar could only stop a reload running out of
-    /// sight under it.
+    /// What the frame presses on this page. **Stop is the list's own** (decision 10): handed
+    /// while the list is asked of its source, it stops that ask and nothing else — never a
+    /// reload of the stream running out of sight under the page.
     static func acts(
-        onBack: @escaping () -> Void, onReload: @escaping () -> Void, onPull: @escaping () async -> Void
+        onBack: @escaping () -> Void, onReload: @escaping () -> Void, onPull: @escaping () async -> Void,
+        onStop: (() -> Void)? = nil
     ) -> OpenedPageActs<SoleTab> {
-        OpenedPageActs(onBack: onBack, onReload: onReload, onPull: onPull, onStop: nil)
-    }
-
-    /// The press that asks the list again beside a failure: its words as drawn, which are its
-    /// name to a listener and to Voice Control, and whom it asks, told after them.
-    static func again(_ said: FollowedTagsSaid, language: DummyLanguage? = nil) -> (words: String, hint: String) {
-        (L10n.t("person.retry", language: language), PersonPage.reloadName(said.page.host, language: language))
+        OpenedPageActs(onBack: onBack, onReload: onReload, onPull: onPull, onStop: onStop)
     }
 
     var body: some View {
         OpenedPage(
             tabs: SoleTab.tabs, front: .sole, slide: slide, reload: reload,
-            acts: Self.acts(onBack: onBack, onReload: onReload, onPull: onPull),
+            acts: Self.acts(onBack: onBack, onReload: onReload, onPull: onPull, onStop: onStop),
             head: {
                 FollowedTagsHead(said: said)
                 ShellRule()
@@ -74,7 +69,7 @@ struct FollowedTagsPane: View {
     }
 
     private var listActs: FollowedTagsActs {
-        FollowedTagsActs(onOpen: onOpen, onAskAgain: onAskAgain, onReadOn: onReadOn, onAct: onAct, onAsk: onAsk)
+        FollowedTagsActs(onOpen: onOpen, onReadOn: onReadOn, onAct: onAct, onAsk: onAsk)
     }
 }
 
@@ -104,14 +99,13 @@ struct FollowedTagsHead: View {
 /// What the list of the hashtags followed presses, each answered by the page's owner.
 struct FollowedTagsActs {
     var onOpen: (RisingRow) -> Void
-    var onAskAgain: () -> Void
     var onReadOn: () -> Void
     var onAct: (FollowedTagRow, Bool) -> Void
     var onAsk: () -> Void
 }
 
-/// The hashtags followed, as the list under the head: where the asking stands, the rows, the
-/// sentence where there are none, and the foot that reads on — led by the head where it
+/// The hashtags followed, as the list under the head: the rows, the sentence where there are
+/// none, and the foot that reads on — the asking is the page's toast — led by the head where it
 /// scrolls away.
 struct FollowedTagsList<Lead: View>: View {
     let said: FollowedTagsSaid
@@ -129,10 +123,6 @@ struct FollowedTagsList<Lead: View>: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     lead
-                    if let line = said.stateLine() {
-                        stateLine(line)
-                        ShellRule()
-                    }
                     ForEach(Array(said.rows.enumerated()), id: \.element.id) { index, row in
                         self.row(row)
                             .id(row.id)
@@ -170,25 +160,6 @@ struct FollowedTagsList<Lead: View>: View {
                 withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(first.id, anchor: .top) }
             }
         }
-    }
-
-    /// Where the asking stands, and beside a failure the press that asks again.
-    private func stateLine(_ line: String) -> some View {
-        WordsThenPress(
-            words: Text(line)
-                .shellFont(.meta)
-                .foregroundStyle(said.reading == .asking ? ShellChrome.inkFaint(colorScheme) : ShellChrome.ink(colorScheme)),
-            press: Group {
-                if said.offersAgain {
-                    let again = FollowedTagsPane.again(said)
-                    ShellLinkButton(again.words, action: acts.onAskAgain)
-                        .disabled(said.asking)
-                        .fixedSize()
-                        // Called by its words, as Voice Control hears them; whom it asks, told after.
-                        .accessibilityHint(again.hint)
-                }
-            }
-        )
     }
 
     /// One hashtag. A press lights the row, and a second on the row it is already on opens
