@@ -314,11 +314,11 @@ struct PagesHoldTogetherTests {
     func theGuideSaysWhatTabDoesOnEachPage() throws {
         let line = try #require(DummyShortcut.all.first { $0.commands.contains(.nextTab) })
         let english = line.words(language: .english)
-        for page in ["timelines", "somebody's page", "a hashtag", "what is rising", "what a search found", "A conversation", "a list of people", "the hashtags you follow", "does nothing"] {
+        for page in ["timelines", "Posts, Hashtags and Links on Trends", "somebody's page", "a hashtag", "what a search found", "A conversation", "a list of people", "the hashtags you follow", "does nothing"] {
             #expect(english.contains(page), "\(page)")
         }
         let taiwanese = line.words(language: .taiwanese)
-        for page in ["時間軸", "某人的頁面", "主題標籤", "正在竄升的", "搜尋找到的", "討論串", "一份名單", "你追蹤的主題標籤", "不做任何事"] {
+        for page in ["時間軸", "「趨勢」的貼文、主題標籤和連結", "某人的頁面", "主題標籤", "搜尋找到的", "討論串", "一份名單", "你追蹤的主題標籤", "不做任何事"] {
             #expect(taiwanese.contains(page), "\(page)")
         }
 

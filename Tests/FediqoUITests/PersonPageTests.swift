@@ -957,8 +957,8 @@ struct PersonPageTests {
         let keys = [
             "person.tab.about", "person.tab.following", "person.tab.followers", "person.tab.pinned", "person.tab.posts",
             "person.figure.hint", "person.figure.hidden", "person.lists.hidden", "person.reload", "person.about.none",
-            "person.stands.neither", "person.stands.asking", "person.pinned.asking", "person.pinned.failed", "person.pinned.none",
-            "person.pinned.foot.more", "person.pinned.foot.end", "person.unheardOf", "person.failed",
+            "person.stands.neither", "person.stands.asking", "person.pinned.asking", "person.pinned.none",
+            "person.pinned.foot.more", "person.pinned.foot.end", "person.unheardOf",
         ]
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
@@ -983,7 +983,7 @@ struct PersonPageTests {
             }
         }
         #expect(tables[1] == tables[2])
-        for key in ["person.unheardOf", "person.failed"] {
+        for key in ["person.unheardOf"] {
             #expect(L10n.t(key, language: .english).hasSuffix("What this device holds of theirs is under Posts."))
             #expect(L10n.t(key, language: .taiwanese).hasSuffix("這台裝置上有的他們的貼文在「貼文」分頁。"))
         }

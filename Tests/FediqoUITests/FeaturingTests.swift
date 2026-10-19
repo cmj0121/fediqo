@@ -856,7 +856,7 @@ struct FeaturingTests {
             guard prefixes.contains(where: { line.hasPrefix($0) }) else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 33)
+        #expect(keys.count == 31)
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }

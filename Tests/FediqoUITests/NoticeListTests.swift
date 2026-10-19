@@ -476,7 +476,7 @@ struct NoticeListTests {
         #expect(list.failures.map(\.host) == [Self.a], "the source stopped being named")
     }
 
-    @Test("A 401 at depth from a source still signed in and still allowed keeps holding the list, and asking by name asks it again")
+    @Test("A 401 at depth from a source still signed in and still allowed keeps holding the list, and a reload and the foot ask it again from where it stood")
     func aRefusalThatLeavesTheSourceAskableHoldsTheList() async throws {
         let (session, server, _) = try await shell(Self.two)
         let list = session.noticeList
@@ -495,8 +495,9 @@ struct NoticeListTests {
         #expect(!list.hasMore(in: session))
 
         await server.set(older, Self.page())
-        await list.retry(host: Self.a, in: session)
-        #expect(await server.reads.last == older)
+        await list.read(in: session)
+        await list.readOn(in: session)
+        #expect(await server.reads.contains(older))
         #expect(list.failures.isEmpty && list.floor == Self.minute(10))
         #expect(drawn(list.lines) == ["a4", "b8", "a3", "a2", "a1", "b7"])
     }
@@ -534,16 +535,16 @@ struct NoticeListTests {
         #expect(drawn(list.lines) == ["b9", "a4", "b8", "a3"])
         #expect(!list.isReading)
 
-        // Asked again by name, it is asked for what failed: its newest.
+        // Read again, it is asked for what failed: its newest.
         await server.set("\(Self.a)\(Self.v1)", Self.page(Self.one(4, at: 50), Self.one(3, at: 40)))
-        await list.retry(host: Self.a, in: session)
-        #expect(await server.reads.last == "\(Self.a)\(Self.v1)")
+        await list.read(in: session)
+        #expect(await server.reads.suffix(2).contains("\(Self.a)\(Self.v1)"))
         #expect(list.failures.isEmpty)
         #expect(drawn(list.lines) == ["b9", "a4", "b8", "a3"])
     }
 
-    @Test("A source that fails reading on keeps its depth and holds the list there, is not asked by the foot, and is asked again by name")
-    func aSourceThatFailsReadingOnIsRetriedByName() async throws {
+    @Test("A source that fails reading on keeps its depth and holds the list there, is not asked by the foot, and after a reload is asked from where it stood")
+    func aSourceThatFailsReadingOnIsAskedAfterAReload() async throws {
         let (session, server, _) = try await shell(Self.two)
         let list = session.noticeList
         await list.read(in: session)
@@ -564,15 +565,11 @@ struct NoticeListTests {
         #expect(await server.asked.count == asked, "the foot asked a source that failed")
 
         await server.set(older, Self.page(Self.one(2, at: 30), Self.one(1, at: 20)))
-        await list.retry(host: Self.a, in: session)
-        #expect(await server.reads.last == older, "it was not asked from where it stood")
+        await list.read(in: session)
+        await list.readOn(in: session)
+        #expect(await server.reads.contains(older), "it was not asked from where it stood")
         #expect(list.failures.isEmpty)
         #expect(drawn(list.lines) == ["a4", "b8", "a3", "a2", "a1"])
-
-        // A source that did not fail is not asked by name.
-        let after = await server.asked.count
-        await list.retry(host: Self.b, in: session)
-        #expect(await server.asked.count == after)
     }
 
     @Test("A source that cannot be reached on the first read is named while the other's notices stand")
@@ -605,7 +602,6 @@ struct NoticeListTests {
 
         let asked = await server.asked.filter { $0.hasPrefix(Self.a) }.count
         await list.read(in: session)
-        await list.retry(host: Self.a, in: session)
         #expect(await server.asked.filter { $0.hasPrefix(Self.a) }.count == asked)
         #expect(list.standing(host: Self.a) == .failed(.refused), "the source stopped being named")
     }

@@ -5,9 +5,9 @@ import Observation
 // What every signed-in source says happened to the reader, as one list (#323).
 //
 // **Read when somebody asks, and never on a timer**: the page opening, its reload mark, a pull
-// (`read`), the foot of the list reached or pressed (`readOn`), and a press on a source named
-// as failed (`retry`). Nothing here starts by itself, and nothing is asked while the page is
-// closed.
+// (`read`), and the foot of the list reached or pressed (`readOn`). A source that failed is
+// asked again by the next `read`. Nothing here starts by itself, and nothing is asked while the
+// page is closed.
 //
 // **Held by the store, and this is what is drawn of it.** A notice is not an item, and is held
 // beside the items all the same (`ItemStore.hold(_:)`, `NoticeReach`): each source's lines and
@@ -393,8 +393,8 @@ final class ShellNoticeList {
     ///
     /// **Asked only of the sources standing at the floor** — those the list stops at. One read
     /// further down already is not asked again until the others have caught up with it, and one
-    /// that failed is asked again by `retry`, not here, so a dark network is not asked over and
-    /// over by a foot in view. Nothing while another read is on the wire.
+    /// that failed is asked again by the next `read`, not here, so a dark network is not asked
+    /// over and over by a foot in view. Nothing while another read is on the wire.
     func readOn(in session: ShellSession) async {
         guard work == nil else { return }
         settle(in: session)
@@ -430,20 +430,6 @@ final class ShellNoticeList {
             }
         }
         rebuild()
-    }
-
-    /// A source named as failed, asked again for what it did not hand over: the older stretch
-    /// where reading on failed, from where it stood, and its newest where that did — that
-    /// source by name, and nothing else. Nothing while another read is on the wire, and nothing
-    /// for a source whose sign-in may no longer read notices.
-    func retry(host raw: String, in session: ShellSession) async {
-        let host = raw.lowercased()
-        guard work == nil, let reach = reaches[host], case .failed = reach.standing,
-              let source = Self.asked(in: session).first(where: { $0.host.lowercased() == host })
-        else { return }
-        locked.remove(host)
-        let ask = Ask(source: source, before: reach.readingOn ? reach.before : nil, gathered: reach.gathered)
-        await run([ask], fromTop: nil, in: session)
     }
 
     /// Ends the read on the wire: every source still waited on is as it was before it was

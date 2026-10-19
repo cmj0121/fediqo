@@ -1212,7 +1212,7 @@ struct PersonStandingTests {
     func everySentenceIsWritten() {
         let keys = [
             "person.stands.followsYou", "person.stands.following", "person.stands.asked", "person.stands.muted",
-            "person.stands.mutedUntil", "person.stands.blocked", "person.stands.blockedBy", "person.stands.failed",
+            "person.stands.mutedUntil", "person.stands.blocked", "person.stands.blockedBy",
             "person.posts.noneGiven", "person.act.follow", "person.act.askToFollow", "person.act.unfollow", "person.act.withdraw",
             "person.act.follow.spoken", "person.act.askToFollow.spoken", "person.act.follow.failed", "person.act.unfollow.failed",
             "person.act.withdraw.failed", "person.unfollow.ask.title", "person.unfollow.ask.line", "shortcut.follow",

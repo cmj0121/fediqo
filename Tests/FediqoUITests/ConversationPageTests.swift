@@ -42,7 +42,7 @@ struct ConversationPageTests {
         let said = ConversationSaid.made(of: Self.post, blog: false, canReload: true, language: en)
         // The mark is called what the keys guide calls `r`: asking again may ask more than one source.
         let again = L10n.t("shortcut.reload", language: en)
-        #expect(said.title == "Thread" && said.reload == again && again.hasPrefix("Reload this timeline, or the open thread"))
+        #expect(said.title == "Thread" && said.reload == again && again.hasPrefix("Reload the page in front"))
         #expect(said.wayOut == ConversationSaid.WayOut(name: "Open on m.example", url: try #require(Self.post.outwardURL)))
         let forum = ConversationSaid.made(of: Self.topic, blog: false, canReload: true, language: en)
         #expect(forum.title == "Thread" && forum.reload == again && forum.wayOut?.name == "Open on forum.example")
@@ -327,8 +327,8 @@ struct ConversationPageTests {
 
     @Test("The keys guide says what Tab does on an opened page with no tabs, in each language; the bar's words are the ones every opened page has")
     func theGuideSaysWhatTabDoes() throws {
-        #expect(L10n.t("shortcut.tabs", language: .english) == "Turn the tabs of the page in front — the timelines, or those of somebody's page, a hashtag, what is rising or what a search found. A conversation, a list of people and the hashtags you follow have none, and there it does nothing: leave the page to change timeline")
-        #expect(L10n.t("shortcut.tabs", language: .taiwanese) == "輪換眼前這一頁的分頁——時間軸，或某人的頁面、主題標籤頁、正在竄升的、搜尋找到的那一頁的分頁。討論串、一份名單和你追蹤的主題標籤沒有分頁，在那裡這個鍵不做任何事：先離開那一頁，才能換時間軸")
+        #expect(L10n.t("shortcut.tabs", language: .english) == "Turn the tabs of the page in front — All and your own timelines, Posts, Hashtags and Links on Trends, or those of somebody's page, a hashtag or what a search found. A conversation, a list of people and the hashtags you follow have none, and there it does nothing: leave the page to change timeline")
+        #expect(L10n.t("shortcut.tabs", language: .taiwanese) == "輪換眼前這一頁的分頁——「全部」和你自己的時間軸，「趨勢」的貼文、主題標籤和連結，或某人的頁面、主題標籤頁、搜尋找到的那一頁的分頁。討論串、一份名單和你追蹤的主題標籤沒有分頁，在那裡這個鍵不做任何事：先離開那一頁，才能換時間軸")
         let resources = try Self.sources().appending(path: "Resources")
         let tw = try String(contentsOf: resources.appending(path: "zh-TW.lproj/Localizable.strings"), encoding: .utf8)
         let hant = try String(contentsOf: resources.appending(path: "zh-Hant.lproj/Localizable.strings"), encoding: .utf8)

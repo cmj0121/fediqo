@@ -1057,11 +1057,11 @@ struct PersonSaidTests {
     func writtenInEveryLanguage() throws {
         let keys = [
             "work.purpose.person", "person.said.by", "person.said.elsewhere", "person.asking", "person.unheardOf",
-            "person.failed", "person.retry", "person.line.suspended", "person.line.moved", "person.line.limited",
+            "person.retry", "person.line.suspended", "person.line.moved", "person.line.limited",
             "person.line.locked", "person.line.automated", "person.line.group", "person.line.partial",
             "person.count.posts", "person.count.following", "person.count.followers", "person.posts.none",
             "person.posts.noneOf", "person.field.checked", "person.foot.more", "person.foot.reading", "person.foot.end",
-            "person.foot.failed", "person.foot.stopped", "person.again.failed", "person.again.unheardOf", "person.unheld",
+            "person.foot.stopped", "person.again.unheardOf", "person.unheld",
             "person.line.moved.open", "person.own.there", "person.own.signedIn", "person.own.open",
             "person.count.following.unsaid", "person.count.followers.unsaid", "person.count.opens",
         ]

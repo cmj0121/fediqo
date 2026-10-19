@@ -535,7 +535,7 @@ struct DirectoryTests {
             guard line.hasPrefix("\"people.directory.") || line.hasPrefix("\"people.title.directory\"") || line.hasPrefix("\"source.more.directory") else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 17 && keys.contains("people.directory.none.local") && keys.contains("source.more.directory.hint"))
+        #expect(keys.count == 16 && keys.contains("people.directory.none.local") && keys.contains("source.more.directory.hint"))
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }

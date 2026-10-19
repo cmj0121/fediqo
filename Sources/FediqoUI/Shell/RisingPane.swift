@@ -19,11 +19,6 @@ import SwiftUI
 extension RisingSaid {
     // MARK: - Words
 
-    /// What each way in at the head of the timeline says: the page, opened on that tab.
-    static func title(_ which: RisingWhich, language: DummyLanguage? = nil) -> String {
-        L10n.t("rising.title.\(which.rawValue)", language: language)
-    }
-
     /// What the page is called, whichever tab is in front.
     static func pageTitle(language: DummyLanguage? = nil) -> String {
         L10n.t("rising.title", language: language)

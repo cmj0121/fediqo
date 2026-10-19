@@ -790,7 +790,7 @@ struct SearchFoundTests {
             guard ours.contains(where: line.hasPrefix) else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 28 && keys.contains("search.lookup.found.other") && keys.contains("search.lookup.offer") && keys.contains("people.found.none"))
+        #expect(keys.count == 27 && keys.contains("search.lookup.found.other") && keys.contains("search.lookup.offer") && keys.contains("people.found.none"))
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }

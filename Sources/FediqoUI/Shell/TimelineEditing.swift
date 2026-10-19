@@ -503,8 +503,8 @@ extension ShellSession {
         toast = ShellToast(tick: (toast?.tick ?? 0) + 1, text: text)
     }
 
-    /// `e`. Opens the editor on the timeline in front. All and Trends answer with a toast and
-    /// open nothing. Adding is the `[+]` pill, pressed, not a Tab stop.
+    /// `e`. Opens the editor on the timeline in front. All answers with a toast and opens
+    /// nothing. Adding is the `[+]` pill, pressed, not a Tab stop.
     @discardableResult
     func editCurrentTimeline() -> Bool {
         guard !queries.isEmpty else { return false }

@@ -558,7 +558,7 @@ struct SuggestedTests {
             guard line.hasPrefix("\"people.suggested.") || line.hasPrefix("\"people.title.suggested\"") || line.hasPrefix("\"source.more.suggested") else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 12)
+        #expect(keys.count == 11)
         #expect(!keys.contains("people.suggested.dismiss.dim"))
         #expect(keys.contains("people.suggested.dismiss.failed"))
         #expect(keys.contains("source.more.suggested.hint"))

@@ -877,9 +877,9 @@ struct FollowedTagsTests {
     @Test("Every sentence of the list is in each language, and the two tables of Chinese are the same; following is the word the hashtag's page uses")
     func everySentenceIsInEachLanguage() throws {
         let keys = [
-            "followed.tags.title", "followed.tags.asking", "followed.tags.failed",
-            "followed.tags.again.failed", "followed.tags.none", "followed.tags.foot.more", "followed.tags.foot.reading",
-            "followed.tags.foot.end", "followed.tags.foot.failed", "followed.tags.foot.stopped", "followed.tags.foot.farthest",
+            "followed.tags.title", "followed.tags.asking",
+            "followed.tags.none", "followed.tags.foot.more", "followed.tags.foot.reading",
+            "followed.tags.foot.end", "followed.tags.foot.stopped", "followed.tags.foot.farthest",
         ]
         for key in keys {
             let english = L10n.t(key, language: .english)

@@ -412,7 +412,6 @@ struct RisingTests {
 
     @Test("A row says what it is and whose figures these are: a hashtag as it was written, a link by what its source calls it or by its address where it calls it nothing, the host read out of the address, and the source's counts written whole — 'not said' where it gave one figure and not the other, and no line where it gave none")
     func theWords() throws {
-        #expect(RisingSaid.title(.tags, language: .english) == "Rising hashtags" && RisingSaid.title(.links, language: .english) == "Rising links")
         #expect(RisingSaid.used(RisingUse(posts: 1_204, people: 310, days: 2), language: .english) == "Posts 1,204, people 310, over two days.")
         #expect(RisingSaid.used(RisingUse(posts: 7, people: nil, days: 1), language: .english) == "Posts 7, people not said, today.")
         #expect(RisingSaid.used(.unsaid) == nil && RisingSaid.used(RisingUse(posts: nil, people: nil, days: 2)) == nil)
@@ -445,8 +444,9 @@ struct RisingTests {
             else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        // Four more since F10: the one page's title, its two tabs and its bar's mark.
-        #expect(keys.count == 20 && keys.contains("rising.use.two") && keys.contains("work.purpose.rising") && keys.contains("shortcut.expand"))
+        // The page's title and its two tabs; the two titles a way in had, the bar's mark and
+        // the lines that said a miss went with the page.
+        #expect(keys.count == 14 && keys.contains("rising.use.two") && keys.contains("work.purpose.rising") && keys.contains("shortcut.expand"))
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }
