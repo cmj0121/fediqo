@@ -30,7 +30,8 @@ struct StoreLettingGoTests {
     /// A store of every kind of row a letting go asks about: posts ten minutes apart, newest
     /// first, every seventh posted in the same moment as the one before; kept posts; reblogs of
     /// an older post, some of them kept; posts quoting an older one; posts marked gone; posts
-    /// saying what the reader did; posts owing a load as the reader.
+    /// saying what the reader did, a vote in a poll among it (#331); posts owing a load as the
+    /// reader.
     private static func seed() -> [Note] {
         (0..<size).map { i in
             let moment = at.addingTimeInterval(-Double(i - (i % 7 == 6 ? 1 : 0)) * 600)
@@ -48,7 +49,9 @@ struct StoreLettingGoTests {
                 categories: i % 4 == 0 ? [.public] : [.home],
                 boosted: i % 10 == 0 ? false : nil, favourited: i % 5 == 0 ? true : nil, bookmarked: i % 11 == 0 ? true : nil,
                 statusID: "s\(i)", goneSince: i % 13 == 0 ? at.addingTimeInterval(-Double(i % 5) * 86_400) : nil,
-                kept: i % 97 == 0 || (i % 17 == 0 && i % 2 == 0), refs: refs, refsDue: i % 23 == 0
+                kept: i % 97 == 0 || (i % 17 == 0 && i % 2 == 0),
+                poll: i % 29 == 0 ? Poll(id: "q\(i)", choices: [.init(title: "a", votes: 1), .init(title: "b", votes: 0)], voted: i % 2 == 0, ownVotes: i % 2 == 0 ? [0] : []) : nil,
+                refs: refs, refsDue: i % 23 == 0
             )
         }
     }
