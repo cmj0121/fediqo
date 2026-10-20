@@ -561,6 +561,53 @@ struct DirectoryChoiceMenu: View {
     }
 }
 
+/// A way from the reader's own page to one of their lists of whom they keep away at a source
+/// (#314): whom they mute, whom they block, and the servers they block — one line of "You
+/// there" on About each, and what its press does.
+///
+/// **Where the sign-in does not see whom they mute and block, there is one line and not three**:
+/// the lock of how the sign-in stands, said once, whose press asks where it may.
+struct KeepingEntry: Equatable, Identifiable {
+    enum Which: String, CaseIterable {
+        case muted, blocked, servers
+    }
+
+    let which: Which
+    let host: String
+    /// How the sign-in stands where it does not see whom the reader mutes and blocks.
+    var locked: PartWords.Place?
+
+    /// What the lamp stands on where it stands on this line.
+    var id: String { Self.id(which) }
+
+    static func id(_ which: Which) -> String { "about." + which.rawValue }
+
+    /// The list a press opens: one of people, or nothing for the servers, which are a sheet.
+    var list: PeopleList? {
+        switch which {
+        case .muted: PeopleList(.muted, at: host)
+        case .blocked: PeopleList(.blocked, at: host)
+        case .servers: nil
+        }
+    }
+
+    var asks: Bool { locked?.asks ?? false }
+    var presses: Bool { locked == nil || asks }
+
+    func words(language: DummyLanguage? = nil) -> String {
+        if let locked { return String(format: L10n.t(locked.key, language: language), host) }
+        return L10n.t("keeping.\(which.rawValue).entry", language: language)
+    }
+
+    var symbol: String {
+        switch which {
+        case .muted: "speaker.slash"
+        case .blocked: "hand.raised"
+        case .servers: PersonActing.serverBlockedSymbol
+        }
+    }
+}
+
 /// The way to the people who ask to follow the reader, on their own page (#313): one line of
 /// "You there" on About, and what its press does.
 ///

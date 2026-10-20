@@ -92,6 +92,7 @@ struct TimelinePane: View {
     var onFollowed: (FollowedTagsEntry) -> Void = { _ in }
     /// The way to the people who ask to follow the reader, pressed there (#313).
     var onRequests: (RequestsEntry) -> Void = { _ in }
+    var onKeeping: (KeepingEntry) -> Void = { _ in }
     /// A hashtag somebody features, or the way to the people they feature, pressed on About
     /// of their page (#315, #318), answered by the root: a step of the walk.
     var onOpenFeatured: (FeaturedPress) -> Void = { _ in }
@@ -696,6 +697,7 @@ struct TimelinePane: View {
             },
             onFollowed: onFollowed,
             onRequests: onRequests,
+            onKeeping: onKeeping,
             onFeatured: { press in
                 switch press {
                 case .takeOff(let tag):

@@ -2217,3 +2217,24 @@
 "standing.held.hide" = "Hide them here, each saying why";
 "standing.held.letGo" = "Let them go — a post you keep stays";
 "standing.held.leave" = "Leave them as they are";
+/* The lists of whom you mute and block, and the servers you block (#314) */
+"keeping.muted.entry" = "People you mute";
+"keeping.blocked.entry" = "People you block";
+"keeping.servers.entry" = "Servers you block";
+"people.title.muted" = "Who you mute at %@";
+"people.title.blocked" = "Who you block at %@";
+"people.muted.asking" = "Asking %@ who you mute…";
+"people.blocked.asking" = "Asking %@ who you block…";
+"people.muted.none" = "%@ says you mute nobody.";
+"people.blocked.none" = "%@ says you block nobody.";
+"servers.title" = "Servers you block at %@";
+"servers.asking" = "Asking %@ which servers you block…";
+"servers.failed" = "%@ did not say which servers you block.";
+"servers.again" = "Try again";
+"servers.none" = "%@ says you block no server.";
+"servers.end" = "That is every server %@ says you block.";
+"servers.foot.failed" = "The rest did not come from %@. Read on again";
+"servers.unblock" = "Unblock";
+"servers.unblock.spoken" = "Unblock %1$@ at %2$@";
+"servers.unblock.failed" = "Could not unblock %1$@ at %2$@.";
+"servers.close" = "Done";

@@ -2161,3 +2161,24 @@
 "standing.held.hide" = "在這裡隱藏，並各自說明原因";
 "standing.held.letGo" = "放掉它們——你保留的貼文會留下";
 "standing.held.leave" = "維持原樣";
+/* The lists of whom you mute and block, and the servers you block (#314) */
+"keeping.muted.entry" = "你靜音的人";
+"keeping.blocked.entry" = "你封鎖的人";
+"keeping.servers.entry" = "你封鎖的站台";
+"people.title.muted" = "你在 %@ 靜音的人";
+"people.title.blocked" = "你在 %@ 封鎖的人";
+"people.muted.asking" = "正在向 %@ 詢問你靜音的人…";
+"people.blocked.asking" = "正在向 %@ 詢問你封鎖的人…";
+"people.muted.none" = "%@ 說你沒有靜音任何人。";
+"people.blocked.none" = "%@ 說你沒有封鎖任何人。";
+"servers.title" = "你在 %@ 封鎖的站台";
+"servers.asking" = "正在向 %@ 詢問你封鎖的站台…";
+"servers.failed" = "%@ 沒有說你封鎖了哪些站台。";
+"servers.again" = "再試一次";
+"servers.none" = "%@ 說你沒有封鎖任何站台。";
+"servers.end" = "這是 %@ 說你封鎖的所有站台。";
+"servers.foot.failed" = "其餘的沒有從 %@ 送來。再讀一次";
+"servers.unblock" = "取消封鎖";
+"servers.unblock.spoken" = "在 %2$@ 取消封鎖 %1$@";
+"servers.unblock.failed" = "無法在 %2$@ 取消封鎖 %1$@。";
+"servers.close" = "完成";

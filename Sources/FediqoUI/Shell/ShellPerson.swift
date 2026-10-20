@@ -308,6 +308,9 @@ final class ShellPersonPages {
     /// The mute or the block being asked about on its sheet (#314), where one is: nothing is sent
     /// while it is up.
     var standingAsk: StandingAsk?
+    /// The whole servers the reader blocks at each source, on a sheet of their own (#314):
+    /// numbered on the same count, and let go with the same reader.
+    let servers: ShellBlockedServers
 
     init() {
         let count = PageErrands(), looks = PageReaders()
@@ -342,6 +345,9 @@ final class ShellPersonPages {
         acts.hosts = hosts
         let tabs = ShellPersonTabs(errands: count, readers: looks, hosts: hosts)
         self.tabs = tabs
+        let servers = ShellBlockedServers(errands: count, readers: looks)
+        self.servers = servers
+        looks.whenChanged { [weak servers] host in servers?.letGo(at: host) }
         looks.whenChanged { [weak tabs] host in tabs?.letGo(at: host) }
         looks.whenChanged { [weak acts] host in acts?.letGo(at: host) }
         looks.whenChanged { [weak followed] host in followed?.letGo(at: host) }

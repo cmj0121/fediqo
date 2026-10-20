@@ -461,6 +461,7 @@ extension ShellPersonPages {
         )
         // What they feature is the added source's: not drawn while their own server's word is.
         if home == nil { about.featured = featured(of: who, in: session) }
+        about.keeping = keepingEntries(of: who, in: session)
         return about
     }
 
@@ -497,6 +498,23 @@ extension ShellPersonPages {
             list: PeopleList(requestsAt: source.host), counted: counted,
             locked: ShellPersonActs.sees(at: who.host, in: session) ? nil : place
         )
+    }
+
+    /// The ways to whom the reader mutes and blocks, and the servers they block (#314), where the
+    /// page of `who` is their own at a source where somebody is muted and blocked — once it has
+    /// said who they are, and not while the page draws what their own server says. Where the
+    /// sign-in does not see them, the one lock in their place.
+    func keepingEntries(of who: DummyPerson, in session: ShellSession) -> [KeepingEntry] {
+        let said = said(of: who, in: session)
+        guard said?.person != nil, home.said(of: who, beside: said, in: session) == nil,
+              let source = Self.source(of: who, in: session), source.kind.offers.blocks,
+              Self.own(at: who.host, in: session)?.id == who.id
+        else { return [] }
+        guard ShellPersonActs.seesBlocks(at: who.host, in: session) else {
+            let place = session.mastodon.place(.blocks, host: who.host) ?? PartWords.Place(kind: .none, key: "part.ask.partly")
+            return [KeepingEntry(which: .muted, host: source.host, locked: place)]
+        }
+        return KeepingEntry.Which.allCases.map { KeepingEntry(which: $0, host: source.host) }
     }
 
     /// The list of people `tab` is on the page of `who`, where it is one and the page has it.

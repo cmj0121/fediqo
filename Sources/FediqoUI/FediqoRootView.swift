@@ -1639,6 +1639,7 @@ public struct FediqoRootView: View {
         if let person = walk.openedPerson, people.front(of: person, in: session) == .about {
             if let entry = people.followedEntry(of: person, in: session), entry.id == id { return followedPressed(entry) }
             if id == RequestsEntry.id, let entry = people.requestsEntry(of: person, in: session) { return requestsPressed(entry) }
+            if let entry = people.keepingEntries(of: person, in: session).first(where: { $0.id == id }) { return keepingPressed(entry) }
             if let press = people.featured(of: person, in: session)?.press(on: id) {
                 return featuredPressed(press, from: id)
             }
@@ -2132,6 +2133,24 @@ public struct FediqoRootView: View {
         // Left, the list gives the line back: the lamp is on it again, and nothing in the list is lit.
         guard Self.canWalk(place: place, open: openLayers), walk.walk(to: .people(entry.list), from: RequestsEntry.id)
         else { return false }
+        selectedItemID = nil
+        return true
+    }
+
+    /// A way to whom the reader mutes or blocks, pressed on their own page (#314): the list, one
+    /// more step of the walk; the servers they block, on their sheet — or, where the line is the
+    /// lock of a sign-in that does not see them and may be asked, the question that asks it.
+    private func keepingPressed(_ entry: KeepingEntry) -> Bool {
+        guard entry.locked == nil else {
+            guard entry.asks else { return false }
+            session.askFor([.blocks], host: entry.host)
+            return true
+        }
+        guard let list = entry.list else {
+            Task { await people.servers.show(entry.host, in: session) }
+            return true
+        }
+        guard Self.canWalk(place: place, open: openLayers), walk.walk(to: .people(list), from: entry.id) else { return false }
         selectedItemID = nil
         return true
     }
@@ -2974,6 +2993,7 @@ public struct FediqoRootView: View {
                 onTurnFound: foundTurned,
                 onFollowed: { _ = followedPressed($0) },
                 onRequests: { _ = requestsPressed($0) },
+                onKeeping: { _ = keepingPressed($0) },
                 onOpenFeatured: { _ = featuredPressed($0, from: nil) },
                 onLookUp: lookUpPressed,
                 trends: stream == .trends ? trendsHead : nil
@@ -3066,9 +3086,9 @@ private struct WithdrawQuestion: ViewModifier {
     }
 }
 
-/// What a person's page puts up over everything — their profile and the mute or block asked —
-/// gathered in one modifier so the root's chain of presenters stays short enough to type-check in
-/// time (`test-before-push`).
+/// What a person's page puts up over everything — their profile, the mute or block asked, and the
+/// servers the reader blocks — gathered in one modifier so the root's chain of presenters stays
+/// short enough to type-check in time (`test-before-push`).
 private struct PersonPresenters: ViewModifier {
     let people: ShellPersonPages
     let session: ShellSession
@@ -3077,6 +3097,7 @@ private struct PersonPresenters: ViewModifier {
         content
             .modifier(ProfileSheetPresenter(profile: people.profile, session: session))
             .modifier(StandingSheetPresenter(people: people, session: session))
+            .modifier(BlockedServersPresenter(servers: people.servers, session: session))
     }
 }
 
