@@ -371,6 +371,7 @@ struct DummyItemRow: View {
                 .modifier(Probed(\.frames, .header, probe: probe))
             mainBox(written)
                 .modifier(Probed(\.frames, .content, probe: probe))
+            pollBand
             quoteBand(openQuote)
             actions
                 .modifier(Probed(\.frames, .marks, probe: probe))
@@ -1429,6 +1430,12 @@ struct DummyItemRow: View {
                     )
                     .lineLimit(wordLines)
             }
+            // A list row's poll is one line under the words, in the line it took from them
+            // (`bodyLines`); the pane draws it whole below (`pollBand`).
+            if !inFull, let poll {
+                PollLine(poll: poll, acting: acting, covered: covered)
+                    .modifier(Probed(\.frames, .poll, probe: probe))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // The row a hashtag pressed in these words gives back when its page is left (#124).
@@ -1475,6 +1482,8 @@ struct DummyItemRow: View {
         if decorated { lines -= 1 }
         if item.title != nil { lines -= 1 }
         if item.source.kind == .board, item.board != nil { lines -= 1 }
+        // A poll's one line, in a list (#331).
+        if poll != nil, !inFull { lines -= 1 }
         return max(1, lines)
     }
 
@@ -1617,6 +1626,22 @@ struct DummyItemRow: View {
     /// Close under the words: the stack's `snug` step taken back to `tight`, so the card reads as
     /// this post's own quote rather than the next thing down the pane, and its border never
     /// touches the last line of the words.
+    /// The post's poll as the row draws, sizes and votes in it (#331): the one copy's its acts
+    /// chose (`ItemActing.poll`), and the row's own where the list does not act.
+    private var poll: Poll? { acting.poll ?? item.poll }
+
+    /// The post's poll, whole under the words (#331) — **in the pane only**, for `quoteBand`'s
+    /// reason: a stranger's poll of thirty choices is thirty lines a list row would be sized by.
+    /// A list row says it in one line among its words (`PollLine`). Under a cover, nothing: the
+    /// poll is part of what the cover keeps back.
+    @ViewBuilder
+    private var pollBand: some View {
+        if inFull, !covered, let poll {
+            PollBand(poll: poll, acting: acting)
+                .modifier(Probed(\.frames, .poll, probe: probe))
+        }
+    }
+
     @ViewBuilder
     private func quoteBand(_ openQuote: (() -> Void)?) -> some View {
         if drawsQuoteCard, let quote = item.quote {
@@ -2051,6 +2076,8 @@ enum RowBand: Hashable {
     case marks
     /// The picture beside the words, or a post of pictures alone.
     case picture
+    /// The post's poll: its one line in a list, the whole of it in the pane (#331).
+    case poll
 }
 
 /// Where a hosted row laid its bands out, in the row's own space. See `DummyItemRow.probe`.

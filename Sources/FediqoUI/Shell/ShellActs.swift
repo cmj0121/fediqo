@@ -65,6 +65,27 @@ final class ShellActs {
         return all
     }
 
+    /// What each vote out chose, by row (#331): drawn as the reader's own choices until its
+    /// source answers, over a poll the store has not moved. Gone with the press, whichever way
+    /// it ended: what is drawn after is the poll as the source last said it.
+    private(set) var choices: [String: [Int]] = [:]
+
+    /// A vote for `choices` is about to be pressed on `row`: drawn while it is out.
+    func choose(_ choices: [Int], on row: String) {
+        self.choices[row] = choices
+    }
+
+    /// The choices a vote out on `row` chose, while one is out.
+    func chosen(on row: String) -> [Int]? {
+        presses.isOut(ShellActKey(row: row, act: .vote)) ? choices[row] : nil
+    }
+
+    /// What a vote chose is let go of, where no vote on `row` is out any more.
+    func unchoose(_ row: String) {
+        guard !presses.isOut(ShellActKey(row: row, act: .vote)) else { return }
+        choices[row] = nil
+    }
+
     /// The rows whose taking back is pressed and not yet answered — every copy of each — which
     /// are left out of what is drawn until the source answers. Back the moment it fails.
     private(set) var leaving: Set<String> = []
@@ -169,6 +190,7 @@ final class ShellActs {
         fell = fell.filter { !$0.row.hasPrefix(prefix) }
         missed = missed.filter { !$0.key.row.hasPrefix(prefix) }
         for key in taken.keys where key.row.hasPrefix(prefix) { stay(key) }
+        choices = choices.filter { !$0.key.hasPrefix(prefix) }
     }
 
     func clear() {
@@ -177,5 +199,6 @@ final class ShellActs {
         missed = [:]
         taken = [:]
         leaving = []
+        choices = [:]
     }
 }

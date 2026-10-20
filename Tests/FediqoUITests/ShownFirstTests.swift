@@ -164,6 +164,7 @@ struct ShownFirstTests {
         case .favourite: note?.favourited
         case .boost: note?.boosted
         case .bookmark: note?.bookmarked
+        case .vote: note?.poll?.voted
         case .answer, .withdraw: nil
         }
     }
@@ -172,7 +173,7 @@ struct ShownFirstTests {
         switch act {
         case .boost: 2 + (on ? 1 : 0)
         case .favourite: 3 + (on ? 1 : 0)
-        case .bookmark, .answer, .withdraw: nil
+        case .bookmark, .answer, .withdraw, .vote: nil
         }
     }
 

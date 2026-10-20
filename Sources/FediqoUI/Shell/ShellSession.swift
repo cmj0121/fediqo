@@ -1438,6 +1438,18 @@ final class ShellSession {
             acting.standings[act] = acts.standing(of: copy.id, act)
             if copy.id != item.id { acting.through[act] = copy }
         }
+        // **The one copy a row's poll is drawn, sized, voted in and read again by** (#331): the
+        // one its vote goes through, or where none does, the first an act would reach — on a
+        // reblog's row, the post's. A row two sources carried so never shows a vote its press
+        // would refuse: one copy read signed out says nothing of the reader, while the other
+        // says they voted. Nothing more is asked of a row no copy of which carries a poll.
+        guard item.actCopies.contains(where: { $0.poll != nil }),
+              let copy = each.first(where: { $0.acts.offers(.vote) })?.copy ?? each.first?.copy
+        else { return acting }
+        acting.pollCopy = copy
+        acting.poll = note(ofRow: copy.id)?.poll ?? copy.poll ?? item.poll
+        acting.chosen = acts.chosen(on: copy.id)
+        if !acting.acts.offers(.vote) { acting.voteLock = voteLock(on: item) }
         return acting
     }
 
@@ -1451,7 +1463,9 @@ final class ShellSession {
             nameable: copy.statusID != nil,
             mine: isMine(copy),
             gone: copy.goneSince != nil,
-            bookmarks: mastodon.bookmarks(host: copy.source.host)
+            bookmarks: mastodon.bookmarks(host: copy.source.host),
+            // One fact of the kind of source, never which kind it is (#331).
+            polls: kind.offers.polls
         )
     }
 
@@ -1587,8 +1601,44 @@ final class ShellSession {
             case .boost: return try await write.boost(note, on: on)
             case .favourite: return try await write.favourite(note, on: on)
             case .bookmark: return try await write.bookmark(note, on: on)
-            case .answer, .withdraw: return note
+            case .answer, .withdraw, .vote: return note
             }
+        }
+    }
+
+    /// Votes in `item`'s poll for `choices`, each by its place (#331), through the copy that
+    /// offers a vote — on a reblog's row, the post's. Returns whether a vote was sent for.
+    ///
+    /// **Refused before anything is sent** where the post offers no vote, its poll has ended,
+    /// the reader voted in it already, what was chosen is not a vote it takes, or a vote on it
+    /// is out already: one vote, once. What was chosen is drawn as the reader's own while it is
+    /// out (`ShellActs.chosen`), over a store that has not moved; the source's yes lands in the
+    /// store as an act's answer does, and a refusal or a miss leaves the poll exactly as it was
+    /// and says so — `perform`'s whole table, with no second press to turn.
+    @discardableResult
+    func vote(_ item: DummyItem, choices: [Int]) async -> Bool {
+        let acting = acting(on: item)
+        guard acting.acts.offers(.vote), let copy = acting.pollCopy, !acts.isOnItsWay(copy.id, .vote),
+              let poll = acting.poll, poll.refusal(of: choices) == nil
+        else { return false }
+        acts.choose(choices, on: copy.id)
+        await perform(.vote, on: item) { door, note, _ in
+            try await self.reach.write(door, landingIn: self.store).vote(note, choices: choices)
+        }
+        acts.unchoose(copy.id)
+        return true
+    }
+
+    /// `item`'s post read again for how its poll stands now (#331), through the copy whose
+    /// source it is — the post's own, on a reblog's row — as the reader where signed in and
+    /// unsigned otherwise. What it says lands as any read of the post does; a read that does
+    /// not arrive changes nothing and is said once.
+    func readPollAgain(_ item: DummyItem) async {
+        guard let copy = acting(on: item).pollCopy, let held = note(ofRow: copy.id), held.poll != nil else { return }
+        if await reload.readAgain(held, in: self) {
+            await adopt()
+        } else {
+            showToast(String(format: L10n.t("poll.read.failed"), held.source.host))
         }
     }
 
@@ -1599,6 +1649,8 @@ final class ShellSession {
         case .boost: note.boosted
         case .favourite: note.favourited
         case .bookmark: note.bookmarked
+        // A vote that did not arrive went after all where a later read says the reader voted.
+        case .vote: note.poll?.voted
         case .answer, .withdraw: nil
         }
     }

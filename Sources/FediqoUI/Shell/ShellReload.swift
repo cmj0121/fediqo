@@ -1029,6 +1029,15 @@ final class ShellReload {
         _ = await again(held, in: session)
     }
 
+    /// One post read again into the store as `r` reads it — a poll's figures asked for again
+    /// (#331) — and whether it was: a post its source said is gone was answered too.
+    func readAgain(_ held: Note, in session: ShellSession) async -> Bool {
+        switch await again(held, in: session) {
+        case .read, .gone: true
+        case .failed, .unfindable: false
+        }
+    }
+
     /// Whether `note` looks like a quote post kept before quotes were read: a microblog post with
     /// no quote whose words open with the `RE:` address a quoting server writes.
     static func heldBeforeQuotes(_ note: Note) -> Bool {

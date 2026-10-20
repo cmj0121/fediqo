@@ -175,6 +175,8 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let spoiler: String?
     /// The app the source says wrote this post, where it said one. Nothing where it said none.
     public let via: String?
+    /// The post's poll (#331), as its source last said it — on a reblog's row, the post's.
+    public let poll: Poll?
     /// The pictures this post is partly written in, as the post itself carried them.
     ///
     /// The post's own list and not the reading server's: `:blobcat:` registered on two servers
@@ -556,6 +558,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         sensitive = note.sensitive
         spoiler = note.spoiler
         via = note.via
+        poll = note.poll
         emojis = note.emojis
         mentions = note.mentions
         counts = DummyCounts(

@@ -148,4 +148,23 @@ extension ShellSession {
         }
         return [:]
     }
+
+    /// What a post's poll says where a vote is not offered for want of what a vote needs
+    /// (#331): how the sign-in at the post's source stands to writing as the reader — the
+    /// acting part's place, the one every act of it reads. Nothing where no sign-in is held
+    /// there, where the source has no polls, and where writing is not what is in the way.
+    ///
+    /// About the source the press asks (`askingCopy`), as the bookmark's lock is; where no
+    /// copy's sign-in can be asked, about the first that has polls and a sign-in to stand.
+    func voteLock(on item: DummyItem) -> ItemActing.Lock? {
+        let asked = askingCopy(of: item, for: .vote)
+        for copy in asked.map({ [$0] }) ?? item.actCopies {
+            let host = copy.source.host.lowercased()
+            guard let kind = sources.first(where: { $0.host == host })?.kind, kind.offers.polls,
+                  let place = mastodon.place(.acting, host: host)
+            else { continue }
+            return ItemActing.Lock(place: place, host: host)
+        }
+        return nil
+    }
 }

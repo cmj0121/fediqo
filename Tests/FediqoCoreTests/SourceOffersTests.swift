@@ -15,8 +15,9 @@ struct SourceOffersTests {
             timelines: true, trends: true, writes: true,
             fields: [.audience, .language, .covered, .reblog, .reblogOf],
             loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true, people: true,
-            follows: true
+            follows: true, polls: true
         ))
+        #expect(ProtocolKind.allCases.filter(\.offers.polls) == [.mastodon], "only a Mastodon's posts carry a poll voted in here (#331)")
         #expect(ProtocolKind.allCases.filter(\.offers.people) == [.mastodon], "only a Mastodon is asked who somebody is")
         #expect(ProtocolKind.allCases.filter(\.offers.follows) == [.mastodon], "and only at a Mastodon is somebody followed")
         for kind in ProtocolKind.allCases {

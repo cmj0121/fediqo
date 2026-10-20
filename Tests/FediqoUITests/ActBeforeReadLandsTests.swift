@@ -82,6 +82,7 @@ struct ActBeforeReadLandsTests {
         case .favourite: note?.favourited
         case .boost: note?.boosted
         case .bookmark: note?.bookmarked
+        case .vote: note?.poll?.voted
         case .answer, .withdraw: nil
         }
     }

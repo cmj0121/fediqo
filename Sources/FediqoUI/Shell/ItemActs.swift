@@ -70,6 +70,26 @@ struct ItemActing {
     /// does, for the one destructive item of the row's `…`. Nothing where the list cannot act,
     /// or the post does not offer it.
     var withdraw: Withdraw?
+    /// A vote in the post's poll for the choices given, each by its place (#331). Nothing
+    /// where the list cannot act or the post offers no vote: its poll is then read, and not
+    /// voted in.
+    var vote: (([Int]) -> Void)?
+    /// The post's poll as the copy a vote goes through holds it (`ShellSession.poll(on:)`): what
+    /// the poll is drawn from, so a merged row draws the poll its vote is checked against.
+    /// Nothing where the list cannot act, and the row draws its own.
+    var poll: Poll?
+    /// The copy that poll is the post's on: the one a vote goes through, or the first an act
+    /// would reach. Nothing on a row no copy of which carries a poll.
+    var pollCopy: DummyItem?
+    /// What the vote out on the post chose, while one is out: drawn as the reader's own.
+    var chosen: [Int]?
+    /// The post's poll read again: how it stands now. Nothing where the list cannot read.
+    var readPoll: (() -> Void)?
+    /// What the poll's place says where its sign-in does not hold what a vote needs (#331) —
+    /// the acting part's standing, as every place draws one — and the press that asks for it.
+    /// Nothing where a vote is offered, or no sign-in is held to ask.
+    var voteLock: Lock?
+    var askToVote: (() -> Void)?
 
     /// The question taking a post back asks, and what a yes to it does. **The question is built
     /// when the item is chosen** — it names the copy that goes as things stand at the press.
@@ -113,6 +133,8 @@ enum ItemActs {
         // Never "done": a post taken back is not on the row to be drawn.
         case .withdraw: return "trash"
         case .bookmark: return "bookmark"
+        // Pressed from the poll and never a mark of the row's line (#331).
+        case .vote: return "checklist"
         }
     }
 
@@ -129,6 +151,8 @@ enum ItemActs {
         case .withdraw: return L10n.t("item.act.withdraw", language: language)
         case .bookmark:
             return L10n.t(done ? "item.act.unbookmark" : "item.act.bookmark", language: language)
+        // A vote is not taken back: once done, there is nothing a press would do.
+        case .vote: return L10n.t(done ? "item.act.voted" : "item.act.vote", language: language)
         }
     }
 
@@ -181,8 +205,10 @@ enum ItemActs {
         case .withdraw: (false, nil)
         // What the source the act goes through last said (#285); a source counts no bookmarks.
         case .bookmark: (copy.bookmarked == true, nil)
+        // Whether the reader voted, and how many votes the poll has, where it says (#331).
+        case .vote: (copy.poll?.voted == true, copy.poll?.votes)
         }
-        if case .pressed(let to) = standing, act != .answer, act != .withdraw, to != done {
+        if case .pressed(let to) = standing, act != .answer, act != .withdraw, act != .vote, to != done {
             count = count.map { max(0, $0 + (to ? 1 : -1)) }
             done = to
         }

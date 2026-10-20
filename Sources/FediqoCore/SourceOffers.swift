@@ -51,12 +51,16 @@ public struct SourceOffers: Hashable, Sendable {
     /// somebody's page offers the press only where this is so, and a kind that has no such
     /// thing is offered none.
     public let follows: Bool
+    /// Whether a post of it may carry a poll the reader votes in (#331), given a sign-in that
+    /// may write — so a poll's choices are offered as a vote only where this is so, and a kind
+    /// that has no polls is offered none.
+    public let polls: Bool
 
     public init(
         timelines: Bool = false, trends: Bool = false, boards: Bool = false, authorsAreItsOwn: Bool = false,
         writes: Bool = false, fields: [SourceField] = [], loadsReferences: Bool = false,
         saysReaderMarks: Bool = false, saysQuotes: Bool = false, notices: Bool = false, people: Bool = false,
-        follows: Bool = false
+        follows: Bool = false, polls: Bool = false
     ) {
         self.timelines = timelines
         self.trends = trends
@@ -70,6 +74,7 @@ public struct SourceOffers: Hashable, Sendable {
         self.notices = notices
         self.people = people
         self.follows = follows
+        self.polls = polls
     }
 
     /// The field it declares under `name`, or nothing.
@@ -119,7 +124,7 @@ extension ProtocolKind {
                 timelines: true, trends: true, writes: true,
                 fields: [.audience, .language, .covered, .reblog, .reblogOf],
                 loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true, people: true,
-                follows: true
+                follows: true, polls: true
             )
         case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial:
             SourceOffers(timelines: true, trends: true)
