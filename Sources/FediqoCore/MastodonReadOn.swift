@@ -119,15 +119,32 @@ public struct TimelineGap: Hashable, Sendable {
         self.from = from
     }
 
-    /// **One of each kind per timeline per post**: two are the same place whatever moment or id
-    /// each carries, so a set of them never says one place twice.
-    public static func == (a: Self, b: Self) -> Bool {
-        a.kind == b.kind && a.category == b.category
+}
+
+/// A post's places, **one of each kind per timeline** (#369): each is found, put and taken off by
+/// its kind and timeline, whatever moment or id it carries. Two places are equal only where they
+/// say the same of it, moment and id too — so a place moved down, or settled again, is a change to
+/// its post, which the post is held and written with.
+extension Set<TimelineGap> {
+    /// The place of `kind` said in `category`, or nothing.
+    public func gap(_ kind: TimelineGap.Kind, in category: Category) -> TimelineGap? {
+        first { $0.kind == kind && $0.category == category }
     }
 
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(kind)
-        hasher.combine(category)
+    /// `gap`, in place of any of its kind said in its timeline before.
+    public mutating func place(_ gap: TimelineGap) {
+        clear(gap.kind, in: gap.category)
+        insert(gap)
+    }
+
+    /// `gap`, where nothing of its kind is said in its timeline yet: what is said there stays.
+    public mutating func add(_ gap: TimelineGap) {
+        if self.gap(gap.kind, in: gap.category) == nil { insert(gap) }
+    }
+
+    /// Whatever of `kind` is said in `category`, taken off.
+    public mutating func clear(_ kind: TimelineGap.Kind, in category: Category) {
+        if let said = gap(kind, in: category) { remove(said) }
     }
 }
 

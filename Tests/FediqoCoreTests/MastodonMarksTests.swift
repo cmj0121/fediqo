@@ -361,7 +361,7 @@ struct MastodonMarksTests {
         await server.answer(Self.byTwo)
         try await marks.read(.bookmarks)
         let lowest = try #require(await store.all().first { $0.statusID == Captures.ids[1] })
-        #expect(lowest.gaps == [TimelineGap(.mayBeMissing, in: .bookmarks)])
+        #expect(lowest.gaps == [TimelineGap(.mayBeMissing, in: .bookmarks, from: "4")])
         #expect(await store.markHole(lowest.key, in: .bookmarks) == "4")
         // Read down: below `4` brings the fifth and the first; one stretch is the bound, and it
         // met nothing held, so the place moves down to `2`.
