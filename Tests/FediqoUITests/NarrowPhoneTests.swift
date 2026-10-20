@@ -22,16 +22,17 @@ import AppKit
 struct NarrowPhoneTests {
     // MARK: - The orders things give way in
 
-    @Test("A row's header gives way a step at a time: the host to its first letter, the age to its shortest words, then the handle; then the marks' words; and last the pill and half of every gap")
+    @Test("A row's header gives way a step at a time: the host to its first letter, the age to its shortest words, then the handle; then the marks' words; then half of every gap; and last the pill")
     func headerLadder() {
-        #expect(HeadFit.ladder == [.whole, .initialled, .brief, .unhandled, .plain, .bare, .gaunt])
+        #expect(HeadFit.ladder == [.whole, .initialled, .brief, .unhandled, .plain, .bare, .lean, .gaunt])
         #expect(Set(HeadFit.ladder) == Set(HeadFit.allCases), "every way of drawing the line is tried")
         // The handle is kept while the host and the age's words give way, and is gone from there on.
-        #expect(HeadFit.ladder.map(\.drawsHandle) == [true, true, true, false, false, false, false])
-        #expect(HeadFit.ladder.map(\.pill) == [.host, .initial, .initial, .host, .initial, .initial, .absent])
-        #expect(HeadFit.ladder.map(\.shortAge) == [false, false, true, false, true, true, true])
-        #expect(HeadFit.ladder.map(\.terse) == [false, false, false, false, false, true, true])
-        #expect(HeadFit.ladder.map(\.close) == [false, false, false, false, false, false, true])
+        #expect(HeadFit.ladder.map(\.drawsHandle) == [true, true, true, false, false, false, false, false])
+        #expect(HeadFit.ladder.map(\.pill) == [.host, .initial, .initial, .host, .initial, .initial, .initial, .absent])
+        #expect(HeadFit.ladder.map(\.shortAge) == [false, false, true, false, true, true, true, true])
+        #expect(HeadFit.ladder.map(\.terse) == [false, false, false, false, false, true, true, true])
+        // The gaps close before the pill goes (#345): the pill is the last thing given up.
+        #expect(HeadFit.ladder.map(\.close) == [false, false, false, false, false, false, true, true])
     }
 
     private static func plain(host: String, name: String = "Ada", handle: String = "@ada@m.example") -> DummyItem {
@@ -144,7 +145,7 @@ struct NarrowPhoneTests {
 
     private static func laid(
         _ item: DummyItem, layout: ShellLayout, width: CGFloat, type: DynamicTypeSize,
-        acting: ItemActing = ItemActing(), here: Set<String>? = nil
+        acting: ItemActing = ItemActing(), here: Set<String>? = nil, locale: Locale? = nil
     ) -> RowBandProbe {
         let probe = RowBandProbe()
         let row = DummyItemRow(
@@ -152,6 +153,7 @@ struct NarrowPhoneTests {
         )
         .environment(\.shellLayout, layout)
         .environment(\.shellSourcesHere, here)
+        .environment(\.locale, locale ?? .current)
         .dynamicTypeSize(type)
         let hosted = NSHostingView(rootView: row.frame(width: width))
         hosted.frame = NSRect(origin: .zero, size: hosted.fittingSize)
@@ -181,14 +183,17 @@ struct NarrowPhoneTests {
         if type <= DummyFontSize.largest.dynamicType {
             #expect(names.width >= 40, "\(type): the name was left \(names.width) points")
         }
-        // The pill is drawn at every size the app reaches; past it the last rung may give it up.
-        // **Not asked on a hosted runner at the largest of those sizes** (`HostedRunner`): there
-        // the same row measures a few points wider and the last rung gives the pill up at
-        // exactly that size, where a desk keeps it. Every other size is asked everywhere.
-        if type <= DummyFontSize.largest.dynamicType,
-           !(HostedRunner.isOne && type == DummyFontSize.largest.dynamicType) {
-            let source = try #require(probe.meta[.source], "\(type): the pill was given up")
-            #expect(names.maxX <= source.minX + 0.5, "\(type): the name runs under the source")
+        // The pill is drawn at every size the app reaches, in every language its age is said in
+        // and whatever the machine's own is (#345); past those sizes the last rung may give it up.
+        if type <= DummyFontSize.largest.dynamicType {
+            for locale in LaidIn.languages {
+                let said = Self.laid(Self.crowded(), layout: .narrow, width: width, type: type, acting: Self.everyAct, locale: locale)
+                let source = try #require(said.meta[.source], "\(type), \(locale.identifier): the pill was given up")
+                let names = try #require(said.meta[.names])
+                #expect(names.maxX <= source.minX + 0.5, "\(type), \(locale.identifier): the name runs under the source")
+                let header = try #require(said.frames[.header])
+                #expect(header.maxX <= inner + 0.5, "\(type), \(locale.identifier): the header at \(header) is wider than the row")
+            }
         }
     }
 
@@ -515,12 +520,13 @@ struct NarrowPhoneTests {
     #endif
 }
 
-/// Whether these tests are being run by a hosted runner and not on somebody's desk.
+/// The languages a row's header is laid out in where a check is about its width (#345).
 ///
-/// **For what a runner measures differently, and for nothing else.** A row laid out there is a
-/// few points wider at the largest text than the same row on a desk, so the one or two checks
-/// that sit on that edge are not asked of it; they are still asked wherever a person runs the
-/// tests. It is the runner's own word (`GITHUB_ACTIONS`), read once.
-enum HostedRunner {
-    static let isOne = ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true"
+/// **Named, never the machine's.** A row's age is a reading in a monospaced face, worded by the
+/// locale it is drawn in: on a desk set to 繁體中文 it is "3年前", on a runner set to English "3y
+/// ago", seventeen points wider at the largest text. Left to the machine, a check about the
+/// header's width asked a different question on each, and passed on one while the other gave
+/// the pill up. Both are asked everywhere.
+enum LaidIn {
+    static let languages = [Locale(identifier: "en_US"), Locale(identifier: "zh_TW")]
 }
