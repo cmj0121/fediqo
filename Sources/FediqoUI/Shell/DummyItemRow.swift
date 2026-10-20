@@ -373,6 +373,7 @@ struct DummyItemRow: View {
                 .modifier(Probed(\.frames, .content, probe: probe))
             pollBand
             quoteBand(openQuote)
+            if inFull { viaFoot }
             actions
                 .modifier(Probed(\.frames, .marks, probe: probe))
         }
@@ -647,6 +648,22 @@ struct DummyItemRow: View {
         }
     }
 
+    /// The app a post names, at the post's foot just above its marks and at the far end of the
+    /// line: a fact about how it was written, not about who wrote it or where it was read, so it
+    /// keeps out of the header the source and the time need.
+    @ViewBuilder
+    private var viaFoot: some View {
+        if let via = Self.viaLine(item.via) {
+            Text(via)
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .accessibilityLabel(via)
+        }
+    }
+
     /// The app a post names, as one line, or nothing where it named none.
     static func viaLine(_ name: String?, language: DummyLanguage? = nil) -> String? {
         guard let name, !name.isEmpty else { return nil }
@@ -666,13 +683,6 @@ struct DummyItemRow: View {
                 .fixedSize(horizontal: fit != nil, vertical: false)
                 .layoutPriority(0)
                 .modifier(Probed(\.meta, .source, probe: probe))
-            if let via = Self.viaLine(item.via) {
-                Text(via)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(1)
-                    .accessibilityLabel(via)
-            }
             leftMark(terse: terse)
                 .modifier(Probed(\.meta, .left, probe: probe))
             goneMark(terse: terse)
@@ -1436,6 +1446,9 @@ struct DummyItemRow: View {
                 PollLine(poll: poll, acting: acting, covered: covered)
                     .modifier(Probed(\.frames, .poll, probe: probe))
             }
+            // The app that wrote it, at the foot of the words in the line it took from them
+            // (`bodyLines`); the pane gives it a line of its own above the marks.
+            if !inFull { viaFoot }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // The row a hashtag pressed in these words gives back when its page is left (#124).
@@ -1484,6 +1497,8 @@ struct DummyItemRow: View {
         if item.source.kind == .board, item.board != nil { lines -= 1 }
         // A poll's one line, in a list (#331).
         if poll != nil, !inFull { lines -= 1 }
+        // The app that wrote it, at the foot of the words.
+        if Self.viaLine(item.via) != nil, !inFull { lines -= 1 }
         return max(1, lines)
     }
 
