@@ -17,6 +17,8 @@ actor TimelineServer: HTTPClient {
     private var holding: String?
     /// A query every ask carrying it fails on, where one is set.
     private var refusing: String?
+    /// Whether an ask of the public timeline's newest stretch — no `min_id`, no `max_id` — fails.
+    private var refusingNewest = false
     let gate = Gate()
     /// How many asks reached `gate`.
     private(set) var parked = 0
@@ -46,6 +48,10 @@ actor TimelineServer: HTTPClient {
     /// Fails every ask whose query carries `query`, or none where nil.
     func refuse(_ query: String?) { refusing = query }
 
+    /// Fails every ask of the newest stretch where `refused`: a read on that reaches its bound
+    /// then cannot catch up, and says newer remain above the newest it read, as before #283.
+    func refuseNewest(_ refused: Bool) { refusingNewest = refused }
+
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
         if let holding, url.query?.contains(holding) == true {
             parked += 1
@@ -53,6 +59,10 @@ actor TimelineServer: HTTPClient {
         }
         asked.append(url)
         if let refusing, url.query?.contains(refusing) == true { throw URLError(.timedOut) }
+        if refusingNewest, url.path == "/api/v1/timelines/public",
+           url.query?.contains("min_id") != true, url.query?.contains("max_id") != true {
+            throw URLError(.timedOut)
+        }
         let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
         if url.path == "/api/v2/instance" {
             return (Data(#"{"domain":"\#(host)","title":"\#(host)","version":"4.3.1"}"#.utf8), response)
@@ -156,13 +166,49 @@ struct ReadOnTests {
         #expect(session.reload.line == nil)
     }
 
-    @Test("Past the bound the place says more belong there; reaching it reads them, nothing moves, no row twice")
+    /// #283: a busy server's public timeline brings more between two reads than one read reads on
+    /// through, so a read at its bound reads the newest stretch too — what is new now lands now —
+    /// and says between the two that posts may be missing, which reaching reads down.
+    @Test("Past the bound the newest stretch lands too, and the place between says posts may be missing; reaching it reads down, nothing moves, no row twice")
     func boundThenReachIt() async throws {
         let server = TimelineServer(host: Self.one, 1...10)
         let session = await shell(server, store: await store(holding: 1...10))
         await server.post(11...300)
 
         await session.reload.timeline(.all, in: session)
+        #expect(drawn(session) == Array((261...300).reversed()) + Array((1...209).reversed()),
+                "read on as far as the bound, and the newest now")
+        let marks = session.gapMarks(in: session.timelineItems(latest: nil))
+        #expect(marks.keys.sorted() == [Self.row(261)], "said below the newest stretch's oldest")
+        #expect(marks[Self.row(261)]?.below == [Self.stretch])
+        #expect(marks[Self.row(261)]?.above.isEmpty == true, "the newest is held: nothing more belongs above")
+
+        // Trends reads no public timeline, so it says nothing of one.
+        session.stream = .trends
+        #expect(session.gapMarks(in: session.timelineItems(latest: nil)).isEmpty)
+        session.stream = .timeline
+        session.timelineID = nil
+
+        // Reached — scrolled, walked or pressed to: read down toward what was read on.
+        let landed = session.reload.landed
+        await session.reload.readDown(Self.stretch, below: Self.note(261).key, in: session)
+        #expect(drawn(session) == Array((1...300).reversed()), "every one, once each")
+        #expect(session.gapMarks(in: session.timelineItems(latest: nil)).isEmpty, "read, and said no more")
+        #expect(session.reload.landed == landed, "reaching the place does not re-centre")
+        #expect(session.reload.asking.isEmpty)
+    }
+
+    /// Where the newest stretch could not be read, a read at its bound says more belong above the
+    /// newest it read, as it did before it caught up (#201, #283).
+    @Test("Past the bound with the newest stretch failing, the place says more belong there; reaching it reads them, nothing moves, no row twice")
+    func boundNewestFailsThenReachIt() async throws {
+        let server = TimelineServer(host: Self.one, 1...10)
+        let session = await shell(server, store: await store(holding: 1...10))
+        await server.post(11...300)
+
+        await server.refuseNewest(true)
+        await session.reload.timeline(.all, in: session)
+        await server.refuseNewest(false)
         let newest = try #require(drawn(session).first)
         #expect(newest < 300, "the bound stopped it short")
         #expect(drawn(session) == Array((1...newest).reversed()), "what came, came with no hole")
@@ -192,7 +238,10 @@ struct ReadOnTests {
         let server = TimelineServer(host: Self.one, 1...10)
         let session = await shell(server, store: await store(holding: 1...10))
         await server.post(11...300)
+        // The newest stretch failing, so more belong above the newest read (#283).
+        await server.refuseNewest(true)
         await session.reload.timeline(.all, in: session)
+        await server.refuseNewest(false)
         let landed = session.reload.landed
         await session.reload.readOn(Self.stretch, in: session)
         #expect(session.reload.landed == landed)
@@ -236,7 +285,10 @@ struct ReadOnTests {
         let server = TimelineServer(host: Self.one, 1...10)
         let session = await shell(server, store: await store(holding: 1...10))
         await server.post(11...300)
+        // The newest stretch failing, so more belong above the newest read (#283).
+        await server.refuseNewest(true)
         await session.reload.timeline(.all, in: session)
+        await server.refuseNewest(false)
         #expect(drawn(session).first == 209)
 
         await server.hold("max_id")
@@ -259,7 +311,10 @@ struct ReadOnTests {
         let server = TimelineServer(host: Self.one, 1...10)
         let session = await shell(server, store: await store(holding: 1...10))
         await server.post(11...300)
+        // The newest stretch failing, so more belong above the newest read (#283).
+        await server.refuseNewest(true)
         await session.reload.timeline(.all, in: session)
+        await server.refuseNewest(false)
 
         await server.hold("max_id")
         let guardTask = watching(server.gate, "the ask for more, held on the wire")
@@ -282,7 +337,10 @@ struct ReadOnTests {
         let server = TimelineServer(host: Self.one, 1...10)
         let session = await shell(server, store: await store(holding: 1...10))
         await server.post(11...300)
+        // The newest stretch failing, so more belong above the newest read (#283).
+        await server.refuseNewest(true)
         await session.reload.timeline(.all, in: session)
+        await server.refuseNewest(false)
 
         await server.hold("min_id=208")
         let guardTask = watching(server.gate, "r's read, held on the wire")

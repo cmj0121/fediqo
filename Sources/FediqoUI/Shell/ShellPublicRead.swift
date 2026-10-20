@@ -8,6 +8,9 @@ import Foundation
 // So every read of it — `r` and the wait reading on, an ask for more, a place reached and read
 // down — goes through the reader's sign-in where one is held there that reads, and is then the
 // reader's own read, ended by a sign-out as Home is. Unsigned, it is asked as it always was.
+//
+// **A reload's read of it catches up** (`MastodonReadOn.read`'s `catchingUp`): a busy server's
+// public timeline outruns reading on, so its newest stretch is read too at the bound.
 
 extension ShellReload {
     /// The public timeline read on from the newest id it listed, and landed with what it says
@@ -25,7 +28,9 @@ extension ShellReload {
             let read = try await asReader(host, if: reader.asYou) {
                 let anchor = await store.newestListedID(host: host, category: .public)
                 let held = anchor == nil ? await store.held(host: host, category: .public) : []
-                return try await reader.client.publicTimeline(source: stamp, readingOnFrom: anchor, holding: held)
+                return try await reader.client.publicTimeline(
+                    source: stamp, readingOnFrom: anchor, holding: held, catchingUp: true
+                )
             }
             try Task.checkCancellation()
             await session.store.land(read, of: .public, ifSourceHere: host)

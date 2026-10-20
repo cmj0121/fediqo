@@ -303,6 +303,9 @@ struct StorePoolTests {
         func oldestStatusID(host: String, category: FediqoCore.Category) throws -> String? {
             try call { try file.oldestStatusID(host: host, category: category) }
         }
+        func newestListed(host: String, category: FediqoCore.Category) throws -> (id: String, key: NoteKey)? {
+            try call { try file.newestListed(host: host, category: category) }
+        }
 
         /// How many times the kept rows were asked for.
         var keptAsked: Int { lock.withLock { keptReads } }

@@ -21,6 +21,12 @@ import Foundation
 // was full, more may remain, and the newest post read says so. A stretch that fails after the
 // first keeps what came before it, and says more may remain above that the same way.
 //
+// **A public timeline catches up at the bound** (#283). A busy server's brings a stretch in half
+// a minute, more between two reads than one read reads on through, so reading on alone fell
+// further behind each time and what is new never landed. Reaching the bound, its newest stretch is
+// read too: where that meets what was read on, nothing is said; where it does not, posts may be
+// missing below its oldest, and reaching that reads down toward what was read on (#204).
+//
 // **Where the source no longer gives back what lay between.** The first stretch is asked from
 // one before the anchor, so the anchor itself comes back first where the source still holds it.
 // Where the first stretch brings posts and not the anchor, one stretch before its oldest is asked
@@ -235,8 +241,17 @@ enum MastodonReadOn {
     /// an id, to tell an anchor deleted from what the source let go.
     ///
     /// `held` is the posts this device holds of that timeline, asked only where there is no anchor.
+    ///
+    /// **`catchingUp` reads the newest stretch too where the bound is reached** with more
+    /// remaining, so a timeline that brings more than `bound` stretches between two reads — a
+    /// busy server's public one brings a stretch in half a minute — is not read further behind
+    /// each time, and what is new now lands now. Where that stretch meets what this read
+    /// brought, nothing is said; where it does not, posts may be missing below its oldest, which
+    /// reaching reads down toward what was read on (#204) — the place more belong above is not
+    /// said, as the newest is held. Where the newest stretch fails, or the anchor's own stretch
+    /// already said posts may be missing, newer remain above the newest read, as without it.
     static func read(
-        from anchor: String?, holding held: Set<NoteKey> = [], bound: Int = bound,
+        from anchor: String?, holding held: Set<NoteKey> = [], bound: Int = bound, catchingUp: Bool = false,
         newer: (String?) async throws -> [Listed],
         older: (String) async throws -> [Listed]
     ) async throws -> ReadOn {
@@ -281,7 +296,33 @@ enum MastodonReadOn {
             cursor = newest.listed
             last = newest.note.key
             guard posts.count >= limit else { return read }
-            if stretch == bound - 1 { read.newerRemainAbove = newest.note.key }
+            if stretch == bound - 1 {
+                guard catchingUp, read.missingBelow == nil else {
+                    read.newerRemainAbove = newest.note.key
+                    return read
+                }
+                return try await caughtUp(read, past: newest, newer: newer)
+            }
+        }
+        return read
+    }
+
+    /// `read`, which reached its bound at `front` with more remaining, and the newest stretch
+    /// read beside it (`read(from:holding:bound:catchingUp:newer:older:)`).
+    private static func caughtUp(
+        _ read: ReadOn, past front: Listed, newer: (String?) async throws -> [Listed]
+    ) async throws -> ReadOn {
+        var read = read
+        let top: [Listed]
+        do {
+            top = try await newer(nil)
+        } catch where !ends(error) {
+            read.newerRemainAbove = front.note.key
+            return read
+        }
+        read.notes += top.landing
+        if let oldest = oldest(top), StatusID.later(oldest.listed, than: front.listed) {
+            read.missingBelow = oldest.note.key
         }
         return read
     }

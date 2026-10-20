@@ -1034,12 +1034,23 @@ public actor ItemStore {
     /// The anchor a timeline is read on from (#201): the newest id a read of `category` from
     /// `host` listed a post under, of a post its source has not said is gone. A post the reader
     /// wrote, or one a search or a thread brought, was listed by no read, and is never it.
+    ///
+    /// **The file's rows too** (#283): after a launch the pool holds only what the pages read in,
+    /// and an anchor of the pool's alone was an older post — read on from again — or none, which
+    /// read the newest stretch and said nothing of what lay between it and what the file held.
+    /// A row of the file the pool answers for and does not hold is not held, and is not it.
     public func newestListedID(host raw: String, category: Category) -> String? {
         let host = raw.lowercased()
-        let held = notes.values
+        let pooled = notes.values
             .filter { $0.source.host == host && $0.goneSince == nil }
             .compactMap { $0.listed[category] }
             .max { StatusID.later($1, than: $0) }
+        let filed = fileNewestListed(host: host, category: category)
+        let held: String? = switch (pooled, filed) {
+        case (let pooled?, let filed?): StatusID.later(filed, than: pooled) ? filed : pooled
+        case (let one?, nil), (nil, let one?): one
+        case (nil, nil): nil
+        }
         // Of the rows let go of the pool, the newest not answered for again: read back, one
         // says for itself; let go of the file, it says nothing, as in the whole store.
         if let left = listedLeft[host]?[category], let first = left.firstIndex(where: { !looked.contains($0.key) }) {
@@ -1052,13 +1063,37 @@ public actor ItemStore {
         return StatusID.later(left.id, than: held) ? left.id : held
     }
 
+    /// The newest listing of `category` from `host` among the file's rows the pool does not
+    /// answer for (`newestListedID`); nothing with no file, or where it would not be read.
+    private func fileNewestListed(host: String, category: Category) -> String? {
+        guard let disk else { return nil }
+        do {
+            guard let newest = try disk.newestListed(host: host, category: category),
+                  !looked.contains(newest.key)
+            else { return nil }
+            return newest.id
+        } catch {
+            Self.unread(error)
+            return nil
+        }
+    }
+
     /// The posts held of `category` from `host` that a timeline brought (#201): what a read with
-    /// no anchor looks for in the newest stretch, to tell whether it reached what was held.
+    /// no anchor looks for in the newest stretch, to tell whether it reached what was held — the
+    /// file's rows too, but those the pool answers for and does not hold.
     public func held(host raw: String, category: Category) -> Set<NoteKey> {
         let host = raw.lowercased()
-        return Set(notes.values.filter {
+        var held = Set(notes.values.filter {
             $0.source.host == host && $0.categories.contains(category)
         }.map(\.key))
+        if let disk {
+            do {
+                held.formUnion(try disk.keys(host: host, in: category).filter { !looked.contains($0) })
+            } catch {
+                Self.unread(error)
+            }
+        }
+        return held
     }
 
     /// Every post of `host` held through `category` of the reader's marks (#317), by the span of

@@ -1116,6 +1116,27 @@ extension StoreFile {
         }
     }
 
+    /// **Down the status index of `host`, newest id first, to the first row listed under
+    /// `category`** — a few rows read, not the host's every row: the newest listing of a timeline
+    /// is among its newest posts. A row is listed under the post's own id (a reblog under its
+    /// own, which is its status id), so the index's order is the listing's. That order is the
+    /// ids' as text, which is theirs as numbers while they are as long — Mastodon's have been
+    /// eighteen digits since 2018, and no timeline read here lists one older.
+    public func newestListed(host: String, category: FediqoCore.Category) throws -> (id: String, key: NoteKey)? {
+        let row = CategoryRow(category)
+        let status = Self.statusIDExpression
+        let id = row.id == nil ? "" : " AND json_extract(l.value, '$.category.id') = ?"
+        return try poolRead { db, _ in
+            try Row.fetchOne(db, sql: """
+                SELECT host, id, (SELECT json_extract(l.value, '$.id') FROM json_each(CASE WHEN json_valid(facts) THEN json_extract(facts, '$.listed') END) l \
+                WHERE json_extract(l.value, '$.category.kind') = ?\(id)) AS listed FROM note \
+                WHERE host = ? AND \(status) IS NOT NULL AND gone_at IS NULL AND listed IS NOT NULL \
+                ORDER BY \(status) DESC LIMIT 1
+                """, arguments: StatementArguments([row.kind] + (row.id.map { [$0] } ?? []) + [host]))
+            .map { (id: $0["listed"], key: NoteKey(host: $0["host"], id: $0["id"])) }
+        }
+    }
+
     /// `op`, made on every row it names, inside the save's transaction.
     static func make(_ op: StoreOp, in db: Database) throws {
         switch op.kind {
