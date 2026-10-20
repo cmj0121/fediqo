@@ -44,6 +44,10 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     /// `acting`**, as following does: a sign-in that only reads may be asked for it, and then
     /// sees the lists and changes none of them.
     case blocks
+    /// A post or a person reported to those who answer for the server (#339). **Stands without
+    /// `acting`**: telling a server's moderators is not writing as the reader, and a sign-in that
+    /// only reads may be asked for it.
+    case reports
 
     /// The words a page asks for this part.
     public var words: [String] {
@@ -58,6 +62,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
         case .media: ["write:media"]
         case .marks: ["read:bookmarks", "read:favourites"]
         case .blocks: ["read:mutes", "write:mutes", "read:blocks", "write:blocks"]
+        case .reports: ["write:reports"]
         }
     }
 
@@ -66,7 +71,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var wordsBesideActing: [String] {
         switch self {
         case .notices: ["write:notifications"]
-        case .reading, .search, .acting, .bookmarks, .follows, .account, .media, .marks, .blocks: []
+        case .reading, .search, .acting, .bookmarks, .follows, .account, .media, .marks, .blocks, .reports: []
         }
     }
 
@@ -76,7 +81,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var rider: Bool {
         switch self {
         case .search, .bookmarks: true
-        case .reading, .acting, .notices, .follows, .account, .media, .marks, .blocks: false
+        case .reading, .acting, .notices, .follows, .account, .media, .marks, .blocks, .reports: false
         }
     }
 
@@ -85,7 +90,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var needsActing: Bool {
         switch self {
         case .bookmarks, .media: true
-        case .reading, .search, .acting, .notices, .follows, .account, .marks, .blocks: false
+        case .reading, .search, .acting, .notices, .follows, .account, .marks, .blocks, .reports: false
         }
     }
 }

@@ -214,6 +214,6 @@ struct MastodonBlocksTests {
         #expect(MastodonGrant.of(scopes: "read:statuses read:lists read:accounts read:mutes write:mutes read:blocks write:blocks") == .reading)
         for act in PersonAct.allCases where act.isMuteOrBlock { #expect(act.needs == .blocks, "\(act)") }
         #expect(PersonAct.allCases.filter(\.isMuteOrBlock) == [.mute, .unmute, .block, .unblock, .blockServer, .unblockServer])
-        #expect(MastodonParts.everything.hasSuffix("read:mutes write:mutes read:blocks write:blocks"))
+        #expect(MastodonParts.everything.contains("read:mutes write:mutes read:blocks write:blocks"))
     }
 }

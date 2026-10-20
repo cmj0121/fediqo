@@ -75,6 +75,11 @@ struct PersonActing: Equatable {
     /// Whether somebody is muted and blocked at the source at all (#314): the one fact of its
     /// kind (`SourceOffers.blocks`), handed in where the source is asked.
     var blockable = false
+    /// Whether somebody is reported at the source at all (#339): the one fact of its kind
+    /// (`SourceOffers.reports`), handed in where the source is asked.
+    var reportable = false
+    /// How the sign-in stands where it holds less than reporting needs, or nothing where it holds it.
+    var reportsLock: PartWords.Place?
 
     /// How the reader stands to them as the page draws it: what the source last said, with the
     /// press on its way drawn over it. Nothing until the source has said.
@@ -108,7 +113,7 @@ struct PersonActing: Equatable {
             standing.followedBy = false
         case .unblock: standing.blocking = false
         case .unblockServer: standing.serverBlocked = false
-        case .dismissSuggestion, nil: break
+        case .dismissSuggestion, .report, nil: break
         }
         return standing
     }
@@ -250,8 +255,16 @@ struct PersonActing: Equatable {
         return offered
     }
 
-    /// Whether the page's `…` offers `act`: among `more` or among `keeping`.
-    func offersInMenu(_ act: PersonAct) -> Bool { more.contains(act) || keeping.contains(act) }
+    /// What the page's `…` offers last, under muting and blocking (#339): reporting them, where the
+    /// source has reports — **whatever the source has said of how the reader stands**, since a
+    /// report needs none of it. None while a press is on its way.
+    var reporting: [PersonAct] { reportable && doing == nil ? [.report] : [] }
+
+    /// Whether the page's `…` offers `act`: among `more`, `keeping` or `reporting`.
+    func offersInMenu(_ act: PersonAct) -> Bool { more.contains(act) || keeping.contains(act) || reporting.contains(act) }
+
+    /// The mark of a report (#339).
+    static let reportSymbol = "flag"
 
     /// Whether `act` is one muting and blocking's that is answered on a sheet of its own before
     /// it is sent (#314): what it takes away, for how long, and what becomes of what this device
@@ -271,6 +284,7 @@ struct PersonActing: Equatable {
     /// muting and blocking's for theirs (#314) — or nothing where the sign-in holds it.
     func lock(of act: PersonAct) -> PartWords.Place? {
         if Self.features(act) { return accountLock }
+        if act == .report { return reportsLock }
         return act.isMuteOrBlock ? blocksLock : nil
     }
 
@@ -464,6 +478,7 @@ struct PersonActing: Equatable {
         case .unblock: "hand.raised.slash"
         case .blockServer: serverBlockedSymbol
         case .unblockServer: "checkmark.shield"
+        case .report: reportSymbol
         }
     }
 
@@ -486,6 +501,7 @@ struct PersonActing: Equatable {
         case .unblock: "person.act.unblock"
         case .blockServer: "person.act.blockServer"
         case .unblockServer: "person.act.unblockServer"
+        case .report: "person.act.report"
         }
     }
 
@@ -496,7 +512,7 @@ struct PersonActing: Equatable {
     @MainActor
     func menu(head: [String], act: @escaping (PersonAct) -> Void) -> ShellMore {
         var said = head
-        let items: [ShellMoreItem] = (more + keeping).map { offered in
+        let items: [ShellMoreItem] = (more + keeping + reporting).map { offered in
             let symbol = Self.symbol(offered), name = Self.name(offered, server: server)
             if let lock = lock(of: offered) {
                 if let words = lockWords(of: offered), !said.contains(words) { said.append(words) }
@@ -548,7 +564,7 @@ struct PersonHeadActs: View {
 
     /// Whether there is anything to draw: a press, or a menu with something in it.
     static func draws(_ acting: PersonActing) -> Bool {
-        acting.press != nil || !acting.more.isEmpty || !acting.keeping.isEmpty
+        acting.press != nil || !acting.more.isEmpty || !acting.keeping.isEmpty || !acting.reporting.isEmpty
     }
 
     var body: some View {
@@ -573,7 +589,7 @@ struct PersonHeadActs: View {
             case nil:
                 EmptyView()
             }
-            if !acting.more.isEmpty || !acting.keeping.isEmpty {
+            if !acting.more.isEmpty || !acting.keeping.isEmpty || !acting.reporting.isEmpty {
                 ShellMoreButton(label: ShellMore.label()) { acting.menu(head: head, act: onAct) }
                     .fixedSize()
             }

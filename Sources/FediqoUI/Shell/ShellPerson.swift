@@ -311,6 +311,8 @@ final class ShellPersonPages {
     /// The whole servers the reader blocks at each source, on a sheet of their own (#314):
     /// numbered on the same count, and let go with the same reader.
     let servers: ShellBlockedServers
+    /// The report being written on its sheet (#339), where one is.
+    let reports: ShellReports
 
     init() {
         let count = PageErrands(), looks = PageReaders()
@@ -347,6 +349,7 @@ final class ShellPersonPages {
         self.tabs = tabs
         let servers = ShellBlockedServers(errands: count, readers: looks)
         self.servers = servers
+        reports = ShellReports(readers: looks)
         looks.whenChanged { [weak servers] host in servers?.letGo(at: host) }
         looks.whenChanged { [weak tabs] host in tabs?.letGo(at: host) }
         looks.whenChanged { [weak acts] host in acts?.letGo(at: host) }

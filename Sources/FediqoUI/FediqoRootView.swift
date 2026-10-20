@@ -3086,9 +3086,9 @@ private struct WithdrawQuestion: ViewModifier {
     }
 }
 
-/// What a person's page puts up over everything — their profile, the mute or block asked, and the
-/// servers the reader blocks — gathered in one modifier so the root's chain of presenters stays
-/// short enough to type-check in time (`test-before-push`).
+/// What a person's page puts up over everything — their profile, the mute or block asked, the
+/// servers the reader blocks, and a report — gathered in one modifier so the root's chain of
+/// presenters stays short enough to type-check in time (`test-before-push`).
 private struct PersonPresenters: ViewModifier {
     let people: ShellPersonPages
     let session: ShellSession
@@ -3098,6 +3098,7 @@ private struct PersonPresenters: ViewModifier {
             .modifier(ProfileSheetPresenter(profile: people.profile, session: session))
             .modifier(StandingSheetPresenter(people: people, session: session))
             .modifier(BlockedServersPresenter(servers: people.servers, session: session))
+            .modifier(ReportSheetPresenter(people: people, session: session))
     }
 }
 

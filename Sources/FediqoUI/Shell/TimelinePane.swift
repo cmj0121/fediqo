@@ -1344,6 +1344,12 @@ struct TimelinePane: View {
         acting.keep = { Task { await session.toggleKept(item) } }
         acting.ask = { _ in session.askToBookmark(item) }
         acting.locks = session.locks(on: item, acts: acting.acts)
+        // Reporting it (#339): the sheet goes up at the press, or the sign-in is asked for more.
+        if let people, let offer = session.reportOffer(on: item) {
+            acting.report = ItemActing.Report(lock: offer.lock) {
+                Task { await people.reports.start(offer.who, post: offer.post, people: people, in: session) }
+            }
+        }
         // Taking back is an item of the row's `…` (#109), built only where the post offers it:
         // the question the key `d` asks, about the copy that goes, and a yes that refuses what
         // that asking refuses.

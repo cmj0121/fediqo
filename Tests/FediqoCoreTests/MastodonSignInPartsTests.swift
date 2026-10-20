@@ -29,6 +29,7 @@ struct MastodonSignInPartsTests {
         (.media, "write:media", ""),
         (.marks, "read:bookmarks read:favourites", ""),
         (.blocks, "read:mutes write:mutes read:blocks write:blocks", ""),
+        (.reports, "write:reports", ""),
     ]
 
     @Test("Every part's words are the ones it shipped with, in the order it shipped; no word belongs to two parts; and they are the words a sign-in asks today")

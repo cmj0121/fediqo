@@ -121,14 +121,14 @@ struct MuteBlockTests {
         let ada = try #require(pages.stands(to: Self.ada, in: session))
         #expect(ada.keeping == [.mute, .block] && ada.server == nil && ada.blocksLock == nil)
         let menu = ada.menu(head: ["Ada"]) { _ in }
-        #expect(Array(menu.items.map(\.name).suffix(2)) == ["Mute…", "Block…"] && menu.head == ["Ada"])
-        #expect(menu.items.suffix(2).allSatisfy { $0.look == .live && !$0.isDanger }, "each asks on its own sheet")
+        #expect(Array(menu.items.map(\.name).suffix(3)) == ["Mute…", "Block…", "Report…"] && menu.head.first == "Ada")
+        #expect(menu.items.suffix(3).prefix(2).allSatisfy { $0.look == .live && !$0.isDanger }, "each asks on its own sheet")
 
         let farPages = await opened(Self.far, in: session)
         let far = try #require(farPages.stands(to: Self.far, in: session))
         #expect(far.keeping == [.unmute, .unblock, .unblockServer] && far.server == "far.example")
         #expect(far.marks(language: .english).map(\.words).suffix(3) == ["Muted", "Blocked", "Their server blocked"])
-        #expect(far.menu(head: []) { _ in }.items.map(\.name).suffix(3) == ["Unmute", "Unblock", "Unblock far.example"])
+        #expect(Array(far.menu(head: []) { _ in }.items.map(\.name).suffix(4).prefix(3)) == ["Unmute", "Unblock", "Unblock far.example"])
         #expect(PersonActing.name(.blockServer, server: "far.example", language: .english) == "Block all of far.example…")
 
         let unsaid = PersonActing(source: Self.host, named: "@ada", reading: .asking, changes: true)
@@ -145,8 +145,8 @@ struct MuteBlockTests {
         #expect(lock.asks && acting.asksForPart(.mute) && acting.asksForPart(.block) && !acting.asksForPart(.unfollow))
         let menu = acting.menu(head: ["Ada"]) { _ in }
         let unasked = L10n.t("part.blocks.unasked")
-        #expect(menu.head == ["Ada", unasked], "said once for the two")
-        #expect(menu.items.suffix(2).allSatisfy { $0.look == .dim(.askAgain) && $0.symbol == SourceRow.permissionSymbol && $0.answers })
+        #expect(Array(menu.head.prefix(2)) == ["Ada", unasked] && menu.head.filter { $0 == unasked }.count == 1, "said once for the two")
+        #expect(menu.items.suffix(3).prefix(2).allSatisfy { $0.look == .dim(.askAgain) && $0.symbol == SourceRow.permissionSymbol && $0.answers })
 
         await pages.act(.mute, on: Self.ada, in: session)
         #expect(pages.standingAsk == nil, "no sheet")

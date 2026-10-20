@@ -134,6 +134,9 @@ public enum PersonAct: Sendable, Hashable, CaseIterable {
     /// a server, pressed from the page of somebody who lives there, or from the list of servers.
     case blockServer
     case unblockServer
+    /// Tells those who answer for the source of somebody, or of a post of theirs (#339): written
+    /// on a sheet of its own, and sent only from there.
+    case report
 
     /// The part of a sign-in the act needs (#347): where it is not held, the act's place says
     /// so and asks. **No `default:`**, so an act added later has to say which.
@@ -143,6 +146,7 @@ public enum PersonAct: Sendable, Hashable, CaseIterable {
              .removeFollower: .follows
         case .feature, .unfeature, .dismissSuggestion: .account
         case .mute, .unmute, .block, .unblock, .blockServer, .unblockServer: .blocks
+        case .report: .reports
         }
     }
 
@@ -152,7 +156,7 @@ public enum PersonAct: Sendable, Hashable, CaseIterable {
         switch self {
         case .mute, .unmute, .block, .unblock, .blockServer, .unblockServer: true
         case .follow, .unfollow, .withdraw, .showBoosts, .hideBoosts, .notify, .stopNotifying, .acceptRequest, .refuseRequest,
-             .removeFollower, .feature, .unfeature, .dismissSuggestion: false
+             .removeFollower, .feature, .unfeature, .dismissSuggestion, .report: false
         }
     }
 }

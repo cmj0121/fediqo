@@ -62,12 +62,15 @@ public struct SourceOffers: Hashable, Sendable {
     /// sign-in that may — so somebody's page offers those only where this is so, and the
     /// reader's own page lists whom they mute and block.
     public let blocks: Bool
+    /// Whether a post or a person is reported to those who answer for it (#339), given a sign-in
+    /// that may — so the `…` of a post and of a person offers it only where this is so.
+    public let reports: Bool
 
     public init(
         timelines: Bool = false, trends: Bool = false, boards: Bool = false, authorsAreItsOwn: Bool = false,
         writes: Bool = false, fields: [SourceField] = [], loadsReferences: Bool = false,
         saysReaderMarks: Bool = false, saysQuotes: Bool = false, notices: Bool = false, people: Bool = false,
-        follows: Bool = false, polls: Bool = false, marks: Bool = false, blocks: Bool = false
+        follows: Bool = false, polls: Bool = false, marks: Bool = false, blocks: Bool = false, reports: Bool = false
     ) {
         self.timelines = timelines
         self.trends = trends
@@ -84,6 +87,7 @@ public struct SourceOffers: Hashable, Sendable {
         self.polls = polls
         self.marks = marks
         self.blocks = blocks
+        self.reports = reports
     }
 
     /// The field it declares under `name`, or nothing.
@@ -136,7 +140,7 @@ extension ProtocolKind {
                 timelines: true, trends: true, writes: true,
                 fields: [.audience, .language, .covered, .reblog, .reblogOf],
                 loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true, people: true,
-                follows: true, polls: true, marks: true, blocks: true
+                follows: true, polls: true, marks: true, blocks: true, reports: true
             )
         case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial:
             SourceOffers(timelines: true, trends: true)

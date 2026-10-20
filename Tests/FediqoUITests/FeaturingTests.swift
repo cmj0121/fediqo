@@ -104,7 +104,7 @@ struct FeaturingTests {
         // Muting and blocking follow them (#314), dim with their own lock where it is not held.
         #expect(menu.head.first == "Ada" && !menu.head.contains(L10n.t("part.account.unasked")))
         #expect(Array(menu.items.map(\.name).prefix(2)) == [PersonActing.name(.feature), PersonActing.name(.unfollow)])
-        #expect(Array(menu.items.map(\.name).dropFirst(2)) == before.keeping.map { PersonActing.name($0, server: before.server) })
+        #expect(Array(menu.items.map(\.name).dropFirst(2)) == (before.keeping + before.reporting).map { PersonActing.name($0, server: before.server) })
         #expect(menu.items.first?.isDanger == false && menu.items.first?.look == .live, "plain, and at once")
         #expect(PersonActing.name(.feature, language: .taiwanese) == "在個人檔案上推薦")
 

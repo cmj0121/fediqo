@@ -239,6 +239,12 @@ final class ShellPersonActs {
         // is not this source's.
         acting.blockable = source.kind.offers.blocks
         acting.server = person.livesHere ? nil : person.home
+        // Reporting them (#339), where its kind has it.
+        acting.reportable = source.kind.offers.reports && ShellReports.isSomebodyElse(person, at: host, in: session)
+        if session.mastodon.standing(PersonAct.report.needs, host: host) != .held {
+            acting.reportsLock = session.mastodon.place(PersonAct.report.needs, host: host)
+                ?? PartWords.Place(kind: .none, key: "part.reports.unasked")
+        }
         if !Self.blocks(at: host, in: session) {
             acting.blocksLock = session.mastodon.place(PersonAct.mute.needs, host: host)
                 ?? PartWords.Place(kind: .none, key: "part.ask.partly")
@@ -651,7 +657,7 @@ final class ShellPersonActs {
         // Muting and blocking taken back are a row's on the reader's lists of them (#314).
         case .acceptRequest, .refuseRequest, .removeFollower, .unfeature, .unmute, .unblock: true
         case .follow, .unfollow, .withdraw, .showBoosts, .hideBoosts, .notify, .stopNotifying, .feature,
-             .dismissSuggestion, .mute, .block, .blockServer, .unblockServer: false
+             .dismissSuggestion, .mute, .block, .blockServer, .unblockServer, .report: false
         }
     }
 
@@ -760,8 +766,9 @@ final class ShellPersonActs {
             listed == nil
                 ? offered.keeping.contains(act) && !offered.asksForPart(act)
                 : listed == (act == .unmute ? .muted : .blocked) && offered.blocksLock == nil && offered.doing == nil
-        // A suggestion is told apart on its list, and never from here (`ShellPeoplePages.dismiss`).
-        case .dismissSuggestion: false
+        // A suggestion is told apart on its list, and never from here (`ShellPeoplePages.dismiss`);
+        // a report is sent from its sheet (`ShellReports`).
+        case .dismissSuggestion, .report: false
         }
     }
 
@@ -769,7 +776,7 @@ final class ShellPersonActs {
     private static func isSwitch(_ act: PersonAct) -> Bool {
         switch act {
         case .follow, .unfollow, .withdraw, .acceptRequest, .refuseRequest, .removeFollower, .feature, .unfeature,
-             .dismissSuggestion, .mute, .unmute, .block, .unblock, .blockServer, .unblockServer: false
+             .dismissSuggestion, .mute, .unmute, .block, .unblock, .blockServer, .unblockServer, .report: false
         case .showBoosts, .hideBoosts, .notify, .stopNotifying: true
         }
     }
@@ -821,7 +828,7 @@ final class ShellPersonActs {
         case .block: try await through.block(accountID, true)
         case .unblock: try await through.block(accountID, false)
         // Sent through `servers`, and never from here.
-        case .dismissSuggestion, .blockServer, .unblockServer: throw MastodonRequestError.invalidURL
+        case .dismissSuggestion, .blockServer, .unblockServer, .report: throw MastodonRequestError.invalidURL
         }
     }
 
@@ -845,7 +852,7 @@ final class ShellPersonActs {
         case .unblock: !answer.blocking
         case .blockServer: answer.serverBlocked
         case .unblockServer: !answer.serverBlocked
-        case .dismissSuggestion: false
+        case .dismissSuggestion, .report: false
         }
     }
 }
@@ -880,6 +887,11 @@ extension ShellPersonPages {
         }
         if PersonActing.asksOnASheet(act) {
             ask(act, of: who, in: session)
+            return
+        }
+        // A report is written on a sheet of its own, and sent only from there (#339).
+        if act == .report {
+            if stands(to: who, in: session)?.reporting.contains(.report) == true { await reports.start(who, people: self, in: session) }
             return
         }
         let came = await acts.pressCame(act, on: who, said: said(of: who, in: session), in: session)
