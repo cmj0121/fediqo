@@ -432,6 +432,9 @@ struct StatusDTO: Decodable, Sendable {
     /// **Read leniently**, as `quote` is: a shape this build cannot read — a string, a fork's
     /// own idea — is no name, and never costs the reader the status.
     let application: Lenient<AppDTO>?
+    /// The post's poll (#331), `null` on a status that has none. **Read leniently**, as `quote`
+    /// is: a poll of a shape this build cannot read is no poll, and never costs the status.
+    let poll: Lenient<PollDTO>?
 
     /// A value read where it can be and nothing where it cannot, rather than a failed decode.
     struct Lenient<Wrapped: Decodable & Sendable>: Decodable, Sendable {
@@ -722,6 +725,7 @@ struct StatusDTO: Decodable, Sendable {
             editedAt: Self.edited(subject.editedAt?.value, posted: subject.createdAt, now: Date()),
             language: subject.language?.value,
             via: Self.applicationName(subject.application),
+            poll: subject.poll?.value?.poll,
             // What it refers to, as the status says it: the post it answers, the post it quotes.
             refs: [
                 Self.answers(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),

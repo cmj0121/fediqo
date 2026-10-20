@@ -33,7 +33,9 @@ extension StoreFile {
         "CREATE INDEX IF NOT EXISTS note_cites_many ON note(host) WHERE instr(refs, '\"id\"') > 0 AND \(citesMany)",
         // `note_cites` and `note_cites_many` answer what `note_refers` did (#360).
         "DROP INDEX IF EXISTS note_refers",
-        "CREATE INDEX IF NOT EXISTS note_marked ON note(host) WHERE \(readerSaidOrOwing)",
+        // `note_marked_vote` answers what `note_marked` did, and a vote with it (#331).
+        "DROP INDEX IF EXISTS note_marked",
+        "CREATE INDEX IF NOT EXISTS note_marked_vote ON note(host) WHERE \(readerSaidOrOwing)",
     ]
 
     /// The id a row's first reference names, as `note_cites` holds it (#360): a row with one
@@ -1098,7 +1100,7 @@ extension StoreFile {
             let (named, arguments) = try rows(of: hosts)
             try db.execute(sql: """
                 UPDATE note SET bookmarked = NULL,
-                facts = CASE WHEN json_valid(facts) THEN json_remove(facts, '$.boosted', '$.favourited') ELSE facts END,
+                facts = CASE WHEN json_valid(facts) THEN json_remove(facts, '$.boosted', '$.favourited', '$.poll.voted', '$.poll.ownVotes') ELSE facts END,
                 refs_due = CASE WHEN refs_due AND \(arrivedAsReader) THEN 0 ELSE refs_due END
                 WHERE \(named) AND \(readerSaidOrOwing) AND \(readerMarked)
                 """, arguments: arguments)
@@ -1117,10 +1119,12 @@ extension StoreFile {
         String(decoding: try JSONEncoder().encode(values), as: UTF8.self)
     }
 
-    /// What a reader's reads said they did: a boost, a favourite, a bookmark — any word on it.
+    /// What a reader's reads said they did: a boost, a favourite, a bookmark, a vote — any word
+    /// on it.
     static let readerSaid = """
         (bookmarked IS NOT NULL OR (CASE WHEN json_valid(facts) THEN \
-        json_extract(facts, '$.boosted') IS NOT NULL OR json_extract(facts, '$.favourited') IS NOT NULL ELSE 0 END))
+        json_extract(facts, '$.boosted') IS NOT NULL OR json_extract(facts, '$.favourited') IS NOT NULL \
+        OR json_extract(facts, '$.poll.voted') IS NOT NULL ELSE 0 END))
         """
 
     /// Whether a row arrived by a signed read (`ItemStore.arrivedAsReader`): through no public
@@ -1132,7 +1136,7 @@ extension StoreFile {
         WHERE j.type = 'object' AND json_extract(j.value, '$.kind') IN ('home', 'list')) OR \(readerSaid)))
         """
 
-    /// Every row the taking back of a reader's marks may change, as `note_marked` holds them: a
+    /// Every row the taking back of a reader's marks may change, as `note_marked_vote` holds them: a
     /// statement names it word for word for the index to answer it.
     static let readerSaidOrOwing = "(\(readerSaid) OR refs_due)"
 

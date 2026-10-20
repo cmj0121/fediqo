@@ -732,7 +732,7 @@ public actor ItemStore {
         assert(
             incoming.allSatisfy { note in
                 !note.source.kind.saysReaderMarks || note.asked.place != nil
-                    || (note.boosted == nil && note.favourited == nil && note.bookmarked == nil)
+                    || !note.saysReader
             },
             "a copy saying what the reader did reached the store without when it was sent"
         )
@@ -790,7 +790,12 @@ public actor ItemStore {
                 // the post says now, where it stood, and keeps what it said. A copy that is the
                 // older of the two — a read still on its way when a later one landed — changes no
                 // word of it.
-                if note.isLater(than: existing) { merged = merged.revised(by: note, was: existing) }
+                if note.isLater(than: existing) {
+                    merged = merged.revised(by: note, was: existing)
+                    // The poll as the change says it, and the reader's vote in it as the marks
+                    // are: not this copy's word where it was sent before their own vote landed.
+                    if older { merged.poll = Poll.later(note.poll, over: existing.poll, reader: false) }
+                }
                 // The same source handing the post over again is the source having it (#179):
                 // a mark it once earned comes off.
                 let kept = categories != existing.categories
@@ -2973,7 +2978,7 @@ public actor ItemStore {
             case .board: break
             }
         }
-        return through || note.boosted != nil || note.favourited != nil || note.bookmarked != nil
+        return through || note.saysReader
     }
 
     /// How one load ended, as whoever made the request reports it.
@@ -3162,8 +3167,8 @@ public actor ItemStore {
             // on its own what only the sign-in they ended was shown — so the debt is dropped
             // here, at the moment and for the reason their marks are.
             let owesAsReader = note.refsDue && Self.arrivedAsReader(note)
-            guard owesAsReader || note.boosted != nil || note.favourited != nil || note.bookmarked != nil else { continue }
-            var plain = note.boosted != nil || note.favourited != nil || note.bookmarked != nil ? note.withoutReaderMarks() : note
+            guard owesAsReader || note.saysReader else { continue }
+            var plain = note.saysReader ? note.withoutReaderMarks() : note
             if owesAsReader {
                 plain.refsDue = false
                 stalled.remove(key)
@@ -3201,7 +3206,7 @@ public actor ItemStore {
             case .forgetReaderMarks(let hosts):
                 guard hosts.contains(note.key.host) else { continue }
                 let owesAsReader = note.refsDue && Self.arrivedAsReader(note)
-                if note.boosted != nil || note.favourited != nil || note.bookmarked != nil {
+                if note.saysReader {
                     note = note.withoutReaderMarks()
                 }
                 if owesAsReader { note.refsDue = false }
