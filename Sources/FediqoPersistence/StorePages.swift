@@ -882,6 +882,20 @@ extension StoreFile {
                 sql += " AND gone_at <= ?"
                 arguments = [cutoff]
             }
+        case .authors(let authors):
+            // The maker's handle is one of the facts a row draws, in no column of its own.
+            sql += " AND host = ? AND json_extract(facts, '$.handle') <> ''"
+            arguments = [authors.host]
+            if let handle = authors.handle {
+                sql += " AND lower(json_extract(facts, '$.handle')) = lower(?)"
+                arguments.append(handle)
+            } else if let server = authors.server {
+                // A server's name has no letter `LIKE` reads as a pattern but `_`, which no host has.
+                sql += " AND lower(json_extract(facts, '$.handle')) LIKE ?"
+                arguments.append("%@" + server)
+            } else {
+                sql += " AND 0"
+            }
         }
         return try poolRead { db, beside in
             try Row.fetchAll(db, sql: sql, arguments: StatementArguments(arguments)).map { NoteKey(host: $0["host"], id: $0["id"]) }

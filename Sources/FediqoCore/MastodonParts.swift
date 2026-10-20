@@ -39,6 +39,11 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     /// (#317) — from whichever reader marked them. **Reads, and stands without `acting`**: a
     /// sign-in that only reads may be asked for it, and only where the person presses for it.
     case marks
+    /// Who the reader mutes and blocks at the source, and the servers they block (#314): the
+    /// three lists read, and each muting and blocking made and undone. **Stands without
+    /// `acting`**, as following does: a sign-in that only reads may be asked for it, and then
+    /// sees the lists and changes none of them.
+    case blocks
 
     /// The words a page asks for this part.
     public var words: [String] {
@@ -52,6 +57,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
         case .account: ["write:accounts"]
         case .media: ["write:media"]
         case .marks: ["read:bookmarks", "read:favourites"]
+        case .blocks: ["read:mutes", "write:mutes", "read:blocks", "write:blocks"]
         }
     }
 
@@ -60,7 +66,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var wordsBesideActing: [String] {
         switch self {
         case .notices: ["write:notifications"]
-        case .reading, .search, .acting, .bookmarks, .follows, .account, .media, .marks: []
+        case .reading, .search, .acting, .bookmarks, .follows, .account, .media, .marks, .blocks: []
         }
     }
 
@@ -70,7 +76,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var rider: Bool {
         switch self {
         case .search, .bookmarks: true
-        case .reading, .acting, .notices, .follows, .account, .media, .marks: false
+        case .reading, .acting, .notices, .follows, .account, .media, .marks, .blocks: false
         }
     }
 
@@ -79,7 +85,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var needsActing: Bool {
         switch self {
         case .bookmarks, .media: true
-        case .reading, .search, .acting, .notices, .follows, .account, .marks: false
+        case .reading, .search, .acting, .notices, .follows, .account, .marks, .blocks: false
         }
     }
 }

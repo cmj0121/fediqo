@@ -93,6 +93,10 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case requests
         /// The people somebody features on their profile (#315).
         case featured
+        /// The people whoever is signed in mutes, and blocks (#314): the reader's own, asked
+        /// only as them.
+        case muted
+        case blocked
 
         /// The two lists that are somebody's, in the order their page counts them.
         static let ofSomebody: [Which] = [.following, .followers]
@@ -133,10 +137,25 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case .following: counted = person.tally.following
         case .followers: counted = person.tally.followers
         // Not somebody's: a directory is made by `init(directoryAt:)`, and counts nobody.
-        case .directory, .found, .suggested, .requests, .featured: counted = nil
+        case .directory, .found, .suggested, .requests, .featured, .muted, .blocked: counted = nil
         }
         hidden = person.hidesLists
     }
+
+    /// The people whoever is signed in to the source at `host` mutes, or blocks (#314): of no
+    /// account named here, counted by nobody — the source gives no figure — and hidden by nobody.
+    init(_ which: Which, at host: String) {
+        self.which = which
+        self.host = host
+        accountID = ""
+        handle = ""
+        counted = nil
+        hidden = false
+    }
+
+    /// Whether the list is the reader's own whoever's page it was reached from, and is asked
+    /// only as them: who asks to follow them, and whom they mute and block (#314).
+    var isReadersOwn: Bool { which == .requests || which == .muted || which == .blocked }
 
     /// The people who ask to follow whoever is signed in to the source at `host` (#313): of
     /// no account named here, counted by nobody on the list itself, and hidden by nobody.
@@ -205,6 +224,8 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case .followers: .followers(of: accountID)
         case .requests: .requests
         case .featured: .featured(by: accountID)
+        case .muted: .muted
+        case .blocked: .blocked
         case .directory, .found, .suggested: nil
         }
     }
@@ -220,7 +241,7 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case .directory: .directory
         case .suggested: .suggestions
         case .featured: .featuredPeople
-        case .following, .followers, .found, .requests: nil
+        case .following, .followers, .found, .requests, .muted, .blocked: nil
         }
     }
 }
@@ -396,7 +417,7 @@ final class ShellPeoplePages {
         // **Whose own list this is is known by handle and no other way**: a reader the source
         // has not named — a sign-in that only reads — is not known to be looking at their own.
         // Who asks to follow the reader is said to the reader, and drawn for nobody else.
-        if list.which == .requests, now == .nobody { return nil }
+        if list.isReadersOwn, now == .nobody { return nil }
         var handed = PeopleSaid(list: list, signedIn: now != .nobody, own: Self.isOwn(list, as: now, in: session))
         handed.acts = Self.rowActs(of: handed, at: source, in: session)
         handed.lock = Self.rowLock(of: handed, at: source, in: session)
@@ -453,7 +474,7 @@ final class ShellPeoplePages {
     /// where it is held** — a handle is a name, and another account may be shown under the
     /// same one; by the handle only where no id is held, as it always was.
     private static func isOwn(_ list: PeopleList, as now: AskedAs, in session: ShellSession) -> Bool {
-        if list.which == .requests { return now != .nobody }
+        if list.isReadersOwn { return now != .nobody }
         guard now != .nobody else { return false }
         if let reader = session.mastodon.reader(host: list.host) { return reader.id == list.accountID }
         return now == .reader(list.handle)
@@ -463,14 +484,25 @@ final class ShellPeoplePages {
     /// followers, at a source where somebody is followed.
     private static func offersRows(_ said: PeopleSaid, at source: Source) -> Bool {
         guard said.own, ShellPersonActs.offersFollowing(source) else { return false }
-        return said.list.which == .requests || said.list.which == .followers
+        return said.list.which == .requests || said.list.which == .followers || mutesOrBlocks(said.list)
+    }
+
+    /// Whether `list` is whom the reader mutes or blocks (#314): its rows are taken back under
+    /// muting and blocking's part, and not following's.
+    private static func mutesOrBlocks(_ list: PeopleList) -> Bool {
+        list.which == .muted || list.which == .blocked
     }
 
     /// How the sign-in stands where such a list's rows would offer something and it may not
     /// change who follows whom: its place for following, or — held in part with the rest not
     /// to be asked for — the sentence that says so, unpressed.
     private static func rowLock(of said: PeopleSaid, at source: Source, in session: ShellSession) -> PartWords.Place? {
-        guard offersRows(said, at: source), !ShellPersonActs.changes(at: source.host, in: session) else { return nil }
+        guard offersRows(said, at: source) else { return nil }
+        if mutesOrBlocks(said.list) {
+            guard !ShellPersonActs.blocks(at: source.host, in: session) else { return nil }
+            return session.mastodon.place(.blocks, host: source.host) ?? PartWords.Place(kind: .none, key: "part.ask.partly")
+        }
+        guard !ShellPersonActs.changes(at: source.host, in: session) else { return nil }
         return session.mastodon.place(.follows, host: source.host) ?? PartWords.Place(kind: .none, key: "part.ask.partly")
     }
 
@@ -479,11 +511,16 @@ final class ShellPeoplePages {
     /// else's list, on any other, or to a sign-in that may not change who follows whom.
     private static func rowActs(of said: PeopleSaid, at source: Source, in session: ShellSession) -> [PersonAct] {
         if takesOff(said, at: source) { return ShellPersonActs.features(at: source.host, in: session) ? [.unfeature] : [] }
-        guard offersRows(said, at: source), ShellPersonActs.changes(at: source.host, in: session) else { return [] }
+        guard offersRows(said, at: source) else { return [] }
+        if mutesOrBlocks(said.list) {
+            guard ShellPersonActs.blocks(at: source.host, in: session) else { return [] }
+            return said.list.which == .muted ? [.unmute] : [.unblock]
+        }
+        guard ShellPersonActs.changes(at: source.host, in: session) else { return [] }
         switch said.list.which {
         case .requests: return [.acceptRequest, .refuseRequest]
         case .followers: return [.removeFollower]
-        case .following, .directory, .found, .suggested, .featured: return []
+        case .following, .directory, .found, .suggested, .featured, .muted, .blocked: return []
         }
     }
 
@@ -546,8 +583,11 @@ final class ShellPeoplePages {
               let offered = said(of: list, in: session), offered.acts.contains(act),
               offered.people.contains(where: { $0.accountID == person.accountID })
         else { return }
-        let done = await acts.pressRow(act, on: person, standing: page.stands[person.accountID], listed: list.which, in: session)
-        guard done else { return }
+        let came = await acts.pressRowCame(act, on: person, standing: page.stands[person.accountID], listed: list.which, in: session)
+        // A mute or a block taken back from the reader's list of them: what was hidden shows (#314)
+        // once the source did it, whatever became of the row.
+        if came.sourceDid { ShellPersonPages.undone(act, of: person, in: session) }
+        guard came.taken else { return }
         // Answered: the count of who asks is old, whichever page now stands for the list.
         if list.which == .requests { askingOld[source.host] = session.mastodon.askingCheck(host: source.host) }
         guard self.standing(list, at: source, in: session)?.number == page.number else { return }
@@ -672,7 +712,7 @@ final class ShellPeoplePages {
         guard let source = ShellPersonPages.source(at: list.host, in: session) else { return }
         let held = readers.look(at: source.host, in: session).held
         // Who asks to follow the reader is asked of the source as them, and never unsigned.
-        if list.which == .requests, held == nil { return }
+        if list.isReadersOwn, held == nil { return }
         // A thing the host said it has not is not asked for by being opened.
         if let thing = list.thing, hosts.has(thing, at: source.host) == .absent { return }
         if let page = self.standing(list, at: source, in: session) {
@@ -841,6 +881,7 @@ final class ShellPeoplePages {
         guard !named.isEmpty else { return }
         pages[id]?.stood.formUnion(named)
         let through = session.reach.standing(session.mastodon.authorized(token: held, within: deadline, for: .people))
+        let ticket = session.hides.ticket()
         var left = named[...]
         while !left.isEmpty {
             let asked = Array(left.prefix(MastodonStanding.most))
@@ -850,6 +891,12 @@ final class ShellPeoplePages {
                 guard isStill(page.number, round: page.round, of: list, at: source, in: session) else { return }
                 for silent in asked where said[silent] == nil { pages[id]?.stands[silent] = nil }
                 pages[id]?.stands.merge(said) { _, now in now }
+                // A mute or a block the source says is no longer there hides nothing more (#314).
+                for person in people {
+                    if let now = said[person.accountID] {
+                        ShellPersonActs.heard(now, key: DummyPerson(person).id, at: source.host, since: ticket, in: session)
+                    }
+                }
             } catch {
                 // The rows stay as they are: nothing is said of it, and nothing is drawn in its
                 // place. What it says of the sign-in is told whatever became of the list — to
@@ -875,7 +922,7 @@ final class ShellPeoplePages {
         case .suggested:
             let passed = next.flatMap(MastodonSuggestions.passed) ?? 0
             return passed + stretchLength >= MastodonSuggestions.furthest
-        case .following, .followers, .requests, .featured: return false
+        case .following, .followers, .requests, .featured, .muted, .blocked: return false
 
         }
     }

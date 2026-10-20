@@ -105,7 +105,7 @@ struct PeopleSaid: Equatable {
     /// Whether the title names the source that keeps the list — nobody's list, or the
     /// reader's own requests — and not whose list it is.
     static func titleNamesHost(_ list: PeopleList, own: Bool = false) -> Bool {
-        list.readByCount || list.which == .requests || (own && list.which == .featured)
+        list.readByCount || list.isReadersOwn || (own && list.which == .featured)
     }
 
     /// What an order of a directory is called, in the control that chooses it.
@@ -189,6 +189,8 @@ struct PeopleSaid: Equatable {
         case .suggested: "people.suggested"
         case .requests: "people.requests"
         case .featured: "people.featured"
+        case .muted: "people.muted"
+        case .blocked: "people.blocked"
         case .following, .followers: "people"
         }
     }
@@ -233,7 +235,7 @@ struct PeopleSaid: Equatable {
             let key = switch list.which {
             case .found: "people.found.foot.farthest"
             case .suggested: "people.suggested.foot.farthest"
-            case .directory, .following, .followers, .requests, .featured: "people.directory.foot.farthest"
+            case .directory, .following, .followers, .requests, .featured, .muted, .blocked: "people.directory.foot.farthest"
             }
             return String(format: L10n.t(key, language: language), L10n.grouped(people.count, language: language), source)
         case .end:
@@ -276,6 +278,9 @@ struct PeopleSaid: Equatable {
         }
         if list.which == .featured {
             return String(format: L10n.t("people.featured.none", language: language), source)
+        }
+        if list.which == .muted || list.which == .blocked {
+            return String(format: L10n.t("\(Self.words(list.which)).none", language: language), source)
         }
         if list.hidden, !own {
             return String(format: L10n.t("people.hidden", language: language), list.lineHandle)

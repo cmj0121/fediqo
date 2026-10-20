@@ -160,7 +160,8 @@ public struct FediqoRootView: View {
             http: http, store: store, forums: forums, mastodon: mastodon,
             // A launch made for a picture writes no timeline down: one it makes for itself
             // (`ShellStaged.Step.empty`) is gone with the launch.
-            timelines: staged == nil ? WrittenTimelineStore(defaults: .standard, file: lists?.timelines) : nil
+            timelines: staged == nil ? WrittenTimelineStore(defaults: .standard, file: lists?.timelines) : nil,
+            hides: staged == nil ? ShellHides(defaults: .standard, file: lists?.hides) : nil
         )
         session.persist = persist
         session.persistUnsent = persistUnsent
@@ -405,7 +406,7 @@ public struct FediqoRootView: View {
             // its own rather than the dialog spelled here — see `WithdrawQuestion`.
             .modifier(WithdrawQuestion(session: session))
             .modifier(PartQuestion(session: session))
-            .modifier(ProfileSheetPresenter(profile: people.profile, session: session))
+            .modifier(PersonPresenters(people: people, session: session))
             .modifier(UnsentPresenters(session: session))
             // An answer, over the conversation it belongs to (#108). Driven by the session's one
             // value, so the key and the mark open the same surface by writing the same thing.
@@ -3062,6 +3063,20 @@ private struct WithdrawQuestion: ViewModifier {
             get: { session.withdrawing.map { Asked(item: $0, copy: session.withdrawingCopy ?? $0) } },
             set: { if $0 == nil { session.cancelWithdraw() } }
         )
+    }
+}
+
+/// What a person's page puts up over everything — their profile and the mute or block asked —
+/// gathered in one modifier so the root's chain of presenters stays short enough to type-check in
+/// time (`test-before-push`).
+private struct PersonPresenters: ViewModifier {
+    let people: ShellPersonPages
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(ProfileSheetPresenter(profile: people.profile, session: session))
+            .modifier(StandingSheetPresenter(people: people, session: session))
     }
 }
 

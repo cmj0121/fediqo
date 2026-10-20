@@ -61,6 +61,7 @@ public struct ListFile: @unchecked Sendable {
 
     package static let allowancesName = "allowances.json"
     package static let timelinesName = "timelines.json"
+    package static let hidesName = "hides.json"
 
     package init(
         directory: URL, name: String, key: String, defaults: UserDefaults, protected: ProtectedData,
@@ -262,6 +263,9 @@ public struct ListFiles: Sendable {
     public let allowances: ListFile
     /// The timelines the person wrote (#27).
     public let timelines: ListFile
+    /// What the person chose to hide here of whom they muted or blocked at a source (#314).
+    /// Carried in a package with the other two (`all`).
+    public let hides: ListFile
 
     public init(directory: URL, defaults: UserDefaults, protected: ProtectedData) {
         self.init(directory: directory, defaults: defaults, protected: protected, device: .this)
@@ -276,7 +280,11 @@ public struct ListFiles: Sendable {
             directory: directory, name: ListFile.timelinesName, key: "fediqo.timelines",
             defaults: defaults, protected: protected, device: device
         )
+        hides = ListFile(
+            directory: directory, name: ListFile.hidesName, key: "fediqo.hides",
+            defaults: defaults, protected: protected, device: device
+        )
     }
 
-    package var all: [ListFile] { [allowances, timelines] }
+    package var all: [ListFile] { [allowances, timelines, hides] }
 }

@@ -84,6 +84,38 @@ public enum RowSelection: Sendable, Equatable {
     case span(Range<Date>, host: String?)
     /// Every row marked gone from its source, at or before a moment or at any.
     case gone(markedBy: Date?)
+    /// Every row one person made at one source, or everybody of one server there (#314).
+    case authors(HeldAuthors)
+}
+
+/// Whose rows a mute or a block lets go (#314): one person at one source, by their handle — or
+/// everybody one server is home to, at one source. **By what the row says made it**: the handle
+/// a row carries is its maker's, so a reblog they made is theirs and a post of theirs another
+/// reblogged is not.
+public struct HeldAuthors: Sendable, Hashable {
+    /// The source the rows came through, as a source is named: lower case.
+    public let host: String
+    /// `@user@host`, as the source spelt it: one person. Nothing where a server is meant.
+    public let handle: String?
+    /// The server, as a host: everybody whose handle names it. Nothing where a person is meant.
+    public let server: String?
+
+    public static func person(_ handle: String, at host: String) -> HeldAuthors {
+        HeldAuthors(host: host.lowercased(), handle: handle, server: nil)
+    }
+
+    public static func server(_ server: String, at host: String) -> HeldAuthors {
+        HeldAuthors(host: host.lowercased(), handle: nil, server: server.lowercased())
+    }
+
+    /// Whether `note` is one of theirs: through this source, made by this handle — whatever its
+    /// case — or by somebody whose handle names this server.
+    public func wrote(_ note: Note) -> Bool {
+        guard note.source.host == host, !note.handle.isEmpty else { return false }
+        if let handle { return note.handle.caseInsensitiveCompare(handle) == .orderedSame }
+        guard let server, let named = note.handle.split(separator: "@").last else { return false }
+        return named.lowercased() == server
+    }
 }
 
 /// A row of the file past the months limit (`HeldRows.beyond`): its key, and whether it is a

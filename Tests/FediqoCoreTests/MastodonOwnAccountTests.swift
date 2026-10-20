@@ -63,8 +63,7 @@ struct MastodonOwnAccountTests {
         #expect(part.wordsBesideActing.isEmpty)
         #expect(!part.rider)
         #expect(!part.needsActing)
-        #expect(MastodonPart.allCases.dropLast(2).last == .account)
-        #expect(MastodonPart.allCases.dropLast().last == .media)
+        #expect(MastodonPart.allCases.firstIndex(of: .media) == MastodonPart.allCases.firstIndex(of: .account).map { $0 + 1 })
         #expect(MastodonGrant.of(scopes: "\(Self.r) \(Self.a)") == .reading)
         #expect(!MastodonOAuth.writes("\(Self.r) \(Self.s) \(Self.a)"))
     }
@@ -87,7 +86,7 @@ struct MastodonOwnAccountTests {
         }
         #expect(MastodonParts.page(held: nil, ticked: [.follows, .account]) == "\(f) \(a)")
         #expect(MastodonParts.page(held: "\(r) \(a)", ticked: [.reading, .search], readOnly: true) == "\(r) \(s)")
-        #expect(MastodonParts.everything == "\(r) \(s) \(w) \(b) \(n) \(d) \(f) \(a) write:media read:bookmarks read:favourites")
+        #expect(MastodonParts.everything == "\(r) \(s) \(w) \(b) \(n) \(d) \(f) \(a) write:media read:bookmarks read:favourites read:mutes write:mutes read:blocks write:blocks")
     }
 
     @Test("Today's four sign-in choices ask exactly the strings they asked, byte for byte, and none of them asks for the account part")
@@ -123,7 +122,7 @@ struct MastodonOwnAccountTests {
     func theRegistrationWidens() {
         let (r, s, w, b, n, d, f, a) = (Self.r, Self.s, Self.w, Self.b, Self.n, Self.d, Self.f, Self.a)
         let before = "\(r) \(s) \(w) \(b) \(n) \(d) \(f)"
-        #expect(MastodonRegistration.superset() == "\(before) \(a) write:media read:bookmarks read:favourites")
+        #expect(MastodonRegistration.superset() == "\(before) \(a) write:media read:bookmarks read:favourites read:mutes write:mutes read:blocks write:blocks")
         #expect(MastodonRegistration.superset(listed: Set(before.split(separator: " ").map(String.init))) == before)
         let asked = "\(r) \(s) \(a)"
         #expect(!MastodonRegistration.holds(asked, on: before))

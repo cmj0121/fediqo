@@ -305,6 +305,9 @@ final class ShellPersonPages {
     /// The tabs of each page (F9): which is in front, each tab's lamp, and what they pinned —
     /// numbered on the same count, and let go with the same reader.
     let tabs: ShellPersonTabs
+    /// The mute or the block being asked about on its sheet (#314), where one is: nothing is sent
+    /// while it is up.
+    var standingAsk: StandingAsk?
 
     init() {
         let count = PageErrands(), looks = PageReaders()

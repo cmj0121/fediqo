@@ -90,6 +90,10 @@ struct ItemActing {
     /// Nothing where a vote is offered, or no sign-in is held to ask.
     var voteLock: Lock?
     var askToVote: (() -> Void)?
+    /// Why the row is drawn as hidden, where it is (#314): the person muted or blocked whoever
+    /// made it, or their whole server, and chose that what this device held of them is hidden.
+    /// Nothing for a row drawn as it is.
+    var hidden: HiddenHere?
 
     /// The question taking a post back asks, and what a yes to it does. **The question is built
     /// when the item is chosen** — it names the copy that goes as things stand at the press.

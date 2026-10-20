@@ -465,7 +465,8 @@ struct RequestsTests {
             }
         }
         let lists = try String(contentsOf: shell.appending(path: "ShellPeople.swift"), encoding: .utf8)
-        #expect(lists.components(separatedBy: "acts.pressRow(").count == 2)
+        // Through the sequence, saying what it came to (#314).
+        #expect(lists.components(separatedBy: "acts.pressRowCame(").count == 2)
         // A suggestion dismissed is no act on how the reader stands, and has a guard of its own (#315).
         #expect(!lists.contains("PressGuard<String, PersonAct>"), "a row's act has no guard of its own")
         #expect(lists.components(separatedBy: "PressGuard<").count == 2, "one guard, the dismissal's")

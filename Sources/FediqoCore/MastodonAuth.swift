@@ -895,6 +895,12 @@ public struct MastodonAuthorized: Sendable {
         try await finish(try await send(path: path, method: "DELETE"), path: path)
     }
 
+    /// A DELETE carrying a form through the same door (#314): a block of a whole server taken
+    /// back, which the source names by the form and not by the address.
+    public func delete(path: String, form: [(String, String)]) async throws -> Data {
+        try await finish(try await send(path: path, method: "DELETE", form: form), path: path)
+    }
+
     /// What one request was answered: its body, its status, and its `Link` and
     /// `WWW-Authenticate` headers where it sent them.
     private struct Answered {

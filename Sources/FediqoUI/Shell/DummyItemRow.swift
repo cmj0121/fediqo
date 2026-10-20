@@ -232,6 +232,23 @@ struct DummyItemRow: View {
     /// take (`bodyLines`). The marks are one line on every page and at every type size, giving
     /// way rather than breaking where the line is narrow (`actions`).
     var body: some View {
+        // A post of whoever the person muted or blocked, and chose to hide here (#314): one line
+        // that says why, where the post stood, and nothing of the post.
+        if let hidden = acting.hidden {
+            HiddenRow(hidden: hidden)
+                .padding(.horizontal, ShellSpace.pad)
+                .padding(.vertical, ShellSpace.snug)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(selected ? ShellChrome.floatFill(colorScheme) : .clear)
+                .overlay(alignment: .leading) { lamp }
+                .contentShape(Rectangle())
+                .onTapGesture { onSelect?() }
+        } else {
+            shown
+        }
+    }
+
+    private var shown: some View {
         // Worked out once for the pass and handed down, not read by each band that wants a
         // piece of it: before the hop below has answered, `written` builds the post's own
         // alphabet and scans every line, and four readers made that four dictionaries and
@@ -2315,5 +2332,26 @@ struct SourcePill: View {
             )
             .help(spoken)
             .accessibilityLabel(spoken)
+    }
+}
+
+/// A post drawn as hidden (#314): the glyph of why, and the sentence — who was muted or blocked,
+/// at which source. **Not a rule's**: a rule leaves a post out and the timeline names it; this
+/// is the post's own place, saying what the person chose for it.
+struct HiddenRow: View {
+    let hidden: HiddenHere
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+            Image(systemName: hidden.symbol)
+                .accessibilityHidden(true)
+            Text(hidden.words)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .shellFont(.meta)
+        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(hidden.words)
     }
 }

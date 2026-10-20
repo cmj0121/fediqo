@@ -149,6 +149,12 @@ struct SourceReach {
         MastodonFeaturing(door: door)
     }
 
+    /// The whole servers the reader blocks, and blocking one or stopping (#314): only ever as
+    /// the reader, through the signed-in door.
+    func serverBlocks(_ door: MastodonAuthorized) -> MastodonServerBlocks {
+        MastodonServerBlocks(door: door)
+    }
+
     /// What somebody features on their profile (#315, #318), as the reader, through `door`.
     func featured(_ door: MastodonAuthorized) -> MastodonFeatured {
         MastodonFeatured(door: door)

@@ -101,8 +101,10 @@ struct FeaturingTests {
         let before = try #require(acts.acting(of: Self.ada, said: page, in: session))
         #expect(before.more == [.feature, .unfollow] && before.featurable && before.accountLock == nil)
         let menu = before.menu(head: ["Ada"]) { _ in }
-        #expect(menu.head == ["Ada"])
-        #expect(menu.items.map(\.name) == [PersonActing.name(.feature), PersonActing.name(.unfollow)])
+        // Muting and blocking follow them (#314), dim with their own lock where it is not held.
+        #expect(menu.head.first == "Ada" && !menu.head.contains(L10n.t("part.account.unasked")))
+        #expect(Array(menu.items.map(\.name).prefix(2)) == [PersonActing.name(.feature), PersonActing.name(.unfollow)])
+        #expect(Array(menu.items.map(\.name).dropFirst(2)) == before.keeping.map { PersonActing.name($0, server: before.server) })
         #expect(menu.items.first?.isDanger == false && menu.items.first?.look == .live, "plain, and at once")
         #expect(PersonActing.name(.feature, language: .taiwanese) == "在個人檔案上推薦")
 
@@ -181,7 +183,7 @@ struct FeaturingTests {
         #expect(lock.asks)
         var pressed: [PersonAct] = []
         let menu = acting.menu(head: ["Ada"]) { pressed.append($0) }
-        #expect(menu.head == ["Ada", "This sign-in was not asked to change your profile. Update permission"])
+        #expect(Array(menu.head.prefix(2)) == ["Ada", "This sign-in was not asked to change your profile. Update permission"])
         let item = try #require(menu.items.first)
         #expect(item.look == .dim(.askAgain) && item.symbol == SourceRow.permissionSymbol && item.answers)
         item.press { _ in }

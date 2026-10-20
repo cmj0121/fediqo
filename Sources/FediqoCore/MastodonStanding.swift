@@ -31,13 +31,23 @@ public struct PersonStanding: Hashable, Sendable {
     /// of a follow, and of nothing else**, as what is taken from them is: only somebody followed
     /// can be featured, and unfollowing takes them off. Nothing where the source did not say.
     public var featured: Bool?
+    /// Whether the reader's muting of them keeps their notices from the reader too (#314):
+    /// **said of a mute, and of nothing else** — nothing where the reader does not mute them,
+    /// and nothing where the source did not say.
+    public var mutesNotices: Bool?
+    /// The reader blocks the whole server they live on (#314). **Only its yes is a word**: a
+    /// source that leaves it out has said nothing of a block of a server, and is read as none.
+    public var serverBlocked: Bool
 
     public init(
         accountID: String, following: Bool = false, followedBy: Bool = false, requested: Bool = false,
         muting: Bool = false, mutedUntil: Date? = nil, blocking: Bool = false, blockedBy: Bool = false,
-        showsBoosts: Bool? = nil, notifies: Bool? = nil, featured: Bool? = nil
+        showsBoosts: Bool? = nil, notifies: Bool? = nil, featured: Bool? = nil, mutesNotices: Bool? = nil,
+        serverBlocked: Bool = false
     ) {
         self.featured = featured
+        self.mutesNotices = muting ? mutesNotices : nil
+        self.serverBlocked = serverBlocked
         self.showsBoosts = showsBoosts
         self.notifies = notifies
         self.accountID = accountID
@@ -188,6 +198,39 @@ public struct MastodonStanding: Sendable {
         )
     }
 
+    /// The word a mute is sent with to say whether their notices are kept from the reader too,
+    /// and the one that says for how long, in seconds — none, for good (#314).
+    static let noticesWord = "notifications"
+    static let durationWord = "duration"
+
+    /// Mutes the account `accountID` names (#314): their posts and boosts kept from the reader
+    /// by the source — and, with `notices`, what they do to the reader as well — for `seconds`,
+    /// or for good where that is nothing. Hands back how the reader stands to them afterwards.
+    /// **Each word is sent whatever it is**: a mute said again is the mute as last sent (asked
+    /// of a real one: `MastodonBlocksCaptures`). A length of none or less is refused before
+    /// anything is asked: "for good" is said by sending none.
+    public func mute(_ accountID: String, notices: Bool = true, for seconds: Int? = nil) async throws -> PersonStanding {
+        guard ListSubscription.isPathSegment(accountID), (seconds ?? 1) > 0 else { throw MastodonRequestError.invalidURL }
+        let form = [(Self.noticesWord, String(notices)), (Self.durationWord, String(seconds ?? 0))]
+        return try Self.answered(about: accountID, try await door.post(path: "/api/v1/accounts/\(accountID)/mute", form: form))
+    }
+
+    /// Mutes them no longer, and hands back how the reader stands to them afterwards. **Of
+    /// somebody not muted it changes nothing**, and is answered the same.
+    public func unmute(_ accountID: String) async throws -> PersonStanding {
+        guard ListSubscription.isPathSegment(accountID) else { throw MastodonRequestError.invalidURL }
+        return try Self.answered(about: accountID, try await door.post(path: "/api/v1/accounts/\(accountID)/unmute", form: []))
+    }
+
+    /// Blocks the account `accountID` names (#314), or with `on` false blocks them no longer,
+    /// and hands back how the reader stands to them afterwards. **A block takes a follow either
+    /// way with it**, which the source says in its answer. Asked twice it answers the same.
+    public func block(_ accountID: String, _ on: Bool = true) async throws -> PersonStanding {
+        guard ListSubscription.isPathSegment(accountID) else { throw MastodonRequestError.invalidURL }
+        let path = "/api/v1/accounts/\(accountID)/\(on ? "block" : "unblock")"
+        return try Self.answered(about: accountID, try await door.post(path: path, form: []))
+    }
+
     /// The standing a press was answered with, where it is about whom the press was about.
     static func answered(about accountID: String, _ body: Data) throws -> PersonStanding {
         guard let said = try? MastodonJSON.decoder.decode(Said.self, from: body), let standing = said.standing,
@@ -225,6 +268,8 @@ public struct MastodonStanding: Sendable {
         let showingReblogs: Bool?
         let notifying: Bool?
         let endorsed: StatusDTO.Lenient<Bool>?
+        let mutingNotifications: StatusDTO.Lenient<Bool>?
+        let domainBlocking: StatusDTO.Lenient<Bool>?
 
         /// The standing, where the source said every part of it. What is taken from them is
         /// no such part: a source that leaves it out has said the rest.
@@ -234,7 +279,8 @@ public struct MastodonStanding: Sendable {
                 accountID: id, following: following, followedBy: followedBy, requested: requested, muting: muting,
                 mutedUntil: muting ? mutingExpiresAt?.value : nil, blocking: blocking, blockedBy: blockedBy,
                 showsBoosts: following ? showingReblogs : nil, notifies: following ? notifying : nil,
-                featured: following ? endorsed?.value : nil
+                featured: following ? endorsed?.value : nil, mutesNotices: mutingNotifications?.value,
+                serverBlocked: domainBlocking?.value ?? false
             )
         }
     }

@@ -118,7 +118,9 @@ struct PeopleStandingTests {
         let said = try #require(pages.said(of: Self.followers, in: session))
         #expect(said.stands == [
             "3": PersonStanding(accountID: "3", followedBy: true),
-            "1": PersonStanding(accountID: "1", following: true, muting: true, showsBoosts: true, notifies: false, featured: false),
+            "1": PersonStanding(
+                accountID: "1", following: true, muting: true, showsBoosts: true, notifies: false, featured: false, mutesNotices: true
+            ),
         ])
         #expect(said.reading == .said && said.foot == .more && said.stateLine() == nil && session.notes.isEmpty)
         #expect(PersonRow.standing(said.stands["3"], language: .english) == ["Follows you"])

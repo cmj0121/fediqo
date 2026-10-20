@@ -1101,6 +1101,7 @@ struct PartAskTests {
         .account: ["write:accounts"],
         .media: ["write:media"],
         .marks: ["read:bookmarks", "read:favourites"],
+        .blocks: ["read:mutes", "write:mutes", "read:blocks", "write:blocks"],
     ]
 
     private static func split(_ scopes: String) -> Set<String> {

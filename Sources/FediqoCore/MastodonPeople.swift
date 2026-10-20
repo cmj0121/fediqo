@@ -47,11 +47,19 @@ public struct MastodonPeople: Sendable {
         /// Whom the reader features on their own profile (#315): the reader's own, and so asked
         /// only signed in. Absent where the host says so, as `featured(by:)` is.
         case featuredByReader
+        /// Whom the reader mutes, and whom they block (#314): the reader's own, and so asked only
+        /// signed in. Read on by the source's own next, which names the mute or the block and
+        /// not the person, as following does.
+        case muted
+        case blocked
 
         /// Where the requests to follow the reader are listed, and under it answered.
         static let requestsPath = "/api/v1/follow_requests"
         /// Where the people the reader features are listed.
         static let featuredByReaderPath = "/api/v1/endorsements"
+        /// Where whom the reader mutes and blocks are listed.
+        static let mutedPath = "/api/v1/mutes"
+        static let blockedPath = "/api/v1/blocks"
 
         /// Where the list is asked. Nothing for an id that could not stand in a path as one
         /// segment: it came out of a stranger's answer.
@@ -62,6 +70,8 @@ public struct MastodonPeople: Sendable {
             case .featured(let id) where ListSubscription.isPathSegment(id): "/api/v1/accounts/\(id)/endorsements"
             case .requests: Self.requestsPath
             case .featuredByReader: Self.featuredByReaderPath
+            case .muted: Self.mutedPath
+            case .blocked: Self.blockedPath
             default: nil
             }
         }
@@ -71,7 +81,7 @@ public struct MastodonPeople: Sendable {
         var mayBeAbsent: Bool {
             switch self {
             case .featured, .featuredByReader: true
-            case .followers, .following, .requests: false
+            case .followers, .following, .requests, .muted, .blocked: false
             }
         }
     }
