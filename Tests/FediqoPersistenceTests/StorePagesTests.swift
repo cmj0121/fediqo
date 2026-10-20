@@ -214,6 +214,44 @@ struct StorePagesTests {
         }
     }
 
+    /// All is everything held (#282): every category of every source — Home, a list, the public
+    /// timeline, Trends, the reader's marks, a forum's board, and posts no timeline listed, as a
+    /// search or an opened thread brings them — in the one order. A busy source filling the
+    /// first page holds back nothing of the others: reading down reaches every one of them.
+    @Test("All, read down page after page, is every post held of every source and category in one order")
+    func allIsEverything() async throws {
+        let base = Date(timeIntervalSince1970: 1_790_000_000)
+        let kinds: [Set<FediqoCore.Category>] = [[.home], [.list(id: "7")], [.trends], [.bookmarks], [.favourites], []]
+        var notes: [Note] = (0..<300).map { minute in
+            Note(
+                id: "busy\(minute)", source: Self.two, author: "B", handle: "b@two.example", body: "busy",
+                postedAt: base.addingTimeInterval(Double(10_000 + minute) * 60), categories: [.public]
+            )
+        }
+        for (n, categories) in kinds.enumerated() {
+            notes.append(Note(
+                id: "one\(n)", source: Self.one, author: "A", handle: "a@one.example", body: "one",
+                postedAt: base.addingTimeInterval(Double(n) * 60), categories: categories
+            ))
+        }
+        notes.append(Note(
+            id: "discuz:forum.example:9", source: Self.forum, author: "F", handle: "f@forum.example", body: "topic",
+            postedAt: base.addingTimeInterval(30 * 60), categories: [.board(id: "2")]
+        ))
+        let (file, loaded) = try await store(notes)
+        let all = PageQuery(
+            timeline: TimelineDefinition.all.id, generation: 1,
+            compiled: CompiledTimeline(.all, sources: Self.sources), latestEnd: nil, keepFrom: nil
+        )
+        let pages = try await down(file, all, limit: 100)
+        let first = try #require(pages.first)
+        #expect(first.rows.allSatisfy { $0.note.source.host == Self.two.host }, "the busy source fills the newest page")
+        let read = pages.flatMap(\.rows).map(\.note.key)
+        #expect(Set(read) == Set(loaded.map(\.key)), "and every post held is read, of every source and category")
+        #expect(read.count == loaded.count, "each once")
+        #expect(read == oracle(loaded, all), "newest first, in the one order")
+    }
+
     @Test("a page never ends inside the copies of one post", arguments: [1, 2, 7])
     func runsWhole(limit: Int) async throws {
         let (file, _) = try await store()
