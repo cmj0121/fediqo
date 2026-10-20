@@ -119,7 +119,9 @@ extension ShellReload {
                 }
                 try Task.checkCancellation()
                 await session.store.land(down, below: post, of: .public, ifSourceHere: host)
-                return down.stopped == nil
+                guard let stopped = down.stopped else { return true }
+                _ = walkedAway(from: .public, of: host, stopped)
+                return false
             // The reader's marks, read down by mark from where the place keeps (#317).
             case .bookmarks, .favourites:
                 try await readDownMarks(category, of: host, below: post, in: session)
@@ -143,7 +145,7 @@ extension ShellReload {
             session.mastodon.endedByServer(host: host)
             return false
         } catch {
-            return Cancellation.happened(error)
+            return walkedAway(from: category, of: host, error)
         }
     }
 

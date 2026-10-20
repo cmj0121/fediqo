@@ -416,7 +416,7 @@ extension ShellReload {
             session.mastodon.endedByServer(host: host)
             return false
         } catch {
-            return Cancellation.happened(error)
+            return walkedAway(from: due.stretch.category, of: host, error)
         }
     }
 

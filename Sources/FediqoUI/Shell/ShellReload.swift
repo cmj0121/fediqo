@@ -1186,7 +1186,7 @@ final class ShellReload {
                     }
                     return true
                 } catch {
-                    return Cancellation.happened(error)
+                    return self.walkedAway(from: .trends, of: host, error)
                 }
             }
             var read: Bool
@@ -1316,7 +1316,7 @@ final class ShellReload {
             // The same one request as before, read for the boards around this one too (#161):
             // a sub-board the forum's front page never names is written here, and the picker
             // then offers it with no request of its own.
-            read = await land(source.host, in: session) {
+            read = await land(source.host, of: .board(id: String(board.fid)), in: session) {
                 let page = try await client(board).boardPage(board.fid, source: source, named: board.name)
                 session.learn(page, of: board, host: source.host)
                 return page.notes
@@ -1337,15 +1337,16 @@ final class ShellReload {
         _ source: Source, through http: any HTTPClient, in session: ShellSession
     ) async {
         let client = session.reach.discuz(source.host, over: http, for: .timeline, name: .trends, within: deadline)
-        _ = await land(source.host, in: session) { try await client.rankedThreads(source: source) }
+        _ = await land(source.host, of: .trends, in: session) { try await client.rankedThreads(source: source) }
         guard !Task.isCancelled else { return }
-        _ = await land(source.host, in: session) { try await client.rankedBlogs(source: source) }
+        _ = await land(source.host, of: .trends, in: session) { try await client.rankedBlogs(source: source) }
     }
 
     /// One read into the store, while its source is still here and the reload is not stopped.
-    /// A reader walking away is not a failure; anything else is.
+    /// A reader walking away is not a failure; anything else is, and is said (`walkedAway`).
     private func land(
-        _ host: String, in session: ShellSession, _ fetch: () async throws -> [Note]
+        _ host: String, of category: FediqoCore.Category? = nil, in session: ShellSession,
+        _ fetch: () async throws -> [Note]
     ) async -> Bool {
         do {
             let notes = try await fetch()
@@ -1353,8 +1354,20 @@ final class ShellReload {
             await session.store.ingest(notes, ifSourceHere: host)
             return true
         } catch {
-            return Cancellation.happened(error)
+            return walkedAway(from: category, of: host, error)
         }
+    }
+
+    /// Whether a read of a timeline that threw `error` was the reader walking away, which is no
+    /// failure — and where it was not, the line that says which timeline of `host` was not read,
+    /// and how (`NetLog.line(_:host:category:error:)`). **Every such failure is said**: one the
+    /// network gave is logged where it was asked too, but one it did not — an answer that would
+    /// not decode, the reload's deadline passing, a stretch after the first — was said nowhere,
+    /// and a timeline that stopped landing left no word of why.
+    func walkedAway(from category: FediqoCore.Category?, of host: String, _ error: any Error) -> Bool {
+        if Cancellation.happened(error) { return true }
+        NetLog.network.error("\(NetLog.line("timeline not read", host: host, category: category, error: error), privacy: .public)")
+        return false
     }
 
     /// Bounded by the reload's deadline, and on `SourceWork` for what it is (#164) while it runs.

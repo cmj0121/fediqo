@@ -30,18 +30,20 @@ extension ShellReload {
             try Task.checkCancellation()
             await session.store.land(read, of: .public, ifSourceHere: host)
             // What came before a stretch that failed has landed; the read still did not come back.
-            return read.stopped == nil
+            guard let stopped = read.stopped else { return true }
+            _ = walkedAway(from: .public, of: host, stopped)
+            return false
         } catch MastodonAuthError.signedOut {
             session.mastodon.endedByServer(host: host)
             return false
         } catch {
             if !reader.asYou, MastodonClient.asksSignIn(error) {
                 NetLog.network.notice(
-                    "\(NetLog.line("public timeline asks a sign-in", host: host, error: error), privacy: .public)"
+                    "\(NetLog.line("public timeline asks a sign-in", host: host, category: .public, error: error), privacy: .public)"
                 )
                 return false
             }
-            return Cancellation.happened(error)
+            return walkedAway(from: .public, of: host, error)
         }
     }
 
