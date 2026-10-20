@@ -964,6 +964,11 @@
 "part.media.ask.line" = "它的頁面會問你已允許的，並加上媒體。";
 "part.media.ask.detail" = "%1$@ 自己的登入頁面會打開，問這個登入已經有的，再多問一件事——媒體：在貼文附上圖片、聲音或影片，每件都能寫說明。不會先登出，這台裝置和其他裝置都不會：關掉那一頁，或在上面拒絕，你原有的登入都照舊。";
 "part.media.unasked" = "這個登入還沒被問過在貼文附上媒體。更新權限";
+"part.marks.ask.title" = "請 %@ 允許讀你的書籤和收藏？";
+"part.marks.ask.line" = "它的頁面會問你已允許的，並加上你的書籤和收藏。";
+"part.marks.ask.detail" = "%1$@ 自己的登入頁面會打開，問這個登入已經有的，再多問一件事——你的書籤和收藏：讀回你在 %1$@ 加過書籤或收藏的每篇貼文，不論是在 Fediqo 或其他 app 裡標記的，讓時間軸能以它們為條件。不會先登出，這台裝置和其他裝置都不會：關掉那一頁，或在上面拒絕，你原有的登入都照舊。";
+"part.marks.unasked" = "這個登入還沒被問過讀你的書籤和收藏。更新權限";
+"part.marks.partly" = "這個登入只被允許讀你的書籤和收藏其中一樣。更新權限";
 /* What a sign-in holds, part by part (#347): its row and its source's page. */
 "part.held.line" = "這個登入允許：%@。";
 "part.held.partly" = "%@（部分）";
@@ -977,6 +982,7 @@
 "part.follows.name" = "你追蹤的對象";
 "part.account.name" = "你的個人檔案";
 "part.media.name" = "媒體";
+"part.marks.name" = "你的書籤和收藏";
 "profile.change" = "修改";
 "profile.change.help" = "修改你的圖片、名稱、自我介紹、欄位，以及別人可以做的事";
 "profile.change.spoken" = "修改你在 %@ 的個人檔案";

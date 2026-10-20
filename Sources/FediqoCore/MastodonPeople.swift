@@ -205,6 +205,23 @@ enum MastodonLink {
     /// could not stand in a query as an id, throws: reading it as "no more" would end a list
     /// short and say it was whole.
     static func next(in header: String?) throws -> String? {
+        guard let found = id(rel: "next", name: "max_id", in: header) else { return nil }
+        guard let id = found else { throw MastodonPeopleError.unreadable }
+        return id
+    }
+
+    /// The `min_id` of the address marked `rel="prev"`, where the header names one that can stand
+    /// as an id — the newest of what the answer listed, for a list that pages by its own mark
+    /// (#317). **Nothing for anything else**: it only narrows where a mark lies, and a stranger's
+    /// header that says it badly says nothing.
+    static func previous(in header: String?) -> String? {
+        id(rel: "prev", name: "min_id", in: header) ?? nil
+    }
+
+    /// What the first address marked `rel` says for `name` in its query: nothing where no address
+    /// is so marked, and an address with no such id — or one that could not stand in a query as
+    /// an id — where one is and says it badly.
+    private static func id(rel: String, name: String, in header: String?) -> String?? {
         guard let header else { return nil }
         // Each `<address>` and what follows it up to the next one: an address may hold a comma.
         for entry in header.split(separator: "<", omittingEmptySubsequences: false).dropFirst() {
@@ -215,10 +232,10 @@ enum MastodonLink {
                 guard sides.count == 2, sides[0].trimmingCharacters(in: .whitespaces).lowercased() == "rel" else { return [] }
                 return sides[1].split(whereSeparator: { $0.isWhitespace || $0 == "\"" || $0 == "," })
             }
-            guard relations.contains(where: { $0.lowercased() == "next" }) else { continue }
+            guard relations.contains(where: { $0.lowercased() == rel }) else { continue }
             let items = URLComponents(string: String(entry[..<close]))?.queryItems ?? []
-            guard let id = items.first(where: { $0.name == "max_id" })?.value, ListSubscription.isPathSegment(id) else {
-                throw MastodonPeopleError.unreadable
+            guard let id = items.first(where: { $0.name == name })?.value, ListSubscription.isPathSegment(id) else {
+                return .some(nil)
             }
             return id
         }

@@ -346,9 +346,22 @@ enum MastodonReadOn {
 }
 
 extension Dictionary where Key == Category, Value == String {
-    /// These listings and `other`'s, keeping the later id where both list one timeline.
+    /// These listings and `other`'s, keeping the later id where both list one timeline — and of
+    /// the reader's marks (#317), what both spans say of the post together (`MarkSpan.merged`).
     func later(_ other: Self) -> Self {
-        merging(other) { StatusID.later($1, than: $0) ? $1 : $0 }
+        var merged = self
+        for (category, id) in other {
+            guard let held = merged[category] else {
+                merged[category] = id
+                continue
+            }
+            if category.isMarks, let was = MarkSpan(listed: held), let now = MarkSpan(listed: id) {
+                merged[category] = was.merged(with: now).listed
+            } else if StatusID.later(id, than: held) {
+                merged[category] = id
+            }
+        }
+        return merged
     }
 }
 

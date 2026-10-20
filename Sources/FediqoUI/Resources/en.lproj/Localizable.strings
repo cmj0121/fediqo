@@ -990,6 +990,11 @@
 "part.media.ask.line" = "Its page asks for what you allowed, and for media.";
 "part.media.ask.detail" = "%1$@'s own sign-in page opens. It asks for what this sign-in already has, and for one thing more — media: to attach a picture, a sound or a film to a post, each with a description. Nothing is signed out first, on this device or another: close the page, or refuse on it, and the sign-in you have goes on as it is.";
 "part.media.unasked" = "This sign-in was not asked to attach media. Update permission";
+"part.marks.ask.title" = "Ask %@ for your bookmarks and favourites?";
+"part.marks.ask.line" = "Its page asks for what you allowed, and for your bookmarks and favourites.";
+"part.marks.ask.detail" = "%1$@'s own sign-in page opens. It asks for what this sign-in already has, and for one thing more — your bookmarks and favourites: to read back every post you bookmarked or favourited at %1$@, from Fediqo or any other app, so a timeline can name them. Nothing is signed out first, on this device or another: close the page, or refuse on it, and the sign-in you have goes on as it is.";
+"part.marks.unasked" = "This sign-in was not asked to read your bookmarks and favourites. Update permission";
+"part.marks.partly" = "This sign-in was asked to read only one of your bookmarks and favourites. Update permission";
 /* What a sign-in holds, part by part (#347): its row and its source's page. */
 "part.held.line" = "This sign-in allows %@.";
 "part.held.partly" = "%@ (in part)";
@@ -1003,6 +1008,7 @@
 "part.follows.name" = "who you follow";
 "part.account.name" = "your profile";
 "part.media.name" = "media";
+"part.marks.name" = "your bookmarks and favourites";
 "profile.change" = "Change";
 "profile.change.help" = "Change your pictures, your name, your words, your fields and what others can do";
 "profile.change.spoken" = "Change your profile at %@";
