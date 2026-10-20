@@ -1475,6 +1475,11 @@ private var migrator: DatabaseMigrator {
             t.add(column: "poll", .text)
         }
     }
+    // What the reader bookmarked and favourited at a source, as two kinds of category (#317).
+    // **Empty, and an id all the same** (`CategoryRow`): a build from before drops a kind it does
+    // not know, and its next save would lose every such row's category for good. The id makes it
+    // refuse the store instead.
+    migrator.registerMigration("v17-marks") { _ in }
     return migrator
 }
 
@@ -1610,6 +1615,8 @@ struct CategoryRow: Codable, Comparable {
         case .home: kind = "home"
         case .list(let list): kind = "list"; id = list
         case .board(let board): kind = "board"; id = board
+        case .bookmarks: kind = "bookmarks"
+        case .favourites: kind = "favourites"
         }
     }
 
@@ -1621,6 +1628,8 @@ struct CategoryRow: Codable, Comparable {
         case ("home", _): .home
         case ("list", let id?): .list(id: id)
         case ("board", let id?): .board(id: id)
+        case ("bookmarks", _): .bookmarks
+        case ("favourites", _): .favourites
         default: nil
         }
     }

@@ -294,7 +294,9 @@ public struct NoteSearch: Sendable {
             names[source.host] = byCategory
         }
         categoryNames = names
-        let words: [Category: String] = [.public: "public", .trends: "trends", .home: "home"]
+        let words: [Category: String] = [
+            .public: "public", .trends: "trends", .home: "home", .bookmarks: "bookmarks", .favourites: "favourites",
+        ]
         let shared: [Category: [String]] = words.reduce(into: [:]) { shared, pair in
             shared[pair.key] = [pair.value] + (labels[pair.key] ?? []).map(Fold.key)
         }
@@ -311,7 +313,7 @@ public struct NoteSearch: Sendable {
 
     private func names(of category: Category, on host: String) -> [String] {
         switch category {
-        case .public, .trends, .home: sharedNames[category] ?? []
+        case .public, .trends, .home, .bookmarks, .favourites: sharedNames[category] ?? []
         case .list, .board: categoryNames[host]?[category] ?? []
         }
     }

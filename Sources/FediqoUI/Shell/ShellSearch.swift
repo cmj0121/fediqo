@@ -69,11 +69,12 @@ final class ShellSearch {
     /// How long typing has to pause before the results follow it.
     static let pause = Duration.milliseconds(120)
 
-    /// The names public, trends and home are drawn with, in every language the app speaks — so
-    /// `趨勢` and `Trends` both find a trending post whichever language the app is set to.
+    /// The names public, trends, home, bookmarks and favourites are drawn with, in every language
+    /// the app speaks — so `趨勢` and `Trends` both find a trending post whichever language the
+    /// app is set to.
     static let labels: [FediqoCore.Category: [String]] = {
         let languages: [DummyLanguage] = [.english, .taiwanese]
-        return [FediqoCore.Category.public, .trends, .home].reduce(into: [:]) { labels, category in
+        return [FediqoCore.Category.public, .trends, .home, .bookmarks, .favourites].reduce(into: [:]) { labels, category in
             labels[category] = languages.map { RuleText.categoryName(category, host: nil, sources: [], language: $0) }
         }
     }()

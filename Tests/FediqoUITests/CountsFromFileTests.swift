@@ -85,6 +85,9 @@ struct CountsFromFileTests {
         func keptRows() throws -> [HeldRow] { try call { try file.keptRows() } }
         func reblogged(by keys: [NoteKey]) throws -> [NoteKey] { try call { try file.reblogged(by: keys) } }
         func keys(_ selection: RowSelection) throws -> [NoteKey] { try call { try file.keys(selection) } }
+        func keys(host: String, in category: FediqoCore.Category) throws -> [NoteKey] {
+            try call { try file.keys(host: host, in: category) }
+        }
         func oldest(_ limit: Int, after: PageCursor?) throws -> (rows: [HeldRow], next: PageCursor?) {
             try call { try file.oldest(limit, after: after) }
         }

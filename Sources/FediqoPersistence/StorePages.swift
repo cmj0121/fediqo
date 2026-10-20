@@ -36,6 +36,10 @@ extension StoreFile {
         // `note_marked_vote` answers what `note_marked` did, and a vote with it (#331).
         "DROP INDEX IF EXISTS note_marked",
         "CREATE INDEX IF NOT EXISTS note_marked_vote ON note(host) WHERE \(readerSaidOrOwing)",
+        // The rows of each kind of the reader's marks by host (#317), which a read of them asks
+        // for every one of (`keys(host:in:)`): partial, so each holds only those.
+        "CREATE INDEX IF NOT EXISTS note_bookmarks ON note(host) WHERE \(markedRows("bookmarks"))",
+        "CREATE INDEX IF NOT EXISTS note_favourites ON note(host) WHERE \(markedRows("favourites"))",
     ]
 
     /// The id a row's first reference names, as `note_cites` holds it (#360): a row with one
@@ -1079,6 +1083,27 @@ extension StoreFile {
         }
     }
 
+    /// **A kind of the reader's marks is asked through its own index** (`pageIndexes`): the rows of
+    /// it are few beside a host's whole timeline, and the index holds only rows whose cell names
+    /// the kind — the very words of `markedRows`, which the planner matches as written.
+    public func keys(host: String, in category: FediqoCore.Category) throws -> [NoteKey] {
+        let row = CategoryRow(category)
+        let marked = category.markWord.map { " AND " + Self.markedRows($0) } ?? ""
+        return try poolRead { db, beside in
+            try Row.fetchAll(db, sql: """
+                SELECT host, id FROM note WHERE host = ?\(marked) AND \(Self.category(category, certain: true))
+                """, arguments: StatementArguments([host, row.kind] + (row.id.map { [$0] } ?? [])))
+                .map { NoteKey(host: $0["host"], id: $0["id"]) }
+        }
+    }
+
+    /// The rows whose categories cell names a kind of the reader's marks (#317), in the words a
+    /// partial index of them is made with (`pageIndexes`) — and the words of a query it answers. A
+    /// cell may name the word otherwise, as a list's id; the category's own test then decides.
+    static func markedRows(_ word: String) -> String {
+        "instr(categories, '\"\(word)\"') > 0"
+    }
+
     public func oldestStatusID(host: String, category: FediqoCore.Category) throws -> String? {
         let row = CategoryRow(category)
         let status = Self.statusIDExpression
@@ -1133,7 +1158,8 @@ extension StoreFile {
         (NOT EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(categories) THEN categories ELSE '[]' END) j \
         WHERE j.type = 'object' AND json_extract(j.value, '$.kind') IN ('public', 'trends')) \
         AND (EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(categories) THEN categories ELSE '[]' END) j \
-        WHERE j.type = 'object' AND json_extract(j.value, '$.kind') IN ('home', 'list')) OR \(readerSaid)))
+        WHERE j.type = 'object' AND json_extract(j.value, '$.kind') IN ('home', 'list', 'bookmarks', 'favourites')) \
+        OR \(readerSaid)))
         """
 
     /// Every row the taking back of a reader's marks may change, as `note_marked_vote` holds them: a

@@ -167,6 +167,26 @@ public enum Category: Hashable, Sendable {
     case list(id: String)
     /// A forum section, by the id the source gives it — Discuz!'s `fid` as a string.
     case board(id: String)
+    /// What a signed-in Mastodon reader bookmarked at the source, from any reader (#317).
+    case bookmarks
+    /// What a signed-in Mastodon reader favourited at the source, from any reader (#317).
+    case favourites
+
+    /// Whether this is something the reader marked (#317): **listed by when it was marked, not
+    /// by when it was posted**, and paged by the source's own mark, which is no post's id. So
+    /// nothing read of it is read on by a post's id, and no place where a stretch of it is
+    /// missing is said — `MastodonMarks` reads it by its own rule.
+    public var isMarks: Bool { markWord != nil }
+
+    /// The word a Mastodon names this kind of mark by, in its address and in the scope that reads
+    /// it (#317): `bookmarks`, `favourites`. Nothing for a category that is no mark.
+    public var markWord: String? {
+        switch self {
+        case .bookmarks: "bookmarks"
+        case .favourites: "favourites"
+        case .public, .trends, .home, .list, .board: nil
+        }
+    }
 }
 
 public enum Audience: String, Sendable, Hashable, CaseIterable {

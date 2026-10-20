@@ -218,6 +218,9 @@ public protocol HeldRows: Sendable {
     func reblogged(by keys: [NoteKey]) throws -> [NoteKey]
     /// The keys of the rows `selection` names, none of them kept.
     func keys(_ selection: RowSelection) throws -> [NoteKey]
+    /// The keys of every row of `host` that arrived through `category`, kept or not: what
+    /// a read of the reader's marks may show is no longer marked (#317).
+    func keys(host: String, in category: Category) throws -> [NoteKey]
     /// At most `limit` rows not kept, the oldest posted first and two of one moment in the order
     /// they arrived, from past `after` on — and where the next are asked from, or nothing where
     /// none are left. A row that will not decode is passed over.

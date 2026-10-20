@@ -217,6 +217,8 @@
 "rule.category" = "從 %@ 來的貼文";
 "rule.category.public" = "公開";
 "rule.category.home" = "首頁";
+"rule.category.bookmarks" = "書籤";
+"rule.category.favourites" = "收藏";
 "rule.category.list" = "列表 %@";
 "rule.category.board" = "看板 %@";
 "rule.scope.every" = "所有來源";

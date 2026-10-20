@@ -218,6 +218,8 @@
 "rule.category" = "posts that arrived through %@";
 "rule.category.public" = "Public";
 "rule.category.home" = "Home";
+"rule.category.bookmarks" = "Bookmarks";
+"rule.category.favourites" = "Favourites";
 "rule.category.list" = "List %@";
 "rule.category.board" = "Board %@";
 "rule.scope.every" = "on every source";

@@ -2974,7 +2974,7 @@ public actor ItemStore {
         for category in note.categories {
             switch category {
             case .public, .trends: return false
-            case .home, .list: through = true
+            case .home, .list, .bookmarks, .favourites: through = true
             case .board: break
             }
         }

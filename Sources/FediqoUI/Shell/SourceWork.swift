@@ -149,6 +149,9 @@ final class SourceWork {
         case home
         case `public`
         case trends
+        /// What the reader bookmarked, or favourited, at the source (#317).
+        case bookmarks
+        case favourites
         /// A list's title or a board's name, as the reader sees it. Never an id or a number.
         case called(String)
 
@@ -157,6 +160,8 @@ final class SourceWork {
             case .home: L10n.t("rule.category.home", language: language)
             case .public: L10n.t("rule.category.public", language: language)
             case .trends: L10n.t("timeline.tab.trends", language: language)
+            case .bookmarks: L10n.t("rule.category.bookmarks", language: language)
+            case .favourites: L10n.t("rule.category.favourites", language: language)
             case .called(let name): name
             }
         }

@@ -178,6 +178,9 @@ public struct Rule: Hashable, Sendable, Identifiable {
         // A Discuz! has Trends — its ranking lists — without having the other two.
         case (.trends, .source(let host)):
             if let source = sources.first(where: { $0.host == host }), !source.kind.hasTrends { return nil }
+        // The reader's marks are only where a kind of source reads them back (#317).
+        case (.bookmarks, .source(let host)), (.favourites, .source(let host)):
+            if let source = sources.first(where: { $0.host == host }), !source.kind.offers.marks { return nil }
         default:
             break
         }
