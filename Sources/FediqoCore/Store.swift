@@ -101,10 +101,14 @@ public actor ItemStore {
     /// The source's ids each host's rows were already looked for by (`HeldRows.rows(host:
     /// statusIDs:)`): one not found then is held, if ever, by a row that landed here since.
     private var namesAsked: [String: Set<String>] = [:]
-    /// The "newer posts remain" marks a read on said again this run, by host (`land(_:of:
-    /// ifSourceHere:)`): a row of the file laid in later says them no more, as every row held
-    /// then stopped saying them.
-    private var remainSaid: [String: Set<TimelineGap>] = [:]
+    /// The timelines a read on said "newer posts remain" of again this run, by host (`land(_:of:
+    /// ifSourceHere:)`): a row of the file laid in later says it of them no more, as every row
+    /// held then stopped saying it.
+    private var remainSaid: [String: Set<Category>] = [:]
+    /// Whether `gap` is a "newer posts remain" mark of a timeline in `said` (`remainSaid`).
+    private static func remains(_ gap: TimelineGap, _ said: Set<Category>) -> Bool {
+        gap.kind == .newerRemain && said.contains(gap.category)
+    }
     /// The first arrival of a row new to a store over a file: after every `rowid` there is, so a
     /// copy read from the file is the earlier of two (#114), as it arrived first.
     private static let arrivingAfterTheFile = 1 << 62
@@ -850,7 +854,7 @@ public actor ItemStore {
             let moving = post.listed.filter { reblog.listed[$0.key] == $0.value }
             var plain = post.withoutArrivalAsReblog()
             for category in moving.keys {
-                held.gaps.formUnion(plain.gaps.filter { $0.category == category })
+                for gap in plain.gaps where gap.category == category { held.gaps.add(gap) }
                 plain.gaps = plain.gaps.filter { $0.category != category }
                 let own = incoming.first { $0.key == key && !$0.isReblog && $0.listed[category] != nil }
                 plain.listed[category] = own?.listed[category]
@@ -1121,8 +1125,7 @@ public actor ItemStore {
     /// (#317), or nothing where `key` says no such place.
     public func markHole(_ key: NoteKey, in category: Category) -> String? {
         pool([key])
-        let mark = TimelineGap(.mayBeMissing, in: category)
-        return notes[key]?.gaps.first { $0 == mark }?.from
+        return notes[key]?.gaps.gap(.mayBeMissing, in: category)?.from
     }
 
     /// A read of the reader's marks is begun (#317): its place among the reads, which its landing
@@ -1166,7 +1169,6 @@ public actor ItemStore {
         guard !outrun, !passingThrough else { return }
         marksLanded[reads] = read.begun
         if !membersPooled { poolMembers(host: host, category: category) }
-        let mark = TimelineGap(.mayBeMissing, in: category)
         let met = Set(read.notes.filter { $0.categories.contains(category) }.map(\.key))
         var moved = false
         var shown = false
@@ -1179,38 +1181,26 @@ public actor ItemStore {
         }
         for (key, note) in notes where key.host == host && note.categories.contains(category) {
             var changed = note
-            // A place moved down is the same place to `==`, which does not read its mark — and
-            // the row would not take it (`HeldNotes`): it is taken off first, then put back (#369).
-            var moves = false
             if !met.contains(key), read.covered.contains(MarkSpan(listed: note.listed[category])) {
                 changed.categories.remove(category)
                 changed.listed[category] = nil
                 changed.gaps = note.gaps.filter { $0.category != category }
                 marksGone[reads, default: [:]][key] = read.begun
-            } else if let hole = note.gaps.first(where: { $0 == mark }) {
+            } else if let hole = note.gaps.gap(.mayBeMissing, in: category) {
                 if read.whole || (read.fills == hole.from && (read.connected || read.reachedEnd)) {
-                    changed.gaps.remove(mark)
+                    changed.gaps.remove(hole)
                 } else if read.fills == hole.from {
-                    changed.gaps.update(with: TimelineGap(.mayBeMissing, in: category, from: read.covered.low))
-                    moves = true
+                    changed.gaps.place(TimelineGap(.mayBeMissing, in: category, from: read.covered.low))
                 }
             }
-            if moves {
-                var without = changed
-                without.gaps.remove(mark)
-                notes[key] = without
-            }
-            if moves || changed != note { put(key, changed) }
+            if changed != note { put(key, changed) }
         }
         // On the post it names, or — where the keep window refused that one — the lowest of the
         // read's that is held.
         if let hole = read.hole,
            let key = ([hole.post] + read.notes.reversed().map(\.key)).first(where: { notes[$0]?.categories.contains(category) == true }),
            var held = notes[key] {
-            // Taken off first, then put back, for the reason above (#369).
-            held.gaps.remove(mark)
-            notes[key] = held
-            held.gaps.update(with: TimelineGap(.mayBeMissing, in: category, from: hole.from))
+            held.gaps.place(TimelineGap(.mayBeMissing, in: category, from: hole.from))
             put(key, held)
         }
         if moved { changed(shown: shown, replies: replies) }
@@ -1241,16 +1231,17 @@ public actor ItemStore {
         pool([read.newerRemainAbove, read.missingBelow].compactMap { $0 })
         let remain = TimelineGap(.newerRemain, in: category)
         // Said again, it is said again of the rows the file holds too, once they are read.
-        if disk != nil { remainSaid[host, default: []].insert(remain) }
+        if disk != nil { remainSaid[host, default: []].insert(category) }
         var marked: [NoteKey: Set<TimelineGap>] = [:]
-        for (key, note) in notes where key.host == host && note.gaps.contains(remain) {
-            marked[key] = note.gaps.subtracting([remain])
+        for (key, note) in notes where key.host == host && note.gaps.gap(.newerRemain, in: category) != nil {
+            marked[key] = note.gaps
+            marked[key]?.clear(.newerRemain, in: category)
         }
         if let key = read.newerRemainAbove, let held = notes[key] {
-            marked[key] = (marked[key] ?? held.gaps).union([remain])
+            marked[key, default: held.gaps].place(remain)
         }
         if let key = read.missingBelow, let held = notes[key] {
-            marked[key] = (marked[key] ?? held.gaps).union([TimelineGap(.mayBeMissing, in: category)])
+            marked[key, default: held.gaps].add(TimelineGap(.mayBeMissing, in: category))
         }
         var moved = false
         for (key, gaps) in marked where notes[key]?.gaps != gaps {
@@ -1276,9 +1267,8 @@ public actor ItemStore {
     public func missing(
         below key: NoteKey, in category: Category, writtenBy me: String? = nil, signedIn: Bool = false
     ) -> MissingPlace? {
-        let mark = TimelineGap(.mayBeMissing, in: category)
         pool([key])
-        guard let marked = notes[key], let gap = marked.gaps.first(where: { $0 == mark }),
+        guard let marked = notes[key], let gap = marked.gaps.gap(.mayBeMissing, in: category),
               let listed = gap.from ?? marked.listed[category]
         else { return nil }
         let timeline = notes.values.filter {
@@ -1323,9 +1313,8 @@ public actor ItemStore {
         guard sourceList.contains(where: { $0.host == host }) else { return }
         ingest(down.notes)
         pool([key])
-        let mark = TimelineGap(.mayBeMissing, in: category)
-        guard notes[key]?.gaps.contains(mark) == true else { return }
-        notes[key]?.gaps.remove(mark)
+        guard notes[key]?.gaps.gap(.mayBeMissing, in: category) != nil else { return }
+        notes[key]?.gaps.clear(.mayBeMissing, in: category)
         let carrier = down.notes
             .filter { $0.listed[category] != nil && notes[$0.key] != nil }
             .min { StatusID.later($1.listed[category]!, than: $0.listed[category]!) }?.key ?? key
@@ -1334,8 +1323,9 @@ public actor ItemStore {
         case .further(let from): TimelineGap(.mayBeMissing, in: category, from: from)
         case .settled: TimelineGap(.settled, in: category, since: moment)
         }
-        // One of each kind per timeline per post: a place said there before gives way to this one.
-        if let place { notes[carrier]?.gaps.update(with: place) }
+        // One of each kind per timeline per post: a place said there before gives way to this one,
+        // and the id or moment it says is the post's change to hold and write (#369).
+        if let place { notes[carrier]?.gaps.place(place) }
         changed(shown: true, replies: false)
     }
 
@@ -2688,7 +2678,7 @@ public actor ItemStore {
                 return false
             }
             if note.refsDue && !stalled.contains(key) { return false }
-            if let said = remainSaid[key.host], !note.gaps.isDisjoint(with: said) { return false }
+            if let said = remainSaid[key.host], note.gaps.contains(where: { Self.remains($0, said) }) { return false }
             return true
         }
         // The rows in the order last seen, the least lately first (`HeldNotes.sightings`): each
@@ -2905,8 +2895,8 @@ public actor ItemStore {
                 readPastLimit[key] = row.note.isReblog
             }
             notes.lay(unlanded(row.note))
-            if let said = remainSaid[key.host], !row.note.gaps.isDisjoint(with: said) {
-                notes[key]?.gaps.subtract(said)
+            if let said = remainSaid[key.host], let held = notes[key], held.gaps.contains(where: { Self.remains($0, said) }) {
+                notes[key]?.gaps = held.gaps.filter { !Self.remains($0, said) }
             }
             // One that arrived this run and left the pool keeps its place among the run's.
             arrival[key] = arrival[key] ?? Int(row.arrival)

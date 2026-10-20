@@ -33,6 +33,11 @@ struct ReadDownTests {
 
     private static let missing = TimelineGap(.mayBeMissing, in: .public)
 
+    /// The place moved down by a read that stopped short, reading on from `from`.
+    private static func missing(from: Int) -> TimelineGap {
+        TimelineGap(.mayBeMissing, in: .public, from: "\(from)")
+    }
+
     /// A store holding `ids` of the public timeline, with posts that may be missing below `marked`.
     private func store(holding ids: some Sequence<Int>, markedAt marked: Int) async -> ItemStore {
         let store = ItemStore()
@@ -89,7 +94,7 @@ struct ReadDownTests {
         #expect(down.end == .further(from: "250"))
         #expect(await server.cursors == ["max_id=450", "max_id=410", "max_id=370", "max_id=330", "max_id=290"])
         #expect(await held(store) == Array(1...10) + Array(250...500))
-        #expect(await marked(store) == [250: [Self.missing]], "still may be missing, lower down")
+        #expect(await marked(store) == [250: [Self.missing(from: 250)]], "still may be missing, lower down")
 
         _ = try await readDown(store, from: server, at: 250)
         _ = try await readDown(store, from: server, at: 50)
@@ -104,7 +109,7 @@ struct ReadDownTests {
         let moment = Date(timeIntervalSince1970: 1_750_000_000)
         let down = try await readDown(store, from: server, at: 31, moment: moment)
         #expect(down.end == .settled)
-        #expect(await marked(store) == [31: [TimelineGap(.settled, in: .public)]])
+        #expect(await marked(store) == [31: [TimelineGap(.settled, in: .public, since: moment)]])
         #expect(await store.note(Self.key(31))?.gaps.first?.since == moment)
         #expect(await store.missing(below: Self.key(31), in: .public) == nil, "a settled place asks nothing")
     }
@@ -141,7 +146,7 @@ struct ReadDownTests {
         await server.fail(ask: 2)
         let down = try await readDown(store, from: server, at: 450)
         #expect(down.stopped != nil)
-        #expect(await marked(store) == [410: [Self.missing]])
+        #expect(await marked(store) == [410: [Self.missing(from: 410)]])
     }
 
     @Test("With nothing held below the mark there is no hole: nothing is asked, and the mark goes")
@@ -202,7 +207,7 @@ struct ReadDownTests {
         let store = await store(holding: Array(1...10) + Array(450...500), markedAt: 450)
         let down = try await readDown(store, from: server, at: 450)
         #expect(down.end == .further(from: "250"), "440 is a boost of 5, not 5 listed where it stands")
-        #expect(await store.note(Self.key(250))?.gaps == [Self.missing])
+        #expect(await store.note(Self.key(250))?.gaps == [Self.missing(from: 250)])
     }
 
     @Test("The reader's own post, listed by no timeline, is not what is held below: it does not fill the hole")
@@ -287,8 +292,7 @@ struct ReadDownTests {
             below: Self.key(450), of: .public, ifSourceHere: Self.host
         )
         #expect(await store.note(Self.key(250)) == nil, "the premise: older than what is kept")
-        #expect(await store.note(Self.key(450))?.gaps == [Self.missing])
-        #expect(await store.note(Self.key(450))?.gaps.first?.from == "250")
+        #expect(await store.note(Self.key(450))?.gaps == [Self.missing(from: 250)])
 
         await store.land(ReadDown(notes: [Self.note(300)], end: .settled), below: Self.key(450), of: .public,
                          ifSourceHere: Self.host)
@@ -319,8 +323,35 @@ struct ReadDownTests {
         await store.land(ReadOn(missingBelow: Self.key(31)), of: .public, ifSourceHere: Self.host)
         _ = try await readDown(store, from: server, at: 31, moment: first.addingTimeInterval(60))
         let gaps = try #require(await store.note(Self.key(31))?.gaps)
-        #expect(gaps.filter { $0.kind == .settled }.count == 1)
+        #expect(gaps == [TimelineGap(.settled, in: .public, since: first.addingTimeInterval(60))],
+                "one place, as of when the source last said it had nothing more (#369)")
         #expect(await store.settledCount() == 1)
+        #expect(await store.letSettledGo(markedBy: first) == 0, "the wait counts from the later moment")
+    }
+
+    @Test("A read that stops short on a post already marked in its timeline moves that place to where it stopped, and the next read down goes on from there (#369)")
+    func stopsShortOnAMark() async throws {
+        let server = TimelineServer(Array(1...10) + [290, 300, 400] + Array(450...500))
+        let store = await store(holding: [300] + Array(450...500), markedAt: 450)
+        await store.land(ReadOn(missingBelow: Self.key(300)), of: .public, ifSourceHere: Self.host)
+        // The read below 450 reached 290, which the keep window refused: 300 is the oldest taken in.
+        let month = try #require(Calendar.current.date(byAdding: .month, value: 1, to: Self.posted(295)))
+        await store.setRetention(months: 1, from: month)
+        await store.land(
+            ReadDown(notes: [Self.note(400), Self.note(300), Self.note(290)], end: .further(from: "290")),
+            below: Self.key(450), of: .public, ifSourceHere: Self.host
+        )
+        #expect(await store.note(Self.key(290)) == nil, "the premise: older than what is kept")
+        #expect(await marked(store) == [300: [Self.missing(from: 290)]], "the place said there before gives way")
+        #expect(await store.missing(below: Self.key(300), in: .public)?.listed == "290")
+
+        await store.setRetention(months: nil)
+        await store.ingest((1...10).map { Self.note($0) })
+        let down = try await readDown(store, from: server, at: 300)
+        #expect(down.end == .met)
+        #expect(await server.cursors == ["max_id=290"], "on from where the last read stopped, not 300 again")
+        #expect(await held(store) == Array(1...10) + [300, 400] + Array(450...500), "no row twice")
+        #expect(await marked(store).isEmpty)
     }
 
     @Test("A place on a post marked gone is counted as the post, not beside it")

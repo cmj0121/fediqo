@@ -121,6 +121,46 @@ struct StoreFileTests {
         #expect(gaps.first { $0.kind == .mayBeMissing }?.from == "250", "and a moved place where it reads down from")
     }
 
+    /// #369: a place that only moved — onto a post already marked in that timeline, or settled
+    /// again — is a change to its row, written as it stands now and read down from after a relaunch.
+    @Test("A place moved onto a post already marked there, or settled again, is written as it moved")
+    func movedPlaceIsWritten() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        func post(_ id: Int) -> Note {
+            var post = note(id: "\(id)")
+            post.listed = [.public: "\(id)"]
+            return post
+        }
+        let host = mastodon.host
+        let file = try StoreFile(at: dir)
+        let store = ItemStore(sources: [mastodon], rows: file)
+        await store.ingest([post(300), post(450)])
+        for marked in [450, 300] {
+            await store.land(ReadOn(missingBelow: post(marked).key), of: .public, ifSourceHere: host)
+        }
+        try await StoreSaver(store: store, file: file).save()
+        // Read below 450, it stopped short having reached 290: the oldest taken in is 300.
+        await store.land(ReadDown(notes: [post(400), post(300)], end: .further(from: "290")),
+                         below: post(450).key, of: .public, ifSourceHere: host)
+        try await StoreSaver(store: store, file: file).save()
+        var written = Dictionary(uniqueKeysWithValues: StoreFile.open(at: dir).notes.map { ($0.id, $0.gaps) })
+        #expect(written["300"] == [TimelineGap(.mayBeMissing, in: .public, from: "290")])
+        #expect(written["450"] == [])
+        let opened = ItemStore(sources: [mastodon], rows: try StoreFile(at: dir))
+        #expect(await opened.missing(below: post(300).key, in: .public)?.listed == "290", "reading down goes on from there")
+
+        // Settled, said again, and settled once more later: the later moment is the one written.
+        let later = origin.addingTimeInterval(86_400)
+        await store.land(ReadDown(end: .settled), below: post(300).key, of: .public, at: origin, ifSourceHere: host)
+        await store.land(ReadOn(missingBelow: post(300).key), of: .public, ifSourceHere: host)
+        await store.land(ReadDown(end: .settled), below: post(300).key, of: .public, at: later, ifSourceHere: host)
+        try await StoreSaver(store: store, file: file).save()
+        written = Dictionary(uniqueKeysWithValues: StoreFile.open(at: dir).notes.map { ($0.id, $0.gaps) })
+        #expect(written["300"] == [TimelineGap(.settled, in: .public, since: later)])
+    }
+
     /// #177: a topic read to its end is there with the network off, which is a relaunch reading
     /// its replies back — their floor, their own date where the page gave one, and none where it
     /// did not, and the page each was read off.
