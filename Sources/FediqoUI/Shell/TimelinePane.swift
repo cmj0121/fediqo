@@ -1147,6 +1147,8 @@ struct TimelinePane: View {
                     // Which sources have no more of what is rising to give (#288). A search's
                     // results are not a timeline, and end nowhere a source chose.
                     if !searching { TrendsEndFoot(timeline: timeline, session: session) }
+                    // That the reader's marks stand by when they were published (#317).
+                    if !searching, session.readsMarks(timeline) { MarksOrderFoot() }
                     // The page below being read from this device (#357).
                     if !searching, session.timelineLoading(latest: prefs.latestDate) { TimelineReadingOn() }
                 }

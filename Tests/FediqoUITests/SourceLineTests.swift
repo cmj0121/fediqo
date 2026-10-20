@@ -70,7 +70,10 @@ struct SourceLineTests {
             for actsLive in [false, true] {
                 let drawn = Self.view(Self.row(Source(host: "a.example", kind: kind), signedIn: signedIn), actsLive: actsLive)
                 #expect(drawn.key.symbol == "key", "\(kind): the sign-in is one glyph on every source")
-                #expect(drawn.more.items.map(\.symbol) == ["checklist", "list.bullet", "eraser", "trash"], "\(kind)")
+                // The reader's bookmarks and favourites only where a kind has them (#317): an act
+                // one kind alone has is absent from every other's menu, never dim.
+                let marks = kind.offers.marks ? [SourceRow.marksSymbol] : []
+                #expect(drawn.more.items.map(\.symbol) == ["checklist", "list.bullet"] + marks + ["eraser", "trash"], "\(kind)")
             }
         }
     }
@@ -249,7 +252,7 @@ struct SourceLineTests {
             let more = drawn.more
             #expect(more.dangers.map(\.symbol) == ["eraser", "trash"], "\(source.kind)")
             #expect(more.dangers.allSatisfy(\.isDanger) && more.ordinary.allSatisfy { !$0.isDanger })
-            #expect(more.items.map(\.answers).count == 4 && more.divides)
+            #expect(more.items.map(\.answers).count == (source.kind.offers.marks ? 5 : 4) && more.divides)
             _ = (drawn.key, drawn.saying, drawn.permission, more.label(), more.items.map { $0.title() })
             #expect(built == 0, "\(source.kind): a question was built for a row nobody pressed")
             #expect(more.ordinary.allSatisfy { $0.question == nil })

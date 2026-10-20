@@ -153,6 +153,8 @@ final class ShellReload {
 
     /// How long one request of a reload may take before it counts as failed.
     @ObservationIgnored var deadline: Duration = .seconds(30)
+    /// The categories of the reader's marks being read now, by source (#317, `readMarks`).
+    @ObservationIgnored var marksReading: Set<Stretch> = []
     /// Where each stretch a listing reads toward its end has got to (#87).
     @ObservationIgnored var stretches = ShellStretches()
     /// The sources whose trending list has been read to its end this run (#288) — what the
@@ -1198,7 +1200,7 @@ final class ShellReload {
                 let trendsCame = await trendsCome()
                 read = publicCame || trendsCame
             }
-            return await readAsYou(source, for: categories, in: session) && read
+            return await readAsYou(source, for: categories, thorough: revisits, in: session) && read
         case .discuz:
             // A board's read is shown under that board's name (#164); the front page names none.
             // The forum's transport is chosen once for the reload: every board and the ranking
@@ -1249,8 +1251,20 @@ final class ShellReload {
         }
     }
 
-    /// Home and the chosen lists, as the reader — only where signed in, and only what was asked.
+    /// Home and the chosen lists, as the reader — only where signed in, and only what was asked —
+    /// and then the reader's bookmarks and favourites, where the sign-in may read them (#317).
+    /// `thorough` is a reload the person pressed for, and not the wait (`readMarks`).
     private func readAsYou(
+        _ source: Source, for categories: Set<FediqoCore.Category>?, thorough: Bool, in session: ShellSession
+    ) async -> Bool {
+        let timelines = await readTimelinesAsYou(source, for: categories, in: session)
+        // Nothing where the sign-in has gone meanwhile: it then reads no marks at all.
+        guard !Task.isCancelled else { return timelines }
+        return await readMarks(source, for: categories, thorough: thorough, in: session) && timelines
+    }
+
+    /// Home and the chosen lists, as the reader — only where signed in, and only what was asked.
+    private func readTimelinesAsYou(
         _ source: Source, for categories: Set<FediqoCore.Category>?, in session: ShellSession
     ) async -> Bool {
         let home = categories?.contains(.home) ?? true
@@ -1370,7 +1384,7 @@ final class ShellReload {
     /// The name a reader knows each of a Mastodon source's timelines by, as it stands when the
     /// reload starts: a list by its own title, and never by its id — a list this source no
     /// longer names is named nothing.
-    private static func names(of source: Source) -> (FediqoCore.Category) -> SourceWork.Name? {
+    static func names(of source: Source) -> (FediqoCore.Category) -> SourceWork.Name? {
         let titles = Dictionary(source.lists.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
         return { category in
             switch category {

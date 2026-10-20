@@ -156,6 +156,7 @@
 "timeline.reload.unspoken" = "%1$@ 現在自稱是 %2$@，Fediqo 讀不了。它先前帶來的東西仍然都在。";
 "timeline.reload.stopped" = "已停止重新載入。";
 "timeline.trends.end" = "%@ 沒有更多趨勢貼文了。重新載入可以從頭再讀。";
+"timeline.marks.order" = "書籤和收藏依每篇貼文發布的時間排列，不是依你標記的時間。";
 "timeline.gap.more" = "這裡還有來自 %@ 的貼文，捲到或按下這裡就會讀取。";
 "timeline.gap.missing" = "這裡可能缺少來自 %@ 的貼文，捲到或按下這裡就會往下讀到已有的貼文。";
 "timeline.gap.settled" = "%1$@：來源 %2$@ 已不再有這裡原本的貼文。";
@@ -1066,6 +1067,8 @@
 "account.mastodon.home.progress"      = "正在讀你在 %@ 的首頁…";
 "account.mastodon.read.partial"       = "現在讀不到你在 %@ 的部分首頁和列表。";
 "account.source.lists.change"         = "選你在 %@ 上讀哪些列表";
+"account.source.marks.read"           = "再讀一次你在 %@ 的書籤和收藏";
+"account.source.marks.unread"         = "%@ 沒有交出你的書籤和收藏。這台裝置上什麼都沒有改。";
 "account.source.lists.progress"       = "正在讀你在 %@ 的列表…";
 "account.source.lists.reading"        = "正在讀你在 %@ 選的列表…";
 "account.source.lists.unread"         = "現在讀不到你在 %@ 的列表。";

@@ -133,6 +133,10 @@ extension ShellReload {
                 try Task.checkCancellation()
                 await session.store.land(down, below: post, of: .public, ifSourceHere: host)
                 return down.stopped == nil
+            // The reader's marks, read down by mark from where the place keeps (#317).
+            case .bookmarks, .favourites:
+                try await readDownMarks(category, of: host, below: post, in: session)
+                return true
             default:
                 // Signed out since the place was drawn: nothing is asked, and nothing failed.
                 guard let token = session.mastodon.token(host: host) else { return true }

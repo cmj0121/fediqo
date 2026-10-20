@@ -65,6 +65,11 @@ struct ShellStretches {
     /// How far into its source's trending list each Trends stretch has read this run (#288): the
     /// offset its next ask starts from. Nothing where this run has not read it, which is the top.
     private var trendsRead: [Stretch: Int] = [:]
+    /// Where the next stretch of each category of the reader's marks begins, as its source said it
+    /// at this run's last stretch of it (#317), and the ones it said have no more. A mark does not
+    /// move as others are marked or taken off, so it holds for the run.
+    private var marksNext: [Stretch: String] = [:]
+    private(set) var marksEnded: Set<Stretch> = []
     /// Trends stretches whose source has said it has no more, until `r` reads their top again.
     private(set) var trendsEnded: Set<Stretch> = []
     /// The posts each Trends stretch has been handed this run, from the top down — what tells a
@@ -98,6 +103,18 @@ struct ShellStretches {
             further[stretch] = page
             lastPage[stretch] = threads
         }
+    }
+
+    /// The mark a stretch of the reader's marks asks below next, where this run has read on (#317).
+    func nextMarks(_ stretch: Stretch) -> String? {
+        marksNext[stretch]
+    }
+
+    /// A stretch of the reader's marks was read on, and its source said the next begins below
+    /// `next` — or, with nothing, that there are no more.
+    mutating func readMarks(_ stretch: Stretch, to next: String?) {
+        marksNext[stretch] = next
+        if next == nil { marksEnded.insert(stretch) }
     }
 
     /// The offset a Trends stretch asks next (#288), or nothing where its source has said it has
@@ -160,6 +177,8 @@ extension ShellReload {
             case page(Int)
             /// What is rising on a Mastodon, this many posts into its list (#288).
             case offset(Int)
+            /// The reader's marks on a Mastodon, below this mark (#317).
+            case mark(String)
         }
     }
 
@@ -172,7 +191,8 @@ extension ShellReload {
         guard !asking.contains(.more), session.editing == nil else { return }
         let readingNewest = !asking.isDisjoint(with: [.timeline, .held, .renew])
         let onFile = await Self.oldestOnFile(query, in: session)
-        let due = Self.due(query, in: session, stretches: stretches, onFile: onFile)
+        let floors = await Self.marksFloors(query, in: session, after: stretches)
+        let due = Self.due(query, in: session, stretches: stretches, onFile: onFile, marks: floors)
             .filter { !readingNewest || $0.source.kind == .mastodon }
         guard !due.isEmpty else { return }
         let hosts = due.map(\.stretch.host).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
@@ -243,9 +263,12 @@ extension ShellReload {
     }
 
     /// Every stretch of `query` there is a next of now. `onFile` is the oldest post the file
-    /// holds of each (`oldestOnFile`), asked before where it is older than what is held.
+    /// holds of each (`oldestOnFile`), asked before where it is older than what is held; `marks`
+    /// is the lowest floor held of each stretch of the reader's marks (`marksFloors`, #317),
+    /// asked below — and a stretch of marks with none there has no next to ask.
     static func due(
-        _ query: TimelineQuery, in session: ShellSession, stretches: ShellStretches, onFile: [Stretch: String] = [:]
+        _ query: TimelineQuery, in session: ShellSession, stretches: ShellStretches, onFile: [Stretch: String] = [:],
+        marks: [Stretch: String] = [:]
     ) -> [Due] {
         let sources = session.sources
         let asks = CompiledTimeline(query.definition(among: session.written), sources: sources).sourcesToAsk()
@@ -254,13 +277,23 @@ extension ShellReload {
                 return []
             }
             let signedIn = source.kind == .mastodon && session.mastodon.isSignedIn(host: source.host)
-            return Self.stretches(of: source, for: ask.categories, signedIn: signedIn).compactMap { stretch in
+            let readsMarks = signedIn ? session.readableMarks(host: source.host) : []
+            return Self.stretches(of: source, for: ask.categories, signedIn: signedIn, marks: readsMarks).compactMap { stretch in
                 switch source.kind {
                 case .mastodon:
                     // What is rising has no oldest post to ask before: it is asked by how far
                     // into the list this run has read (#288).
                     if stretch.category == .trends {
                         return stretches.nextTrends(stretch).map { Due(stretch: stretch, source: source, cursor: .offset($0)) }
+                    }
+                    // Nor do the reader's marks: they are asked below where this run's last stretch
+                    // of them said the next begins, or at first below the lowest mark held (#317)
+                    // — never what landed, which the keep window may have refused.
+                    if stretch.category?.isMarks == true {
+                        guard !stretches.marksEnded.contains(stretch), let cursor = stretches.nextMarks(stretch) ?? marks[stretch],
+                              !stretches.hasAsked(stretch, before: cursor)
+                        else { return nil }
+                        return Due(stretch: stretch, source: source, cursor: .mark(cursor))
                     }
                     guard let category = stretch.category,
                           let oldest = Self.older(Self.oldest(category, of: source.host, in: session.notes), onFile[stretch]),
@@ -281,13 +314,16 @@ extension ShellReload {
     /// signed in. **A Mastodon's Trends only where the timeline asks for it by name** (#288): the
     /// Trends timeline, or one the reader wrote with a rule on it — a listing of everything reads
     /// on through time, and does not go down a ranking beside it. A forum's Trends are its
-    /// ranking lists, which have no next.
-    static func stretches(of source: Source, for categories: Set<FediqoCore.Category>?, signedIn: Bool) -> [Stretch] {
+    /// ranking lists, which have no next. `marks` are the categories of the reader's marks the
+    /// sign-in may read (#317), read on beside Home where signed in.
+    static func stretches(
+        of source: Source, for categories: Set<FediqoCore.Category>?, signedIn: Bool, marks: [FediqoCore.Category] = []
+    ) -> [Stretch] {
         let host = source.host
         switch source.kind {
         case .mastodon:
             var reads: [FediqoCore.Category] = [.public]
-            if signedIn { reads += [.home] + source.lists.map { .list(id: $0.id) } }
+            if signedIn { reads += [.home] + source.lists.map { .list(id: $0.id) } + marks }
             if categories?.contains(.trends) == true { reads.append(.trends) }
             return reads.filter { categories?.contains($0) ?? true }.map { Stretch(host: host, category: $0) }
         case .discuz:
@@ -347,6 +383,11 @@ extension ShellReload {
             case .before(let id):
                 try await mastodon(due, before: id, stamp: stamp, in: session)
                 stretches.asked(due.stretch, before: id)
+            case .mark(let cursor):
+                guard let category = due.stretch.category else { return true }
+                let next = try await olderMarks(category, of: due.source, below: cursor, in: session)
+                stretches.asked(due.stretch, before: cursor)
+                stretches.readMarks(due.stretch, to: next)
             case .offset(let offset):
                 let client = session.reach.mastodon(host, for: .timeline, name: .trends, within: deadline)
                 let notes = try await client.trending(source: stamp, offset: offset)
@@ -387,6 +428,9 @@ extension ShellReload {
             let notes = try await client.publicTimeline(source: stamp, olderThan: id)
             try Task.checkCancellation()
             await session.store.ingest(notes, ifSourceHere: host)
+        // The reader's marks are asked by mark (`Due.Cursor.mark`), never before a post's id.
+        case .some(let category) where category.isMarks:
+            return
         case .some(let category):
             // As the reader, through a door named for the timeline it reads, and ended by a
             // sign-out or a Clear before anything it brings lands.

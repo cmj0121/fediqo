@@ -3797,10 +3797,17 @@ final class ShellSession {
     /// Only through the signed-in door, so a source never signed in to asks nothing here. A read
     /// that did not all come back is one sentence under the row; a server that ended the sign-in
     /// is told to `mastodon`, which signs the row out and says so.
+    ///
+    /// **And the reader's bookmarks and favourites, where the sign-in may read them** (#317) —
+    /// so a sign-in just asked for them brings them in at once.
     func readAsYou(host: String) async {
         guard let door = mastodon.authorized(host: host, for: .timeline) else { return }
         await readingAsYou(host: host, key: "account.mastodon.home.progress") {
-            try await self.reach.account(door, landingIn: self.store).read()
+            let read = try await self.reach.account(door, landingIn: self.store).read()
+            guard let source = self.sources.first(where: { $0.host == host.lowercased() }),
+                  self.mastodon.isSignedIn(host: host)
+            else { return read }
+            return await self.reload.readMarks(source, for: nil, in: self) && read
         }
     }
 
@@ -3851,6 +3858,10 @@ final class ShellSession {
     /// The reads as the reader in flight, per host — so a sign-out, Clear or Remove can stop them
     /// before their posts land (`stopReadingAsYou`).
     @ObservationIgnored private var readsAsYou: [String: Task<Void, Never>] = [:]
+
+    /// Whether the timeline last asked of names a mark, and what that was worked out from (#317,
+    /// `readsMarks`): its foot is drawn often, and its rules and sign-ins change seldom.
+    @ObservationIgnored var marksOrderSaid: (asked: MarksOrderAsked, says: Bool)?
 
     /// One errand of reads as the reader, reported in its row.
     ///

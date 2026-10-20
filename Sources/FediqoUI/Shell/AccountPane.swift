@@ -624,6 +624,8 @@ struct AccountPane: View {
                             ?? session.mastodon.leftLine(host: row.source.host),
                         holds: session.mastodon.holds(host: row.source.host),
                         lock: session.mastodon.bookmarkPlace(host: row.source.host),
+                        marksReads: !session.readableMarks(host: row.source.host).isEmpty,
+                        marksPlace: session.marksLock(host: row.source.host),
                         announced: announced?.mark(at: row.source.host, in: session),
                         clearAsks: { session.clearQuestion(host: row.source.host) },
                         removeAsks: { session.removeQuestion(host: row.source.host, postsStay: postsStay()) },
@@ -657,6 +659,7 @@ struct AccountPane: View {
             askAgain: { askAgain(row) },
             changeBoards: { Task { await changeBoards(row) } },
             chooseLists: { Task { await changeLists(row) } },
+            marks: { Task { await pressMarks(row) } },
             clear: { Task { await clear(row) } },
             remove: { Task { await remove(row, keepingPosts: postsStay()) } },
             open: { openSource(row) },
@@ -669,6 +672,11 @@ struct AccountPane: View {
     func ownPage(_ row: SourceRow) -> (() -> Void)? {
         guard let onOwnPage, let me = ShellPersonPages.own(at: row.source.host, in: session) else { return nil }
         return { onOwnPage(me) }
+    }
+
+    /// A row's bookmarks and favourites item (#317): read again, or asked for.
+    func pressMarks(_ row: SourceRow) async {
+        await session.pressMarks(host: row.source.host)
     }
 
     // MARK: - What every control on this page actually does
