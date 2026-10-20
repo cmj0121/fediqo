@@ -90,6 +90,21 @@ struct ItemActing {
     /// Nothing where a vote is offered, or no sign-in is held to ask.
     var voteLock: Lock?
     var askToVote: (() -> Void)?
+    /// Reporting the post (#339): the item of the row's `…` that puts the report's sheet up, or —
+    /// where the sign-in lacks what reporting needs — dim with that lock, its press asking.
+    /// Nothing where the post is not one to report: no sign-in at its source, a kind of source
+    /// with no reports, the reader's own, or one gone.
+    var report: Report?
+
+    struct Report {
+        var lock: Lock?
+        let press: () -> Void
+    }
+
+    /// Why the row is drawn as hidden, where it is (#314): the person muted or blocked whoever
+    /// made it, or their whole server, and chose that what this device held of them is hidden.
+    /// Nothing for a row drawn as it is.
+    var hidden: HiddenHere?
 
     /// The question taking a post back asks, and what a yes to it does. **The question is built
     /// when the item is chosen** — it names the copy that goes as things stand at the press.
@@ -442,6 +457,18 @@ extension ItemActs {
         if let leave {
             items.append(.plain("arrow.up.forward.app", item.outwardName, act: leave))
         }
+        // Reporting it (#339): to those who answer for its source, asked on a sheet first.
+        var reportLock: String?
+        if let report = acting.report {
+            let name = L10n.t("item.act.report", language: language)
+            if let lock = report.lock {
+                reportLock = lock.line(language: language) ?? String(format: L10n.t(lock.place.key, language: language), lock.host)
+                let dim = ShellMark(SourceRow.permissionSymbol, name, look: .dim(.askAgain))
+                items.append(ShellMoreItem.plain(dim, ask: lock.place.asks ? report.press : nil, act: {}).underHead)
+            } else {
+                items.append(.plain(PersonActing.reportSymbol, name, act: report.press))
+            }
+        }
         // **Not offered on a post already leaving**: its row is on no list to have a menu
         // (`ShellActs.leaving`), and where the post is still drawn — a conversation opened on
         // it — an item whose yes would be dropped is not shown as one to choose.
@@ -463,7 +490,7 @@ extension ItemActs {
         // sign-in stands, where a pointer and VoiceOver hear it on the mark.
         let locked = PostAct.allCases.compactMap { acting.locks[$0]?.line(language: language) }
         let head = head(for: item, here: here, refused: acting.acts.refused, language: language)
-            + ShellMore.reasons(of: shared, language: language) + locked + quoted
+            + ShellMore.reasons(of: shared, language: language) + locked + quoted + [reportLock].compactMap { $0 }
         return ShellMore(head: head, items: items)
     }
 

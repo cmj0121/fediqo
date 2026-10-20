@@ -40,9 +40,11 @@ extension ShellReload {
             return false
         } catch MastodonAuthError.signedOut {
             session.mastodon.endedByServer(host: host)
+            noteSignedOut(.public, of: host)
             return false
         } catch {
             if !reader.asYou, MastodonClient.asksSignIn(error) {
+                noteUnread(.public, of: host, error)
                 NetLog.network.notice(
                     "\(NetLog.line("public timeline asks a sign-in", host: host, category: .public, error: error), privacy: .public)"
                 )

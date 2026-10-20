@@ -17,14 +17,20 @@ public struct MastodonAccount: Sendable {
     /// asked for its own per timeline: the app names each one while it is on the wire, and only
     /// the caller knows the names (#170). Every one of them is the same token to the same host.
     private let reading: @Sendable (Category) -> MastodonAuthorized
+    /// Told of each read that failed and cost only itself — the timeline it was of where it was
+    /// one, and why — so the caller can say which of a source is not being read (#371). Not of a
+    /// sign-out or a reader walking away, which end the whole read and are thrown.
+    private let failed: (@Sendable (Category?, any Error) -> Void)?
 
     public init(
         door: MastodonAuthorized, store: ItemStore,
-        reading: (@Sendable (Category) -> MastodonAuthorized)? = nil
+        reading: (@Sendable (Category) -> MastodonAuthorized)? = nil,
+        failed: (@Sendable (Category?, any Error) -> Void)? = nil
     ) {
         self.door = door
         self.store = store
         self.reading = reading ?? { _ in door }
+        self.failed = failed
     }
 
     private var host: String { door.token.host }
@@ -233,6 +239,7 @@ public struct MastodonAccount: Sendable {
             throw CancellationError()
         } catch {
             NetLog.auth.error("\(NetLog.line("read as you", host: host, category: category, error: error), privacy: .public)")
+            failed?(category, error)
             return nil
         }
     }

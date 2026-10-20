@@ -16,7 +16,7 @@ struct PersonAboutSaid: Equatable {
     /// One block of the tab, top to bottom: what the lamp stops on.
     enum Block: String, CaseIterable {
         case view, sentences, picture, words, fields, featuredTags, featuredPeople, figures, none, stands, boosts, notices, home,
-             requests, you
+             requests, muted, blocked, servers, you
     }
 
     /// The host of the source that says, and whose copies the pictures are.
@@ -42,6 +42,9 @@ struct PersonAboutSaid: Equatable {
     var followed: FollowedTagsEntry?
     /// The way to the people who ask to follow the reader, on their own page (#313).
     var requests: RequestsEntry?
+    /// The ways to whom the reader mutes and blocks, and the servers they block, on their own
+    /// page (#314): one each, or the one lock where the sign-in does not see them.
+    var keeping: [KeepingEntry] = []
     /// What they feature on their profile (#315, #318), or nothing where it is not asked.
     var featured: FeaturedSaid?
 
@@ -108,6 +111,9 @@ struct PersonAboutSaid: Equatable {
             case .notices: taken(.notices) != nil
             case .home: home != nil
             case .requests: requests != nil
+            case .muted: keeping.contains { $0.which == .muted }
+            case .blocked: keeping.contains { $0.which == .blocked }
+            case .servers: keeping.contains { $0.which == .servers }
             case .you: followed != nil
             }
         }
@@ -182,6 +188,8 @@ struct PersonAbout<Lead: View>: View {
     var onAct: (PersonAct) -> Void = { _ in }
     /// The way to the people who ask to follow the reader, pressed.
     var onRequests: (RequestsEntry) -> Void = { _ in }
+    /// A way to whom the reader mutes or blocks, or the servers they block, pressed (#314).
+    var onKeeping: (KeepingEntry) -> Void = { _ in }
     /// A hashtag they feature, or the way to the people they feature (#315, #318).
     var onFeatured: (FeaturedPress) -> Void = { _ in }
     /// What stands over the blocks and scrolls away with them: the page's head, at a text
@@ -241,6 +249,9 @@ struct PersonAbout<Lead: View>: View {
         case .notices: narrowRow(.notices)
         case .home: home
         case .requests: requests
+        case .muted: keeping(.muted)
+        case .blocked: keeping(.blocked)
+        case .servers: keeping(.servers)
         case .you: you
         }
     }
@@ -479,6 +490,30 @@ struct PersonAbout<Lead: View>: View {
             } else {
                 Button { onRequests(entry) } label: {
                     HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                        Text(entry.words()).fixedSize(horizontal: false, vertical: true)
+                        Image(systemName: "chevron.right").shellFont(.mark).accessibilityHidden(true)
+                    }
+                    .shellFont(.reading)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(entry.words())
+            }
+        }
+    }
+
+    /// A way to one of the reader's lists of whom they keep away (#314): words and the mark that
+    /// says it leads on — or the sign-in's lock, dim, a press where it may be asked.
+    @ViewBuilder
+    private func keeping(_ which: KeepingEntry.Which) -> some View {
+        if let entry = said.keeping.first(where: { $0.which == which }) {
+            if let place = entry.locked {
+                locked(entry.words(), asks: place.asks, press: { onKeeping(entry) })
+            } else {
+                Button { onKeeping(entry) } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                        Image(systemName: entry.symbol).accessibilityHidden(true)
                         Text(entry.words()).fixedSize(horizontal: false, vertical: true)
                         Image(systemName: "chevron.right").shellFont(.mark).accessibilityHidden(true)
                     }

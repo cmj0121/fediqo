@@ -71,9 +71,10 @@ struct SourceReach {
     /// where its caller made them, so each is listed under its own name.
     func account(
         _ door: MastodonAuthorized, landingIn store: ItemStore,
-        reading: (@Sendable (FediqoCore.Category) -> MastodonAuthorized)? = nil
+        reading: (@Sendable (FediqoCore.Category) -> MastodonAuthorized)? = nil,
+        failed: (@Sendable (FediqoCore.Category?, any Error) -> Void)? = nil
     ) -> MastodonAccount {
-        MastodonAccount(door: door, store: store, reading: reading)
+        MastodonAccount(door: door, store: store, reading: reading, failed: failed)
     }
 
     /// One post and what is around it, as the reader, through `door`.
@@ -146,6 +147,12 @@ struct SourceReach {
     /// signed-in door.
     func featuring(_ door: MastodonAuthorized) -> MastodonFeaturing {
         MastodonFeaturing(door: door)
+    }
+
+    /// The whole servers the reader blocks, and blocking one or stopping (#314): only ever as
+    /// the reader, through the signed-in door.
+    func serverBlocks(_ door: MastodonAuthorized) -> MastodonServerBlocks {
+        MastodonServerBlocks(door: door)
     }
 
     /// What somebody features on their profile (#315, #318), as the reader, through `door`.

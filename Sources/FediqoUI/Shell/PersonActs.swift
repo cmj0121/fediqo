@@ -66,6 +66,20 @@ struct PersonActing: Equatable {
     /// How the sign-in stands where it holds less than featuring needs — the account part —
     /// or nothing where it holds it.
     var accountLock: PartWords.Place?
+    /// The server they live on, where it is not the source's own (#314): what blocking a whole
+    /// server names. Nothing for somebody of the source itself, whose server is the reader's.
+    var server: String?
+    /// How the sign-in stands where it holds less than muting and blocking need (#314), or
+    /// nothing where it holds them.
+    var blocksLock: PartWords.Place?
+    /// Whether somebody is muted and blocked at the source at all (#314): the one fact of its
+    /// kind (`SourceOffers.blocks`), handed in where the source is asked.
+    var blockable = false
+    /// Whether somebody is reported at the source at all (#339): the one fact of its kind
+    /// (`SourceOffers.reports`), handed in where the source is asked.
+    var reportable = false
+    /// How the sign-in stands where it holds less than reporting needs, or nothing where it holds it.
+    var reportsLock: PartWords.Place?
 
     /// How the reader stands to them as the page draws it: what the source last said, with the
     /// press on its way drawn over it. Nothing until the source has said.
@@ -86,7 +100,20 @@ struct PersonActing: Equatable {
         case .refuseRequest, .removeFollower: standing.followedBy = false
         case .feature: standing.featured = true
         case .unfeature: standing.featured = false
-        case .dismissSuggestion, nil: break
+        case .mute: standing.muting = true
+        case .unmute:
+            standing.muting = false
+            standing.mutedUntil = nil
+            standing.mutesNotices = nil
+        // A block takes a follow either way with it, and a request.
+        case .block, .blockServer:
+            if doing == .block { standing.blocking = true } else { standing.serverBlocked = true }
+            standing.following = false
+            standing.requested = false
+            standing.followedBy = false
+        case .unblock: standing.blocking = false
+        case .unblockServer: standing.serverBlocked = false
+        case .dismissSuggestion, .report, nil: break
         }
         return standing
     }
@@ -216,12 +243,50 @@ struct PersonActing: Equatable {
         return offered + (standing.followedBy ? [.removeFollower] : [])
     }
 
+    /// What the page's `…` offers of muting and blocking (#314), after what `more` offers: one of
+    /// mute or unmute, of block or unblock, as the source said it stands — and, of somebody whose
+    /// server is not the source's own, blocking that whole server or not. **Offered of anybody the
+    /// source said how the reader stands to**; none while a press is on its way. Where the
+    /// sign-in lacks what they need they are dim with that lock (`menu`), and a press asks.
+    var keeping: [PersonAct] {
+        guard blockable, doing == nil, let standing = shown else { return [] }
+        var offered: [PersonAct] = [standing.muting ? .unmute : .mute, standing.blocking ? .unblock : .block]
+        if server != nil { offered.append(standing.serverBlocked ? .unblockServer : .blockServer) }
+        return offered
+    }
+
+    /// What the page's `…` offers last, under muting and blocking (#339): reporting them, where the
+    /// source has reports — **whatever the source has said of how the reader stands**, since a
+    /// report needs none of it. None while a press is on its way.
+    var reporting: [PersonAct] { reportable && doing == nil ? [.report] : [] }
+
+    /// Whether the page's `…` offers `act`: among `more`, `keeping` or `reporting`.
+    func offersInMenu(_ act: PersonAct) -> Bool { more.contains(act) || keeping.contains(act) || reporting.contains(act) }
+
+    /// The mark of a report (#339).
+    static let reportSymbol = "flag"
+
+    /// Whether `act` is one muting and blocking's that is answered on a sheet of its own before
+    /// it is sent (#314): what it takes away, for how long, and what becomes of what this device
+    /// holds of them. Undoing one is sent at the press.
+    static func asksOnASheet(_ act: PersonAct) -> Bool {
+        act == .mute || act == .block || act == .blockServer
+    }
+
     /// Whether `act` is one of featuring's two, which want the account part.
     static func features(_ act: PersonAct) -> Bool { act == .feature || act == .unfeature }
 
     /// Whether a press on `act` is the lock's: it wants the account part, which the sign-in
     /// does not hold — the press then only asks.
-    func asksForPart(_ act: PersonAct) -> Bool { Self.features(act) && accountLock != nil }
+    func asksForPart(_ act: PersonAct) -> Bool { lock(of: act) != nil }
+
+    /// The lock a press on `act` would only ask through: the account part's for featuring,
+    /// muting and blocking's for theirs (#314) — or nothing where the sign-in holds it.
+    func lock(of act: PersonAct) -> PartWords.Place? {
+        if Self.features(act) { return accountLock }
+        if act == .report { return reportsLock }
+        return act.isMuteOrBlock ? blocksLock : nil
+    }
 
     /// Whether `act` is asked about before it is sent: unfollowing somebody who must agree to
     /// be followed, since following them again means asking again.
@@ -257,6 +322,7 @@ struct PersonActing: Equatable {
             } ?? L10n.t("person.stands.muted", language: language))
         }
         if standing.blocking { pills.append(L10n.t("person.stands.blocked", language: language)) }
+        if standing.serverBlocked { pills.append(L10n.t("person.stands.serverBlocked", language: language)) }
         return pills
     }
 
@@ -287,8 +353,12 @@ struct PersonActing: Equatable {
             marks.append(Mark(symbol: "speaker.slash", words: pills(of: muted, language: language).first ?? ""))
         }
         if standing.blocking { say("hand.raised", "person.stands.blocked") }
+        if standing.serverBlocked { say(serverBlockedSymbol, "person.stands.serverBlocked") }
         return marks
     }
+
+    /// The mark of somebody whose whole server the reader blocks (#314).
+    static let serverBlockedSymbol = "xmark.shield"
 
     /// The mark of somebody the reader features on their profile (#315).
     static let featuredSymbol = "person.crop.rectangle.stack"
@@ -315,6 +385,12 @@ struct PersonActing: Equatable {
     /// featuring it cannot make.
     func accountLockWords(language: DummyLanguage? = nil) -> String? {
         accountLock.map { String(format: L10n.t($0.key, language: language), source) }
+    }
+
+    /// The words of the lock a press on `act` would only ask through (`lock(of:)`), as the `…`
+    /// says it at its head.
+    func lockWords(of act: PersonAct, language: DummyLanguage? = nil) -> String? {
+        lock(of: act).map { String(format: L10n.t($0.key, language: language), source) }
     }
 
     /// What a listener is read of the marks, as one element: each in words, joined.
@@ -377,6 +453,13 @@ struct PersonActing: Equatable {
         L10n.t(key(act), language: language)
     }
 
+    /// What an act is called in the page's `…`, of somebody whose server is `server`: blocking
+    /// a whole server names it (#314).
+    static func name(_ act: PersonAct, server: String?, language: DummyLanguage? = nil) -> String {
+        guard act == .blockServer || act == .unblockServer, let server else { return name(act, language: language) }
+        return String(format: L10n.t(key(act) + ".named", language: language), server)
+    }
+
     static func symbol(_ act: PersonAct) -> String {
         switch act {
         case .follow: "person.badge.plus"
@@ -389,6 +472,13 @@ struct PersonActing: Equatable {
         case .removeFollower: "person.crop.circle.badge.minus"
         case .feature, .unfeature: featuredSymbol
         case .dismissSuggestion: PeopleSaid.dismissSymbol
+        case .mute: "speaker.slash"
+        case .unmute: "speaker.wave.2"
+        case .block: "hand.raised"
+        case .unblock: "hand.raised.slash"
+        case .blockServer: serverBlockedSymbol
+        case .unblockServer: "checkmark.shield"
+        case .report: reportSymbol
         }
     }
 
@@ -405,6 +495,13 @@ struct PersonActing: Equatable {
         case .feature: "person.act.feature"
         case .unfeature: "person.act.unfeature"
         case .dismissSuggestion: "people.suggested.dismiss"
+        case .mute: "person.act.mute"
+        case .unmute: "person.act.unmute"
+        case .block: "person.act.block"
+        case .unblock: "person.act.unblock"
+        case .blockServer: "person.act.blockServer"
+        case .unblockServer: "person.act.unblockServer"
+        case .report: "person.act.report"
         }
     }
 
@@ -415,10 +512,10 @@ struct PersonActing: Equatable {
     @MainActor
     func menu(head: [String], act: @escaping (PersonAct) -> Void) -> ShellMore {
         var said = head
-        let items: [ShellMoreItem] = more.map { offered in
-            let symbol = Self.symbol(offered), name = Self.name(offered)
-            if asksForPart(offered), let lock = accountLock {
-                if let words = accountLockWords() { said.append(words) }
+        let items: [ShellMoreItem] = (more + keeping + reporting).map { offered in
+            let symbol = Self.symbol(offered), name = Self.name(offered, server: server)
+            if let lock = lock(of: offered) {
+                if let words = lockWords(of: offered), !said.contains(words) { said.append(words) }
                 let dim = ShellMark(SourceRow.permissionSymbol, name, look: .dim(.askAgain))
                 return ShellMoreItem.plain(dim, ask: lock.asks ? { act(offered) } : nil, act: {}).underHead
             }
@@ -427,6 +524,32 @@ struct PersonActing: Equatable {
         }
         return ShellMore(head: said, items: items)
     }
+}
+
+/// What the person answered on the sheet a mute or a block is asked on (#314), beside the act.
+///
+/// **What becomes of what this device holds of them is the person's to say**, and is done only
+/// once the source has said the act is done: a press that did not arrive changes nothing here.
+struct StandingChoice: Equatable, Sendable {
+    /// What becomes of the posts this device holds of them.
+    enum Held: String, CaseIterable, Sendable {
+        /// Drawn as hidden, each saying why, until the mute or the block is taken back.
+        case hide
+        /// Let go of, as a letting go by dates lets posts go: a post the person keeps stays.
+        case letGo
+        /// Left as it is.
+        case leave
+    }
+
+    var held: Held = .hide
+    /// Whether a mute keeps their notices from the reader too.
+    var notices = true
+    /// How long a mute lasts, in seconds; nothing, for good.
+    var seconds: Int?
+
+    /// The lengths a mute is offered for, in seconds — nothing, for good — in the order offered:
+    /// the ones a Mastodon's own page offers.
+    static let lengths: [Int?] = [nil, 30 * 60, 60 * 60, 6 * 60 * 60, 24 * 60 * 60, 3 * 24 * 60 * 60, 7 * 24 * 60 * 60]
 }
 
 /// The heading's press and the page's `…`, side by side: Follow — dim with the lock where the
@@ -441,7 +564,7 @@ struct PersonHeadActs: View {
 
     /// Whether there is anything to draw: a press, or a menu with something in it.
     static func draws(_ acting: PersonActing) -> Bool {
-        acting.press != nil || !acting.more.isEmpty
+        acting.press != nil || !acting.more.isEmpty || !acting.keeping.isEmpty || !acting.reporting.isEmpty
     }
 
     var body: some View {
@@ -466,7 +589,7 @@ struct PersonHeadActs: View {
             case nil:
                 EmptyView()
             }
-            if !acting.more.isEmpty {
+            if !acting.more.isEmpty || !acting.keeping.isEmpty || !acting.reporting.isEmpty {
                 ShellMoreButton(label: ShellMore.label()) { acting.menu(head: head, act: onAct) }
                     .fixedSize()
             }

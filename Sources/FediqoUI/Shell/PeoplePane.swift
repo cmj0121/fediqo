@@ -105,7 +105,7 @@ struct PeopleSaid: Equatable {
     /// Whether the title names the source that keeps the list — nobody's list, or the
     /// reader's own requests — and not whose list it is.
     static func titleNamesHost(_ list: PeopleList, own: Bool = false) -> Bool {
-        list.readByCount || list.which == .requests || (own && list.which == .featured)
+        list.readByCount || list.isReadersOwn || (own && list.which == .featured)
     }
 
     /// What an order of a directory is called, in the control that chooses it.
@@ -189,6 +189,8 @@ struct PeopleSaid: Equatable {
         case .suggested: "people.suggested"
         case .requests: "people.requests"
         case .featured: "people.featured"
+        case .muted: "people.muted"
+        case .blocked: "people.blocked"
         case .following, .followers: "people"
         }
     }
@@ -233,7 +235,7 @@ struct PeopleSaid: Equatable {
             let key = switch list.which {
             case .found: "people.found.foot.farthest"
             case .suggested: "people.suggested.foot.farthest"
-            case .directory, .following, .followers, .requests, .featured: "people.directory.foot.farthest"
+            case .directory, .following, .followers, .requests, .featured, .muted, .blocked: "people.directory.foot.farthest"
             }
             return String(format: L10n.t(key, language: language), L10n.grouped(people.count, language: language), source)
         case .end:
@@ -276,6 +278,9 @@ struct PeopleSaid: Equatable {
         }
         if list.which == .featured {
             return String(format: L10n.t("people.featured.none", language: language), source)
+        }
+        if list.which == .muted || list.which == .blocked {
+            return String(format: L10n.t("\(Self.words(list.which)).none", language: language), source)
         }
         if list.hidden, !own {
             return String(format: L10n.t("people.hidden", language: language), list.lineHandle)
@@ -553,6 +558,53 @@ struct DirectoryChoiceMenu: View {
         .buttonStyle(.plain)
         .shellNamed("people.directory.choose")
         .accessibilityValue(PeopleSaid.sortingLine(choice, source: source))
+    }
+}
+
+/// A way from the reader's own page to one of their lists of whom they keep away at a source
+/// (#314): whom they mute, whom they block, and the servers they block — one line of "You
+/// there" on About each, and what its press does.
+///
+/// **Where the sign-in does not see whom they mute and block, there is one line and not three**:
+/// the lock of how the sign-in stands, said once, whose press asks where it may.
+struct KeepingEntry: Equatable, Identifiable {
+    enum Which: String, CaseIterable {
+        case muted, blocked, servers
+    }
+
+    let which: Which
+    let host: String
+    /// How the sign-in stands where it does not see whom the reader mutes and blocks.
+    var locked: PartWords.Place?
+
+    /// What the lamp stands on where it stands on this line.
+    var id: String { Self.id(which) }
+
+    static func id(_ which: Which) -> String { "about." + which.rawValue }
+
+    /// The list a press opens: one of people, or nothing for the servers, which are a sheet.
+    var list: PeopleList? {
+        switch which {
+        case .muted: PeopleList(.muted, at: host)
+        case .blocked: PeopleList(.blocked, at: host)
+        case .servers: nil
+        }
+    }
+
+    var asks: Bool { locked?.asks ?? false }
+    var presses: Bool { locked == nil || asks }
+
+    func words(language: DummyLanguage? = nil) -> String {
+        if let locked { return String(format: L10n.t(locked.key, language: language), host) }
+        return L10n.t("keeping.\(which.rawValue).entry", language: language)
+    }
+
+    var symbol: String {
+        switch which {
+        case .muted: "speaker.slash"
+        case .blocked: "hand.raised"
+        case .servers: PersonActing.serverBlockedSymbol
+        }
     }
 }
 

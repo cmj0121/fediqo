@@ -123,17 +123,18 @@ struct SourceRow: Identifiable, Hashable {
 
     /// Every sentence standing about this source now, in the order the head of the row's `…`
     /// reads them: the errand running, then a refusal of the last press on this host, then the
-    /// forum's own notice. The row draws none of them — its `…` says in colour and in its name that
+    /// forum's own notice, then that its reads keep failing (#371). The row draws none of them — its `…` says in colour and in its name that
     /// there is something to read (`saying`) — VoiceOver hears them all, and the source's detail
     /// (`SourceStanding`) says every one whole.
     static func statusLines(waiting: String?, refusal: (host: String, key: String)?, notice: String?,
-                            host: String, language: DummyLanguage? = nil) -> [String] {
+                            unread: String? = nil, host: String, language: DummyLanguage? = nil) -> [String] {
         var lines: [String] = []
         if let waiting { lines.append(waiting) }
         if let refusal, refusal.host == host {
             lines.append(String(format: L10n.t(refusal.key, language: language), host))
         }
         if let notice { lines.append(notice) }
+        if let unread { lines.append(unread) }
         return lines
     }
 
@@ -749,6 +750,9 @@ struct SourceRowView: View {
     /// it in again and why, or that a password was not kept or not deleted — already a sentence.
     /// The caller asks `ForumSessions.notice(host:)` for this row's host; nothing here looks.
     var notice: String? = nil
+    /// That this source's reads keep failing, since when and why (#371), already a sentence —
+    /// `ShellReload.unreadLine(host:sources:)`, handed in as `notice` is.
+    var unread: String? = nil
     /// What this source's sign-in holds, part by part, already a sentence (#347) — or nothing
     /// where it has no sign-in or its kind of source has no parts. Handed in as `notice` is:
     /// the caller asks `MastodonSessions.holds(host:)`, and nothing here looks.
@@ -793,7 +797,7 @@ struct SourceRowView: View {
     /// Every sentence standing about this source now. **Internal and pinned**: it is the head of
     /// `…`, the glyph `…` wears and what a listener hears after the row's own sentence.
     var said: [String] {
-        SourceRow.statusLines(waiting: waiting, refusal: refusal, notice: notice, host: row.source.host)
+        SourceRow.statusLines(waiting: waiting, refusal: refusal, notice: notice, unread: unread, host: row.source.host)
     }
 
     /// The sign-in, as the mark the row draws. **Internal and pinned** — a look decided inside a

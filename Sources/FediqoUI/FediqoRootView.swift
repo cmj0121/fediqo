@@ -160,7 +160,8 @@ public struct FediqoRootView: View {
             http: http, store: store, forums: forums, mastodon: mastodon,
             // A launch made for a picture writes no timeline down: one it makes for itself
             // (`ShellStaged.Step.empty`) is gone with the launch.
-            timelines: staged == nil ? WrittenTimelineStore(defaults: .standard, file: lists?.timelines) : nil
+            timelines: staged == nil ? WrittenTimelineStore(defaults: .standard, file: lists?.timelines) : nil,
+            hides: staged == nil ? ShellHides(defaults: .standard, file: lists?.hides) : nil
         )
         session.persist = persist
         session.persistUnsent = persistUnsent
@@ -405,7 +406,7 @@ public struct FediqoRootView: View {
             // its own rather than the dialog spelled here — see `WithdrawQuestion`.
             .modifier(WithdrawQuestion(session: session))
             .modifier(PartQuestion(session: session))
-            .modifier(ProfileSheetPresenter(profile: people.profile, session: session))
+            .modifier(PersonPresenters(people: people, session: session))
             .modifier(UnsentPresenters(session: session))
             // An answer, over the conversation it belongs to (#108). Driven by the session's one
             // value, so the key and the mark open the same surface by writing the same thing.
@@ -1638,6 +1639,7 @@ public struct FediqoRootView: View {
         if let person = walk.openedPerson, people.front(of: person, in: session) == .about {
             if let entry = people.followedEntry(of: person, in: session), entry.id == id { return followedPressed(entry) }
             if id == RequestsEntry.id, let entry = people.requestsEntry(of: person, in: session) { return requestsPressed(entry) }
+            if let entry = people.keepingEntries(of: person, in: session).first(where: { $0.id == id }) { return keepingPressed(entry) }
             if let press = people.featured(of: person, in: session)?.press(on: id) {
                 return featuredPressed(press, from: id)
             }
@@ -2131,6 +2133,24 @@ public struct FediqoRootView: View {
         // Left, the list gives the line back: the lamp is on it again, and nothing in the list is lit.
         guard Self.canWalk(place: place, open: openLayers), walk.walk(to: .people(entry.list), from: RequestsEntry.id)
         else { return false }
+        selectedItemID = nil
+        return true
+    }
+
+    /// A way to whom the reader mutes or blocks, pressed on their own page (#314): the list, one
+    /// more step of the walk; the servers they block, on their sheet — or, where the line is the
+    /// lock of a sign-in that does not see them and may be asked, the question that asks it.
+    private func keepingPressed(_ entry: KeepingEntry) -> Bool {
+        guard entry.locked == nil else {
+            guard entry.asks else { return false }
+            session.askFor([.blocks], host: entry.host)
+            return true
+        }
+        guard let list = entry.list else {
+            Task { await people.servers.show(entry.host, in: session) }
+            return true
+        }
+        guard Self.canWalk(place: place, open: openLayers), walk.walk(to: .people(list), from: entry.id) else { return false }
         selectedItemID = nil
         return true
     }
@@ -2973,6 +2993,7 @@ public struct FediqoRootView: View {
                 onTurnFound: foundTurned,
                 onFollowed: { _ = followedPressed($0) },
                 onRequests: { _ = requestsPressed($0) },
+                onKeeping: { _ = keepingPressed($0) },
                 onOpenFeatured: { _ = featuredPressed($0, from: nil) },
                 onLookUp: lookUpPressed,
                 trends: stream == .trends ? trendsHead : nil
@@ -3062,6 +3083,22 @@ private struct WithdrawQuestion: ViewModifier {
             get: { session.withdrawing.map { Asked(item: $0, copy: session.withdrawingCopy ?? $0) } },
             set: { if $0 == nil { session.cancelWithdraw() } }
         )
+    }
+}
+
+/// What a person's page puts up over everything — their profile, the mute or block asked, the
+/// servers the reader blocks, and a report — gathered in one modifier so the root's chain of
+/// presenters stays short enough to type-check in time (`test-before-push`).
+private struct PersonPresenters: ViewModifier {
+    let people: ShellPersonPages
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(ProfileSheetPresenter(profile: people.profile, session: session))
+            .modifier(StandingSheetPresenter(people: people, session: session))
+            .modifier(BlockedServersPresenter(servers: people.servers, session: session))
+            .modifier(ReportSheetPresenter(people: people, session: session))
     }
 }
 

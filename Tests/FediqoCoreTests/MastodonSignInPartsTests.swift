@@ -28,6 +28,8 @@ struct MastodonSignInPartsTests {
         (.account, "write:accounts", ""),
         (.media, "write:media", ""),
         (.marks, "read:bookmarks read:favourites", ""),
+        (.blocks, "read:mutes write:mutes read:blocks write:blocks", ""),
+        (.reports, "write:reports", ""),
     ]
 
     @Test("Every part's words are the ones it shipped with, in the order it shipped; no word belongs to two parts; and they are the words a sign-in asks today")
@@ -168,7 +170,7 @@ struct MastodonSignInPartsTests {
     @Test("A held word the table does not know is on no page — the whole of reading, as a source names what an older or another app's token holds, among them — and no page names a word that is neither held nor a ticked part's")
     func anUnknownHeldWordIsLeftOut() {
         let reading = MastodonOAuth.reading
-        #expect(MastodonParts.page(held: "\(reading) read:mutes write:nonsense", ticked: [.notices]) == "\(reading) read:notifications")
+        #expect(MastodonParts.page(held: "\(reading) read:filters write:nonsense", ticked: [.notices]) == "\(reading) read:notifications")
         #expect(MastodonParts.page(held: "read write", ticked: [.reading]) == MastodonOAuth.readingWithoutSearch)
         // What a real source said a sign-in for everything holds (`MastodonSignInCaptures.wholeInfo`).
         #expect(MastodonParts.page(held: "read write", ticked: []) == "")
@@ -204,8 +206,10 @@ struct MastodonSignInPartsTests {
             if held.contains(w) { all.append("\(held) \(n) \(d)") }
             all.append("\(held) read:follows write:follows")
             all.append("\(held) read:follows")
-            all.append("\(held) read:mutes write:mutes")
-            all.append("\(held) read:mutes")
+            all.append("\(held) read:filters write:filters")
+            all.append("\(held) read:filters")
+            all.append("\(held) read:mutes write:mutes read:blocks write:blocks")
+            all.append("\(held) read:mutes read:blocks")
         }
         all += ["\(r) write:statuses", "read:statuses", "read write", "read", "write", "\(r) write", "read \(w) \(b)"]
         all.append("\(d) \(n) \(b) write:favourites write:statuses read:search read:accounts read:lists read:statuses")
@@ -273,7 +277,7 @@ struct MastodonSignInPartsTests {
         #expect(MastodonParts.page(held: nil, ticked: reads, readOnly: true) == MastodonOAuth.reading)
         #expect(MastodonParts.page(held: nil, ticked: reads.union([.notices]), readOnly: true) == MastodonOAuth.scopes(writing: false, notices: true))
         // Ticking what acts beside that answer asks for none of it: of follows, the word that reads.
-        #expect(MastodonParts.page(held: everything, ticked: Set(Part.allCases), readOnly: true) == "\(r) read:search \(n) read:follows read:bookmarks read:favourites")
+        #expect(MastodonParts.page(held: everything, ticked: Set(Part.allCases), readOnly: true) == "\(r) read:search \(n) read:follows read:bookmarks read:favourites read:mutes read:blocks")
         #expect(MastodonParts.page(held: nil, ticked: [.acting, .bookmarks], readOnly: true) == "")
 
         let acts = reads.union([.acting, .bookmarks])

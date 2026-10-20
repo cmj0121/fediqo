@@ -92,6 +92,7 @@ struct TimelinePane: View {
     var onFollowed: (FollowedTagsEntry) -> Void = { _ in }
     /// The way to the people who ask to follow the reader, pressed there (#313).
     var onRequests: (RequestsEntry) -> Void = { _ in }
+    var onKeeping: (KeepingEntry) -> Void = { _ in }
     /// A hashtag somebody features, or the way to the people they feature, pressed on About
     /// of their page (#315, #318), answered by the root: a step of the walk.
     var onOpenFeatured: (FeaturedPress) -> Void = { _ in }
@@ -696,6 +697,7 @@ struct TimelinePane: View {
             },
             onFollowed: onFollowed,
             onRequests: onRequests,
+            onKeeping: onKeeping,
             onFeatured: { press in
                 switch press {
                 case .takeOff(let tag):
@@ -1018,8 +1020,18 @@ struct TimelinePane: View {
         .task(id: rising.opening(which, in: session)) { await rising.opened(which, in: session) }
     }
 
-    @ViewBuilder
+    /// The stream, under the line that says which of its sources is not being read (#371) — over
+    /// the posts and over the notice that there are none alike, which may be why. A search's
+    /// results are not a timeline, and say nothing of the kind.
     private var stream: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !searching { UnreadSourcesHead(timeline: timeline, session: session) }
+            streamBody
+        }
+    }
+
+    @ViewBuilder
+    private var streamBody: some View {
         // Bound once: the list, each row's rule under it and the jump to the top all read the
         // same rows, and each read of `items` used to ask the session for them again.
         let items = items
@@ -1332,6 +1344,12 @@ struct TimelinePane: View {
         acting.keep = { Task { await session.toggleKept(item) } }
         acting.ask = { _ in session.askToBookmark(item) }
         acting.locks = session.locks(on: item, acts: acting.acts)
+        // Reporting it (#339): the sheet goes up at the press, or the sign-in is asked for more.
+        if let people, let offer = session.reportOffer(on: item) {
+            acting.report = ItemActing.Report(lock: offer.lock) {
+                Task { await people.reports.start(offer.who, post: offer.post, people: people, in: session) }
+            }
+        }
         // Taking back is an item of the row's `…` (#109), built only where the post offers it:
         // the question the key `d` asks, about the copy that goes, and a yes that refuses what
         // that asking refuses.

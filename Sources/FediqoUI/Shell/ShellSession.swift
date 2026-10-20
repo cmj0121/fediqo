@@ -66,6 +66,8 @@ final class ShellSession {
     /// be the same object. It holds no landed act at all — see its own doc, which is where the
     /// "not because this device remembered pressing it" half of #106 is actually enforced.
     let acts = ShellActs()
+    /// What this device hides of what it held of whom the person muted or blocked (#314).
+    let hides: ShellHides
 
     /// The conversation around each post the reader has opened — #90.
     ///
@@ -982,9 +984,11 @@ final class ShellSession {
         mastodon: MastodonSessions = MastodonSessions(),
         posts: ForumPosts? = nil,
         blogs: ForumBlogs? = nil,
-        timelines: WrittenTimelineStore? = nil
+        timelines: WrittenTimelineStore? = nil,
+        hides: ShellHides? = nil
     ) {
         self.http = http
+        self.hides = hides ?? ShellHides()
         timelineStore = timelines
         carry = ShellCarry(work: work)
         nearby = ShellNearby(work: work)
@@ -1500,6 +1504,8 @@ final class ShellSession {
     func acting(on item: DummyItem) -> ItemActing {
         let each = actsByCopy(of: item)
         var acting = ItemActing(acts: Self.acts(from: each.map(\.acts)))
+        // Hidden here, saying why, where the person muted or blocked whoever made it (#314).
+        acting.hidden = hides.hide(of: item).map { HiddenHere($0) }
         for act in PostAct.allCases {
             let copy = each.first { $0.acts.offers(act) }?.copy ?? item
             acting.standings[act] = acts.standing(of: copy.id, act)
@@ -3957,6 +3963,8 @@ final class ShellSession {
         // Every read of it a reload has on its way ends here, signed in or not, and an open thread
         // from it is not renewed again: nothing this app does on its own reaches it after (#221).
         reload.letGo(host: host)
+        // What it hid of whom the person muted or blocked there goes with it (#314).
+        hides.letGo(at: host)
         removes[host, default: 0] += 1
         removals.insert(host)
         defer { removals.remove(host) }

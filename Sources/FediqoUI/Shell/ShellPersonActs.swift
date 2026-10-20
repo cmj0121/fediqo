@@ -164,6 +164,19 @@ final class ShellPersonActs {
         source.kind.offers.follows
     }
 
+    /// Whether the sign-in at `host` may mute and block people and servers (#314): it holds all
+    /// of that part.
+    static func blocks(at host: String, in session: ShellSession) -> Bool {
+        session.mastodon.standing(PersonAct.mute.needs, host: host) == .held
+    }
+
+    /// Whether the sign-in at `host` sees whom the reader mutes and blocks (#314): it holds all
+    /// of that part, or the half of it that sees.
+    static func seesBlocks(at host: String, in session: ShellSession) -> Bool {
+        blocks(at: host, in: session)
+            || MastodonParts.half(of: .blocks, in: session.mastodon.heldParts[host.lowercased()]?.scopes) == .seeing
+    }
+
     /// Whether the sign-in at `host` may follow and unfollow: it holds all of following.
     static func changes(at host: String, in session: ShellSession) -> Bool {
         session.mastodon.standing(PersonAct.follow.needs, host: host) == .held
@@ -221,6 +234,20 @@ final class ShellPersonActs {
         if !Self.features(at: host, in: session) {
             acting.accountLock = session.mastodon.place(PersonAct.feature.needs, host: host)
                 ?? PartWords.Place(kind: .none, key: "part.account.unasked")
+        }
+        // Muting and blocking (#314), where its kind has them: the server they live on, where it
+        // is not this source's.
+        acting.blockable = source.kind.offers.blocks
+        acting.server = person.livesHere ? nil : person.home
+        // Reporting them (#339), where its kind has it.
+        acting.reportable = source.kind.offers.reports && ShellReports.isSomebodyElse(person, at: host, in: session)
+        if session.mastodon.standing(PersonAct.report.needs, host: host) != .held {
+            acting.reportsLock = session.mastodon.place(PersonAct.report.needs, host: host)
+                ?? PartWords.Place(kind: .none, key: "part.reports.unasked")
+        }
+        if !Self.blocks(at: host, in: session) {
+            acting.blocksLock = session.mastodon.place(PersonAct.mute.needs, host: host)
+                ?? PartWords.Place(kind: .none, key: "part.ask.partly")
         }
         guard Self.sees(at: host, in: session) else { return acting }
         if let out = presses.shown(key), pressed[key]?.under == ShellPersonPages.signIns(at: host, in: session) {
@@ -348,19 +375,23 @@ final class ShellPersonActs {
         // One read out a page: a read begun over another supersedes it.
         asks[key]?.cancel()
         let through = session.reach.standing(session.mastodon.authorized(token: held, within: deadline, for: .person))
-        let task = Task { await self.read(key, of: accountID, through: through, at: source, as: askedAs, errand: errand, in: session) }
+        let ticket = session.hides.ticket()
+        let task = Task {
+            await self.read(key, of: accountID, through: through, at: source, as: askedAs, errand: errand, ticket: ticket, in: session)
+        }
         asks[key] = task
         return task
     }
 
     private func read(
         _ key: String, of accountID: String, through: MastodonStanding, at source: Source, as askedAs: AskedAs,
-        errand: Int, in session: ShellSession
+        errand: Int, ticket: Int, in session: ShellSession
     ) async {
         defer { if pages[key]?.awaits == errand { asks[key] = nil } }
         do {
             let said = try await through.standing(to: accountID)
             guard stillTheirs(key, of: accountID, errand: errand, at: source, in: session) else { return }
+            if let said { Self.heard(said, key: key, at: source.host, since: ticket, in: session) }
             pages[key]?.said = said
             pages[key]?.unsaid = said == nil
             pages[key]?.failed = false
@@ -403,11 +434,34 @@ final class ShellPersonActs {
     /// `listed` is the list a row's press came from, where it came from one: the acts of a
     /// row (#313) are offered there and nowhere else. Whether the source answered that the
     /// press was done.
+    ///
+    /// `choice` is what the person answered on the sheet a mute or a block is asked on (#314):
+    /// how long a mute is for, and whether it keeps their notices too. Nothing for any other.
     @discardableResult
     func press(
-        _ act: PersonAct, on who: DummyPerson, said: PersonSaid?, listed: PeopleList.Which? = nil, in session: ShellSession
+        _ act: PersonAct, on who: DummyPerson, said: PersonSaid?, listed: PeopleList.Which? = nil,
+        choice: StandingChoice? = nil, in session: ShellSession
     ) async -> Bool {
-        guard let person = said?.person, let source = Self.source(of: who, in: session) else { return false }
+        await pressCame(act, on: who, said: said, listed: listed, choice: choice, in: session).taken
+    }
+
+    /// What a press came to (#314): whether **the source said it did it** — whatever became of
+    /// the page meanwhile, and whether how it stands could be read after — and whether the page
+    /// pressed on took the answer. What this device does with what it held of somebody hangs on
+    /// the first: a press the source did is done, though its page was let go or renumbered.
+    struct PressCame: Equatable {
+        var taken = false
+        var sourceDid = false
+        /// The source's word of how the reader stands afterwards, where it gave one.
+        var said: PersonStanding?
+    }
+
+    /// `press`, answering what it came to.
+    func pressCame(
+        _ act: PersonAct, on who: DummyPerson, said: PersonSaid?, listed: PeopleList.Which? = nil,
+        choice: StandingChoice? = nil, in session: ShellSession
+    ) async -> PressCame {
+        guard let person = said?.person, let source = Self.source(of: who, in: session) else { return PressCame() }
         let looked = readers.look(at: source.host, in: session)
         let key = who.id
         guard let held = looked.held, !looked.changed,
@@ -415,12 +469,16 @@ final class ShellPersonActs {
               let offered = acting(of: who, as: person, in: session),
               Self.offers(act, on: offered, listed: listed),
               let flight = presses.begin(key, showing: act)
-        else { return false }
+        else { return PressCame() }
         missed[key] = nil
         refused[key] = nil
         pressed[key] = Pressed(host: source.host, under: page.under)
+        let ticket = session.hides.ticket()
         let writing = session.mastodon.authorized(token: held, within: deadline, for: .write)
-        let through = Doors(standing: session.reach.standing(writing), featuring: session.reach.featuring(writing))
+        let through = Doors(
+            standing: session.reach.standing(writing), featuring: session.reach.featuring(writing),
+            servers: session.reach.serverBlocks(writing), server: offered.server, choice: choice ?? StandingChoice()
+        )
         let round = hosts?.round(at: source.host) ?? 0
         // The door the read after a follow of somebody of another server goes through (`act`).
         let settling = session.reach.standing(session.mastodon.authorized(token: held, within: deadline, for: .person))
@@ -428,7 +486,7 @@ final class ShellPersonActs {
         return await Task {
             await self.act(
                 act, flight: flight, on: page, key: key, through: through, settling: settling, with: held, at: source,
-                round: round, in: session
+                round: round, ticket: ticket, in: session
             )
         }.value
     }
@@ -454,8 +512,9 @@ final class ShellPersonActs {
     /// taking a request back are sent as they always were, with no such read.
     private func act(
         _ act: PersonAct, flight: PressNumber, on pressedOn: Page, key: String, through: Doors,
-        settling: MastodonStanding, with held: MastodonToken, at source: Source, round: Int, in session: ShellSession
-    ) async -> Bool {
+        settling: MastodonStanding, with held: MastodonToken, at source: Source, round: Int, ticket: Int,
+        in session: ShellSession
+    ) async -> PressCame {
         /// What the press came to: the source's word, that it has none of them, that the
         /// press did not arrive, or that it did and how it stands could not then be read.
         enum Outcome {
@@ -481,19 +540,43 @@ final class ShellPersonActs {
                 sends = false
             }
             // Let go of with its reader while the read was out: nothing is sent for them.
-            guard presses.isStill(flight, key) else { return false }
+            guard presses.isStill(flight, key) else { return PressCame() }
         }
+        // A server's block is answered with nothing of how it stands: it is read after (#314).
+        var serverDone = false
         if sends {
             do {
-                outcome = .said(try await Self.send(act, about: pressedOn.accountID, through: through))
+                if Self.isOfAServer(act) {
+                    guard let server = through.server else { throw MastodonRequestError.invalidURL }
+                    act == .blockServer ? try await through.servers.block(server) : try await through.servers.unblock(server)
+                    serverDone = true
+                    outcome = try await settling.standing(to: pressedOn.accountID).map(Outcome.said) ?? .unsaid
+                } else {
+                    outcome = .said(try await Self.send(act, about: pressedOn.accountID, through: through))
+                }
             } catch {
                 ShellPersonPages.concluded(error, at: source, askedAs: pressedOn.askedAs, in: session)
                 if case .refused(let sentence) = error as? AccountPartError { refusal = sentence }
                 absent = (error as? MastodonHostMoreError) == .noSuchAddress && PersonActing.features(act)
+                // Done at the source, and how it stands now could not be read.
+                if serverDone { outcome = .unread }
             }
         }
+        // What the source now says of how the reader stands, taken to what is hidden of them.
+        if case .said(let answer) = outcome, session.mastodon.token(host: source.host)?.accessToken == held.accessToken {
+            Self.heard(answer, key: key, at: source.host, since: ticket, in: session)
+        }
+        // Whether the source did it, whatever becomes of the page from here (#314).
+        var came = PressCame()
+        if Self.isOfAServer(act) {
+            came.sourceDid = serverDone
+            if case .said(let answer) = outcome { came.said = answer }
+        } else if case .said(let answer) = outcome, !turned, Self.did(act, answer) {
+            came.sourceDid = true
+            came.said = answer
+        }
         // Let go of with its reader meanwhile: the entry, if any, is another press's.
-        guard presses.isStill(flight, key) else { return false }
+        guard presses.isStill(flight, key) else { return came }
         // Somebody of another server is answered "followed" at the press, and is asked until
         // their server agrees: the answer is not how it stands, and is drawn nowhere. The
         // source is read now, **while the press is still out** — so the page goes on drawing
@@ -505,7 +588,7 @@ final class ShellPersonActs {
                 ShellPersonPages.concluded(error, at: source, askedAs: pressedOn.askedAs, in: session)
                 outcome = .unread
             }
-            guard presses.isStill(flight, key) else { return false }
+            guard presses.isStill(flight, key) else { return came }
         }
         // The press is answered, or did not arrive: either way it is out no longer.
         presses.settle(key)
@@ -521,17 +604,17 @@ final class ShellPersonActs {
             {
                 _ = begin(key, of: pressedOn.accountID, far: pressedOn.far, at: source, with: held, in: session)
             }
-            return false
+            return came
         }
         if absent {
             // The host has no people featured: the item goes, for the run, and nothing failed.
             hosts?.notFound(.featuredPeople, at: source.host, round: round)
-            return false
+            return came
         }
         if case .missed = outcome {
             missed[key] = act
             refused[key] = refusal
-            return false
+            return came
         }
         // A read still out set out before this answer: it is awaited no longer.
         asks[key]?.cancel()
@@ -546,7 +629,8 @@ final class ShellPersonActs {
             // The source's word stands either way; one that is not what was pressed is said as
             // not done — but not where nothing was sent: then nothing failed.
             if !turned, !Self.did(act, answer) { missed[key] = act }
-            return !turned && Self.did(act, answer)
+            came.taken = !turned && Self.did(act, answer)
+            return came
         case .unsaid:
             pages[key]?.said = nil
             pages[key]?.unsaid = true
@@ -561,7 +645,7 @@ final class ShellPersonActs {
         case .missed:
             break
         }
-        return false
+        return came
     }
 
     // MARK: - A row of a list (#313)
@@ -570,9 +654,10 @@ final class ShellPersonActs {
     static func isOfARow(_ act: PersonAct) -> Bool {
         switch act {
         // Taking somebody off the reader's profile is a row's too, on the people they feature (#315).
-        case .acceptRequest, .refuseRequest, .removeFollower, .unfeature: true
+        // Muting and blocking taken back are a row's on the reader's lists of them (#314).
+        case .acceptRequest, .refuseRequest, .removeFollower, .unfeature, .unmute, .unblock: true
         case .follow, .unfollow, .withdraw, .showBoosts, .hideBoosts, .notify, .stopNotifying, .feature,
-             .dismissSuggestion: false
+             .dismissSuggestion, .mute, .block, .blockServer, .unblockServer, .report: false
         }
     }
 
@@ -592,9 +677,16 @@ final class ShellPersonActs {
     func pressRow(
         _ act: PersonAct, on person: Person, standing said: PersonStanding?, listed: PeopleList.Which, in session: ShellSession
     ) async -> Bool {
+        await pressRowCame(act, on: person, standing: said, listed: listed, in: session).taken
+    }
+
+    /// `pressRow`, answering what it came to (`PressCame`).
+    func pressRowCame(
+        _ act: PersonAct, on person: Person, standing said: PersonStanding?, listed: PeopleList.Which, in session: ShellSession
+    ) async -> PressCame {
         let who = DummyPerson(person)
         guard Self.isOfARow(act), let source = Self.source(of: who, in: session), Self.sees(at: source.host, in: session)
-        else { return false }
+        else { return PressCame() }
         if self.standing(who.id, of: person.accountID, at: source.host, in: session) == nil {
             asks[who.id]?.cancel()
             missed[who.id] = nil
@@ -605,7 +697,7 @@ final class ShellPersonActs {
             )
             for gone in order.keep(who.id, among: Self.kept, busy: { pages[$0]?.asking == true || presses.isOut($0) }) { drop(gone) }
         }
-        return await press(act, on: who, said: PersonSaid(source: source.host, reading: .said(person)), listed: listed, in: session)
+        return await pressCame(act, on: who, said: PersonSaid(source: source.host, reading: .said(person)), listed: listed, in: session)
     }
 
     /// Whether `act` is one that takes a row off the list `which`: a request answered off the
@@ -616,6 +708,8 @@ final class ShellPersonActs {
         case .acceptRequest, .refuseRequest: which == .requests
         case .removeFollower: which == .followers
         case .unfeature: which == .featured
+        case .unmute: which == .muted
+        case .unblock: which == .blocked
         default: false
         }
     }
@@ -664,8 +758,17 @@ final class ShellPersonActs {
 
         case .showBoosts, .hideBoosts, .notify, .stopNotifying:
             offered.narrowsTakePress && offered.narrows().contains { $0.act == act }
-        // A suggestion is told apart on its list, and never from here (`ShellPeoplePages.dismiss`).
-        case .dismissSuggestion: false
+        // Muting and blocking (#314): from the page's `…` where it lists them and the sign-in
+        // holds what they need; taken back from a row of the reader's list of them too.
+        case .mute, .block, .blockServer, .unblockServer:
+            listed == nil && offered.keeping.contains(act) && !offered.asksForPart(act)
+        case .unmute, .unblock:
+            listed == nil
+                ? offered.keeping.contains(act) && !offered.asksForPart(act)
+                : listed == (act == .unmute ? .muted : .blocked) && offered.blocksLock == nil && offered.doing == nil
+        // A suggestion is told apart on its list, and never from here (`ShellPeoplePages.dismiss`);
+        // a report is sent from its sheet (`ShellReports`).
+        case .dismissSuggestion, .report: false
         }
     }
 
@@ -673,15 +776,34 @@ final class ShellPersonActs {
     private static func isSwitch(_ act: PersonAct) -> Bool {
         switch act {
         case .follow, .unfollow, .withdraw, .acceptRequest, .refuseRequest, .removeFollower, .feature, .unfeature,
-             .dismissSuggestion: false
+             .dismissSuggestion, .mute, .unmute, .block, .unblock, .blockServer, .unblockServer, .report: false
         case .showBoosts, .hideBoosts, .notify, .stopNotifying: true
         }
     }
 
-    /// The two ways a press is sent: following, and featuring on the reader's profile.
+    /// What a read of how the reader stands to the person whose page is `key` said, taken to what
+    /// this device hides of them (`ShellHides.heard`): their handle is the page's own name for
+    /// them, and their server the last part of it.
+    static func heard(_ standing: PersonStanding, key: String, at host: String, since ticket: Int, in session: ShellSession) {
+        guard let handle = key.split(separator: "\u{1e}").last.map(String.init), handle.contains("@") else { return }
+        let server = handle.split(separator: "@").last.flatMap { MastodonServerBlocks.server(String($0)) }
+        session.hides.heard(standing, of: handle, server: server == host.lowercased() ? nil : server, at: host, since: ticket)
+    }
+
+    /// Whether `act` is about the whole server somebody lives on (#314), and not about them.
+    private static func isOfAServer(_ act: PersonAct) -> Bool {
+        act == .blockServer || act == .unblockServer
+    }
+
+    /// The ways a press is sent: following, featuring on the reader's profile, and blocking a
+    /// whole server (#314) — with the server it names, and what the person answered on a mute's
+    /// sheet.
     private struct Doors {
         let standing: MastodonStanding
         let featuring: MastodonFeaturing
+        let servers: MastodonServerBlocks
+        let server: String?
+        let choice: StandingChoice
     }
 
     /// The one request `act` is, sent: a follow, the taking back of one, or a follow said
@@ -701,7 +823,12 @@ final class ShellPersonActs {
         case .removeFollower: try await through.removeFollower(accountID)
         case .feature: try await doors.featuring.feature(accountID: accountID)
         case .unfeature: try await doors.featuring.unfeature(accountID: accountID)
-        case .dismissSuggestion: throw MastodonRequestError.invalidURL
+        case .mute: try await through.mute(accountID, notices: doors.choice.notices, for: doors.choice.seconds)
+        case .unmute: try await through.unmute(accountID)
+        case .block: try await through.block(accountID, true)
+        case .unblock: try await through.block(accountID, false)
+        // Sent through `servers`, and never from here.
+        case .dismissSuggestion, .blockServer, .unblockServer, .report: throw MastodonRequestError.invalidURL
         }
     }
 
@@ -719,7 +846,13 @@ final class ShellPersonActs {
         case .refuseRequest, .removeFollower: !answer.followedBy
         case .feature: answer.featured == true
         case .unfeature: answer.featured != true
-        case .dismissSuggestion: false
+        case .mute: answer.muting
+        case .unmute: !answer.muting
+        case .block: answer.blocking
+        case .unblock: !answer.blocking
+        case .blockServer: answer.serverBlocked
+        case .unblockServer: !answer.serverBlocked
+        case .dismissSuggestion, .report: false
         }
     }
 }
@@ -743,12 +876,84 @@ extension ShellPersonPages {
 
     /// A press on the page of `who`: its heading's Follow, or an item of its `…`. **Featuring
     /// where the sign-in lacks the account part only asks for it**: nothing is sent.
+    ///
+    /// **A mute and a block are asked on a sheet first** (#314): the press puts the sheet up and
+    /// sends nothing; its yes is `answer`. Taking either back is sent at the press, and what this
+    /// device hid of them is shown again once the source says it is done.
     func act(_ act: PersonAct, on who: DummyPerson, in session: ShellSession) async {
         if let standing = stands(to: who, in: session), standing.asksForPart(act) {
-            if standing.accountLock?.asks == true { session.askFor([act.needs], host: standing.source) }
+            if standing.lock(of: act)?.asks == true { session.askFor([act.needs], host: standing.source) }
             return
         }
-        await acts.press(act, on: who, said: said(of: who, in: session), in: session)
+        if PersonActing.asksOnASheet(act) {
+            ask(act, of: who, in: session)
+            return
+        }
+        // A report is written on a sheet of its own, and sent only from there (#339).
+        if act == .report {
+            if stands(to: who, in: session)?.reporting.contains(.report) == true { await reports.start(who, people: self, in: session) }
+            return
+        }
+        let came = await acts.pressCame(act, on: who, said: said(of: who, in: session), in: session)
+        // What this device hid of them shows once the source has taken the mute or block back,
+        // whatever became of the page meanwhile.
+        if came.sourceDid, let person = said(of: who, in: session)?.person { Self.undone(act, of: person, in: session) }
+    }
+
+    /// The sheet of a mute or a block put up (#314), over what the page offers now: only where
+    /// its `…` lists the act, the sign-in holds what it needs, and — for a whole server — the
+    /// page names one.
+    func ask(_ act: PersonAct, of who: DummyPerson, in session: ShellSession) {
+        guard PersonActing.asksOnASheet(act), standingAsk == nil, let standing = stands(to: who, in: session),
+              standing.keeping.contains(act), !standing.asksForPart(act), let person = said(of: who, in: session)?.person
+        else { return }
+        let server = act == .blockServer ? standing.server : nil
+        if act == .blockServer, server == nil { return }
+        let held = server.map { server in
+            session.notes.filter(HeldAuthors.server(server, at: standing.source).wrote).count
+        } ?? session.heldPosts(of: who).count
+        standingAsk = StandingAsk(
+            act: act, who: who, named: person.lineHandle, handle: person.handle, source: standing.source, server: server,
+            held: held
+        )
+    }
+
+    /// The sheet's yes (#314): the act sent as answered, and — **once the source says it is
+    /// done, and only then** — what this device holds of them treated as the person chose. A
+    /// press that did not arrive changes nothing here: the page says so under its heading.
+    func answer(_ ask: StandingAsk, _ choice: StandingChoice, in session: ShellSession) async {
+        guard standingAsk == ask else { return }
+        standingAsk = nil
+        let came = await acts.pressCame(ask.act, on: ask.who, said: said(of: ask.who, in: session), choice: choice, in: session)
+        // The source did it: what is held is treated as answered, whatever became of the page.
+        guard came.sourceDid else { return }
+        let authors = ask.server.map { HeldAuthors.server($0, at: ask.source) } ?? .person(ask.handle, at: ask.source)
+        switch choice.held {
+        case .hide:
+            if let server = ask.server {
+                session.hides.hide(server: server, at: ask.source)
+            } else {
+                // A mute for a time hides until the end the source named.
+                let until = ask.act == .mute ? (came.said ?? stands(to: ask.who, in: session)?.shown)?.mutedUntil : nil
+                session.hides.hide(ask.handle, at: ask.source, ask.act == .mute ? .muted : .blocked, until: until)
+            }
+        case .letGo:
+            _ = await session.letGo(by: authors)
+        case .leave:
+            break
+        }
+    }
+
+    /// What this device hid of `person` shown again: their mute, their block, or their server's
+    /// block, taken back at the source (#314).
+    static func undone(_ act: PersonAct, of person: Person, in session: ShellSession) {
+        let host = person.source.host
+        switch act {
+        case .unmute: session.hides.show(person.handle, at: host, .muted)
+        case .unblock: session.hides.show(person.handle, at: host, .blocked)
+        case .unblockServer: if let server = person.home { session.hides.show(server: server, at: host) }
+        default: break
+        }
     }
 
 

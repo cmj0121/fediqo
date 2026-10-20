@@ -42,6 +42,31 @@ struct ListsInAPackageTests {
         }
     }
 
+    private static let hides = Data(#"{"version":1,"hides":[{"host":"m.example","handle":"@ada@m.example","why":"muted"}]}"#.utf8)
+
+    @Test("What the person hides of whom they muted or blocked (#314) rides in a package beside the other lists, from a file or from its key alike, and is laid into its file")
+    func theHidesRideToo() async throws {
+        let filed = try await Device(sources: [PackagerFixture.mastodon])
+        let keyed = try await Device(sources: [PackagerFixture.mastodon])
+        let ontoFiled = try await Device()
+        let ontoKeyed = try await Device()
+        let urls = [package(), package()]
+        defer {
+            for device in [filed, keyed, ontoFiled, ontoKeyed] { device.remove() }
+            for url in urls { try? FileManager.default.removeItem(at: url) }
+        }
+        #expect(filed.lists.hides.write(Self.hides))
+        keyed.defaults.set(Self.hides, forKey: "fediqo.hides")
+        try await filed.packager().takeAway(to: urls[0], key: Self.key, pictures: false) { _ in }
+        try await keyed.packager(protected: ProtectedByHand(.none).protected).takeAway(to: urls[1], key: Self.key, pictures: false) { _ in }
+        try await ontoFiled.packager().readBack(urls[0], key: Self.key, replacing: true) { _ in }
+        try await ontoKeyed.packager().readBack(urls[1], key: Self.key, replacing: true) { _ in }
+        for onto in [ontoFiled, ontoKeyed] {
+            #expect(onto.lists.hides.read() == .data(Self.hides))
+            #expect(onto.defaults.object(forKey: "fediqo.hides") == nil)
+        }
+    }
+
     @Test("A package from a device that still kept them under their keys — an earlier build's — reads back the same as one from files")
     func anEarlierBuildsPackage() async throws {
         let keyed = try await Device(sources: [PackagerFixture.mastodon])

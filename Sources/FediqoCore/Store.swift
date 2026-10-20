@@ -1989,6 +1989,33 @@ public actor ItemStore {
         return going.count + unheld.count
     }
 
+    /// Lets go of every row `authors` made — one person at one source, or everybody of one server
+    /// there — where the person, muting or blocking them, chose that what is held of them goes
+    /// (#314). Returns how many went.
+    ///
+    /// **As a letting go by dates is** (`letGo(span:host:)`): exactly the rows named, every one
+    /// of the file's over a file, the copy a notice carries struck with them, and **never a post
+    /// the person keeps**. A post of theirs another reblogged stands, as that reblog's.
+    @discardableResult
+    public func letGo(by authors: HeldAuthors) async -> Int {
+        await untilNoPutBack()
+        guard poolKept(), let unpooled = unpooled(.authors(authors)) else { return 0 }
+        let shown = shownByKept()
+        let going = notes.values.filter { !$0.kept && !shown.contains($0.key) && authors.wrote($0) }
+        let unheld = unpooled.filter { !shown.contains($0) }
+        let leaving = Set(going.map(\.key))
+        let held = notes
+        strike { post in authors.wrote(post) && (held[post.key] == nil || leaving.contains(post.key)) }
+        guard !going.isEmpty || !unheld.isEmpty else { return 0 }
+        for note in going {
+            notes[note.key] = nil
+            arrival[note.key] = nil
+        }
+        drop(unheld)
+        changed(shown: going.contains { !$0.isPartOfTopic }, replies: going.contains { $0.isPartOfTopic })
+        return going.count + unheld.count
+    }
+
     /// The keys of the file's rows `selection` names that the pool does not answer for — none for
     /// a store with no file, and nothing where the file would not be read.
     private func unpooled(_ selection: RowSelection) -> [NoteKey]? {

@@ -622,6 +622,7 @@ struct AccountPane: View {
                         refusal: session.rowRefusal,
                         notice: session.forums.notice(host: row.source.host)?.sentence()
                             ?? session.mastodon.leftLine(host: row.source.host),
+                        unread: session.reload.unreadLine(host: row.source.host, sources: session.sources),
                         holds: session.mastodon.holds(host: row.source.host),
                         lock: session.mastodon.bookmarkPlace(host: row.source.host),
                         marksReads: !session.readableMarks(host: row.source.host).isEmpty,

@@ -47,6 +47,7 @@ struct PersonPageActs {
     var onFollowed: (FollowedTagsEntry) -> Void = { _ in }
     /// The way to the people who ask to follow the reader, pressed on their own page.
     var onRequests: (RequestsEntry) -> Void = { _ in }
+    var onKeeping: (KeepingEntry) -> Void = { _ in }
     /// What they feature, pressed on About (#315, #318): a hashtag, the people, or asking again.
     var onFeatured: (FeaturedPress) -> Void = { _ in }
     /// A press on a row of the list in front that removes a follower (#313).
@@ -194,7 +195,7 @@ struct PersonPage: View {
             if let about {
                 PersonAbout(
                     said: about, lit: selectedID, jumpToTop: jumpToTop, onHome: acts.onHome, onFollowed: acts.onFollowed,
-                    onAskFollows: acts.onAskFollows, onAct: acts.onAct, onRequests: acts.onRequests,
+                    onAskFollows: acts.onAskFollows, onAct: acts.onAct, onRequests: acts.onRequests, onKeeping: acts.onKeeping,
                     onFeatured: acts.onFeatured,
                     lead: lead
                 )
