@@ -157,6 +157,14 @@
 "timeline.reload.stopped" = "已停止重新載入。";
 "timeline.trends.end" = "%@ 沒有更多趨勢貼文了。重新載入可以從頭再讀。";
 "timeline.marks.order" = "書籤和收藏依每篇貼文發布的時間排列，不是依你標記的時間。";
+"timeline.unread.one" = "這條時間軸有一個來源讀不到。";
+"timeline.unread.many" = "這條時間軸有幾個來源讀不到。";
+"source.unread.whole" = "%1$@：從 %2$@ 起沒讀到——%3$@。";
+"source.unread.parts" = "%2$@ 的%1$@：從 %3$@ 起沒讀到——%4$@。";
+"source.unread.refused" = "被拒絕";
+"source.unread.reach" = "連不上";
+"source.unread.understood" = "看不懂回應";
+"source.unread.lists" = "清單名稱";
 "timeline.gap.more" = "這裡還有來自 %@ 的貼文，捲到或按下這裡就會讀取。";
 "timeline.gap.missing" = "這裡可能缺少來自 %@ 的貼文，捲到或按下這裡就會往下讀到已有的貼文。";
 "timeline.gap.settled" = "%1$@：來源 %2$@ 已不再有這裡原本的貼文。";

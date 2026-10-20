@@ -676,7 +676,8 @@ struct JoinSheet: View {
     func standingLines(_ host: String, language: DummyLanguage? = nil) -> [String] {
         SourceRow.statusLines(
             waiting: SourceRow.waitingLine(session.progress, drawnAs: nil, host: host),
-            refusal: session.rowRefusal, notice: session.forums.notice(host: host)?.sentence(), host: host,
+            refusal: session.rowRefusal, notice: session.forums.notice(host: host)?.sentence(),
+            unread: session.reload.unreadLine(host: host, sources: session.sources, language: language), host: host,
             language: language
         ) + [session.mastodon.holds(host: host, whole: true, language: language)].compactMap { $0 }
     }

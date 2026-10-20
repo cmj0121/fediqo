@@ -71,9 +71,10 @@ struct SourceReach {
     /// where its caller made them, so each is listed under its own name.
     func account(
         _ door: MastodonAuthorized, landingIn store: ItemStore,
-        reading: (@Sendable (FediqoCore.Category) -> MastodonAuthorized)? = nil
+        reading: (@Sendable (FediqoCore.Category) -> MastodonAuthorized)? = nil,
+        failed: (@Sendable (FediqoCore.Category?, any Error) -> Void)? = nil
     ) -> MastodonAccount {
-        MastodonAccount(door: door, store: store, reading: reading)
+        MastodonAccount(door: door, store: store, reading: reading, failed: failed)
     }
 
     /// One post and what is around it, as the reader, through `door`.

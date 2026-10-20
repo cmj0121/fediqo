@@ -125,6 +125,11 @@ final class ShellReload {
     /// Each kind's own `failed`, cleared as that kind starts again — and a host's name let go of
     /// as soon as another timeline read, `r`'s or the wait's, reads it whole.
     private(set) var failures: [Ask: [String]] = [:]
+    /// Each source's runs of rounds whose reads did not come back, for this run of the app (#371):
+    /// what its row and the timelines drawn from it say once a run passes `UnreadRuns.rounds`.
+    private(set) var unreadRuns = UnreadRuns()
+    /// When a round ends, as its failures are counted: `Date()` but for a test.
+    @ObservationIgnored var now: () -> Date = { Date() }
     /// Bumped as each reload of the timeline ends, so the list can centre the selected post again.
     /// A thread read again leaves the list under it where it was.
     private(set) var landed = 0
@@ -749,29 +754,49 @@ final class ShellReload {
         let spoken = session.sources
 
         var unread: Set<String> = []
-        await withTaskGroup(of: (String, Bool).self) { group in
-            for ask in asks {
-                guard let source = spoken.first(where: { $0.host == ask.host }) else { continue }
-                // It answered, and it answered as something this app does not read. Nothing
-                // failed, so it is not reported silent; it is its own sentence, said once.
-                guard SourceJoin.reads(source.kind) else {
-                    self.unspokens[kind] = self.unspokens[kind] ?? Unspoken(host: source.host, kind: source.kind)
-                    continue
+        // The sources read this round, and what of each the reads said failed (#371).
+        var reached: [FetchAsk] = []
+        let round = ReadRound()
+        await ReadRound.$current.withValue(round) {
+            await withTaskGroup(of: (String, Bool).self) { group in
+                for ask in asks {
+                    guard let source = spoken.first(where: { $0.host == ask.host }) else { continue }
+                    // It answered, and it answered as something this app does not read. Nothing
+                    // failed, so it is not reported silent; it is its own sentence, said once.
+                    guard SourceJoin.reads(source.kind) else {
+                        self.unspokens[kind] = self.unspokens[kind] ?? Unspoken(host: source.host, kind: source.kind)
+                        continue
+                    }
+                    reached.append(ask)
+                    group.addTask {
+                        (ask.host, await self.onSource(ask.host) {
+                            await self.read(source, for: ask.categories, revisits: kind != .held, in: session)
+                        })
+                    }
                 }
-                group.addTask {
-                    (ask.host, await self.onSource(ask.host) {
-                        await self.read(source, for: ask.categories, revisits: kind != .held, in: session)
-                    })
+                for await (host, read) in group {
+                    if !read { unread.insert(host) }
+                    await session.reloadFromStore()
                 }
-            }
-            for await (host, read) in group {
-                if !read { unread.insert(host) }
-                await session.reloadFromStore()
             }
         }
         guard !Task.isCancelled else { return }
         // A source removed while it was being read was let go of, not failed (#221).
         let held = Set(session.sources.map(\.host))
+        // **A round of `r` or of the wait counts toward a source not being read** (#371); an ask
+        // for more is the reader scrolling, and counts nothing.
+        if kind == .timeline || kind == .held {
+            let moment = now()
+            // A source whose read was stopped before it ended says nothing this round.
+            for ask in reached where held.contains(ask.host) {
+                let word = round.word(of: ask.host)
+                guard !word.stopped else { continue }
+                unreadRuns.round(
+                    ask.host, asked: ask.categories, read: !unread.contains(ask.host),
+                    failed: word.failed, excused: word.excused, at: moment
+                )
+            }
+        }
         failures[kind] = asks.map(\.host).filter { unread.contains($0) && held.contains($0) }
         // **A host that answered now is not still failing** (#95): what `r` said about it goes
         // when a wait reads it whole, and the reverse, rather than standing until that kind runs
@@ -888,8 +913,10 @@ final class ShellReload {
     }
 
     /// Stops whatever a reload is reading as the reader on `host`: signed out, cleared or
-    /// removed, nothing it brings may land afterwards, nor its token be used again.
+    /// removed, nothing it brings may land afterwards, nor its token be used again — and what
+    /// the sign-in read is no longer said not to be read (#371).
     func stop(host: String) {
+        unreadRuns.forgetAsYou(host)
         for cancel in asYou.removeValue(forKey: host.lowercased())?.values.map({ $0 }) ?? [] { cancel() }
     }
 
@@ -900,6 +927,7 @@ final class ShellReload {
     func letGo(host: String) {
         let host = host.lowercased()
         gone.insert(host)
+        unreadRuns.forget(host)
         stop(host: host)
         for cancel in ofSource.removeValue(forKey: host)?.values.map({ $0 }) ?? [] { cancel() }
         if let renewing, inFront?.id == renewing, inFront?.source.host.lowercased() == host { end(.renew) }
@@ -1199,6 +1227,8 @@ final class ShellReload {
                 let publicCame = await publicRead()
                 let trendsCame = await trendsCome()
                 read = publicCame || trendsCame
+                // And so the one that did not come is not counted as a source not read (#371).
+                if publicCame != trendsCame { ReadRound.current?.excuse(host, publicCame ? .trends : .public) }
             }
             return await readAsYou(source, for: categories, thorough: revisits, in: session) && read
         case .discuz:
@@ -1290,9 +1320,15 @@ final class ShellReload {
                 token: token, within: deadline, for: .timeline, name: named(category)
             )
         }
-        let account = session.reach.account(door, landingIn: session.store) { [doors] category in
+        // What of it failed is told to the round this read is of (#371).
+        let round = ReadRound.current
+        let host = source.host
+        let account = session.reach.account(door, landingIn: session.store, reading: { [doors] category in
             doors[category] ?? plain
-        }
+        }, failed: { category, error in
+            // A read naming no timeline is the lists' names, read before the lists are.
+            round?.failed(host, category.map(UnreadDivision.of) ?? .listNames, error)
+        })
         do {
             return try await asReader(source.host) {
                 if let lists { return try await account.read(home: home, lists: lists) }
@@ -1300,8 +1336,10 @@ final class ShellReload {
             }
         } catch MastodonAuthError.signedOut {
             session.mastodon.endedByServer(host: source.host)
+            noteSignedOut(home ? .home : nil, of: source.host)
             return false
         } catch {
+            if Cancellation.happened(error) { noteStopped(source.host) }
             return Cancellation.happened(error)
         }
     }
@@ -1340,6 +1378,8 @@ final class ShellReload {
         _ = await land(source.host, of: .trends, in: session) { try await client.rankedThreads(source: source) }
         guard !Task.isCancelled else { return }
         _ = await land(source.host, of: .trends, in: session) { try await client.rankedBlogs(source: source) }
+        // Never a failure, so never a source not read (#371).
+        ReadRound.current?.excuse(source.host, .trends)
     }
 
     /// One read into the store, while its source is still here and the reload is not stopped.
@@ -1365,7 +1405,11 @@ final class ShellReload {
     /// not decode, the reload's deadline passing, a stretch after the first — was said nowhere,
     /// and a timeline that stopped landing left no word of why.
     func walkedAway(from category: FediqoCore.Category?, of host: String, _ error: any Error) -> Bool {
-        if Cancellation.happened(error) { return true }
+        if Cancellation.happened(error) {
+            noteStopped(host)
+            return true
+        }
+        noteUnread(category, of: host, error)
         NetLog.network.error("\(NetLog.line("timeline not read", host: host, category: category, error: error), privacy: .public)")
         return false
     }

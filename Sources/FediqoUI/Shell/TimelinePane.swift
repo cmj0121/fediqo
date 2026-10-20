@@ -1018,8 +1018,18 @@ struct TimelinePane: View {
         .task(id: rising.opening(which, in: session)) { await rising.opened(which, in: session) }
     }
 
-    @ViewBuilder
+    /// The stream, under the line that says which of its sources is not being read (#371) — over
+    /// the posts and over the notice that there are none alike, which may be why. A search's
+    /// results are not a timeline, and say nothing of the kind.
     private var stream: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !searching { UnreadSourcesHead(timeline: timeline, session: session) }
+            streamBody
+        }
+    }
+
+    @ViewBuilder
+    private var streamBody: some View {
         // Bound once: the list, each row's rule under it and the jump to the top all read the
         // same rows, and each read of `items` used to ask the session for them again.
         let items = items

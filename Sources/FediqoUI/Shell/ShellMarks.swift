@@ -56,9 +56,14 @@ extension ShellReload {
                 try await asReader(host) { try await reading.read(category, thorough: thorough) }
             } catch MastodonAuthError.signedOut {
                 session.mastodon.endedByServer(host: host)
+                noteSignedOut(category, of: host)
                 return false
             } catch {
-                if Cancellation.happened(error) { return read }
+                if Cancellation.happened(error) {
+                    noteStopped(host)
+                    return read
+                }
+                noteUnread(category, of: host, error)
                 NetLog.auth.error("\(NetLog.line("read marks", host: host, error: error), privacy: .public)")
                 read = false
             }
