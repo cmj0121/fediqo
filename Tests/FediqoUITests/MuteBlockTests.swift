@@ -180,7 +180,7 @@ struct MuteBlockTests {
         #expect(said.line(language: .english).hasPrefix("m.example stops handing you @ada@m.example's posts and boosts."))
         #expect(said.heldTitle(language: .english) == "This device holds 2 posts of @ada@m.example:" && said.asksLength && !said.destructive)
         #expect(StandingChoice.lengths.map { StandingSheetSaid.length($0, language: .english) } == [
-            "Until you unmute them", "For 30 minutes", "For 1 hours", "For 6 hours", "For 1 days", "For 3 days", "For 7 days",
+            "Until you unmute them", "For 30 minutes", "For 1 hour", "For 6 hours", "For 1 day", "For 3 days", "For 7 days",
         ])
         #expect(StandingChoice.Held.allCases.map { StandingSheetSaid.held($0, language: .taiwanese) }.allSatisfy { !$0.hasPrefix("standing.") })
         // A second press while it is up asks nothing more.

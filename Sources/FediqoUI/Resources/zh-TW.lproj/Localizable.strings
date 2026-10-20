@@ -2222,3 +2222,7 @@
 "report.failed" = "%@ 沒有收下檢舉。這裡沒有任何改變，你可以再送一次。";
 "report.failed.said" = "%1$@ 沒有收下檢舉：%2$@";
 "report.afterwards" = "你也可以自己避開對方：";
+/* A mute of one minute, hour or day (#314) */
+"standing.mute.minutes.one" = "%d 分鐘";
+"standing.mute.hours.one" = "%d 小時";
+"standing.mute.days.one" = "%d 天";

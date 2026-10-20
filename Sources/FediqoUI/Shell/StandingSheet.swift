@@ -69,7 +69,7 @@ struct StandingSheetSaid: Equatable {
         default: "standing.mute.days"
         }
         let count = seconds < 3600 ? seconds / 60 : seconds < 86400 ? seconds / 3600 : seconds / 86400
-        return String(format: L10n.t(key, language: language), count)
+        return String(format: L10n.t(key + (count == 1 ? ".one" : ""), language: language), count)
     }
 
     /// The heading over what becomes of what is held, with how much that is.

@@ -2278,3 +2278,7 @@
 "report.failed" = "%@ did not take the report. Nothing was changed here; you can send it again.";
 "report.failed.said" = "%1$@ did not take the report: %2$@";
 "report.afterwards" = "You can also keep them away yourself:";
+/* A mute of one minute, hour or day (#314) */
+"standing.mute.minutes.one" = "For %d minute";
+"standing.mute.hours.one" = "For %d hour";
+"standing.mute.days.one" = "For %d day";
