@@ -93,12 +93,16 @@ public struct Unsent: Hashable, Sendable, Identifiable {
     public var sensitive: Bool?
     /// The files that go with it, in the order they were added.
     public var media: [UnsentMedia]
+    /// The poll it is written with (#331), or nothing. Never beside media: a Mastodon takes no
+    /// post with both, and the composer offers one or the other.
+    public var poll: NewPoll?
 
     public init(
         id: UUID = UUID(), host: String, text: String, audience: Audience,
         answers: NoteKey? = nil, root: NoteKey? = nil, pressedAt: Date = Date(), standing: Standing = .fresh,
         writerID: String? = nil, writer: String? = nil, askedAt: Date? = nil,
-        spoiler: String? = nil, language: String? = nil, sensitive: Bool? = nil, media: [UnsentMedia] = []
+        spoiler: String? = nil, language: String? = nil, sensitive: Bool? = nil, media: [UnsentMedia] = [],
+        poll: NewPoll? = nil
     ) {
         self.writerID = writerID
         self.writer = writer
@@ -116,6 +120,7 @@ public struct Unsent: Hashable, Sendable, Identifiable {
         self.language = SourceField.languageTag(language)
         self.sensitive = sensitive
         self.media = media
+        self.poll = poll
     }
 }
 

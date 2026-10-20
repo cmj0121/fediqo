@@ -1,7 +1,8 @@
 import Foundation
 
 // A post's poll (#331): what its source says of it — its choices, how each stands where the
-// source says, when it ends, and what the reader chose.
+// source says, when it ends, and what the reader chose — and the poll a new post is written
+// with, held to what the source says it takes.
 
 /// A poll on a post, as its source last said it.
 ///
@@ -167,5 +168,106 @@ extension Poll {
               multiple || picked.count == 1
         else { return .choices }
         return nil
+    }
+}
+
+/// A poll a new post is written with (#331): its choices, whether the reader may choose more
+/// than one, how long it runs, and whether the figures stay hidden until it ends.
+public struct NewPoll: Hashable, Sendable, Codable {
+    /// The choices as typed. Only those with something in them are sent (`said`).
+    public var choices: [String]
+    public var multiple: Bool
+    /// How long it runs, in seconds.
+    public var runs: Int
+    public var hidesTotals: Bool
+
+    /// What a new poll starts as: two empty choices, one to choose, a day, figures shown.
+    public static let fresh = NewPoll(choices: ["", ""], multiple: false, runs: 86_400, hidesTotals: false)
+
+    public init(choices: [String], multiple: Bool = false, runs: Int = 86_400, hidesTotals: Bool = false) {
+        self.choices = choices
+        self.multiple = multiple
+        self.runs = runs
+        self.hidesTotals = hidesTotals
+    }
+
+    /// The choices that are sent: each trimmed, and the empty ones left out.
+    public var said: [String] {
+        choices.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+
+    /// Why this poll would be refused here, within what the source said it takes — or nothing
+    /// where it may go. Checked before anything is sent, so the words typed are never lost to
+    /// a refusal the source would have made.
+    public func refusal(within limits: MastodonPollLimits) -> MastodonWriteRefusal? {
+        let said = said
+        if said.count < MastodonPollLimits.leastChoices || said.count > limits.choices {
+            return .pollChoices(most: limits.choices)
+        }
+        if said.contains(where: { $0.count > limits.choiceLength }) { return .pollChoiceLength(limit: limits.choiceLength) }
+        if Set(said).count != said.count { return .pollSameChoice }
+        if runs < limits.shortest || runs > limits.longest {
+            return .pollRuns(shortest: limits.shortest, longest: limits.longest)
+        }
+        return nil
+    }
+}
+
+/// How large a poll a Mastodon says it takes, read off the instance document beside its media
+/// ceilings (`MastodonMediaLimits`).
+///
+/// **Lenient, and never the reason a host could not be read.** A document that says nothing of
+/// polls is `unstated`: Mastodon's own numbers, which are what a Mastodon that says nothing takes.
+public struct MastodonPollLimits: Equatable, Sendable {
+    /// Fewer than two choices is no poll, on every Mastodon.
+    public static let leastChoices = 2
+    /// The same, asked of these limits: what a composer holds a poll to with them in hand.
+    public var leastChoices: Int { Self.leastChoices }
+
+    /// How many choices one poll may have.
+    public let choices: Int
+    /// How long one choice may be.
+    public let choiceLength: Int
+    /// The shortest and the longest a poll may run, in seconds.
+    public let shortest: Int
+    public let longest: Int
+
+    /// What stands where the document says nothing of polls: Mastodon's own.
+    public static let unstated = MastodonPollLimits(choices: 4, choiceLength: 50, shortest: 300, longest: 2_629_746)
+
+    /// How long a poll may be asked to run, as the composer offers it: five minutes to a week.
+    public static let runs = [300, 1800, 3600, 21_600, 86_400, 259_200, 604_800]
+
+    public init(choices: Int, choiceLength: Int, shortest: Int, longest: Int) {
+        self.choices = max(Self.leastChoices, choices)
+        self.choiceLength = max(1, choiceLength)
+        self.shortest = max(0, shortest)
+        self.longest = max(self.shortest, longest)
+    }
+
+    /// `document` read for its poll limits, or `unstated` where it says nothing of them. Each
+    /// figure it does not state is Mastodon's own.
+    public init(document: Data) {
+        guard let root = (try? JSONSerialization.jsonObject(with: document)) as? [String: Any],
+              let configuration = root["configuration"] as? [String: Any],
+              let polls = configuration["polls"] as? [String: Any]
+        else {
+            self = .unstated
+            return
+        }
+        let plain = Self.unstated
+        self.init(
+            choices: MastodonMediaLimits.positive(polls["max_options"]) ?? plain.choices,
+            choiceLength: MastodonMediaLimits.positive(polls["max_characters_per_option"]) ?? plain.choiceLength,
+            shortest: MastodonMediaLimits.positive(polls["min_expiration"]) ?? plain.shortest,
+            longest: MastodonMediaLimits.positive(polls["max_expiration"]) ?? plain.longest
+        )
+    }
+
+    /// The runs the composer offers here: those within what the source takes, and where none
+    /// is, the shortest it takes.
+    public var offeredRuns: [Int] {
+        let within = Self.runs.filter { $0 >= shortest && $0 <= longest }
+        return within.isEmpty ? [shortest] : within
     }
 }

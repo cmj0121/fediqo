@@ -1466,6 +1466,15 @@ private var migrator: DatabaseMigrator {
             t.add(column: "media", .text)
         }
     }
+    // The poll a text waiting to be sent is written with (#331). NULL is none.
+    //
+    // **A migration id for `v15-compose`'s reason**: a build from before would send the text on
+    // without the poll the person believes is waiting with it. The id makes it refuse the store.
+    migrator.registerMigration("v16-poll") { db in
+        try db.alter(table: "unsent") { t in
+            t.add(column: "poll", .text)
+        }
+    }
     return migrator
 }
 

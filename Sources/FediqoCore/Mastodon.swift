@@ -185,9 +185,9 @@ public struct MastodonClient: Sendable {
         return (said.kind, said.profile)
     }
 
-    /// `introduction()`, what the same document says the host has (`MastodonHostSays`), and how
-    /// much media it takes (`MastodonMediaLimits`) — one request, four readings, so whoever wants
-    /// another asks nothing the others did not.
+    /// `introduction()`, what the same document says the host has (`MastodonHostSays`), how
+    /// much media it takes (`MastodonMediaLimits`) and how large a poll (`MastodonPollLimits`) —
+    /// one request, five readings, so whoever wants another asks nothing the others did not.
     ///
     /// Each reading is its own: a document the profile cannot be read from still says what kind
     /// of server it is and what it has, and one that says nothing of what it has
@@ -195,12 +195,18 @@ public struct MastodonClient: Sendable {
     /// is `MastodonMediaLimits.unstated`, and that is not a host that could not be read.
     /// **Throws where the document did not come**, as
     /// `introduction()` does, so a host that was not heard is not taken for one that said nothing.
-    public func said() async throws -> (kind: ProtocolKind, profile: SourceProfile?, has: MastodonHostSays, limits: MastodonMediaLimits) {
+    public func said() async throws -> (
+        kind: ProtocolKind, profile: SourceProfile?, has: MastodonHostSays, limits: MastodonMediaLimits,
+        polls: MastodonPollLimits
+    ) {
         let data = try await instanceDocument()
         let kind = Probe.kind(from: data)
         let profile = (try? MastodonJSON.decoder.decode(InstanceDTO.self, from: data))?
             .asProfile(host: host, kind: kind)
-        return (kind, profile, MastodonHostSays(document: data), MastodonMediaLimits(document: data))
+        return (
+            kind, profile, MastodonHostSays(document: data), MastodonMediaLimits(document: data),
+            MastodonPollLimits(document: data)
+        )
     }
 
     private func statuses(

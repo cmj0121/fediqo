@@ -1074,6 +1074,12 @@ final class ShellSession {
     var composeMedia: [UnsentMedia] = []
     /// Why a file was not added, or nothing.
     var composeMediaNote: String?
+    /// The poll the post is written with (#331), or nothing. Never beside a file: a Mastodon
+    /// takes a poll or media on a post, not both, and the composer offers the one or the other.
+    var composePoll: NewPoll?
+    /// Why the last press to add a poll added none: the post carries a file. Said only while
+    /// it still does (`composePollSays`).
+    var composePollRefused: String?
     /// Whether the system file picker is up. Opened only by the Add press, and only once the
     /// sign-in already holds media.
     var composeImporting = false
@@ -1151,7 +1157,7 @@ final class ShellSession {
             let said = try await reach.mastodon(host, for: .serverCheck, within: nil).said()
             let limit = MastodonWrite.limit(advertised: said.profile?.statusLimit)
             postLimits[host] = limit
-            composeRooms[host] = ComposeRoom(limit: limit, media: said.limits)
+            composeRooms[host] = ComposeRoom(limit: limit, media: said.limits, polls: said.polls)
             if let profile = said.profile {
                 await store.said(profile)
                 // Landed here as well as followed from the store, so the composer that asked
@@ -1171,6 +1177,12 @@ final class ShellSession {
     /// no byte ceiling where this run has not heard it.
     func mediaLimits(of host: String) -> MastodonMediaLimits {
         composeRooms[host]?.media ?? .unstated
+    }
+
+    /// How large a poll `host` said it takes (#331), or Mastodon's own where this run has not
+    /// heard it.
+    func pollLimits(of host: String) -> MastodonPollLimits {
+        composeRooms[host]?.polls ?? .unstated
     }
 
     /// Asks what a new post starts from at the composer's source, once this run, and adopts it
@@ -1246,23 +1258,19 @@ final class ShellSession {
     func composeAttach(bytes: Data, name: String, type: String, description: String = "") -> String? {
         let host = composeHost ?? ""
         let limits = composeHost.map { mediaLimits(of: $0) } ?? .unstated
-        if composeMedia.count >= limits.count {
-            let note = String(format: L10n.t("compose.media.tooMany"), host, limits.count)
-            composeMediaNote = note
-            return note
+        let refusal: MastodonWriteRefusal? = if composeMedia.count >= limits.count {
+            .tooMany(count: limits.count)
+        } else if !limits.allows(type) {
+            .kind
+        } else if let ceiling = limits.byteLimit(for: type), bytes.count > ceiling {
+            .tooLarge(limit: ceiling)
+        } else if description.count > limits.descriptionLimit {
+            .description(limit: limits.descriptionLimit)
+        } else {
+            nil
         }
-        if !limits.allows(type) {
-            let note = String(format: L10n.t("compose.media.kind"), host)
-            composeMediaNote = note
-            return note
-        }
-        if let ceiling = limits.byteLimit(for: type), bytes.count > ceiling {
-            let note = String(format: L10n.t("compose.media.tooLarge"), host, MastodonWrite.bytesNamed(ceiling))
-            composeMediaNote = note
-            return note
-        }
-        if description.count > limits.descriptionLimit {
-            let note = String(format: L10n.t("compose.media.description.over"), limits.descriptionLimit)
+        if let refusal {
+            let note = ComposeWords.refusalLine(refusal, host: host)
             composeMediaNote = note
             return note
         }
@@ -1275,11 +1283,69 @@ final class ShellSession {
         composeMedia.removeAll { $0.id == id }
     }
 
+    /// Starts a poll on the post, where it carries no file: two empty choices, one to choose,
+    /// for a day — or the shortest run the source takes, where a day is not among them.
+    func composeAddPoll() {
+        guard composePoll == nil else { return }
+        guard composeMedia.isEmpty else {
+            composePollRefused = ComposeWords.refusalLine(.pollWithMedia, host: composeHost ?? "")
+            return
+        }
+        composePollRefused = nil
+        var poll = NewPoll.fresh
+        let runs = composePollLimits.offeredRuns
+        if !runs.contains(poll.runs) { poll.runs = runs.first ?? poll.runs }
+        composePoll = poll
+    }
+
+    func composeRemovePoll() {
+        composePoll = nil
+    }
+
+    /// Adds an empty choice to the poll, up to as many as the source takes.
+    func composeAddChoice() {
+        guard var poll = composePoll else { return }
+        guard poll.choices.count < composePollLimits.choices else { return }
+        poll.choices.append("")
+        composePoll = poll
+    }
+
+    /// Takes one choice off the poll, where it has more than the two a poll needs.
+    func composeRemoveChoice(at index: Int) {
+        guard var poll = composePoll, poll.choices.indices.contains(index),
+              poll.choices.count > MastodonPollLimits.leastChoices
+        else { return }
+        poll.choices.remove(at: index)
+        composePoll = poll
+    }
+
+    /// How large a poll the composer's source takes, or Mastodon's own where none is chosen.
+    var composePollLimits: MastodonPollLimits {
+        composeHost.map { pollLimits(of: $0) } ?? .unstated
+    }
+
+    /// What the composer's poll place says: why a press added no poll, while the file that kept
+    /// it out is still there — gone with the file — or why the poll cannot go as it is.
+    var composePollSays: String? {
+        (composeMedia.isEmpty ? nil : composePollRefused) ?? composePollNote()
+    }
+
+    /// Why the poll cannot go as it is, in a sentence, or nothing where it can.
+    func composePollNote() -> String? {
+        guard let poll = composePoll, let host = composeHost else { return nil }
+        return poll.refusal(within: composePollLimits).map { ComposeWords.refusalLine($0, host: host) }
+    }
+
     /// The Add press. Where the sign-in already holds media, the system picker opens. Where it
     /// does not, the place says why and the question names what the source's page will ask —
     /// and the picker does not open by itself when that page returns.
     func composeAddMedia() {
         guard let host = composeHost else { return }
+        // A post carries a poll or media, not both (#331): the poll goes first, by the person.
+        if composePoll != nil {
+            composeMediaNote = ComposeWords.refusalLine(.pollWithMedia, host: host)
+            return
+        }
         if mastodon.standing(.media, host: host) == .held {
             composeImporting = true
             return
@@ -1321,7 +1387,8 @@ final class ShellSession {
             hasSource: hostOK,
             cover: composeCover,
             attachments: composeMedia.count,
-            attachmentsOK: composeHost.map { attachmentsOK(host: $0) } ?? composeMedia.isEmpty
+            attachmentsOK: composeHost.map { attachmentsOK(host: $0) } ?? composeMedia.isEmpty,
+            pollOK: composePoll == nil || (composeMedia.isEmpty && composePollNote() == nil)
         )
     }
 

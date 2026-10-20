@@ -26,13 +26,15 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
     var sensitive: Bool?
     /// JSON of the files, or NULL where there are none. A cell that will not read is no media.
     var media: String?
+    /// JSON of the poll, or NULL where there is none. A cell that will not read is no poll.
+    var poll: String?
 
     enum CodingKeys: String, CodingKey {
         case id, host, body, audience, answers, root, standing, writer
         case pressedAt = "pressed_at"
         case writerID = "writer_id"
         case askedAt = "asked_at"
-        case spoiler, language, sensitive, media
+        case spoiler, language, sensitive, media, poll
     }
 
     init(_ text: Unsent) {
@@ -51,6 +53,7 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
         language = text.language
         sensitive = text.sensitive
         media = UnsentMediaRow.text(text.media)
+        poll = text.poll.flatMap { try? JSONEncoder().encode($0) }.flatMap { String(data: $0, encoding: .utf8) }
     }
 
     /// **A standing this build does not know is read as asked** — the careful word: it may have
@@ -63,7 +66,8 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
             answers: answers.flatMap(NoteKey.init(rowID:)), root: root.flatMap(NoteKey.init(rowID:)),
             pressedAt: pressedAt, standing: Unsent.Standing(rawValue: standing) ?? .asked,
             writerID: writerID, writer: writer, askedAt: askedAt,
-            spoiler: spoiler, language: language, sensitive: sensitive, media: UnsentMediaRow.list(media)
+            spoiler: spoiler, language: language, sensitive: sensitive, media: UnsentMediaRow.list(media),
+            poll: poll.flatMap { try? JSONDecoder().decode(NewPoll.self, from: Data($0.utf8)) }
         )
     }
 }

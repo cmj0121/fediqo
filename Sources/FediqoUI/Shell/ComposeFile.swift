@@ -6,6 +6,8 @@ import UniformTypeIdentifiers
 struct ComposeRoom: Equatable, Sendable {
     var limit: Int
     var media: MastodonMediaLimits
+    /// How large a poll the source takes (#331), from the same answer.
+    var polls: MastodonPollLimits = .unstated
 }
 
 /// A file the person picked for a post, read once through the sandbox's leave for that file.
@@ -38,13 +40,13 @@ enum ComposeFile {
         } else if limits.mimeTypes.isEmpty {
             mime = "application/octet-stream"
         } else {
-            return .refused(String(format: L10n.t("compose.media.kind"), host))
+            return .refused(ComposeWords.refusalLine(.kind, host: host))
         }
         if !limits.allows(mime) {
-            return .refused(String(format: L10n.t("compose.media.kind"), host))
+            return .refused(ComposeWords.refusalLine(.kind, host: host))
         }
         if let ceiling = limits.byteLimit(for: mime), size > ceiling {
-            return .refused(String(format: L10n.t("compose.media.tooLarge"), host, MastodonWrite.bytesNamed(ceiling)))
+            return .refused(ComposeWords.refusalLine(.tooLarge(limit: ceiling), host: host))
         }
         guard let bytes = try? Data(contentsOf: url, options: .mappedIfSafe) else {
             return .refused(L10n.t("compose.media.unreadable"))
