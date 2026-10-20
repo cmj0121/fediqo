@@ -895,7 +895,8 @@ final class ShellOutbox {
                 .post(
                     unsent.text, visibility: unsent.audience, answering: answering, key: id,
                     spoiler: unsent.spoiler, language: unsent.language, sensitive: unsent.sensitive,
-                    mediaIDs: unsent.media.compactMap(\.remoteID).filter { !$0.isEmpty }
+                    mediaIDs: unsent.media.compactMap(\.remoteID).filter { !$0.isEmpty },
+                    poll: unsent.poll, pollLimits: session.composeRooms[host]?.polls
                 )
             if let root = unsent.root {
                 let rootID = targets[id]?.root.statusID ?? session.note(ofRow: root.rowID)?.statusID
@@ -1162,16 +1163,18 @@ extension ShellSession {
                 host: host, text: text, audience: composeAudience, writerID: writer?.id, writer: writer?.handle,
                 spoiler: ComposerSheet.trimmed(composeCover),
                 language: composeLanguage.isEmpty ? nil : composeLanguage,
-                sensitive: composeCoversMedia, media: composeMedia
+                sensitive: composeCoversMedia, media: composeMedia, poll: composePoll
             ),
             in: self
         )
-        // The cover and the files go with this post. Who it reaches, its language and whether
-        // it covers its media stay, which is where the next one starts.
+        // The cover, the files and the poll go with this post. Who it reaches, its language and
+        // whether it covers its media stay, which is where the next one starts.
         composeDraft = ""
         composeCover = ""
         composeMedia = []
         composeMediaNote = nil
+        composePoll = nil
+        composePollRefused = nil
         return true
     }
 

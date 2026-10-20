@@ -6,7 +6,8 @@ import os
 // Every request goes through `MastodonAuthorized`, the one door #24 built. A 401 there has
 // already taken the token off this device and arrives here as `MastodonAuthError.signedOut`,
 // which ends the whole read: nothing after it could be asked as you. Any other failure costs
-// only the read it happened on. Public and trends stay unauthenticated in `MastodonClient`.
+// only the read it happened on. Public and trends are read in `MastodonClient` — the public
+// timeline through the sign-in where one is held (`MastodonClient.reading(as:)`).
 
 /// Home and the chosen lists of one signed-in Mastodon source, read into the store.
 public struct MastodonAccount: Sendable {
@@ -43,7 +44,7 @@ public struct MastodonAccount: Sendable {
         var complete = true
         let lists = source.lists
         if !lists.isEmpty {
-            if let named = try await attempt({ try await self.lists() }) {
+            if let named = try await attempt(nil, { try await self.lists() }) {
                 // Relabels what is chosen when the answer lands, not what was chosen when this
                 // read began, so a picker's Done in between is kept.
                 await store.relabel(
@@ -54,7 +55,7 @@ public struct MastodonAccount: Sendable {
                 complete = false
             }
         }
-        if try await attempt({
+        if try await attempt(.home, {
             try await readOn("/api/v1/timelines/home", source: source, category: .home)
         }) == nil {
             complete = false
@@ -70,7 +71,7 @@ public struct MastodonAccount: Sendable {
     public func read(home: Bool, lists ids: Set<String>) async throws -> Bool {
         guard let source = await source() else { return true }
         var complete = true
-        if home, try await attempt({
+        if home, try await attempt(.home, {
             try await readOn("/api/v1/timelines/home", source: source, category: .home)
         }) == nil {
             complete = false
@@ -170,7 +171,7 @@ public struct MastodonAccount: Sendable {
         // Checked again here, not only when the server named it: these ids come back out of the
         // store, and a tampered one must not reach the signed-in path.
         for list in lists where ListSubscription.isPathSegment(list.id) {
-            if try await attempt({
+            if try await attempt(.list(id: list.id), {
                 try await readOn(
                     "/api/v1/timelines/list/\(list.id)", source: source, category: .list(id: list.id)
                 )
@@ -218,9 +219,9 @@ public struct MastodonAccount: Sendable {
         }
     }
 
-    /// One read, or nothing where it failed. A sign-out by the server and a reader walking away
-    /// end the whole errand instead.
-    private func attempt<T>(_ read: () async throws -> T) async throws -> T? {
+    /// One read, or nothing where it failed — said, with the timeline it was of where it was one.
+    /// A sign-out by the server and a reader walking away end the whole errand instead.
+    private func attempt<T>(_ category: Category?, _ read: () async throws -> T) async throws -> T? {
         do {
             return try await read()
         } catch MastodonAuthError.signedOut {
@@ -231,7 +232,7 @@ public struct MastodonAccount: Sendable {
         } catch let error where Cancellation.happened(error) {
             throw CancellationError()
         } catch {
-            NetLog.auth.error("\(NetLog.line("read as you", host: host, error: error), privacy: .public)")
+            NetLog.auth.error("\(NetLog.line("read as you", host: host, category: category, error: error), privacy: .public)")
             return nil
         }
     }

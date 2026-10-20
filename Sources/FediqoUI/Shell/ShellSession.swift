@@ -1074,6 +1074,12 @@ final class ShellSession {
     var composeMedia: [UnsentMedia] = []
     /// Why a file was not added, or nothing.
     var composeMediaNote: String?
+    /// The poll the post is written with (#331), or nothing. Never beside a file: a Mastodon
+    /// takes a poll or media on a post, not both, and the composer offers the one or the other.
+    var composePoll: NewPoll?
+    /// Why the last press to add a poll added none: the post carries a file. Said only while
+    /// it still does (`composePollSays`).
+    var composePollRefused: String?
     /// Whether the system file picker is up. Opened only by the Add press, and only once the
     /// sign-in already holds media.
     var composeImporting = false
@@ -1151,7 +1157,7 @@ final class ShellSession {
             let said = try await reach.mastodon(host, for: .serverCheck, within: nil).said()
             let limit = MastodonWrite.limit(advertised: said.profile?.statusLimit)
             postLimits[host] = limit
-            composeRooms[host] = ComposeRoom(limit: limit, media: said.limits)
+            composeRooms[host] = ComposeRoom(limit: limit, media: said.limits, polls: said.polls)
             if let profile = said.profile {
                 await store.said(profile)
                 // Landed here as well as followed from the store, so the composer that asked
@@ -1171,6 +1177,12 @@ final class ShellSession {
     /// no byte ceiling where this run has not heard it.
     func mediaLimits(of host: String) -> MastodonMediaLimits {
         composeRooms[host]?.media ?? .unstated
+    }
+
+    /// How large a poll `host` said it takes (#331), or Mastodon's own where this run has not
+    /// heard it.
+    func pollLimits(of host: String) -> MastodonPollLimits {
+        composeRooms[host]?.polls ?? .unstated
     }
 
     /// Asks what a new post starts from at the composer's source, once this run, and adopts it
@@ -1246,23 +1258,19 @@ final class ShellSession {
     func composeAttach(bytes: Data, name: String, type: String, description: String = "") -> String? {
         let host = composeHost ?? ""
         let limits = composeHost.map { mediaLimits(of: $0) } ?? .unstated
-        if composeMedia.count >= limits.count {
-            let note = String(format: L10n.t("compose.media.tooMany"), host, limits.count)
-            composeMediaNote = note
-            return note
+        let refusal: MastodonWriteRefusal? = if composeMedia.count >= limits.count {
+            .tooMany(count: limits.count)
+        } else if !limits.allows(type) {
+            .kind
+        } else if let ceiling = limits.byteLimit(for: type), bytes.count > ceiling {
+            .tooLarge(limit: ceiling)
+        } else if description.count > limits.descriptionLimit {
+            .description(limit: limits.descriptionLimit)
+        } else {
+            nil
         }
-        if !limits.allows(type) {
-            let note = String(format: L10n.t("compose.media.kind"), host)
-            composeMediaNote = note
-            return note
-        }
-        if let ceiling = limits.byteLimit(for: type), bytes.count > ceiling {
-            let note = String(format: L10n.t("compose.media.tooLarge"), host, MastodonWrite.bytesNamed(ceiling))
-            composeMediaNote = note
-            return note
-        }
-        if description.count > limits.descriptionLimit {
-            let note = String(format: L10n.t("compose.media.description.over"), limits.descriptionLimit)
+        if let refusal {
+            let note = ComposeWords.refusalLine(refusal, host: host)
             composeMediaNote = note
             return note
         }
@@ -1275,11 +1283,69 @@ final class ShellSession {
         composeMedia.removeAll { $0.id == id }
     }
 
+    /// Starts a poll on the post, where it carries no file: two empty choices, one to choose,
+    /// for a day — or the shortest run the source takes, where a day is not among them.
+    func composeAddPoll() {
+        guard composePoll == nil else { return }
+        guard composeMedia.isEmpty else {
+            composePollRefused = ComposeWords.refusalLine(.pollWithMedia, host: composeHost ?? "")
+            return
+        }
+        composePollRefused = nil
+        var poll = NewPoll.fresh
+        let runs = composePollLimits.offeredRuns
+        if !runs.contains(poll.runs) { poll.runs = runs.first ?? poll.runs }
+        composePoll = poll
+    }
+
+    func composeRemovePoll() {
+        composePoll = nil
+    }
+
+    /// Adds an empty choice to the poll, up to as many as the source takes.
+    func composeAddChoice() {
+        guard var poll = composePoll else { return }
+        guard poll.choices.count < composePollLimits.choices else { return }
+        poll.choices.append("")
+        composePoll = poll
+    }
+
+    /// Takes one choice off the poll, where it has more than the two a poll needs.
+    func composeRemoveChoice(at index: Int) {
+        guard var poll = composePoll, poll.choices.indices.contains(index),
+              poll.choices.count > MastodonPollLimits.leastChoices
+        else { return }
+        poll.choices.remove(at: index)
+        composePoll = poll
+    }
+
+    /// How large a poll the composer's source takes, or Mastodon's own where none is chosen.
+    var composePollLimits: MastodonPollLimits {
+        composeHost.map { pollLimits(of: $0) } ?? .unstated
+    }
+
+    /// What the composer's poll place says: why a press added no poll, while the file that kept
+    /// it out is still there — gone with the file — or why the poll cannot go as it is.
+    var composePollSays: String? {
+        (composeMedia.isEmpty ? nil : composePollRefused) ?? composePollNote()
+    }
+
+    /// Why the poll cannot go as it is, in a sentence, or nothing where it can.
+    func composePollNote() -> String? {
+        guard let poll = composePoll, let host = composeHost else { return nil }
+        return poll.refusal(within: composePollLimits).map { ComposeWords.refusalLine($0, host: host) }
+    }
+
     /// The Add press. Where the sign-in already holds media, the system picker opens. Where it
     /// does not, the place says why and the question names what the source's page will ask —
     /// and the picker does not open by itself when that page returns.
     func composeAddMedia() {
         guard let host = composeHost else { return }
+        // A post carries a poll or media, not both (#331): the poll goes first, by the person.
+        if composePoll != nil {
+            composeMediaNote = ComposeWords.refusalLine(.pollWithMedia, host: host)
+            return
+        }
         if mastodon.standing(.media, host: host) == .held {
             composeImporting = true
             return
@@ -1321,7 +1387,8 @@ final class ShellSession {
             hasSource: hostOK,
             cover: composeCover,
             attachments: composeMedia.count,
-            attachmentsOK: composeHost.map { attachmentsOK(host: $0) } ?? composeMedia.isEmpty
+            attachmentsOK: composeHost.map { attachmentsOK(host: $0) } ?? composeMedia.isEmpty,
+            pollOK: composePoll == nil || (composeMedia.isEmpty && composePollNote() == nil)
         )
     }
 
@@ -1438,6 +1505,18 @@ final class ShellSession {
             acting.standings[act] = acts.standing(of: copy.id, act)
             if copy.id != item.id { acting.through[act] = copy }
         }
+        // **The one copy a row's poll is drawn, sized, voted in and read again by** (#331): the
+        // one its vote goes through, or where none does, the first an act would reach — on a
+        // reblog's row, the post's. A row two sources carried so never shows a vote its press
+        // would refuse: one copy read signed out says nothing of the reader, while the other
+        // says they voted. Nothing more is asked of a row no copy of which carries a poll.
+        guard item.actCopies.contains(where: { $0.poll != nil }),
+              let copy = each.first(where: { $0.acts.offers(.vote) })?.copy ?? each.first?.copy
+        else { return acting }
+        acting.pollCopy = copy
+        acting.poll = note(ofRow: copy.id)?.poll ?? copy.poll ?? item.poll
+        acting.chosen = acts.chosen(on: copy.id)
+        if !acting.acts.offers(.vote) { acting.voteLock = voteLock(on: item) }
         return acting
     }
 
@@ -1451,7 +1530,9 @@ final class ShellSession {
             nameable: copy.statusID != nil,
             mine: isMine(copy),
             gone: copy.goneSince != nil,
-            bookmarks: mastodon.bookmarks(host: copy.source.host)
+            bookmarks: mastodon.bookmarks(host: copy.source.host),
+            // One fact of the kind of source, never which kind it is (#331).
+            polls: kind.offers.polls
         )
     }
 
@@ -1587,8 +1668,44 @@ final class ShellSession {
             case .boost: return try await write.boost(note, on: on)
             case .favourite: return try await write.favourite(note, on: on)
             case .bookmark: return try await write.bookmark(note, on: on)
-            case .answer, .withdraw: return note
+            case .answer, .withdraw, .vote: return note
             }
+        }
+    }
+
+    /// Votes in `item`'s poll for `choices`, each by its place (#331), through the copy that
+    /// offers a vote — on a reblog's row, the post's. Returns whether a vote was sent for.
+    ///
+    /// **Refused before anything is sent** where the post offers no vote, its poll has ended,
+    /// the reader voted in it already, what was chosen is not a vote it takes, or a vote on it
+    /// is out already: one vote, once. What was chosen is drawn as the reader's own while it is
+    /// out (`ShellActs.chosen`), over a store that has not moved; the source's yes lands in the
+    /// store as an act's answer does, and a refusal or a miss leaves the poll exactly as it was
+    /// and says so — `perform`'s whole table, with no second press to turn.
+    @discardableResult
+    func vote(_ item: DummyItem, choices: [Int]) async -> Bool {
+        let acting = acting(on: item)
+        guard acting.acts.offers(.vote), let copy = acting.pollCopy, !acts.isOnItsWay(copy.id, .vote),
+              let poll = acting.poll, poll.refusal(of: choices) == nil
+        else { return false }
+        acts.choose(choices, on: copy.id)
+        await perform(.vote, on: item) { door, note, _ in
+            try await self.reach.write(door, landingIn: self.store).vote(note, choices: choices)
+        }
+        acts.unchoose(copy.id)
+        return true
+    }
+
+    /// `item`'s post read again for how its poll stands now (#331), through the copy whose
+    /// source it is — the post's own, on a reblog's row — as the reader where signed in and
+    /// unsigned otherwise. What it says lands as any read of the post does; a read that does
+    /// not arrive changes nothing and is said once.
+    func readPollAgain(_ item: DummyItem) async {
+        guard let copy = acting(on: item).pollCopy, let held = note(ofRow: copy.id), held.poll != nil else { return }
+        if await reload.readAgain(held, in: self) {
+            await adopt()
+        } else {
+            showToast(String(format: L10n.t("poll.read.failed"), held.source.host))
         }
     }
 
@@ -1599,6 +1716,8 @@ final class ShellSession {
         case .boost: note.boosted
         case .favourite: note.favourited
         case .bookmark: note.bookmarked
+        // A vote that did not arrive went after all where a later read says the reader voted.
+        case .vote: note.poll?.voted
         case .answer, .withdraw: nil
         }
     }
@@ -3678,10 +3797,17 @@ final class ShellSession {
     /// Only through the signed-in door, so a source never signed in to asks nothing here. A read
     /// that did not all come back is one sentence under the row; a server that ended the sign-in
     /// is told to `mastodon`, which signs the row out and says so.
+    ///
+    /// **And the reader's bookmarks and favourites, where the sign-in may read them** (#317) —
+    /// so a sign-in just asked for them brings them in at once.
     func readAsYou(host: String) async {
         guard let door = mastodon.authorized(host: host, for: .timeline) else { return }
         await readingAsYou(host: host, key: "account.mastodon.home.progress") {
-            try await self.reach.account(door, landingIn: self.store).read()
+            let read = try await self.reach.account(door, landingIn: self.store).read()
+            guard let source = self.sources.first(where: { $0.host == host.lowercased() }),
+                  self.mastodon.isSignedIn(host: host)
+            else { return read }
+            return await self.reload.readMarks(source, for: nil, in: self) && read
         }
     }
 
@@ -3732,6 +3858,10 @@ final class ShellSession {
     /// The reads as the reader in flight, per host — so a sign-out, Clear or Remove can stop them
     /// before their posts land (`stopReadingAsYou`).
     @ObservationIgnored private var readsAsYou: [String: Task<Void, Never>] = [:]
+
+    /// Whether the timeline last asked of names a mark, and what that was worked out from (#317,
+    /// `readsMarks`): its foot is drawn often, and its rules and sign-ins change seldom.
+    @ObservationIgnored var marksOrderSaid: (asked: MarksOrderAsked, says: Bool)?
 
     /// One errand of reads as the reader, reported in its row.
     ///

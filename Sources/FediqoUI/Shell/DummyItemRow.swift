@@ -371,7 +371,9 @@ struct DummyItemRow: View {
                 .modifier(Probed(\.frames, .header, probe: probe))
             mainBox(written)
                 .modifier(Probed(\.frames, .content, probe: probe))
+            pollBand
             quoteBand(openQuote)
+            if inFull { viaFoot }
             actions
                 .modifier(Probed(\.frames, .marks, probe: probe))
         }
@@ -646,6 +648,22 @@ struct DummyItemRow: View {
         }
     }
 
+    /// The app a post names, at the post's foot just above its marks and at the far end of the
+    /// line: a fact about how it was written, not about who wrote it or where it was read, so it
+    /// keeps out of the header the source and the time need.
+    @ViewBuilder
+    private var viaFoot: some View {
+        if let via = Self.viaLine(item.via) {
+            Text(via)
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .accessibilityLabel(via)
+        }
+    }
+
     /// The app a post names, as one line, or nothing where it named none.
     static func viaLine(_ name: String?, language: DummyLanguage? = nil) -> String? {
         guard let name, !name.isEmpty else { return nil }
@@ -665,13 +683,6 @@ struct DummyItemRow: View {
                 .fixedSize(horizontal: fit != nil, vertical: false)
                 .layoutPriority(0)
                 .modifier(Probed(\.meta, .source, probe: probe))
-            if let via = Self.viaLine(item.via) {
-                Text(via)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(1)
-                    .accessibilityLabel(via)
-            }
             leftMark(terse: terse)
                 .modifier(Probed(\.meta, .left, probe: probe))
             goneMark(terse: terse)
@@ -1429,6 +1440,15 @@ struct DummyItemRow: View {
                     )
                     .lineLimit(wordLines)
             }
+            // A list row's poll is one line under the words, in the line it took from them
+            // (`bodyLines`); the pane draws it whole below (`pollBand`).
+            if !inFull, let poll {
+                PollLine(poll: poll, acting: acting, covered: covered)
+                    .modifier(Probed(\.frames, .poll, probe: probe))
+            }
+            // The app that wrote it, at the foot of the words in the line it took from them
+            // (`bodyLines`); the pane gives it a line of its own above the marks.
+            if !inFull { viaFoot }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // The row a hashtag pressed in these words gives back when its page is left (#124).
@@ -1475,6 +1495,10 @@ struct DummyItemRow: View {
         if decorated { lines -= 1 }
         if item.title != nil { lines -= 1 }
         if item.source.kind == .board, item.board != nil { lines -= 1 }
+        // A poll's one line, in a list (#331).
+        if poll != nil, !inFull { lines -= 1 }
+        // The app that wrote it, at the foot of the words.
+        if Self.viaLine(item.via) != nil, !inFull { lines -= 1 }
         return max(1, lines)
     }
 
@@ -1617,6 +1641,22 @@ struct DummyItemRow: View {
     /// Close under the words: the stack's `snug` step taken back to `tight`, so the card reads as
     /// this post's own quote rather than the next thing down the pane, and its border never
     /// touches the last line of the words.
+    /// The post's poll as the row draws, sizes and votes in it (#331): the one copy's its acts
+    /// chose (`ItemActing.poll`), and the row's own where the list does not act.
+    private var poll: Poll? { acting.poll ?? item.poll }
+
+    /// The post's poll, whole under the words (#331) — **in the pane only**, for `quoteBand`'s
+    /// reason: a stranger's poll of thirty choices is thirty lines a list row would be sized by.
+    /// A list row says it in one line among its words (`PollLine`). Under a cover, nothing: the
+    /// poll is part of what the cover keeps back.
+    @ViewBuilder
+    private var pollBand: some View {
+        if inFull, !covered, let poll {
+            PollBand(poll: poll, acting: acting)
+                .modifier(Probed(\.frames, .poll, probe: probe))
+        }
+    }
+
     @ViewBuilder
     private func quoteBand(_ openQuote: (() -> Void)?) -> some View {
         if drawsQuoteCard, let quote = item.quote {
@@ -2051,6 +2091,8 @@ enum RowBand: Hashable {
     case marks
     /// The picture beside the words, or a post of pictures alone.
     case picture
+    /// The post's poll: its one line in a list, the whole of it in the pane (#331).
+    case poll
 }
 
 /// Where a hosted row laid its bands out, in the row's own space. See `DummyItemRow.probe`.
@@ -2137,8 +2179,18 @@ private struct Probing<Key: Hashable>: ViewModifier {
 /// 2. the age's words, to their shortest ("2m ago");
 /// 3. the handle, and with it the line is tried again from the whole host down;
 /// 4. the words beside the marks, which stand as their glyphs alone;
-/// 5. and last, where even that is wider than the page — a row with every mark at the largest
-///    text — the pill altogether and half of every gap, so the line cannot be wider than the row.
+/// 5. half of every gap, with the pill's letter still drawn (#345);
+/// 6. and last, where even that is wider than the page — a row with every mark at the largest
+///    text — the pill altogether, so the line cannot be wider than the row.
+///
+/// **Why the fifth rung is there** (#345). The age is a reading, set in a monospaced face, and
+/// its words are the machine's language: "3年前" is three glyphs and "3y ago" six, each a full
+/// cell wide. At the largest text the app reaches, on the narrowest phone, the English age is
+/// about seventeen points wider than the Chinese one, and that was the whole of why a row laid
+/// out on a runner (an English machine) gave its pill up where a desk set to 繁體中文 kept it:
+/// the line went from the fourth rung straight to the one without a pill. Halving the seven
+/// gaps gives back more than twice that, so the pill is kept in either language with room to
+/// spare, and the line is only ever without its source at text past the app's own setting.
 enum HeadFit: Hashable, CaseIterable, Sendable {
     case whole
     case initialled
@@ -2146,9 +2198,10 @@ enum HeadFit: Hashable, CaseIterable, Sendable {
     case unhandled
     case plain
     case bare
+    case lean
     case gaunt
 
-    static let ladder: [HeadFit] = [.whole, .initialled, .brief, .unhandled, .plain, .bare, .gaunt]
+    static let ladder: [HeadFit] = [.whole, .initialled, .brief, .unhandled, .plain, .bare, .lean, .gaunt]
 
     /// What the source's pill says.
     enum Pill: Hashable, Sendable {
@@ -2157,25 +2210,41 @@ enum HeadFit: Hashable, CaseIterable, Sendable {
         case absent
     }
 
-    /// Whether the handle is drawn beside the name.
-    var drawsHandle: Bool { self == .whole || self == .initialled || self == .brief }
+    /// What one rung draws, said once: **a rung added is one line here**.
+    private struct Rung {
+        let drawsHandle: Bool
+        let pill: Pill
+        let shortAge: Bool
+        let terse: Bool
+        let close: Bool
+    }
 
-    var pill: Pill {
+    private var rung: Rung {
         switch self {
-        case .whole, .unhandled: .host
-        case .initialled, .brief, .plain, .bare: .initial
-        case .gaunt: .absent
+        case .whole: Rung(drawsHandle: true, pill: .host, shortAge: false, terse: false, close: false)
+        case .initialled: Rung(drawsHandle: true, pill: .initial, shortAge: false, terse: false, close: false)
+        case .brief: Rung(drawsHandle: true, pill: .initial, shortAge: true, terse: false, close: false)
+        case .unhandled: Rung(drawsHandle: false, pill: .host, shortAge: false, terse: false, close: false)
+        case .plain: Rung(drawsHandle: false, pill: .initial, shortAge: true, terse: false, close: false)
+        case .bare: Rung(drawsHandle: false, pill: .initial, shortAge: true, terse: true, close: false)
+        case .lean: Rung(drawsHandle: false, pill: .initial, shortAge: true, terse: true, close: true)
+        case .gaunt: Rung(drawsHandle: false, pill: .absent, shortAge: true, terse: true, close: true)
         }
     }
 
+    /// Whether the handle is drawn beside the name.
+    var drawsHandle: Bool { rung.drawsHandle }
+
+    var pill: Pill { rung.pill }
+
     /// Whether the age is said in its shortest words.
-    var shortAge: Bool { self == .brief || self == .plain || self == .bare || self == .gaunt }
+    var shortAge: Bool { rung.shortAge }
 
     /// Whether the marks are their glyphs alone whatever their number.
-    var terse: Bool { self == .bare || self == .gaunt }
+    var terse: Bool { rung.terse }
 
     /// Whether the gaps between the parts are closed to half.
-    var close: Bool { self == .gaunt }
+    var close: Bool { rung.close }
 
     /// What the pill says of `host` where it cannot say all of it: its first letter, or nothing
     /// for a host with none — and then no pill is drawn. The whole host is still what is heard

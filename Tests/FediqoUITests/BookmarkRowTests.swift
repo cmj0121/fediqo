@@ -85,7 +85,7 @@ struct BookmarkRowTests {
     func offeredWhereAllowed() async throws {
         let (session, _) = try await shell(scopes: Self.acting, holding: note(bookmarked: false))
         let acts = session.acts(on: try row(session))
-        #expect(acts.offered == [.boost, .favourite, .answer, .bookmark])
+        #expect(acts.offered == [.boost, .favourite, .answer, .bookmark, .vote])
         #expect(acts.asking.isEmpty && acts.refused == nil)
     }
 
@@ -184,7 +184,7 @@ struct BookmarkRowTests {
 
         #expect(session.mastodon.writing(host: host, kind: .mastodon) == .writes, "one forbidden bookmark hid every act")
         let acts = session.acts(on: try row(session))
-        #expect(acts.offered == [.boost, .favourite, .answer])
+        #expect(acts.offered == [.boost, .favourite, .answer, .vote])
         #expect(!acts.asks(.bookmark), "a source that has answered is offered the question again")
         #expect(try row(session).bookmarked == false)
         #expect(session.rowRefusal?.host == host && session.rowRefusal?.key == "account.bookmarks.refused")

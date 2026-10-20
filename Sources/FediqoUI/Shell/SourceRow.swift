@@ -563,6 +563,8 @@ extension SourceRow {
         var askAgain: () -> Void = {}
         var changeBoards: () -> Void = {}
         var chooseLists: () -> Void = {}
+        /// Reads the reader's bookmarks and favourites again, or asks for what reads them (#317).
+        var marks: () -> Void = {}
         /// What the yes to Clear's question does. Reached only through that yes.
         var clear: () -> Void = {}
         /// What the yes to Remove's question does. Reached only through that yes.
@@ -592,6 +594,9 @@ extension SourceRow {
     /// **"Your page there" stands first, and only where there is such a page** (`Presses.ownPage`):
     /// an item of this menu that a kind of source has not got is absent, never dim.
     ///
+    /// **The reader's bookmarks and favourites follow Lists, where `marks` is handed in** (#317,
+    /// `marksMark`): read again where the sign-in may, and that part's lock where it may not.
+    ///
     /// **Clear and Remove are built here and nowhere else, and only as `danger`**: the menu puts
     /// each one's question, and only its yes reaches the act. The questions are the session's
     /// (`ShellSession.clearQuestion`, `.removeQuestion`) and are built when an item is chosen,
@@ -599,7 +604,7 @@ extension SourceRow {
     @MainActor
     static func more(
         _ row: SourceRow, actsLive: Bool, said: [String], holds: String? = nil, lock: PartWords.Place? = nil,
-        clearAsks: @escaping () -> ShellConfirmation,
+        marks: ShellMark? = nil, clearAsks: @escaping () -> ShellConfirmation,
         removeAsks: @escaping () -> ShellConfirmation, presses: Presses
     ) -> ShellMore {
         func mark(_ control: Control) -> ShellMark {
@@ -612,6 +617,7 @@ extension SourceRow {
             items: [own].compactMap { $0 } + [
                 .plain(mark(.boards), act: presses.changeBoards),
                 .plain(mark(.lists), act: presses.chooseLists),
+            ] + [marks.map { ShellMoreItem.plain($0, act: presses.marks) }].compactMap { $0 } + [
                 .danger(mark(.clear), asks: clearAsks(), act: presses.clear),
                 .danger(mark(.remove), asks: removeAsks(), act: presses.remove),
             ]
@@ -750,6 +756,10 @@ struct SourceRowView: View {
     /// How the sign-in's bookmarks stand where they are not held (#347), which is what the
     /// permission control then says — `MastodonSessions.bookmarkPlace(host:)`, handed in.
     var lock: PartWords.Place? = nil
+    /// Whether the sign-in may read the reader's bookmarks and favourites, and the lock of what
+    /// reads them where it does not hold it (#317): the marks item of `…` is drawn from these.
+    var marksReads = false
+    var marksPlace: PartWords.Place? = nil
     /// How many announcements its source holds that are not seen and not dismissed (#321), as
     /// last asked — or nothing, and then no mark is drawn. Handed in: the row asks nothing.
     var announced: Int? = nil
@@ -796,8 +806,9 @@ struct SourceRowView: View {
     /// acts that take something away are destructive items of it.
     var more: ShellMore {
         SourceRow.more(
-            row, actsLive: actsLive, said: said, holds: holds, lock: lock, clearAsks: clearAsks,
-            removeAsks: removeAsks, presses: presses
+            row, actsLive: actsLive, said: said, holds: holds, lock: lock,
+            marks: SourceRow.marksMark(row, actsLive: actsLive, reads: marksReads, place: marksPlace),
+            clearAsks: clearAsks, removeAsks: removeAsks, presses: presses
         )
     }
 

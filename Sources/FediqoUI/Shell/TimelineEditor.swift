@@ -181,7 +181,10 @@ struct TimelineEditor: View {
         case .keyword:
             return []
         case .category:
-            return RuleBuilder.categories(in: session.sources, notes: session.notes, signedIn: session.isSignedIn)
+            return RuleBuilder.categories(
+                in: session.sources, notes: session.notes, signedIn: session.isSignedIn,
+                marks: { !session.readableMarks(host: $0).isEmpty }
+            )
                 .flatMap { group in group.categories.map { RuleTarget.category($0, on: group.host) } }
         case .field:
             // The values the reader's sources can give for this field, and nothing where none

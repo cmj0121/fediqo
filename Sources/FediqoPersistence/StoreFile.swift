@@ -1466,6 +1466,20 @@ private var migrator: DatabaseMigrator {
             t.add(column: "media", .text)
         }
     }
+    // The poll a text waiting to be sent is written with (#331). NULL is none.
+    //
+    // **A migration id for `v15-compose`'s reason**: a build from before would send the text on
+    // without the poll the person believes is waiting with it. The id makes it refuse the store.
+    migrator.registerMigration("v16-poll") { db in
+        try db.alter(table: "unsent") { t in
+            t.add(column: "poll", .text)
+        }
+    }
+    // What the reader bookmarked and favourited at a source, as two kinds of category (#317).
+    // **Empty, and an id all the same** (`CategoryRow`): a build from before drops a kind it does
+    // not know, and its next save would lose every such row's category for good. The id makes it
+    // refuse the store instead.
+    migrator.registerMigration("v17-marks") { _ in }
     return migrator
 }
 
@@ -1601,6 +1615,8 @@ struct CategoryRow: Codable, Comparable {
         case .home: kind = "home"
         case .list(let list): kind = "list"; id = list
         case .board(let board): kind = "board"; id = board
+        case .bookmarks: kind = "bookmarks"
+        case .favourites: kind = "favourites"
         }
     }
 
@@ -1612,6 +1628,8 @@ struct CategoryRow: Codable, Comparable {
         case ("home", _): .home
         case ("list", let id?): .list(id: id)
         case ("board", let id?): .board(id: id)
+        case ("bookmarks", _): .bookmarks
+        case ("favourites", _): .favourites
         default: nil
         }
     }
@@ -1832,6 +1850,54 @@ private struct NoteFacts: Codable {
     /// Additive and optional, so no migration id: a row written before reads as none, and an
     /// older build ignores the key and draws the row as it always did.
     var via: String?
+    /// `Note.poll` (#331): the post's poll as its source last said it, the reader's vote in it
+    /// included. Additive and optional, as `via` is: a row written before reads as a post with
+    /// no poll, which the next read that says fills in, and an older build ignores the key.
+    /// What it says of the reader is taken off with their other marks when their sign-in ends
+    /// (`StoreFile.readerSaid`).
+    var poll: PollRow?
+}
+
+/// `Poll` as `NoteFacts` writes it. Held to `Poll`'s own bounds on the way back, whoever wrote
+/// the cell: it is made again through `Poll.init`.
+private struct PollRow: Codable {
+    struct Choice: Codable {
+        var title: String
+        var votes: Int?
+    }
+
+    var id: String
+    var choices: [Choice]
+    var multiple: Bool?
+    var endsAt: Date?
+    var expired: Bool?
+    var votes: Int?
+    var voters: Int?
+    /// The reader's: `ReaderMark.voted`. Both keys go with their other marks.
+    var voted: Bool?
+    var ownVotes: [Int]?
+
+    init(_ poll: Poll) {
+        id = poll.id
+        choices = poll.choices.map { Choice(title: $0.title, votes: $0.votes) }
+        multiple = poll.multiple ? true : nil
+        endsAt = poll.endsAt
+        expired = poll.expired ? true : nil
+        votes = poll.votes
+        voters = poll.voters
+        voted = poll.voted
+        ownVotes = poll.ownVotes.isEmpty ? nil : poll.ownVotes
+    }
+
+    /// The poll this holds, or nothing where it names no id or no choice.
+    var poll: Poll? {
+        guard !id.isEmpty, !choices.isEmpty else { return nil }
+        return Poll(
+            id: id, choices: choices.map { Poll.Choice(title: $0.title, votes: $0.votes) },
+            multiple: multiple ?? false, endsAt: endsAt, expired: expired ?? false,
+            votes: votes, voters: voters, voted: voted, ownVotes: ownVotes ?? []
+        )
+    }
 }
 
 /// `Counts` as `NoteFacts` writes it.
@@ -2090,7 +2156,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             counts: CountsRow(note.counts),
             kind: note.source.kind.rawValue,
             mentions: note.mentions.isEmpty ? nil : note.mentions,
-            via: note.via
+            via: note.via,
+            poll: note.poll.map(PollRow.init)
         )
     }
 
@@ -2180,6 +2247,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             earlier: Wording.bounded(WordingRow.wordings(earlier)),
             language: language,
             via: facts.via,
+            poll: facts.poll?.poll,
             refs: references,
             refsDue: refs_due
         )

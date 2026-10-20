@@ -27,6 +27,7 @@ struct MastodonSignInPartsTests {
         (.follows, "read:follows write:follows", ""),
         (.account, "write:accounts", ""),
         (.media, "write:media", ""),
+        (.marks, "read:bookmarks read:favourites", ""),
     ]
 
     @Test("Every part's words are the ones it shipped with, in the order it shipped; no word belongs to two parts; and they are the words a sign-in asks today")
@@ -272,7 +273,7 @@ struct MastodonSignInPartsTests {
         #expect(MastodonParts.page(held: nil, ticked: reads, readOnly: true) == MastodonOAuth.reading)
         #expect(MastodonParts.page(held: nil, ticked: reads.union([.notices]), readOnly: true) == MastodonOAuth.scopes(writing: false, notices: true))
         // Ticking what acts beside that answer asks for none of it: of follows, the word that reads.
-        #expect(MastodonParts.page(held: everything, ticked: Set(Part.allCases), readOnly: true) == "\(r) read:search \(n) read:follows")
+        #expect(MastodonParts.page(held: everything, ticked: Set(Part.allCases), readOnly: true) == "\(r) read:search \(n) read:follows read:bookmarks read:favourites")
         #expect(MastodonParts.page(held: nil, ticked: [.acting, .bookmarks], readOnly: true) == "")
 
         let acts = reads.union([.acting, .bookmarks])

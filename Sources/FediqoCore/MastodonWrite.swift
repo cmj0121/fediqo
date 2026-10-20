@@ -14,6 +14,18 @@ public enum MastodonWriteRefusal: Equatable, Sendable {
     case kind
     /// A description longer than the source takes.
     case description(limit: Int)
+    /// A poll with fewer choices than two, or more than the source takes (#331).
+    case pollChoices(most: Int)
+    /// A poll choice longer than the source takes.
+    case pollChoiceLength(limit: Int)
+    /// The same choice twice in one poll, which the source refuses.
+    case pollSameChoice
+    /// A poll asked to run shorter or longer than the source takes, in seconds.
+    case pollRuns(shortest: Int, longest: Int)
+    /// A poll and media on one post, which a Mastodon does not take together.
+    case pollWithMedia
+    /// A vote this device knows the poll will not take (`PollRefusal`).
+    case vote(PollRefusal)
 }
 
 public enum MastodonWriteError: Error, Equatable, Sendable {
@@ -101,8 +113,17 @@ public struct MastodonWrite: Sendable {
     public func post(
         _ text: String, visibility: Audience, answering: Note? = nil, key: UUID? = nil,
         spoiler: String? = nil, language: String? = nil, sensitive: Bool? = nil,
-        mediaIDs: [String] = []
+        mediaIDs: [String] = [], poll: NewPoll? = nil, pollLimits: MastodonPollLimits? = nil
     ) async throws -> Note {
+        // A poll is refused here before anything is asked: one beside media, which a Mastodon
+        // takes on no post (#331), and one past what the source said it takes — where this run
+        // heard what that is. Where it did not, the source is the judge of its own limits.
+        if let poll {
+            if mediaIDs.contains(where: { !$0.isEmpty }) { throw MastodonWriteError.refusedHere(.pollWithMedia) }
+            if let pollLimits, let refusal = poll.refusal(within: pollLimits) {
+                throw MastodonWriteError.refusedHere(refusal)
+            }
+        }
         guard let source = await store.sources().first(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
         }
@@ -119,6 +140,13 @@ public struct MastodonWrite: Sendable {
         if let language = SourceField.languageTag(language) { form.append(("language", language)) }
         if let sensitive { form.append(("sensitive", sensitive ? "true" : "false")) }
         for id in mediaIDs where !id.isEmpty { form.append(("media_ids[]", id)) }
+        // The choices in the order typed, how long it runs, and the two answers said outright.
+        if let poll {
+            for choice in poll.said { form.append(("poll[options][]", choice)) }
+            form.append(("poll[expires_in]", String(poll.runs)))
+            form.append(("poll[multiple]", poll.multiple ? "true" : "false"))
+            form.append(("poll[hide_totals]", poll.hidesTotals ? "true" : "false"))
+        }
         let sent = ReadMoment.now()
         let data = try await door.post(
             path: "/api/v1/statuses", form: form,
@@ -224,6 +252,44 @@ public struct MastodonWrite: Sendable {
     @discardableResult
     public func bookmark(_ note: Note, on: Bool) async throws -> Note {
         try await act(.bookmarked, on: note, path: on ? "bookmark" : "unbookmark")
+    }
+
+    /// Votes in `note`'s poll for `choices`, each by its place (#331), and returns the post as
+    /// the store now holds it — with the poll as the source answered the vote.
+    ///
+    /// **Refused here, before anything is sent, where the poll will not take it**: it has
+    /// ended, the reader voted in it already, or what was chosen is not a vote it takes
+    /// (`Poll.refusal`). Nothing then changes on this device.
+    ///
+    /// **The answer is the poll, and it lands as an act's answer does** (`act`): laid over the
+    /// row the store holds, told it is the latest word on the reader's vote (`ReaderMark.voted`),
+    /// so a read still on its way when the vote landed cannot draw the poll unvoted again. A
+    /// refusal or a miss changes nothing here: the store is written only once the source said yes.
+    @discardableResult
+    public func vote(_ note: Note, choices: [Int]) async throws -> Note {
+        guard await store.sources().contains(where: { $0.host == host }) else {
+            throw MastodonWriteError.noSource
+        }
+        guard let poll = note.poll, ListSubscription.isPathSegment(poll.id) else {
+            throw MastodonWriteError.unfindable
+        }
+        if let refusal = poll.refusal(of: choices) { throw MastodonWriteError.refusedHere(.vote(refusal)) }
+        let sent = ReadMoment.now()
+        let data = try await door.post(
+            path: "/api/v1/polls/\(poll.id)/votes", form: choices.sorted().map { ("choices[]", String($0)) }
+        )
+        guard let answered = (try? MastodonJSON.decoder.decode(PollDTO.self, from: data))?.poll,
+              answered.id == poll.id
+        else {
+            throw MastodonWriteError.unreadable
+        }
+        try Task.checkCancellation()
+        // Over the row as held now, where it is held: nothing but its poll is this answer's word.
+        var copy = await store.note(note.key) ?? note
+        copy.poll = answered
+        copy.asked = sent
+        await store.refresh([copy], ifSourceHere: host, acted: .voted)
+        return await store.note(copy.key) ?? copy.refreshed(over: note)
     }
 
     /// One act on one status, and what the server says the post looks like afterwards.
@@ -338,7 +404,7 @@ public struct MastodonMediaLimits: Equatable, Sendable {
     }
 
     /// A positive whole number, or nothing. Zero is not a ceiling. A boolean is not a number.
-    private static func positive(_ value: Any?) -> Int? {
+    static func positive(_ value: Any?) -> Int? {
         guard let number = value as? NSNumber else { return nil }
         if value is Bool || CFGetTypeID(number as CFTypeRef) == CFBooleanGetTypeID() { return nil }
         let whole = number.intValue

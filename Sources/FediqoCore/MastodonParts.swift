@@ -35,6 +35,10 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     /// a sign-in that only reads has nothing to attach it to. Not a rider — a page that
     /// lacks the word is made again, rather than signed in without it.
     case media
+    /// What the reader bookmarked and favourited at the source, read back as categories of it
+    /// (#317) — from whichever reader marked them. **Reads, and stands without `acting`**: a
+    /// sign-in that only reads may be asked for it, and only where the person presses for it.
+    case marks
 
     /// The words a page asks for this part.
     public var words: [String] {
@@ -47,6 +51,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
         case .follows: ["read:follows", "write:follows"]
         case .account: ["write:accounts"]
         case .media: ["write:media"]
+        case .marks: ["read:bookmarks", "read:favourites"]
         }
     }
 
@@ -55,7 +60,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var wordsBesideActing: [String] {
         switch self {
         case .notices: ["write:notifications"]
-        case .reading, .search, .acting, .bookmarks, .follows, .account, .media: []
+        case .reading, .search, .acting, .bookmarks, .follows, .account, .media, .marks: []
         }
     }
 
@@ -65,7 +70,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var rider: Bool {
         switch self {
         case .search, .bookmarks: true
-        case .reading, .acting, .notices, .follows, .account, .media: false
+        case .reading, .acting, .notices, .follows, .account, .media, .marks: false
         }
     }
 
@@ -74,7 +79,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var needsActing: Bool {
         switch self {
         case .bookmarks, .media: true
-        case .reading, .search, .acting, .notices, .follows, .account: false
+        case .reading, .search, .acting, .notices, .follows, .account, .marks: false
         }
     }
 }
@@ -298,6 +303,16 @@ public enum MastodonParts {
     public static func holdsBesideActing(_ part: MastodonPart, in scopes: String?) -> Bool {
         let beside = part.wordsBesideActing
         return !beside.isEmpty && beside.allSatisfy(words(scopes).contains)
+    }
+
+    /// Whether a scope string may read `category` of the reader's marks (#317): the word of
+    /// `MastodonPart.marks` that reads it — the one naming it (`Category.markWord`) — or the
+    /// source's one word for every read, which holds both. Never for any other category.
+    public static func readsMarks(_ category: Category, in scopes: String?) -> Bool {
+        guard let mark = category.markWord,
+              let word = MastodonPart.marks.words.first(where: { $0.hasSuffix(":" + mark) })
+        else { return false }
+        return holdsEveryRead(in: scopes) || words(scopes).contains(word)
     }
 
     /// Whether a scope string holds the source's one word for every read there is — which no

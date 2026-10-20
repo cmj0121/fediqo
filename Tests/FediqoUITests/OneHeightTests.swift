@@ -500,6 +500,21 @@ struct OneHeightTests {
         #expect(lines(Self.note(title: "t", kind: .discuz, reply: Reply(handle: "@bob@first.example"))) == 3)
     }
 
+    @Test("The app that wrote a post takes the words' last line in a list, and none in the pane")
+    func viaTakesALine() {
+        let item = DummyItem(Note(
+            id: "n1", source: Source(host: "first.example", kind: .mastodon), author: "Ada",
+            handle: "@ada@author.example", body: "Short.", postedAt: Self.posted,
+            categories: [.public], statusID: "1", via: "Ivory"
+        ))
+        func row(_ item: DummyItem, inFull: Bool = false) -> DummyItemRow {
+            DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), inFull: inFull)
+        }
+        #expect(row(item).bodyLines == 4, "the via line is the words' fifth")
+        #expect(row(Self.note()).bodyLines == 5, "a post naming no app keeps it")
+        #expect(row(item, inFull: true).wordLines == nil, "the pane holds the words to no height")
+    }
+
     @Test("The marks' line closes its gaps first, then narrows every mark, and always ends inside the width")
     func marksLineGivesWay() {
         let widths: [CGFloat] = [40, 40, 32, 40, 32, 32, 32, 32]

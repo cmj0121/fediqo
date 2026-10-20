@@ -515,6 +515,102 @@ struct ComposeTests {
     }
 
     /// A writing sign-in that may also attach media, talking to `server`.
+    // MARK: - A poll (#331)
+
+    @Test("A post with a poll goes with its words, its choices as typed, how long it runs and both answers; the poll goes with the post and the next starts without one")
+    func aPostWithAPoll() async throws {
+        let (session, server, _) = try await shell(
+            scopes: writing,
+            routes: ["/api/v1/statuses": .json(Self.status(body: "Which?"))]
+        )
+        session.prepareCompose()
+        session.composeDraft = "Which?"
+        session.composeAddPoll()
+        #expect(session.composePoll == NewPoll.fresh)
+        #expect(!session.canPost, "two empty choices are no poll")
+        session.composePoll?.choices = ["Tea", "Coffee"]
+        session.composePoll?.multiple = true
+        session.composePoll?.hidesTotals = true
+        session.composePoll?.runs = 3600
+        #expect(session.canPost)
+        #expect(session.send())
+        #expect(session.composePoll == nil)
+        await session.outbox.settled()
+        #expect(session.outbox.sendings.isEmpty)
+        let sent = try #require(await server.requests.first)
+        let pairs = Self.pairs(sent)
+        #expect(pairs.filter { $0.0 == "poll[options][]" }.map(\.1) == ["Tea", "Coffee"])
+        #expect(pairs.contains { $0 == ("poll[expires_in]", "3600") })
+        #expect(pairs.contains { $0 == ("poll[multiple]", "true") })
+        #expect(pairs.contains { $0 == ("poll[hide_totals]", "true") })
+        #expect(pairs.contains { $0 == ("status", "Which?") })
+    }
+
+    @Test("A post carries a poll or media, not both: a poll is not started beside a file, and a file is not added beside a poll, and each press says why")
+    func aPollOrMedia() async throws {
+        let (session, server, _) = try await shell(scopes: writing + " write:media")
+        session.prepareCompose()
+        session.composeMedia = [UnsentMedia(bytes: Data([1]), mime: "image/png", name: "a.png")]
+        session.composeAddPoll()
+        #expect(session.composePoll == nil)
+        #expect(session.composePollSays == "social.example takes a poll or media on a post, not both.")
+        // The file taken off, the reason it gave goes with it.
+        session.composeMedia = []
+        #expect(session.composePollSays == nil)
+        session.composeAddPoll()
+        #expect(session.composePoll != nil)
+        session.composeAddMedia()
+        #expect(session.composeMediaNote == "social.example takes a poll or media on a post, not both.")
+        #expect(!session.composeImporting)
+        #expect(await server.paths.isEmpty)
+    }
+
+    @Test("A poll is held to what the source said it takes: as many choices, each as long, runs it offers; past them it cannot be sent, and says why")
+    func heldToTheSourcesLimits() async throws {
+        let (session, _, _) = try await shell(scopes: writing)
+        session.prepareCompose()
+        session.composeDraft = "Which?"
+        session.composeRooms[host] = ComposeRoom(
+            limit: 500, media: .unstated,
+            polls: MastodonPollLimits(choices: 3, choiceLength: 5, shortest: 300, longest: 3600)
+        )
+        session.composeAddPoll()
+        #expect(session.composePoll?.runs == 300, "a day is not among the runs it takes: the shortest is")
+        #expect(MastodonPollLimits(choices: 3, choiceLength: 5, shortest: 300, longest: 3600).offeredRuns == [300, 1800, 3600])
+        session.composeAddChoice()
+        session.composeAddChoice()
+        #expect(session.composePoll?.choices.count == 3, "no more than it takes")
+        session.composePoll?.choices = ["Tea", "Milk", "Water"]
+        #expect(session.canPost)
+        session.composePoll?.choices[1] = "Coffee"
+        #expect(!session.canPost)
+        #expect(session.composePollNote() == "A choice is at most 5.")
+        session.composeRemoveChoice(at: 1)
+        #expect(session.composePoll?.choices == ["Tea", "Water"])
+        session.composeRemoveChoice(at: 1)
+        #expect(session.composePoll?.choices.count == 2, "a poll keeps the two it needs")
+        session.composePoll?.choices = ["Tea", "Tea"]
+        #expect(session.composePollNote() == "Two choices say the same.")
+        session.composeRemovePoll()
+        #expect(session.composePoll == nil && session.canPost)
+    }
+
+    @Test("Every word of a poll in the composer is translated")
+    func pollWordsAreTranslated() {
+        for key in [
+            "compose.poll.add", "compose.poll.remove", "compose.poll.count", "compose.poll.choice",
+            "compose.poll.addChoice", "compose.poll.removeChoice", "compose.poll.removeChoice.named",
+            "compose.poll.multiple", "compose.poll.hide", "compose.poll.runs", "compose.poll.runs.refused",
+            "compose.poll.choices", "compose.poll.choiceLength", "compose.poll.same", "compose.poll.withMedia",
+        ] {
+            for language in [DummyLanguage.english, .taiwanese] {
+                #expect(L10n.t(key, language: language) != key, "\(key) is missing in \(language)")
+            }
+        }
+        #expect(ComposeWords.runsLine(86_400, language: .english) == "1 day")
+        #expect(ComposeWords.runsLine(1800, language: .english) == "30 minutes")
+    }
+
     private func mediaShell(_ server: MediaServer) async throws -> ShellSession {
         let tokens = MemoryMastodonTokens()
         try tokens.save(token(host, scopes: writing + " write:media"))

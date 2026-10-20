@@ -250,6 +250,8 @@ private struct CategoryValue: Codable {
         case .home: kind = "home"
         case .list(let list): kind = "list"; id = list
         case .board(let board): kind = "board"; id = board
+        case .bookmarks: kind = "bookmarks"
+        case .favourites: kind = "favourites"
         }
     }
 
@@ -260,6 +262,8 @@ private struct CategoryValue: Codable {
         case ("home", _): .home
         case ("list", let id?): .list(id: id)
         case ("board", let id?): .board(id: id)
+        case ("bookmarks", _): .bookmarks
+        case ("favourites", _): .favourites
         default: nil
         }
     }

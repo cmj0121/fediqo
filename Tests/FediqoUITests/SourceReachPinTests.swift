@@ -144,14 +144,15 @@ struct SourceReachPinTests {
 
     // MARK: - Reading
 
-    @Test("A reload of a Mastodon signed in to: its public timeline and what is rising through the plain door with no token, each under its own name; its lists' names, Home and each list through the signed door, each timeline under the name the reader knows it by")
+    @Test("A reload of a Mastodon signed in to: what is rising through the plain door with no token; its public timeline with the sign-in, its lists' names, Home and each list through the signed door, each timeline under the name the reader knows it by")
     func reloadSignedIn() async throws {
         let (session, log) = try await Self.shell(signedIn: true)
         await session.reload.timeline(.all, in: session)
         #expect(Set(Self.only(Self.m, log.take())) == [
             // What kind of server it is now, asked beside the read.
             "plain no token m.example/api/v2/instance | serverCheck -",
-            "plain no token m.example/api/v1/timelines/public | timeline Public",
+            // A source may keep it for signed-in readers (#283).
+            "signed token m.example/api/v1/timelines/public | timeline Public",
             "plain no token m.example/api/v1/trends/statuses | timeline Trends",
             "signed token m.example/api/v1/lists | lists -",
             "signed token m.example/api/v1/timelines/home | timeline Home",

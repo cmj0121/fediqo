@@ -167,6 +167,26 @@ public enum Category: Hashable, Sendable {
     case list(id: String)
     /// A forum section, by the id the source gives it — Discuz!'s `fid` as a string.
     case board(id: String)
+    /// What a signed-in Mastodon reader bookmarked at the source, from any reader (#317).
+    case bookmarks
+    /// What a signed-in Mastodon reader favourited at the source, from any reader (#317).
+    case favourites
+
+    /// Whether this is something the reader marked (#317): **listed by when it was marked, not
+    /// by when it was posted**, and paged by the source's own mark, which is no post's id. So
+    /// nothing read of it is read on by a post's id, and no place where a stretch of it is
+    /// missing is said — `MastodonMarks` reads it by its own rule.
+    public var isMarks: Bool { markWord != nil }
+
+    /// The word a Mastodon names this kind of mark by, in its address and in the scope that reads
+    /// it (#317): `bookmarks`, `favourites`. Nothing for a category that is no mark.
+    public var markWord: String? {
+        switch self {
+        case .bookmarks: "bookmarks"
+        case .favourites: "favourites"
+        case .public, .trends, .home, .list, .board: nil
+        }
+    }
 }
 
 public enum Audience: String, Sendable, Hashable, CaseIterable {
@@ -387,6 +407,9 @@ public struct ReadMoment: Hashable, Sendable {
 /// One of the three things a source says its signed-in reader has done to a post (#285).
 public enum ReaderMark: Hashable, Sendable, CaseIterable {
     case boosted, favourited, bookmarked
+    /// Whether the reader voted in the post's poll, and for what (#331): `Poll.voted` and
+    /// `Poll.ownVotes`.
+    case voted
 }
 
 /// A note this device has stored. Its categories remember what it arrived through.
@@ -579,6 +602,18 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// **A fact of the status, a reblog's included.** It is not what the post says, so a reblog
     /// keeps the app its source named for the reblog itself. The post it carries keeps its own.
     public let via: String?
+    /// The post's poll, as its source last said it (#331), or nothing on a post that has none —
+    /// and on every reblog, whose post carries its own.
+    ///
+    /// **How it stands is the source's word about the post, and whether the reader voted is
+    /// its word about the reader** (`ReaderMark.voted`), each kept by the rule the post's
+    /// counts and its marks are. A change to the poll alone is a change to the row: two copies
+    /// that differ in nothing but their poll are two revisions of it, and where its author
+    /// changed the poll the source says so as it says any edit (`editedAt`).
+    ///
+    /// A `var` for `categories`' reason: a vote's answer and a read of the poll alone set it on
+    /// the row they land over.
+    public var poll: Poll?
     /// What this item refers to (#290, #293): each another item on the same source, with the
     /// kind of reference it is. Held to `Reference.bounded`.
     ///
@@ -658,6 +693,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         earlier: [Wording] = [],
         language: String? = nil,
         via: String? = nil,
+        poll: Poll? = nil,
         refs: [Reference] = [],
         refsDue: Bool = false
     ) {
@@ -696,6 +732,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         let editedAt = post ? editedAt : nil
         let earlier = post ? earlier : []
         let language = post ? language : nil
+        let poll = post ? poll : nil
         self.refsDue = refsDue
         self.id = id
         self.source = source
@@ -733,6 +770,13 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.language = SourceField.languageTag(language)
         // Not wiped on a reblog, and not cleaned again: the decode already made it one line.
         self.via = via
+        self.poll = poll
+    }
+
+    /// Whether this copy says anything of what its reader did to the post: a boost, a
+    /// favourite, a bookmark or a vote, either way. What a sign-in that ended takes off.
+    public var saysReader: Bool {
+        boosted != nil || favourited != nil || bookmarked != nil || poll?.voted != nil
     }
 
     /// What this post's words weigh, in the bytes they are written in (#294): its body, title and
@@ -813,6 +857,11 @@ public struct Note: Identifiable, Hashable, Sendable {
             counts: stale.counts.filled(from: counts), statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed,
             kept: kept, editedAt: editedAt, earlier: earlier, language: language, via: via,
+            // How the poll stands is taken from the stale copy as its counts are, and whether the
+            // reader voted only where `taking` says (`Poll.later`). Its choices are this row's.
+            poll: poll.map { held in
+                stale.poll.flatMap { $0.asksTheSame(as: held) ? Poll.later($0, over: held, reader: taking.contains(.voted)) : nil } ?? held
+            },
             refs: refs, refsDue: refsDue
         )
     }
@@ -847,6 +896,9 @@ public struct Note: Identifiable, Hashable, Sendable {
             language: later.language,
             // A name the later copy states replaces the one held. One it does not state leaves it.
             via: later.via ?? via,
+            // The poll as the post says it now — none, where the change took it off — with
+            // what was held of the reader where the later copy says nothing of them.
+            poll: Poll.later(later.poll, over: was.poll, reader: true),
             refs: Reference.rebuilt(answers: answersReference, quotes: quotes, from: refs), refsDue: refsDue
         )
     }
@@ -907,6 +959,10 @@ public struct Note: Identifiable, Hashable, Sendable {
             language: language,
             // As the spoiler is: a read that names no app leaves the name already held.
             via: via ?? held.via,
+            // The poll as this read says it, as its language is (#331); what it says of the reader
+            // only where `taking` says, as the marks are — and a read made signed out, which says
+            // nothing of whether they voted, leaves what was held.
+            poll: Poll.later(poll, over: held.poll, reader: taking.contains(.voted)),
             // **What it reblogs is the held row's, always** (#290): a reblog's target does not
             // change once it is held, so no later copy can turn a reblog — a kept one, which
             // holds its post — towards another post.
@@ -968,6 +1024,12 @@ public struct Note: Identifiable, Hashable, Sendable {
             goneSince: goneSince, gaps: gaps, listed: listed,
             kept: kept, editedAt: editedAt, earlier: earlier, language: language ?? other.language,
             via: via ?? other.via,
+            // How the later copy's poll stands wins as its counts do (#331), and what it says of
+            // the reader only where it is not the stale one. Its choices are this row's — a
+            // changed poll is the edit's to bring (`revised`) — and a row that held none takes it.
+            poll: poll.map { held in
+                other.poll.flatMap { $0.asksTheSame(as: held) ? Poll.later($0, over: held, reader: !stale) : nil } ?? held
+            } ?? other.poll,
             refs: Reference.rebuilt(answers: answersReference, quotes: quotes, from: refs), refsDue: refsDue
         )
     }
@@ -984,7 +1046,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, via: via, refs: refs, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, language: language, via: via, poll: poll?.with(voted: nil),
+            refs: refs, refsDue: refsDue
         )
     }
 
@@ -998,7 +1061,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, via: via, refs: refs, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, language: language, via: via, poll: poll, refs: refs, refsDue: refsDue
         )
     }
 
@@ -1013,7 +1076,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, via: via, refs: references, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, language: language, via: via, poll: poll, refs: references, refsDue: refsDue
         )
     }
 
@@ -1027,7 +1090,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             avatarURL: avatarURL, attachments: attachments, sensitive: sensitive, spoiler: spoiler,
             emojis: emojis, mentions: mentions, url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, via: via, refs: refs, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, language: language, via: via, poll: poll, refs: refs, refsDue: refsDue
         )
     }
 }

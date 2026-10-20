@@ -57,7 +57,7 @@ struct ReblogRowHostedTests {
 
     private static func laid(
         _ item: DummyItem, layout: ShellLayout, width: CGFloat, here: Set<String> = [host],
-        type: DynamicTypeSize = .large, acting: ItemActing = ItemActing()
+        type: DynamicTypeSize = .large, acting: ItemActing = ItemActing(), locale: Locale? = nil
     ) -> Laid {
         let probe = RowBandProbe()
         let row = DummyItemRow(
@@ -67,6 +67,7 @@ struct ReblogRowHostedTests {
         .environment(\.shellLayout, layout)
         .environment(\.shellSourcesHere, here)
         .environment(\.dynamicTypeSize, type)
+        .environment(\.locale, locale ?? .current)
         let hosted = NSHostingView(rootView: row.frame(width: width))
         hosted.frame = NSRect(origin: .zero, size: hosted.fittingSize)
         hosted.layoutSubtreeIfNeeded()
@@ -160,15 +161,14 @@ struct ReblogRowHostedTests {
     @Test("At large text the reblog's line holds across a phone wherever the header under it does, and at the accessibility sizes it reaches no further than that header: the two times stay in one column")
     func largeText() throws {
         let item = DummyItem(Self.reblog(), reblogging: Self.post(changed: true))
+        // In each language the ages are said in, whatever the machine's own (#345): a monospaced
+        // age in English is wider than in 繁體中文, and that alone once cost the pill.
         for size in [DynamicTypeSize.xxxLarge, .accessibility1] {
-            for width in [CGFloat(320)] {
-                let laid = Self.laid(item, layout: .narrow, width: width, type: size)
+            for locale in LaidIn.languages {
+                let width: CGFloat = 320
+                let laid = Self.laid(item, layout: .narrow, width: width, type: size, locale: locale)
                 try Self.holds(laid.meta, [.reblogger, .reblogAge], width: width)
-                // The pill is not asked for on a hosted runner at the largest size the app
-                // reaches (`HostedRunner`): the row measures a few points wider there and gives
-                // it up, where a desk keeps it. Everything else in the header is asked everywhere.
-                let pill: [RowMetaPart] = HostedRunner.isOne && size == .accessibility1 ? [] : [.source]
-                try Self.holds(laid.meta, [.names] + pill + [.changed, .age], width: width)
+                try Self.holds(laid.meta, [.names, .source, .changed, .age], width: width)
             }
         }
         // Past those, the header itself is wider than a phone — on every row, a reblog's or not.

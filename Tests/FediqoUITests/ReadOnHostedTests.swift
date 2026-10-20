@@ -87,7 +87,11 @@ struct ReadOnHostedTests {
             mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: ActServer([:]))
         )
         await session.reloadFromStore()
+        // The newest stretch failing, so more belong above the newest read rather than a place
+        // where posts may be missing below the newest stretch (#283).
+        await server.refuseNewest(true)
         await session.reload.timeline(.all, in: session)
+        await server.refuseNewest(false)
         let before = await server.cursors.count
         #expect(!session.gapMarks(in: session.timelineItems(latest: nil)).isEmpty, "the premise: more belong")
 

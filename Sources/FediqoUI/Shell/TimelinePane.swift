@@ -1147,6 +1147,8 @@ struct TimelinePane: View {
                     // Which sources have no more of what is rising to give (#288). A search's
                     // results are not a timeline, and end nowhere a source chose.
                     if !searching { TrendsEndFoot(timeline: timeline, session: session) }
+                    // That the reader's marks stand by when they were published (#317).
+                    if !searching, session.readsMarks(timeline) { MarksOrderFoot() }
                     // The page below being read from this device (#357).
                     if !searching, session.timelineLoading(latest: prefs.latestDate) { TimelineReadingOn() }
                 }
@@ -1314,11 +1316,18 @@ struct TimelinePane: View {
                 } else {
                     onOpenThread(item.id)
                 }
-            // No mark performs this: taking back is an item of the row's `…` (`withdraw`, below).
-            case .withdraw:
+            // No mark performs these: taking back is an item of the row's `…` (`withdraw`,
+            // below), and a vote is pressed from the post's poll with its choices (`vote`).
+            case .withdraw, .vote:
                 break
             }
         }
+        // A post's poll (#331): voted in where the post offers it, read again wherever it is.
+        if acting.acts.offers(.vote), acting.poll != nil {
+            acting.vote = { choices in Task { await session.vote(item, choices: choices) } }
+        }
+        if acting.poll != nil { acting.readPoll = { Task { await session.readPollAgain(item) } } }
+        if let lock = acting.voteLock { acting.askToVote = { _ = session.askFor([.acting], host: lock.host) } }
         // What `y` does (#284), and it says so itself: one act, one outcome, whichever asked.
         acting.keep = { Task { await session.toggleKept(item) } }
         acting.ask = { _ in session.askToBookmark(item) }

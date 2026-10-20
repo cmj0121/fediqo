@@ -31,7 +31,8 @@ private actor OneAnswer: HTTPSender {
 struct MastodonRegistrationTests {
     private let host = MastodonFixture.host
     private static let whole = "read:statuses read:lists read:accounts read:search write:statuses write:favourites "
-        + "write:bookmarks read:notifications write:notifications read:follows write:follows write:accounts write:media"
+        + "write:bookmarks read:notifications write:notifications read:follows write:follows write:accounts write:media "
+        + "read:bookmarks read:favourites"
 
     private static func list(_ words: [String]) -> Data {
         try! JSONSerialization.data(withJSONObject: ["scopes_supported": words])
@@ -62,7 +63,8 @@ struct MastodonRegistrationTests {
 
         let without: Set<String> = Set(words).subtracting(["write:bookmarks", "read:search"])
         #expect(MastodonRegistration.superset(listed: without)
-            == "read:statuses read:lists read:accounts write:statuses write:favourites read:notifications write:notifications read:follows write:follows write:accounts write:media")
+            == "read:statuses read:lists read:accounts write:statuses write:favourites read:notifications write:notifications read:follows write:follows write:accounts write:media "
+               + "read:bookmarks read:favourites")
         let larger = Set(words).union(["admin:write", "follow", "push", "read", "write"])
         #expect(MastodonRegistration.superset(listed: larger) == Self.whole)
         #expect(MastodonRegistration.superset(listed: nil) == Self.whole, "no list: asked as it is")

@@ -218,6 +218,9 @@ public protocol HeldRows: Sendable {
     func reblogged(by keys: [NoteKey]) throws -> [NoteKey]
     /// The keys of the rows `selection` names, none of them kept.
     func keys(_ selection: RowSelection) throws -> [NoteKey]
+    /// The keys of every row of `host` that arrived through `category`, kept or not: what
+    /// a read of the reader's marks may show is no longer marked (#317).
+    func keys(host: String, in category: Category) throws -> [NoteKey]
     /// At most `limit` rows not kept, the oldest posted first and two of one moment in the order
     /// they arrived, from past `after` on — and where the next are asked from, or nothing where
     /// none are left. A row that will not decode is passed over.
@@ -253,6 +256,10 @@ public protocol HeldRows: Sendable {
     /// Mastodon id grows with time, and a longer one is a later one: where a timeline's next
     /// stretch is asked from once the pool holds only part of what the file does (#201, #359).
     func oldestStatusID(host: String, category: Category) throws -> String?
+    /// The newest id a read of `category` from `host` listed a row of the file under, of a row
+    /// its source has not said is gone, and that row's key — where a timeline is read on from
+    /// once the pool holds only part of what the file does (#201, #359).
+    func newestListed(host: String, category: Category) throws -> (id: String, key: NoteKey)?
 }
 
 /// What the file holds of one host (`HeldRows.rowCounts`): how many rows, and the kind of source

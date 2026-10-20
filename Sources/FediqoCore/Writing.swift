@@ -154,6 +154,10 @@ public enum PostAct: Sendable, Hashable, CaseIterable {
     /// A mark put on the post at its source, for the reader alone (#285). **Offered only where
     /// the sign-in bought bookmarking**, which one made before it was asked for did not.
     case bookmark
+    /// A vote in the post's poll (#331), once, for one choice or several as the poll allows.
+    /// **Offered only on a source whose posts have polls** (`SourceOffers.polls`); whether this
+    /// post has one, and whether it still takes a vote, is the poll's to say.
+    case vote
 }
 
 /// Why a post offers none of the acts. Nothing is a post that offers them.
@@ -216,6 +220,9 @@ public struct PostActs: Sendable, Hashable {
     /// is no post there for it to reach. The row's own mark already says why, so a refusal on top
     /// of it would be saying it twice.
     ///
+    /// `polls` is whether a post of that kind of source carries polls (`SourceOffers.polls`):
+    /// a vote is offered only there.
+    ///
     /// `bookmarks` is whether that sign-in may bookmark (#285). **Not known is not allowed**, as
     /// `mine` is: the mark is offered where the sign-in bought it, asks where the sign-in was
     /// made before it could be bought, and is not offered where the source would not grant it. Every
@@ -225,7 +232,7 @@ public struct PostActs: Sendable, Hashable {
     /// post on such a source offers.
     public static func on(
         _ writing: SourceWriting, nameable: Bool, mine: Bool = false, gone: Bool = false,
-        bookmarks: BookmarkStanding = .unavailable
+        bookmarks: BookmarkStanding = .unavailable, polls: Bool = false
     ) -> PostActs {
         if gone { return .none }
         switch writing {
@@ -234,8 +241,10 @@ public struct PostActs: Sendable, Hashable {
         case .refused: return PostActs(offered: [], refused: .turnedAway)
         case .writes:
             guard nameable else { return PostActs(offered: [], refused: .unnameable) }
-            var offered = Set(PostAct.allCases).subtracting([.withdraw, .bookmark])
+            var offered = Set(PostAct.allCases).subtracting([.withdraw, .bookmark, .vote])
             if mine { offered.insert(.withdraw) }
+            // A vote is the kind of source's to have (#331), and never a reason of its own.
+            if polls { offered.insert(.vote) }
             switch bookmarks {
             case .allowed: offered.insert(.bookmark)
             case .unasked: return PostActs(offered: offered, asking: [.bookmark])

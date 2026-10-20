@@ -242,6 +242,59 @@ struct ReadOnTests {
         #expect(await store.all().allSatisfy { $0.gaps.isEmpty }, "the place is read, and says so no more")
     }
 
+    /// `readPublic`, catching up as a reload reads it: the newest stretch read too at the bound.
+    private func catchUp(_ store: ItemStore, from server: TimelineServer) async throws -> ReadOn {
+        let anchor = await store.newestListedID(host: Self.host, category: .public)
+        let read = try await MastodonClient(http: server, host: Self.host)
+            .publicTimeline(source: Self.source, readingOnFrom: anchor, catchingUp: true)
+        await store.land(read, of: .public, ifSourceHere: Self.host)
+        return read
+    }
+
+    @Test("Catching up past the bound: the newest stretch lands too, and posts may be missing below it — read down toward what was read on")
+    func catchingUp() async throws {
+        let server = TimelineServer(1...10)
+        let store = await store(holding: 1...10)
+        await server.post(11...1000)
+        let read = try await catchUp(store, from: server)
+        #expect(await server.cursors == ["min_id=9", "min_id=49", "min_id=89", "min_id=129", "min_id=169", "newest"])
+        #expect(await held(store) == Array(1...209) + Array(961...1000), "read on as far as the bound, and the newest now")
+        #expect(read.newerRemainAbove == nil, "the newest is held: nothing newer is said to remain")
+        #expect(read.missingBelow == Self.key(961))
+        #expect(await store.note(Self.key(961))?.gaps == [TimelineGap(.mayBeMissing, in: .public)])
+        #expect(await store.note(Self.key(209))?.gaps.isEmpty == true)
+
+        let place = try #require(await store.missing(below: Self.key(961), in: .public))
+        #expect(place.floor == "209", "read down toward what was read on")
+        let down = try await MastodonClient(http: server, host: Self.host)
+            .publicTimeline(source: Self.source, readingDownFrom: place)
+        #expect(down.end == .further(from: "761"))
+        #expect(down.notes.compactMap { $0.statusID.flatMap(Int.init) }.sorted() == Array(761...960))
+    }
+
+    @Test("Catching up where the newest stretch meets what was read on: everything lands, and nothing is said")
+    func catchingUpMeets() async throws {
+        let server = TimelineServer(1...10)
+        let store = await store(holding: 1...10)
+        await server.post(11...230)
+        let read = try await catchUp(store, from: server)
+        #expect(await held(store) == Array(1...230))
+        #expect(read.missingBelow == nil && read.newerRemainAbove == nil)
+        #expect(await store.all().allSatisfy { $0.gaps.isEmpty })
+    }
+
+    @Test("Catching up where the newest stretch fails: newer remain above the newest read, as without it")
+    func catchingUpFails() async throws {
+        let server = TimelineServer(1...10)
+        let store = await store(holding: 1...10)
+        await server.post(11...1000)
+        await server.fail(ask: 6)
+        let read = try await catchUp(store, from: server)
+        #expect(await held(store) == Array(1...209))
+        #expect(read.newerRemainAbove == Self.key(209))
+        #expect(read.missingBelow == nil)
+    }
+
     @Test("A full last stretch at the bound says more remain; a short one does not")
     func boundExactly() async throws {
         let server = TimelineServer(1...10)

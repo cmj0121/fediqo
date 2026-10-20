@@ -51,12 +51,19 @@ public struct SourceOffers: Hashable, Sendable {
     /// somebody's page offers the press only where this is so, and a kind that has no such
     /// thing is offered none.
     public let follows: Bool
+    /// Whether a post of it may carry a poll the reader votes in (#331), given a sign-in that
+    /// may write — so a poll's choices are offered as a vote only where this is so, and a kind
+    /// that has no polls is offered none.
+    public let polls: Bool
+    /// Whether what its signed-in reader bookmarked and favourited there can be read back as
+    /// categories of it (#317), given a sign-in that may — from whichever reader marked them.
+    public let marks: Bool
 
     public init(
         timelines: Bool = false, trends: Bool = false, boards: Bool = false, authorsAreItsOwn: Bool = false,
         writes: Bool = false, fields: [SourceField] = [], loadsReferences: Bool = false,
         saysReaderMarks: Bool = false, saysQuotes: Bool = false, notices: Bool = false, people: Bool = false,
-        follows: Bool = false
+        follows: Bool = false, polls: Bool = false, marks: Bool = false
     ) {
         self.timelines = timelines
         self.trends = trends
@@ -70,6 +77,8 @@ public struct SourceOffers: Hashable, Sendable {
         self.notices = notices
         self.people = people
         self.follows = follows
+        self.polls = polls
+        self.marks = marks
     }
 
     /// The field it declares under `name`, or nothing.
@@ -86,6 +95,7 @@ public struct SourceOffers: Hashable, Sendable {
         case .public, .home, .list: timelines
         case .trends: trends
         case .board: boards
+        case .bookmarks, .favourites: marks
         }
     }
 
@@ -96,11 +106,13 @@ public struct SourceOffers: Hashable, Sendable {
     ///
     /// **Completed by the caller, who holds what this cannot know**: `source` carries the lists
     /// and boards chosen on it, and `signedIn` is whether somebody is signed in to it at this
-    /// moment — asked of whoever keeps sign-ins, never here.
-    public func categories(of source: Source, signedIn: Bool) -> [Category] {
+    /// moment — asked of whoever keeps sign-ins, never here. `marks` is whether that sign-in
+    /// may read what its reader marked (#317), which is asked of the same keeper.
+    public func categories(of source: Source, signedIn: Bool, marks readsMarks: Bool = false) -> [Category] {
         var served: [Category] = timelines ? [.public] : []
         if trends { served.append(.trends) }
         if timelines, signedIn { served.append(.home) }
+        if marks, signedIn, readsMarks { served += [.bookmarks, .favourites] }
         served += source.lists.map { .list(id: $0.id) }
         served += source.boards.map { .board(id: String($0.fid)) }
         return served
@@ -119,7 +131,7 @@ extension ProtocolKind {
                 timelines: true, trends: true, writes: true,
                 fields: [.audience, .language, .covered, .reblog, .reblogOf],
                 loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true, people: true,
-                follows: true
+                follows: true, polls: true, marks: true
             )
         case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial:
             SourceOffers(timelines: true, trends: true)

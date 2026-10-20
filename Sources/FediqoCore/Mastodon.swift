@@ -3,10 +3,37 @@ import Foundation
 public struct MastodonClient: Sendable {
     private let http: any HTTPClient
     private let host: String
+    /// The sign-in a timeline is read through, where there is one (`reading(as:)`).
+    private let door: MastodonAuthorized?
 
     public init(http: any HTTPClient, host: String) {
         self.http = http
         self.host = host
+        door = nil
+    }
+
+    private init(http: any HTTPClient, host: String, door: MastodonAuthorized?) {
+        self.http = http
+        self.host = host
+        self.door = door
+    }
+
+    /// This client with its timelines read as the reader, through `door`, and everything else
+    /// asked as it was. **A source that keeps its public
+    /// timeline for signed-in readers** answers an ask without a token 422, "This method requires
+    /// an authenticated user", every time: g0v.social and mastodon.social do. Signed in there,
+    /// the same ask carries the sign-in and is answered. Nothing where `door` is nothing, or is a
+    /// sign-in to another host: a token is only ever sent to its own.
+    public func reading(as door: MastodonAuthorized?) -> MastodonClient {
+        guard let door, door.token.host.lowercased() == host.lowercased() else { return self }
+        return MastodonClient(http: http, host: host, door: door)
+    }
+
+    /// Whether `error` is a source turning a timeline away for want of a sign-in: a 401 or a 422
+    /// to an ask made without one. Asked with a sign-in, neither means that.
+    public static func asksSignIn(_ error: any Error) -> Bool {
+        guard case .http(let status)? = error as? MastodonRequestError else { return false }
+        return status == 401 || status == 422
     }
 
     /// The public timeline's newest page, or where `olderThan` names a post, the page of posts
@@ -24,10 +51,12 @@ public struct MastodonClient: Sendable {
     /// The public timeline read on from `anchor`, the newest post held of it (#201): stretch
     /// after stretch toward the newest, or the newest stretch alone where nothing is held.
     /// `held` is the posts held of it, which a read with no anchor looks for (`MastodonReadOn`).
+    /// `catchingUp` reads its newest stretch too where reading on reaches its bound: a busy
+    /// server's public timeline brings more between two reads than one read reads on through.
     public func publicTimeline(
-        source: Source, readingOnFrom anchor: String?, holding held: Set<NoteKey> = []
+        source: Source, readingOnFrom anchor: String?, holding held: Set<NoteKey> = [], catchingUp: Bool = false
     ) async throws -> ReadOn {
-        try await MastodonReadOn.read(from: anchor, holding: held) { minID in
+        try await MastodonReadOn.read(from: anchor, holding: held, catchingUp: catchingUp) { minID in
             try await listed(
                 path: "/api/v1/timelines/public", limit: MastodonReadOn.limit,
                 query: try MastodonPage.newer(than: minID), source: source, category: .public
@@ -185,9 +214,9 @@ public struct MastodonClient: Sendable {
         return (said.kind, said.profile)
     }
 
-    /// `introduction()`, what the same document says the host has (`MastodonHostSays`), and how
-    /// much media it takes (`MastodonMediaLimits`) — one request, four readings, so whoever wants
-    /// another asks nothing the others did not.
+    /// `introduction()`, what the same document says the host has (`MastodonHostSays`), how
+    /// much media it takes (`MastodonMediaLimits`) and how large a poll (`MastodonPollLimits`) —
+    /// one request, five readings, so whoever wants another asks nothing the others did not.
     ///
     /// Each reading is its own: a document the profile cannot be read from still says what kind
     /// of server it is and what it has, and one that says nothing of what it has
@@ -195,12 +224,18 @@ public struct MastodonClient: Sendable {
     /// is `MastodonMediaLimits.unstated`, and that is not a host that could not be read.
     /// **Throws where the document did not come**, as
     /// `introduction()` does, so a host that was not heard is not taken for one that said nothing.
-    public func said() async throws -> (kind: ProtocolKind, profile: SourceProfile?, has: MastodonHostSays, limits: MastodonMediaLimits) {
+    public func said() async throws -> (
+        kind: ProtocolKind, profile: SourceProfile?, has: MastodonHostSays, limits: MastodonMediaLimits,
+        polls: MastodonPollLimits
+    ) {
         let data = try await instanceDocument()
         let kind = Probe.kind(from: data)
         let profile = (try? MastodonJSON.decoder.decode(InstanceDTO.self, from: data))?
             .asProfile(host: host, kind: kind)
-        return (kind, profile, MastodonHostSays(document: data), MastodonMediaLimits(document: data))
+        return (
+            kind, profile, MastodonHostSays(document: data), MastodonMediaLimits(document: data),
+            MastodonPollLimits(document: data)
+        )
     }
 
     private func statuses(
@@ -215,7 +250,8 @@ public struct MastodonClient: Sendable {
         ).landing
     }
 
-    /// One page, each post with the id the timeline lists it under — a boost's own.
+    /// One page, each post with the id the timeline lists it under — a boost's own. Through the
+    /// sign-in where this client reads as the reader (`reading(as:)`), and without one otherwise.
     private func listed(
         path: String,
         limit: Int,
@@ -223,17 +259,20 @@ public struct MastodonClient: Sendable {
         source: Source,
         category: Category
     ) async throws -> [Listed] {
-        guard let url = Host.httpsURL(
-            host: host,
-            path: path,
-            query: [URLQueryItem(name: "limit", value: String(limit))] + query
-        ) else {
-            throw MastodonRequestError.invalidURL
-        }
+        let items = [URLQueryItem(name: "limit", value: String(limit))] + query
         let sent = ReadMoment.now()
-        let (data, response) = try await http.data(from: url)
-        guard (200..<300).contains(response.statusCode) else {
-            throw MastodonRequestError.http(response.statusCode)
+        let data: Data
+        if let door {
+            data = try await door.get(path: path, query: items)
+        } else {
+            guard let url = Host.httpsURL(host: host, path: path, query: items) else {
+                throw MastodonRequestError.invalidURL
+            }
+            let (body, response) = try await http.data(from: url)
+            guard (200..<300).contains(response.statusCode) else {
+                throw MastodonRequestError.http(response.statusCode)
+            }
+            data = body
         }
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map {
             $0.listed(source: source, category: category, sent: sent)
@@ -432,6 +471,9 @@ struct StatusDTO: Decodable, Sendable {
     /// **Read leniently**, as `quote` is: a shape this build cannot read — a string, a fork's
     /// own idea — is no name, and never costs the reader the status.
     let application: Lenient<AppDTO>?
+    /// The post's poll (#331), `null` on a status that has none. **Read leniently**, as `quote`
+    /// is: a poll of a shape this build cannot read is no poll, and never costs the status.
+    let poll: Lenient<PollDTO>?
 
     /// A value read where it can be and nothing where it cannot, rather than a failed decode.
     struct Lenient<Wrapped: Decodable & Sendable>: Decodable, Sendable {
@@ -722,6 +764,7 @@ struct StatusDTO: Decodable, Sendable {
             editedAt: Self.edited(subject.editedAt?.value, posted: subject.createdAt, now: Date()),
             language: subject.language?.value,
             via: Self.applicationName(subject.application),
+            poll: subject.poll?.value?.poll,
             // What it refers to, as the status says it: the post it answers, the post it quotes.
             refs: [
                 Self.answers(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),

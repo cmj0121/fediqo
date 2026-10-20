@@ -153,6 +153,8 @@ final class ShellReload {
 
     /// How long one request of a reload may take before it counts as failed.
     @ObservationIgnored var deadline: Duration = .seconds(30)
+    /// The categories of the reader's marks being read now, by source (#317, `readMarks`).
+    @ObservationIgnored var marksReading: Set<Stretch> = []
     /// Where each stretch a listing reads toward its end has got to (#87).
     @ObservationIgnored var stretches = ShellStretches()
     /// The sources whose trending list has been read to its end this run (#288) — what the
@@ -1029,6 +1031,15 @@ final class ShellReload {
         _ = await again(held, in: session)
     }
 
+    /// One post read again into the store as `r` reads it — a poll's figures asked for again
+    /// (#331) — and whether it was: a post its source said is gone was answered too.
+    func readAgain(_ held: Note, in session: ShellSession) async -> Bool {
+        switch await again(held, in: session) {
+        case .read, .gone: true
+        case .failed, .unfindable: false
+        }
+    }
+
     /// Whether `note` looks like a quote post kept before quotes were read: a microblog post with
     /// no quote whose words open with the `RE:` address a quoting server writes.
     static func heldBeforeQuotes(_ note: Note) -> Bool {
@@ -1175,7 +1186,7 @@ final class ShellReload {
                     }
                     return true
                 } catch {
-                    return Cancellation.happened(error)
+                    return self.walkedAway(from: .trends, of: host, error)
                 }
             }
             var read: Bool
@@ -1189,7 +1200,7 @@ final class ShellReload {
                 let trendsCame = await trendsCome()
                 read = publicCame || trendsCame
             }
-            return await readAsYou(source, for: categories, in: session) && read
+            return await readAsYou(source, for: categories, thorough: revisits, in: session) && read
         case .discuz:
             // A board's read is shown under that board's name (#164); the front page names none.
             // The forum's transport is chosen once for the reload: every board and the ranking
@@ -1240,8 +1251,20 @@ final class ShellReload {
         }
     }
 
-    /// Home and the chosen lists, as the reader — only where signed in, and only what was asked.
+    /// Home and the chosen lists, as the reader — only where signed in, and only what was asked —
+    /// and then the reader's bookmarks and favourites, where the sign-in may read them (#317).
+    /// `thorough` is a reload the person pressed for, and not the wait (`readMarks`).
     private func readAsYou(
+        _ source: Source, for categories: Set<FediqoCore.Category>?, thorough: Bool, in session: ShellSession
+    ) async -> Bool {
+        let timelines = await readTimelinesAsYou(source, for: categories, in: session)
+        // Nothing where the sign-in has gone meanwhile: it then reads no marks at all.
+        guard !Task.isCancelled else { return timelines }
+        return await readMarks(source, for: categories, thorough: thorough, in: session) && timelines
+    }
+
+    /// Home and the chosen lists, as the reader — only where signed in, and only what was asked.
+    private func readTimelinesAsYou(
         _ source: Source, for categories: Set<FediqoCore.Category>?, in session: ShellSession
     ) async -> Bool {
         let home = categories?.contains(.home) ?? true
@@ -1293,7 +1316,7 @@ final class ShellReload {
             // The same one request as before, read for the boards around this one too (#161):
             // a sub-board the forum's front page never names is written here, and the picker
             // then offers it with no request of its own.
-            read = await land(source.host, in: session) {
+            read = await land(source.host, of: .board(id: String(board.fid)), in: session) {
                 let page = try await client(board).boardPage(board.fid, source: source, named: board.name)
                 session.learn(page, of: board, host: source.host)
                 return page.notes
@@ -1314,15 +1337,16 @@ final class ShellReload {
         _ source: Source, through http: any HTTPClient, in session: ShellSession
     ) async {
         let client = session.reach.discuz(source.host, over: http, for: .timeline, name: .trends, within: deadline)
-        _ = await land(source.host, in: session) { try await client.rankedThreads(source: source) }
+        _ = await land(source.host, of: .trends, in: session) { try await client.rankedThreads(source: source) }
         guard !Task.isCancelled else { return }
-        _ = await land(source.host, in: session) { try await client.rankedBlogs(source: source) }
+        _ = await land(source.host, of: .trends, in: session) { try await client.rankedBlogs(source: source) }
     }
 
     /// One read into the store, while its source is still here and the reload is not stopped.
-    /// A reader walking away is not a failure; anything else is.
+    /// A reader walking away is not a failure; anything else is, and is said (`walkedAway`).
     private func land(
-        _ host: String, in session: ShellSession, _ fetch: () async throws -> [Note]
+        _ host: String, of category: FediqoCore.Category? = nil, in session: ShellSession,
+        _ fetch: () async throws -> [Note]
     ) async -> Bool {
         do {
             let notes = try await fetch()
@@ -1330,8 +1354,20 @@ final class ShellReload {
             await session.store.ingest(notes, ifSourceHere: host)
             return true
         } catch {
-            return Cancellation.happened(error)
+            return walkedAway(from: category, of: host, error)
         }
+    }
+
+    /// Whether a read of a timeline that threw `error` was the reader walking away, which is no
+    /// failure — and where it was not, the line that says which timeline of `host` was not read,
+    /// and how (`NetLog.line(_:host:category:error:)`). **Every such failure is said**: one the
+    /// network gave is logged where it was asked too, but one it did not — an answer that would
+    /// not decode, the reload's deadline passing, a stretch after the first — was said nowhere,
+    /// and a timeline that stopped landing left no word of why.
+    func walkedAway(from category: FediqoCore.Category?, of host: String, _ error: any Error) -> Bool {
+        if Cancellation.happened(error) { return true }
+        NetLog.network.error("\(NetLog.line("timeline not read", host: host, category: category, error: error), privacy: .public)")
+        return false
     }
 
     /// Bounded by the reload's deadline, and on `SourceWork` for what it is (#164) while it runs.
@@ -1361,7 +1397,7 @@ final class ShellReload {
     /// The name a reader knows each of a Mastodon source's timelines by, as it stands when the
     /// reload starts: a list by its own title, and never by its id — a list this source no
     /// longer names is named nothing.
-    private static func names(of source: Source) -> (FediqoCore.Category) -> SourceWork.Name? {
+    static func names(of source: Source) -> (FediqoCore.Category) -> SourceWork.Name? {
         let titles = Dictionary(source.lists.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
         return { category in
             switch category {
@@ -1369,6 +1405,8 @@ final class ShellReload {
             case .public: .public
             case .trends: .trends
             case .list(let id): titles[id].map { .called($0) }
+            case .bookmarks: .bookmarks
+            case .favourites: .favourites
             case .board: nil
             }
         }

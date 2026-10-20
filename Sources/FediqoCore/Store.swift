@@ -732,7 +732,7 @@ public actor ItemStore {
         assert(
             incoming.allSatisfy { note in
                 !note.source.kind.saysReaderMarks || note.asked.place != nil
-                    || (note.boosted == nil && note.favourited == nil && note.bookmarked == nil)
+                    || !note.saysReader
             },
             "a copy saying what the reader did reached the store without when it was sent"
         )
@@ -790,7 +790,12 @@ public actor ItemStore {
                 // the post says now, where it stood, and keeps what it said. A copy that is the
                 // older of the two — a read still on its way when a later one landed — changes no
                 // word of it.
-                if note.isLater(than: existing) { merged = merged.revised(by: note, was: existing) }
+                if note.isLater(than: existing) {
+                    merged = merged.revised(by: note, was: existing)
+                    // The poll as the change says it, and the reader's vote in it as the marks
+                    // are: not this copy's word where it was sent before their own vote landed.
+                    if older { merged.poll = Poll.later(note.poll, over: existing.poll, reader: false) }
+                }
                 // The same source handing the post over again is the source having it (#179):
                 // a mark it once earned comes off.
                 let kept = categories != existing.categories
@@ -1029,12 +1034,23 @@ public actor ItemStore {
     /// The anchor a timeline is read on from (#201): the newest id a read of `category` from
     /// `host` listed a post under, of a post its source has not said is gone. A post the reader
     /// wrote, or one a search or a thread brought, was listed by no read, and is never it.
+    ///
+    /// **The file's rows too** (#283): after a launch the pool holds only what the pages read in,
+    /// and an anchor of the pool's alone was an older post — read on from again — or none, which
+    /// read the newest stretch and said nothing of what lay between it and what the file held.
+    /// A row of the file the pool answers for and does not hold is not held, and is not it.
     public func newestListedID(host raw: String, category: Category) -> String? {
         let host = raw.lowercased()
-        let held = notes.values
+        let pooled = notes.values
             .filter { $0.source.host == host && $0.goneSince == nil }
             .compactMap { $0.listed[category] }
             .max { StatusID.later($1, than: $0) }
+        let filed = fileNewestListed(host: host, category: category)
+        let held: String? = switch (pooled, filed) {
+        case (let pooled?, let filed?): StatusID.later(filed, than: pooled) ? filed : pooled
+        case (let one?, nil), (nil, let one?): one
+        case (nil, nil): nil
+        }
         // Of the rows let go of the pool, the newest not answered for again: read back, one
         // says for itself; let go of the file, it says nothing, as in the whole store.
         if let left = listedLeft[host]?[category], let first = left.firstIndex(where: { !looked.contains($0.key) }) {
@@ -1047,13 +1063,168 @@ public actor ItemStore {
         return StatusID.later(left.id, than: held) ? left.id : held
     }
 
+    /// The newest listing of `category` from `host` among the file's rows the pool does not
+    /// answer for (`newestListedID`); nothing with no file, or where it would not be read.
+    private func fileNewestListed(host: String, category: Category) -> String? {
+        guard let disk else { return nil }
+        do {
+            guard let newest = try disk.newestListed(host: host, category: category),
+                  !looked.contains(newest.key)
+            else { return nil }
+            return newest.id
+        } catch {
+            Self.unread(error)
+            return nil
+        }
+    }
+
     /// The posts held of `category` from `host` that a timeline brought (#201): what a read with
-    /// no anchor looks for in the newest stretch, to tell whether it reached what was held.
+    /// no anchor looks for in the newest stretch, to tell whether it reached what was held — the
+    /// file's rows too, but those the pool answers for and does not hold.
     public func held(host raw: String, category: Category) -> Set<NoteKey> {
         let host = raw.lowercased()
-        return Set(notes.values.filter {
+        var held = Set(notes.values.filter {
             $0.source.host == host && $0.categories.contains(category)
         }.map(\.key))
+        if let disk {
+            do {
+                held.formUnion(try disk.keys(host: host, in: category).filter { !looked.contains($0) })
+            } catch {
+                Self.unread(error)
+            }
+        }
+        return held
+    }
+
+    /// Every post of `host` held through `category` of the reader's marks (#317), by the span of
+    /// marks it is listed under there (`MarkSpan`, as `Note.listed` writes it) — **the file's rows
+    /// too**, read in: a read of marks decides of every post held through it, and a post only the
+    /// file holds is one of them. A post listed under nothing is named by the end, which only a
+    /// read that reaches the end decides of.
+    public func marked(host raw: String, category: Category) -> [NoteKey: String] {
+        let host = raw.lowercased()
+        poolMembers(host: host, category: category)
+        var held: [NoteKey: String] = [:]
+        for (key, note) in notes where key.host == host && note.categories.contains(category) {
+            held[key] = note.listed[category] ?? MastodonMarks.end
+        }
+        return held
+    }
+
+    /// The lowest mark a post of `host` is held above through `category` of the reader's marks:
+    /// where reading on asks below at first (#317). Nothing where none is held.
+    public func lowestMark(host raw: String, category: Category) -> String? {
+        MarkSpan.lowestFloor(of: marked(host: raw, category: category).values)
+    }
+
+    /// The mark a place where marks of `category` may be missing below `key` reads down from
+    /// (#317), or nothing where `key` says no such place.
+    public func markHole(_ key: NoteKey, in category: Category) -> String? {
+        pool([key])
+        let mark = TimelineGap(.mayBeMissing, in: category)
+        return notes[key]?.gaps.first { $0 == mark }?.from
+    }
+
+    /// A read of the reader's marks is begun (#317): its place among the reads, which its landing
+    /// is told by (`MarksRead.begun`) — compared only with reads of its own host and category.
+    public func beginMarks() -> Int {
+        marksBegun += 1
+        return marksBegun
+    }
+
+    /// One category of the reader's marks read (#317), landed in one step while `host` is still a
+    /// source here: every post it met taken in through it, and **every post held through it whose
+    /// mark lies inside what the read covered, and that it did not bring, leaving it**
+    /// (`MarkCover.contains`) — the category, its span and any place said of it come off, and
+    /// nothing else. The post stays where anything else holds it, a kept one included, and goes
+    /// only as any row goes.
+    ///
+    /// **Where its marks may be missing is kept here too**: a read that leaves such a place says it
+    /// on the post it names, one that read down from one moves it down or, meeting what is held or
+    /// the end, takes it off, and one that went through every mark held takes every one off.
+    ///
+    /// **A read outrun by a later one of the same category decides nothing** — it was sent before
+    /// that one landed, and its silence about a post marked since is no word that it is not — and
+    /// **brings back no post a later read found no longer marked**. What else it brought lands.
+    ///
+    /// **While the file may hold another store** (`passingThrough`, a read back on its way), what
+    /// it holds is not laid in, so what the read did not bring cannot be told from what is not
+    /// held: nothing is decided then, and nothing said of a place. The posts land as `ingest`
+    /// takes them, and the next read decides.
+    ///
+    /// `membersPooled` is a caller that asked `marked` for this category before its read, which
+    /// laid the file's rows of it into the pool: they are not asked of the file again.
+    public func land(_ read: MarksRead, of category: Category, ifSourceHere raw: String, membersPooled: Bool = false) {
+        let host = raw.lowercased()
+        guard category.isMarks, sourceList.contains(where: { $0.host == host }) else { return }
+        let reads = "\(host) \(category)"
+        let outrun = read.begun < (marksLanded[reads] ?? 0)
+        let gone = marksGone[reads] ?? [:]
+        ingest(read.notes.filter { note in
+            !(outrun && note.categories.contains(category) && (gone[note.key] ?? 0) > read.begun)
+        })
+        guard !outrun, !passingThrough else { return }
+        marksLanded[reads] = read.begun
+        if !membersPooled { poolMembers(host: host, category: category) }
+        let mark = TimelineGap(.mayBeMissing, in: category)
+        let met = Set(read.notes.filter { $0.categories.contains(category) }.map(\.key))
+        var moved = false
+        var shown = false
+        var replies = false
+        func put(_ key: NoteKey, _ note: Note) {
+            notes[key] = note
+            moved = true
+            shown = shown || !note.isPartOfTopic
+            replies = replies || note.isPartOfTopic
+        }
+        for (key, note) in notes where key.host == host && note.categories.contains(category) {
+            var changed = note
+            // A place moved down is the same place to `==`, which does not read its mark — and
+            // the row would not take it (`HeldNotes`): it is taken off first, then put back (#369).
+            var moves = false
+            if !met.contains(key), read.covered.contains(MarkSpan(listed: note.listed[category])) {
+                changed.categories.remove(category)
+                changed.listed[category] = nil
+                changed.gaps = note.gaps.filter { $0.category != category }
+                marksGone[reads, default: [:]][key] = read.begun
+            } else if let hole = note.gaps.first(where: { $0 == mark }) {
+                if read.whole || (read.fills == hole.from && (read.connected || read.reachedEnd)) {
+                    changed.gaps.remove(mark)
+                } else if read.fills == hole.from {
+                    changed.gaps.update(with: TimelineGap(.mayBeMissing, in: category, from: read.covered.low))
+                    moves = true
+                }
+            }
+            if moves {
+                var without = changed
+                without.gaps.remove(mark)
+                notes[key] = without
+            }
+            if moves || changed != note { put(key, changed) }
+        }
+        // On the post it names, or — where the keep window refused that one — the lowest of the
+        // read's that is held.
+        if let hole = read.hole,
+           let key = ([hole.post] + read.notes.reversed().map(\.key)).first(where: { notes[$0]?.categories.contains(category) == true }),
+           var held = notes[key] {
+            // Taken off first, then put back, for the reason above (#369).
+            held.gaps.remove(mark)
+            notes[key] = held
+            held.gaps.update(with: TimelineGap(.mayBeMissing, in: category, from: hole.from))
+            put(key, held)
+        }
+        if moved { changed(shown: shown, replies: replies) }
+    }
+
+    /// The file's rows of `host` held through `category`, laid into the pool — nothing where there
+    /// is no file, and what the file would not answer is left as it is.
+    private func poolMembers(host: String, category: Category) {
+        guard let disk else { return }
+        do {
+            pool(try disk.keys(host: host, in: category))
+        } catch {
+            Self.unread(error)
+        }
     }
 
     /// One timeline read on (#201), taken in as `ingest(_:ifSourceHere:)` takes a read, with where
@@ -1989,6 +2160,13 @@ public actor ItemStore {
     /// the store it replaces, or a key it lacks taken for one let go, would be written over the
     /// file put back, or deleted from it, by the undo's `oweEverything`. A read by key is passed
     /// through (`note`, `notes`); every other way in takes no copy over a key it did not find.
+    /// How many reads of the reader's marks have been begun (#317), and for each host and
+    /// category the latest begun of those landed and the posts each found no longer marked, by
+    /// when that read was begun — what tells a read outrun by a later one (`land(_:of:ifSourceHere:)`).
+    private var marksBegun = 0
+    private var marksLanded: [String: Int] = [:]
+    private var marksGone: [String: [NoteKey: Int]] = [:]
+
     private var passingThrough: Bool { putBackMay || restoringFile }
 
     /// Whether a read back may still put the file back (`mayBePutBack`): for the tests.
@@ -2969,11 +3147,11 @@ public actor ItemStore {
         for category in note.categories {
             switch category {
             case .public, .trends: return false
-            case .home, .list: through = true
+            case .home, .list, .bookmarks, .favourites: through = true
             case .board: break
             }
         }
-        return through || note.boosted != nil || note.favourited != nil || note.bookmarked != nil
+        return through || note.saysReader
     }
 
     /// How one load ended, as whoever made the request reports it.
@@ -3162,8 +3340,8 @@ public actor ItemStore {
             // on its own what only the sign-in they ended was shown — so the debt is dropped
             // here, at the moment and for the reason their marks are.
             let owesAsReader = note.refsDue && Self.arrivedAsReader(note)
-            guard owesAsReader || note.boosted != nil || note.favourited != nil || note.bookmarked != nil else { continue }
-            var plain = note.boosted != nil || note.favourited != nil || note.bookmarked != nil ? note.withoutReaderMarks() : note
+            guard owesAsReader || note.saysReader else { continue }
+            var plain = note.saysReader ? note.withoutReaderMarks() : note
             if owesAsReader {
                 plain.refsDue = false
                 stalled.remove(key)
@@ -3201,7 +3379,7 @@ public actor ItemStore {
             case .forgetReaderMarks(let hosts):
                 guard hosts.contains(note.key.host) else { continue }
                 let owesAsReader = note.refsDue && Self.arrivedAsReader(note)
-                if note.boosted != nil || note.favourited != nil || note.bookmarked != nil {
+                if note.saysReader {
                     note = note.withoutReaderMarks()
                 }
                 if owesAsReader { note.refsDue = false }

@@ -39,9 +39,9 @@ struct ComposerSheet: View {
     /// the cover are each held to `limit`. Files the source will not take cannot.
     static func canSend(
         text: String, limit: Int, hasSource: Bool,
-        cover: String = "", attachments: Int = 0, attachmentsOK: Bool = true
+        cover: String = "", attachments: Int = 0, attachmentsOK: Bool = true, pollOK: Bool = true
     ) -> Bool {
-        guard hasSource, attachmentsOK, attachments >= 0 else { return false }
+        guard hasSource, attachmentsOK, pollOK, attachments >= 0 else { return false }
         let body = trimmed(text)
         let line = trimmed(cover)
         guard body.count <= limit, line.count <= limit else { return false }
@@ -379,6 +379,7 @@ private struct ComposeExtras: View {
             }
             Button(L10n.t("compose.media.add")) { session.composeAddMedia() }
                 .accessibilityLabel(L10n.t("compose.media.add"))
+            ComposePoll(session: session)
             if let note = session.composeMediaNote {
                 Text(note)
                     .shellFont(.meta)
@@ -418,5 +419,102 @@ private struct ComposeExtras: View {
                     .accessibilityLabel(over)
             }
         }
+    }
+}
+
+/// The poll a post is written with (#331): its choices, whether more than one may be chosen,
+/// how long it runs and whether its figures wait for the end — **held to what the source said
+/// it takes**, which the composer reads beside the post's own length. A press to add one beside
+/// a file says why there is none, as adding a file beside a poll does.
+private struct ComposePoll: View {
+    @Bindable var session: ShellSession
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let limits = session.composePollLimits
+        VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            if let poll = session.composePoll {
+                editing(poll, least: limits.leastChoices, most: limits.choices, runs: limits.offeredRuns)
+            } else {
+                Button(L10n.t("compose.poll.add")) { session.composeAddPoll() }
+                    .accessibilityLabel(L10n.t("compose.poll.add"))
+            }
+            if let line = session.composePollSays {
+                Text(line)
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(line)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func editing(_ poll: NewPoll, least: Int, most: Int, runs: [Int]) -> some View {
+        let count = String(format: L10n.t("compose.poll.count"), poll.choices.count, most)
+        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+            Text(count)
+                .shellFont(.reading)
+                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .accessibilityLabel(count)
+            Spacer(minLength: ShellSpace.snug)
+            Button(L10n.t("compose.poll.remove")) { session.composeRemovePoll() }
+                .accessibilityLabel(L10n.t("compose.poll.remove"))
+        }
+        ForEach(Array(poll.choices.indices), id: \.self) { index in
+            choice(index, of: poll, least: least)
+        }
+        if poll.choices.count < most {
+            Button(L10n.t("compose.poll.addChoice")) { session.composeAddChoice() }
+                .accessibilityLabel(L10n.t("compose.poll.addChoice"))
+        }
+        Toggle(L10n.t("compose.poll.multiple"), isOn: field(\.multiple))
+            .shellFont(.meta)
+            .accessibilityLabel(L10n.t("compose.poll.multiple"))
+        Toggle(L10n.t("compose.poll.hide"), isOn: field(\.hidesTotals))
+            .shellFont(.meta)
+            .accessibilityLabel(L10n.t("compose.poll.hide"))
+        Picker(L10n.t("compose.poll.runs"), selection: field(\.runs)) {
+            ForEach(runs, id: \.self) { run in
+                Text(ComposeWords.runsLine(run)).tag(run)
+            }
+        }
+        .pickerStyle(.menu)
+        .shellFont(.meta)
+        .accessibilityLabel(L10n.t("compose.poll.runs"))
+    }
+
+    private func choice(_ index: Int, of poll: NewPoll, least: Int) -> some View {
+        let name = String(format: L10n.t("compose.poll.choice"), index + 1)
+        return HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+            TextField(name, text: Binding(
+                get: { session.composePoll?.choices[safe: index] ?? "" },
+                set: { next in
+                    guard session.composePoll?.choices.indices.contains(index) == true else { return }
+                    session.composePoll?.choices[index] = next
+                }
+            ))
+            .shellFont(.body)
+            .accessibilityLabel(name)
+            if poll.choices.count > least {
+                Button(L10n.t("compose.poll.removeChoice")) { session.composeRemoveChoice(at: index) }
+                    .accessibilityLabel(String(format: L10n.t("compose.poll.removeChoice.named"), index + 1))
+            }
+        }
+    }
+
+    /// One field of the poll, as a binding the controls write through the session.
+    private func field<Value>(_ path: WritableKeyPath<NewPoll, Value>) -> Binding<Value> {
+        Binding(
+            get: { (session.composePoll ?? .fresh)[keyPath: path] },
+            set: { next in session.composePoll?[keyPath: path] = next }
+        )
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }

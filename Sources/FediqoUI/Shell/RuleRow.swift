@@ -37,8 +37,8 @@ enum RuleBuilder {
                 return [.source(host: host)]
             // Every source, or one a category of this kind can mean — which is the source's
             // own to say (`SourceOffers.serves`): public and Home where it has timelines, what
-            // is rising where it has that.
-            case .public, .home, .trends:
+            // is rising where it has that, bookmarks and favourites where it reads them (#317).
+            case .public, .home, .trends, .bookmarks, .favourites:
                 return [.every] + sources.filter { $0.kind.offers.serves(category) }.map { .source(host: $0.host) }
             }
         // Every source, or one whose kind declares the field: no other could match it.
@@ -98,15 +98,18 @@ enum RuleBuilder {
 
     /// The categories each source can be picked by: what it can be read by now, as it offers
     /// them (`SourceOffers.categories`) — its public timeline, Home where it is signed in, every
-    /// list chosen on it, its subscribed boards — and any other its held posts arrived through.
+    /// list chosen on it, its subscribed boards, the reader's bookmarks and favourites where the
+    /// sign-in may read them (`marks`, #317) — and any other its held posts arrived through.
     /// **Never what is trending**, which is the Trends page's and no timeline's.
     static func categories(
-        in sources: [Source], notes: [Note], signedIn: (String) -> Bool
+        in sources: [Source], notes: [Note], signedIn: (String) -> Bool, marks: (String) -> Bool = { _ in false }
     ) -> [(host: String, categories: [FediqoCore.Category])] {
         sources.compactMap { source in
             // What the source can be read by now, as it offers it — completed here with who is
             // signed in to it, which only the caller knows.
-            var picked = source.kind.offers.categories(of: source, signedIn: signedIn(source.host))
+            var picked = source.kind.offers.categories(
+                of: source, signedIn: signedIn(source.host), marks: marks(source.host)
+            )
                 .filter { $0 != .trends }
             let held = Set(notes.filter { $0.source.host == source.host }.flatMap(\.categories))
             picked += held.subtracting(picked + [.trends]).sorted {
@@ -197,6 +200,8 @@ enum RuleText {
         case .public: L10n.t("rule.category.public", language: language)
         case .trends: L10n.t("timeline.tab.trends", language: language)
         case .home: L10n.t("rule.category.home", language: language)
+        case .bookmarks: L10n.t("rule.category.bookmarks", language: language)
+        case .favourites: L10n.t("rule.category.favourites", language: language)
         case .list(let id):
             sources.first { $0.host == host }?.lists.first { $0.id == id }?.name
                 ?? String(format: L10n.t("rule.category.list", language: language), id)

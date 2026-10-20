@@ -1040,7 +1040,7 @@ struct MastodonSignInTests {
         #expect(session.mastodon.grants[host] == .writing)
         #expect(self.row(session, host).writing == .writes, "an earlier sign-in reads as read-only")
         var acts = session.acts(on: row)
-        #expect(acts.offered == [.boost, .favourite, .answer])
+        #expect(acts.offered == [.boost, .favourite, .answer, .vote])
         #expect(acts.asks(.bookmark))
         #expect(session.mastodon.bookmarks(host: host) == .unasked)
         // The row owes its control for bookmarks alone: its grant was asked everything else.
@@ -1076,7 +1076,7 @@ struct MastodonSignInTests {
         #expect(session.mastodon.grants[host] == .writing)
         #expect(session.mastodon.bookmarks(host: host) == .allowed)
         acts = session.acts(on: row)
-        #expect(acts.offered == [.boost, .favourite, .answer, .bookmark] && acts.asking.isEmpty, "asked more than once")
+        #expect(acts.offered == [.boost, .favourite, .answer, .bookmark, .vote] && acts.asking.isEmpty, "asked more than once")
         #expect(!session.askToBookmark(row))
         #expect(self.row(session, host).owed == .nothing)
     }
@@ -1114,7 +1114,7 @@ struct MastodonSignInTests {
         #expect(session.rowRefusal == nil, "the fallback was reported as a failure")
         #expect(session.mastodon.bookmarks(host: host) == .unavailable)
         let acts = session.acts(on: await post(in: session))
-        #expect(acts.offered == [.boost, .favourite, .answer] && acts.asking.isEmpty)
+        #expect(acts.offered == [.boost, .favourite, .answer, .vote] && acts.asking.isEmpty)
         #expect(row(session, host).owed == .nothing)
 
         // Signing out forgets that it was asked, with everything else of the sign-in.

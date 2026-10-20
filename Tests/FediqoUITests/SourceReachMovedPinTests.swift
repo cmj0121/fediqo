@@ -78,13 +78,14 @@ struct SourceReachMovedPinTests {
 
     // MARK: - Reading older
 
-    @Test("Reading older on a Mastodon: its public timeline through the plain door under its own name; Home and a list through the signed door, each under the name the reader knows it by")
+    @Test("Reading older on a Mastodon: signed in, its public timeline, Home and a list through the signed door, each under the name the reader knows it by; unsigned, the public one through the plain door")
     func olderOnAMastodon() async throws {
         let held = [Self.post(5, .public), Self.post(6, .home), Self.post(7, .list(id: "7"))]
         let (session, log) = try await Self.shell(signedIn: true, sources: [Self.mastodon], holding: held)
         await session.reload.more(.all, in: session)
         #expect(Set(log.take()) == [
-            "plain no token m.example/api/v1/timelines/public | timeline Public",
+            // With the sign-in where one is held (#283): a source may keep it for signed-in readers.
+            "signed token m.example/api/v1/timelines/public | timeline Public",
             "signed token m.example/api/v1/timelines/home | timeline Home",
             "signed token m.example/api/v1/timelines/list/7 | timeline Friends",
         ])
@@ -136,14 +137,14 @@ struct SourceReachMovedPinTests {
 
     // MARK: - Reading down a gap
 
-    @Test("A place where posts may be missing is read down through the plain door for the public timeline and the signed door for Home and a list, each under its own name; signed out, Home's is not asked at all")
+    @Test("A place where posts may be missing is read down through the signed door where signed in — the public timeline, Home and a list, each under its own name; signed out, Home's is not asked at all")
     func readingDown() async throws {
         // In each timeline, a post with the mark and one held below it.
         let held = [Self.post(31, .public, gap: true), Self.post(41, .home, gap: true), Self.post(51, .list(id: "7"), gap: true)]
             + [Self.post(11, .public), Self.post(12, .home), Self.post(13, .list(id: "7"))]
         let (session, log) = try await Self.shell(signedIn: true, sources: [Self.mastodon], holding: held)
         await session.reload.readDown(Stretch(host: Self.m, category: .public), below: held[0].key, in: session)
-        #expect(log.take() == ["plain no token m.example/api/v1/timelines/public | timeline Public"])
+        #expect(log.take() == ["signed token m.example/api/v1/timelines/public | timeline Public"])
         await session.reload.readDown(Stretch(host: Self.m, category: .home), below: held[1].key, in: session)
         #expect(log.take() == ["signed token m.example/api/v1/timelines/home | timeline Home"])
         await session.reload.readDown(Stretch(host: Self.m, category: .list(id: "7")), below: held[2].key, in: session)

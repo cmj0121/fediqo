@@ -54,6 +54,39 @@ public enum NetLog {
             || value is TextOutputStreamable
     }
 
+    /// `read timeline m.example public: DecodingError.dataCorrupted`, `read timeline m.example
+    /// home: MastodonAuthError.http 503` — a timeline that was not read, by the kind of timeline
+    /// it is (`word(of:)`), and an answer's status where the failure is one a source answered
+    /// with. **Never a list's or a board's id**, which is the reader's choice, and never an
+    /// error's payload but that status: what failed and how, and nothing it carried.
+    public static func line(_ what: StaticString, host: String, category: Category?, error: any Error) -> String {
+        let status = Self.status(of: error).map { " \($0)" } ?? ""
+        return "\(what) \(host) \(category.map(word(of:)) ?? "-"): \(kind(of: error))\(status)"
+    }
+
+    /// The kind of timeline `category` is, in one fixed word.
+    static func word(of category: Category) -> String {
+        switch category {
+        case .public: "public"
+        case .trends: "trends"
+        case .home: "home"
+        case .list: "list"
+        case .board: "board"
+        case .bookmarks: "bookmarks"
+        case .favourites: "favourites"
+        }
+    }
+
+    /// The status a source answered with, where `error` is one: a number of three digits, and
+    /// nothing it said.
+    private static func status(of error: any Error) -> Int? {
+        switch error {
+        case MastodonRequestError.http(let status): status
+        case MastodonAuthError.http(let status): status
+        default: nil
+        }
+    }
+
     /// `request m.example: HTTP 401`.
     public static func line(_ what: StaticString, host: String, status: Int) -> String {
         "\(what) \(host): HTTP \(status)"
