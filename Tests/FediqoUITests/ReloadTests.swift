@@ -512,7 +512,10 @@ struct ReloadTests {
         await signedIn.gate.open()
         await running.value
         #expect(!session.notes.contains { $0.categories.contains(.home) }, "Home read before the sign-out did not land")
-        #expect(await signedIn.paths.filter { $0.hasPrefix("/api/v1/timelines") } == ["/api/v1/timelines/home"])
+        // The public timeline is read first, as the reader too (#283), and nothing after Home.
+        #expect(await signedIn.paths.filter { $0.hasPrefix("/api/v1/timelines") } == [
+            "/api/v1/timelines/public", "/api/v1/timelines/home",
+        ])
         #expect(session.notes.contains { $0.source.host == Self.two }, "the other sources still landed")
     }
 

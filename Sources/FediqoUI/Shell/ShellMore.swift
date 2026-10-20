@@ -424,8 +424,12 @@ extension ShellReload {
         let host = stamp.host
         switch due.stretch.category {
         case .public?:
-            let client = session.reach.mastodon(host, for: .timeline, name: .public, within: deadline)
-            let notes = try await client.publicTimeline(source: stamp, olderThan: id)
+            let reader = publicReader(
+                session.reach.mastodon(host, for: .timeline, name: .public, within: deadline), of: host, in: session
+            )
+            let notes = try await asReader(host, if: reader.asYou) {
+                try await reader.client.publicTimeline(source: stamp, olderThan: id)
+            }
             try Task.checkCancellation()
             await session.store.ingest(notes, ifSourceHere: host)
         // The reader's marks are asked by mark (`Due.Cursor.mark`), never before a post's id.

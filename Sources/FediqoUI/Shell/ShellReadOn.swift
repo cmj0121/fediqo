@@ -53,23 +53,6 @@ enum GapReach: Hashable {
 }
 
 extension ShellReload {
-    /// The public timeline read on from the newest id it listed, and landed with what it says
-    /// about where it is not whole. A reader walking away is not a failure; anything else is.
-    func readOnPublic(_ client: MastodonClient, stamp: Source, in session: ShellSession) async -> Bool {
-        do {
-            let store = session.store
-            let anchor = await store.newestListedID(host: stamp.host, category: .public)
-            let held = anchor == nil ? await store.held(host: stamp.host, category: .public) : []
-            let read = try await client.publicTimeline(source: stamp, readingOnFrom: anchor, holding: held)
-            try Task.checkCancellation()
-            await session.store.land(read, of: .public, ifSourceHere: stamp.host)
-            // What came before a stretch that failed has landed; the read still did not come back.
-            return read.stopped == nil
-        } catch {
-            return Cancellation.happened(error)
-        }
-    }
-
     /// A place where more belong, reached (#201): that one timeline read on from the newest id it
     /// listed, as an ask for more. Reached while another ask for more is out, it waits for that
     /// one to end rather than being dropped. Nothing while `r` or the wait is reading its host —
@@ -128,8 +111,12 @@ extension ShellReload {
                 ) else {
                     return true
                 }
-                let client = session.reach.mastodon(host, for: .timeline, name: .public, within: deadline)
-                let down = try await client.publicTimeline(source: stamp, readingDownFrom: place)
+                let reader = publicReader(
+                    session.reach.mastodon(host, for: .timeline, name: .public, within: deadline), of: host, in: session
+                )
+                let down = try await asReader(host, if: reader.asYou) {
+                    try await reader.client.publicTimeline(source: stamp, readingDownFrom: place)
+                }
                 try Task.checkCancellation()
                 await session.store.land(down, below: post, of: .public, ifSourceHere: host)
                 return down.stopped == nil

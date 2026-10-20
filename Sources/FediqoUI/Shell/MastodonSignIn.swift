@@ -365,6 +365,16 @@ public final class MastodonSessions {
         grants[host.lowercased()] != nil
     }
 
+    /// Whether the sign-in held at `host` reads timelines — the public one among them, which a
+    /// source may keep for signed-in readers. None where no sign-in is held; where one is and
+    /// nothing is written down of what it holds, it is believed to, as Home is read through it.
+    func readsTimelines(host raw: String) -> Bool {
+        let host = raw.lowercased()
+        guard isSignedIn(host: host) else { return false }
+        guard let scopes = heldParts[host]?.scopes else { return true }
+        return MastodonParts.reads(scopes) || MastodonParts.holdsEveryRead(in: scopes)
+    }
+
     /// Signs in on the server's own page and keeps the token. Nothing where it worked, or where the
     /// reader closed the page or said no there; otherwise why it did not.
     ///

@@ -3,10 +3,37 @@ import Foundation
 public struct MastodonClient: Sendable {
     private let http: any HTTPClient
     private let host: String
+    /// The sign-in a timeline is read through, where there is one (`reading(as:)`).
+    private let door: MastodonAuthorized?
 
     public init(http: any HTTPClient, host: String) {
         self.http = http
         self.host = host
+        door = nil
+    }
+
+    private init(http: any HTTPClient, host: String, door: MastodonAuthorized?) {
+        self.http = http
+        self.host = host
+        self.door = door
+    }
+
+    /// This client with its timelines read as the reader, through `door`, and everything else
+    /// asked as it was. **A source that keeps its public
+    /// timeline for signed-in readers** answers an ask without a token 422, "This method requires
+    /// an authenticated user", every time: g0v.social and mastodon.social do. Signed in there,
+    /// the same ask carries the sign-in and is answered. Nothing where `door` is nothing, or is a
+    /// sign-in to another host: a token is only ever sent to its own.
+    public func reading(as door: MastodonAuthorized?) -> MastodonClient {
+        guard let door, door.token.host.lowercased() == host.lowercased() else { return self }
+        return MastodonClient(http: http, host: host, door: door)
+    }
+
+    /// Whether `error` is a source turning a timeline away for want of a sign-in: a 401 or a 422
+    /// to an ask made without one. Asked with a sign-in, neither means that.
+    public static func asksSignIn(_ error: any Error) -> Bool {
+        guard case .http(let status)? = error as? MastodonRequestError else { return false }
+        return status == 401 || status == 422
     }
 
     /// The public timeline's newest page, or where `olderThan` names a post, the page of posts
@@ -221,7 +248,8 @@ public struct MastodonClient: Sendable {
         ).landing
     }
 
-    /// One page, each post with the id the timeline lists it under — a boost's own.
+    /// One page, each post with the id the timeline lists it under — a boost's own. Through the
+    /// sign-in where this client reads as the reader (`reading(as:)`), and without one otherwise.
     private func listed(
         path: String,
         limit: Int,
@@ -229,17 +257,20 @@ public struct MastodonClient: Sendable {
         source: Source,
         category: Category
     ) async throws -> [Listed] {
-        guard let url = Host.httpsURL(
-            host: host,
-            path: path,
-            query: [URLQueryItem(name: "limit", value: String(limit))] + query
-        ) else {
-            throw MastodonRequestError.invalidURL
-        }
+        let items = [URLQueryItem(name: "limit", value: String(limit))] + query
         let sent = ReadMoment.now()
-        let (data, response) = try await http.data(from: url)
-        guard (200..<300).contains(response.statusCode) else {
-            throw MastodonRequestError.http(response.statusCode)
+        let data: Data
+        if let door {
+            data = try await door.get(path: path, query: items)
+        } else {
+            guard let url = Host.httpsURL(host: host, path: path, query: items) else {
+                throw MastodonRequestError.invalidURL
+            }
+            let (body, response) = try await http.data(from: url)
+            guard (200..<300).contains(response.statusCode) else {
+                throw MastodonRequestError.http(response.statusCode)
+            }
+            data = body
         }
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map {
             $0.listed(source: source, category: category, sent: sent)

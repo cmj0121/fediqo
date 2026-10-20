@@ -6,7 +6,8 @@ import os
 // Every request goes through `MastodonAuthorized`, the one door #24 built. A 401 there has
 // already taken the token off this device and arrives here as `MastodonAuthError.signedOut`,
 // which ends the whole read: nothing after it could be asked as you. Any other failure costs
-// only the read it happened on. Public and trends stay unauthenticated in `MastodonClient`.
+// only the read it happened on. Public and trends are read in `MastodonClient` — the public
+// timeline through the sign-in where one is held (`MastodonClient.reading(as:)`).
 
 /// Home and the chosen lists of one signed-in Mastodon source, read into the store.
 public struct MastodonAccount: Sendable {
