@@ -747,6 +747,22 @@ public struct MastodonAuthorized: Sendable {
         return (try await finish(answer, path: path), answer.link)
     }
 
+    /// `get(path:query:)`, and beside the body the moment the source's own clock said as it
+    /// answered (`Date`), where it said one this reads (#333) — what a time ahead is judged by.
+    public func getDated(path: String, query: [URLQueryItem] = []) async throws -> (body: Data, date: Date?) {
+        let answer = try await send(path: path, query: query)
+        return (try await finish(answer, path: path), answer.date.flatMap(Self.httpDate))
+    }
+
+    /// A moment as an HTTP header writes it (`Wed, 21 Oct 2026 04:43:08 GMT`), or nothing.
+    static func httpDate(_ text: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return formatter.date(from: text)
+    }
+
     /// A form POST through the same door: the token, the 401 rule, and never off this host.
     /// As `get`, with a not-found of the address told from every other refusal: throws
     /// `MastodonHostMoreError.noSuchAddress` where the host says it has no such address
@@ -814,8 +830,8 @@ public struct MastodonAuthorized: Sendable {
 
     /// `post(path:form:)`, with what was sent refused told from every other refusal (#334): a 422
     /// throws `MastodonUnprocessable` with the source's answer, as `patch(path:form:)` does.
-    public func postRefusable(path: String, form: [(String, String)]) async throws -> Data {
-        let result = try await send(path: path, method: "POST", form: form)
+    public func postRefusable(path: String, form: [(String, String)], headers: [String: String] = [:]) async throws -> Data {
+        let result = try await send(path: path, method: "POST", form: form, headers: headers)
         if result.status == 422 { throw MastodonUnprocessable(body: result.body) }
         return try await finish(result, path: path)
     }
@@ -928,6 +944,8 @@ public struct MastodonAuthorized: Sendable {
         let status: Int
         let link: String?
         let authenticate: String?
+        /// The answer's `Date` header: the source's clock as it answered.
+        var date: String? = nil
     }
 
     private func finish(_ result: Answered, path: String) async throws -> Data {
@@ -972,7 +990,8 @@ public struct MastodonAuthorized: Sendable {
         let (body, response) = try await sender.send(request)
         return Answered(
             body: body, status: response.statusCode, link: response.value(forHTTPHeaderField: "Link"),
-            authenticate: response.value(forHTTPHeaderField: "WWW-Authenticate")
+            authenticate: response.value(forHTTPHeaderField: "WWW-Authenticate"),
+            date: response.value(forHTTPHeaderField: "Date")
         )
     }
 }

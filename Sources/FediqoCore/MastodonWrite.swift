@@ -137,26 +137,17 @@ public struct MastodonWrite: Sendable {
         guard let source = await store.sources().first(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
         }
-        var form = [("status", text), ("visibility", visibility.mastodon)]
+        var answeringID: String?
         if let answering {
             guard let id = answering.sendableID, answering.source.host == host else {
                 throw MastodonWriteError.unfindable
             }
-            form.append(("in_reply_to_id", id))
+            answeringID = id
         }
-        // A cover and a language are sent only where there is one. Sensitive is sent only
-        // where it was chosen: absent is not a no.
-        if let spoiler = Self.present(spoiler) { form.append(("spoiler_text", spoiler)) }
-        if let language = SourceField.languageTag(language) { form.append(("language", language)) }
-        if let sensitive { form.append(("sensitive", sensitive ? "true" : "false")) }
-        for id in mediaIDs where !id.isEmpty { form.append(("media_ids[]", id)) }
-        // The choices in the order typed, how long it runs, and the two answers said outright.
-        if let poll {
-            for choice in poll.said { form.append(("poll[options][]", choice)) }
-            form.append(("poll[expires_in]", String(poll.runs)))
-            form.append(("poll[multiple]", poll.multiple ? "true" : "false"))
-            form.append(("poll[hide_totals]", poll.hidesTotals ? "true" : "false"))
-        }
+        let form = Self.postForm(
+            text, visibility: visibility, answering: answeringID, spoiler: spoiler, language: language,
+            sensitive: sensitive, mediaIDs: mediaIDs, poll: poll
+        )
         let sent = ReadMoment.now()
         let data = try await door.post(
             path: "/api/v1/statuses", form: form,
@@ -170,6 +161,30 @@ public struct MastodonWrite: Sendable {
         try Task.checkCancellation()
         await store.ingest([note], ifSourceHere: host)
         return note
+    }
+
+    /// The form a post is sent as — a new one, or one to send later (`postLater`): its words and
+    /// who may read it, what it answers by its source's id, and only what was written of the rest.
+    static func postForm(
+        _ text: String, visibility: Audience, answering: String?, spoiler: String?, language: String?,
+        sensitive: Bool?, mediaIDs: [String], poll: NewPoll?
+    ) -> [(String, String)] {
+        var form = [("status", text), ("visibility", visibility.mastodon)]
+        if let answering { form.append(("in_reply_to_id", answering)) }
+        // A cover and a language are sent only where there is one. Sensitive is sent only
+        // where it was chosen: absent is not a no.
+        if let spoiler = Self.present(spoiler) { form.append(("spoiler_text", spoiler)) }
+        if let language = SourceField.languageTag(language) { form.append(("language", language)) }
+        if let sensitive { form.append(("sensitive", sensitive ? "true" : "false")) }
+        for id in mediaIDs where !id.isEmpty { form.append(("media_ids[]", id)) }
+        // The choices in the order typed, how long it runs, and the two answers said outright.
+        if let poll {
+            for choice in poll.said { form.append(("poll[options][]", choice)) }
+            form.append(("poll[expires_in]", String(poll.runs)))
+            form.append(("poll[multiple]", poll.multiple ? "true" : "false"))
+            form.append(("poll[hide_totals]", poll.hidesTotals ? "true" : "false"))
+        }
+        return form
     }
 
     /// Uploads one file to this source and returns the id it gave it (`POST /api/v2/media`).
