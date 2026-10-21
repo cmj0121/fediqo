@@ -123,7 +123,7 @@ struct ComposeTests {
     ) -> ComposerSheet.Surface {
         ComposerSheet.surface(
             offered: session.writableSources,
-            draft: session.composeDraft,
+            draft: session.composeDraft.text,
             failed: failed
         )
     }
@@ -153,12 +153,12 @@ struct ComposeTests {
             routes: ["/api/v1/statuses": .json(Self.status())]
         )
         session.prepareCompose()
-        session.composeDraft = "hello"
-        session.composeAudience = .everyone
-        #expect(session.composeDraft == "hello", "closing the sheet does not touch the session")
+        session.composeDraft.text = "hello"
+        session.composeDraft.audience = .everyone
+        #expect(session.composeDraft.text == "hello", "closing the sheet does not touch the session")
 
         #expect(session.send())
-        #expect(session.composeDraft.isEmpty, "the press took the text")
+        #expect(session.composeDraft.text.isEmpty, "the press took the text")
         await session.outbox.settled()
         #expect(session.outbox.sendings.isEmpty)
         #expect(session.notes.contains { $0.body == "hello" && $0.categories.contains(.home) })
@@ -175,7 +175,7 @@ struct ComposeTests {
             routes: ["/api/v1/statuses": .json("{}", status: 500)]
         )
         session.prepareCompose()
-        session.composeDraft = "kept"
+        session.composeDraft.text = "kept"
         #expect(session.send())
         await session.outbox.settled()
         let entry = try #require(session.outbox.sendings.first)
@@ -204,7 +204,7 @@ struct ComposeTests {
             routes: ["/api/v1/statuses": .json("{}", status: 403)]
         )
         session.prepareCompose()
-        session.composeDraft = "kept"
+        session.composeDraft.text = "kept"
         #expect(session.send())
         await session.outbox.settled()
         let entry = try #require(session.outbox.sendings.first)
@@ -226,7 +226,7 @@ struct ComposeTests {
             ]
         )
         session.prepareCompose()
-        session.composeDraft = "kept"
+        session.composeDraft.text = "kept"
         #expect(session.send())
         await session.outbox.settled()
         #expect(session.outbox.sendings.map(\.unsent.text) == ["kept"])
@@ -252,14 +252,14 @@ struct ComposeTests {
             gate: gate
         )
         session.prepareCompose()
-        session.composeDraft = "hello"
+        session.composeDraft.text = "hello"
         #expect(session.send())
         let sending = Task { await session.outbox.settled() }
         await met("the post is on the wire", by: sending) { await server.paths.contains("/api/v1/statuses") }
-        session.composeDraft = "newer"
+        session.composeDraft.text = "newer"
         await gate.open()
         await session.outbox.settled()
-        #expect(session.composeDraft == "newer")
+        #expect(session.composeDraft.text == "newer")
         #expect(session.notes.contains { $0.body == "hello" })
     }
 
@@ -268,17 +268,17 @@ struct ComposeTests {
         let (session, server, _) = try await shell(scopes: writing)
         session.prepareCompose()
         #expect(session.postLimit(of: host) == 500)
-        session.composeDraft = String(repeating: "a", count: 501)
+        session.composeDraft.text = String(repeating: "a", count: 501)
         #expect(!session.canPost)
-        #expect(ComposerSheet.remaining(session.composeDraft, limit: 500) == -1)
+        #expect(ComposerSheet.remaining(session.composeDraft.text, limit: 500) == -1)
         #expect(ComposerSheet.limitLine(remaining: 499, limit: 500) == "499 / 500")
         #expect(!session.send())
         await session.outbox.settled()
         #expect(await server.paths.isEmpty)
         #expect(session.outbox.sendings.isEmpty)
-        #expect(session.composeDraft.count == 501)
+        #expect(session.composeDraft.text.count == 501)
 
-        session.composeDraft = "ok"
+        session.composeDraft.text = "ok"
         #expect(session.canPost)
         #expect(ComposerSheet.canSend(text: "  \n  ", limit: 500, hasSource: true) == false)
         #expect(ComposerSheet.canSend(text: "ok", limit: 500, hasSource: false) == false)
@@ -297,7 +297,7 @@ struct ComposeTests {
         session.prepareCompose()
         await session.refreshPostLimit()
         #expect(session.postLimit(of: host) == 2000)
-        session.composeDraft = String(repeating: "a", count: 501)
+        session.composeDraft.text = String(repeating: "a", count: 501)
         #expect(session.canPost)
     }
 
@@ -358,7 +358,7 @@ struct ComposeTests {
     func tooLargeKeepsTheWords() async throws {
         let (session, server, _) = try await shell(scopes: writing + " write:media")
         session.prepareCompose()
-        session.composeDraft = "kept"
+        session.composeDraft.text = "kept"
         session.composeRooms[host] = ComposeRoom(
             limit: 500,
             media: MastodonMediaLimits(count: 4, descriptionLimit: 1500, imageBytes: 1024, videoBytes: nil, mimeTypes: [])
@@ -366,8 +366,8 @@ struct ComposeTests {
         let note = session.composeAttach(bytes: Data(count: 1025), name: "big.png", type: "image/png")
         #expect(note?.contains("1 KiB") == true)
         #expect(note?.contains(host) == true)
-        #expect(session.composeDraft == "kept")
-        #expect(session.composeMedia.isEmpty)
+        #expect(session.composeDraft.text == "kept")
+        #expect(session.composeDraft.media.isEmpty)
         #expect(session.canPost)
         #expect(await server.paths.isEmpty)
 
@@ -377,15 +377,15 @@ struct ComposeTests {
         #expect(fifth)
         let tooMany = session.composeAttach(bytes: Data([1]), name: "fifth.png", type: "image/png")
         #expect(tooMany?.contains(host) == true)
-        #expect(session.composeMedia.count == 4)
-        #expect(session.composeDraft == "kept")
+        #expect(session.composeDraft.media.count == 4)
+        #expect(session.composeDraft.text == "kept")
     }
 
     @Test("Adding media the sign-in was not asked for says what the page will ask, and does not open it or the picker")
     func addingMediaAsksBeforeThePage() async throws {
         let (session, server, _) = try await shell(scopes: writing)
         session.prepareCompose()
-        session.composeDraft = "kept"
+        session.composeDraft.text = "kept"
         session.composeAddMedia()
         let ask = try #require(session.partAsks.open)
         #expect(ask.ticked == [.media])
@@ -393,7 +393,7 @@ struct ComposeTests {
         #expect(question.line.contains("media"))
         #expect(question.help?.contains("picture") == true)
         #expect(question.help?.contains("description") == true)
-        #expect(session.composeDraft == "kept")
+        #expect(session.composeDraft.text == "kept")
         #expect(!session.composeImporting)
         #expect(await server.paths.isEmpty)
     }
@@ -408,9 +408,9 @@ struct ComposeTests {
         )
         session.prepareCompose()
         await session.loadComposeDefaults()
-        #expect(session.composeAudience == .followers)
-        #expect(session.composeLanguage == "zh-tw")
-        #expect(session.composeCoversMedia == true)
+        #expect(session.composeDraft.audience == .followers)
+        #expect(session.composeDraft.language == "zh-tw")
+        #expect(session.composeDraft.coversMedia == true)
         #expect(!session.composeTouchedLanguage)
 
         let gate = Gate()
@@ -424,12 +424,12 @@ struct ComposeTests {
         let loading = Task { await late.loadComposeDefaults() }
         await met("the defaults are on the wire", by: loading) { await server.paths.contains("/api/v1/preferences") }
         late.composeTouchedLanguage = true
-        late.composeLanguage = "fr"
+        late.composeDraft.language = "fr"
         await gate.open()
         await loading.value
-        #expect(late.composeLanguage == "fr")
-        #expect(late.composeAudience == .followers)
-        #expect(late.composeCoversMedia == true)
+        #expect(late.composeDraft.language == "fr")
+        #expect(late.composeDraft.audience == .followers)
+        #expect(late.composeDraft.coversMedia == true)
         #expect(!late.composeTouchedAudience)
     }
 
@@ -447,8 +447,8 @@ struct ComposeTests {
         ], status: posted)
         let session = try await mediaShell(server)
         session.prepareCompose()
-        session.composeDraft = "with pictures"
-        session.composeCover = "mind"
+        session.composeDraft.text = "with pictures"
+        session.composeDraft.cover = "mind"
         session.chooseLanguage("zh-TW")
         session.chooseCoversMedia(true)
         #expect(session.composeAttach(bytes: Data("hill".utf8), name: "hill.png", type: "image/png", description: "a hill") == nil)
@@ -490,7 +490,7 @@ struct ComposeTests {
         ], status: Self.status(body: "kept"))
         let session = try await mediaShell(server)
         session.prepareCompose()
-        session.composeDraft = "kept"
+        session.composeDraft.text = "kept"
         #expect(session.composeAttach(bytes: Data("hill".utf8), name: "hill.png", type: "image/png", description: "a hill") == nil)
         #expect(session.composeAttach(bytes: Data("bird".utf8), name: "bird.png", type: "image/png", description: "a bird") == nil)
         #expect(session.send())
@@ -524,17 +524,17 @@ struct ComposeTests {
             routes: ["/api/v1/statuses": .json(Self.status(body: "Which?"))]
         )
         session.prepareCompose()
-        session.composeDraft = "Which?"
+        session.composeDraft.text = "Which?"
         session.composeAddPoll()
-        #expect(session.composePoll == NewPoll.fresh)
+        #expect(session.composeDraft.poll == NewPoll.fresh)
         #expect(!session.canPost, "two empty choices are no poll")
-        session.composePoll?.choices = ["Tea", "Coffee"]
-        session.composePoll?.multiple = true
-        session.composePoll?.hidesTotals = true
-        session.composePoll?.runs = 3600
+        session.composeDraft.poll?.choices = ["Tea", "Coffee"]
+        session.composeDraft.poll?.multiple = true
+        session.composeDraft.poll?.hidesTotals = true
+        session.composeDraft.poll?.runs = 3600
         #expect(session.canPost)
         #expect(session.send())
-        #expect(session.composePoll == nil)
+        #expect(session.composeDraft.poll == nil)
         await session.outbox.settled()
         #expect(session.outbox.sendings.isEmpty)
         let sent = try #require(await server.requests.first)
@@ -550,15 +550,15 @@ struct ComposeTests {
     func aPollOrMedia() async throws {
         let (session, server, _) = try await shell(scopes: writing + " write:media")
         session.prepareCompose()
-        session.composeMedia = [UnsentMedia(bytes: Data([1]), mime: "image/png", name: "a.png")]
+        session.composeDraft.media = [UnsentMedia(bytes: Data([1]), mime: "image/png", name: "a.png")]
         session.composeAddPoll()
-        #expect(session.composePoll == nil)
+        #expect(session.composeDraft.poll == nil)
         #expect(session.composePollSays == "social.example takes a poll or media on a post, not both.")
         // The file taken off, the reason it gave goes with it.
-        session.composeMedia = []
+        session.composeDraft.media = []
         #expect(session.composePollSays == nil)
         session.composeAddPoll()
-        #expect(session.composePoll != nil)
+        #expect(session.composeDraft.poll != nil)
         session.composeAddMedia()
         #expect(session.composeMediaNote == "social.example takes a poll or media on a post, not both.")
         #expect(!session.composeImporting)
@@ -569,30 +569,30 @@ struct ComposeTests {
     func heldToTheSourcesLimits() async throws {
         let (session, _, _) = try await shell(scopes: writing)
         session.prepareCompose()
-        session.composeDraft = "Which?"
+        session.composeDraft.text = "Which?"
         session.composeRooms[host] = ComposeRoom(
             limit: 500, media: .unstated,
             polls: MastodonPollLimits(choices: 3, choiceLength: 5, shortest: 300, longest: 3600)
         )
         session.composeAddPoll()
-        #expect(session.composePoll?.runs == 300, "a day is not among the runs it takes: the shortest is")
+        #expect(session.composeDraft.poll?.runs == 300, "a day is not among the runs it takes: the shortest is")
         #expect(MastodonPollLimits(choices: 3, choiceLength: 5, shortest: 300, longest: 3600).offeredRuns == [300, 1800, 3600])
         session.composeAddChoice()
         session.composeAddChoice()
-        #expect(session.composePoll?.choices.count == 3, "no more than it takes")
-        session.composePoll?.choices = ["Tea", "Milk", "Water"]
+        #expect(session.composeDraft.poll?.choices.count == 3, "no more than it takes")
+        session.composeDraft.poll?.choices = ["Tea", "Milk", "Water"]
         #expect(session.canPost)
-        session.composePoll?.choices[1] = "Coffee"
+        session.composeDraft.poll?.choices[1] = "Coffee"
         #expect(!session.canPost)
         #expect(session.composePollNote() == "A choice is at most 5.")
         session.composeRemoveChoice(at: 1)
-        #expect(session.composePoll?.choices == ["Tea", "Water"])
+        #expect(session.composeDraft.poll?.choices == ["Tea", "Water"])
         session.composeRemoveChoice(at: 1)
-        #expect(session.composePoll?.choices.count == 2, "a poll keeps the two it needs")
-        session.composePoll?.choices = ["Tea", "Tea"]
+        #expect(session.composeDraft.poll?.choices.count == 2, "a poll keeps the two it needs")
+        session.composeDraft.poll?.choices = ["Tea", "Tea"]
         #expect(session.composePollNote() == "Two choices say the same.")
         session.composeRemovePoll()
-        #expect(session.composePoll == nil && session.canPost)
+        #expect(session.composeDraft.poll == nil && session.canPost)
     }
 
     @Test("Every word of a poll in the composer is translated")

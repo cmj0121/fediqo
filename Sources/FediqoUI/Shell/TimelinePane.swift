@@ -96,6 +96,12 @@ struct TimelinePane: View {
     /// A hashtag somebody features, or the way to the people they feature, pressed on About
     /// of their page (#315, #318), answered by the root: a step of the walk.
     var onOpenFeatured: (FeaturedPress) -> Void = { _ in }
+    /// Who boosted or favourited a post, pressed in its `…` (#334), answered by the root: a step
+    /// of the walk from the row pressed.
+    var onOpenPeople: (PeopleList, String) -> Void = { _, _ in }
+    /// Whether a post's link is drawn with its preview (#335): the person's preference, handed in
+    /// by the root, so building a row's acts reads nothing of the environment.
+    var linkPreviews = true
     /// The press about looking somebody up through a source, answered by the root.
     var onLookUp: (SearchLookUpLine.Press) -> Void = { _ in }
     /// Trends' tabs, where this pane is Trends: drawn in place of the timelines' names, and
@@ -1348,6 +1354,33 @@ struct TimelinePane: View {
         if let people, let offer = session.reportOffer(on: item) {
             acting.report = ItemActing.Report(lock: offer.lock) {
                 Task { await people.reports.start(offer.who, post: offer.post, people: people, in: session) }
+            }
+        }
+        // The preview of the page it links to (#335), where the person lets previews be drawn:
+        // its picture only where the gate lets it through as one its own source pointed to.
+        acting.preview = LinkPreview.of(item, shown: linkPreviews) { reached, source in
+            session.work.admits(reached: reached, source: source)
+        }
+        // Pinning, quieting, translating, and who boosted and favourited it (#334). Translate on a
+        // list row opens the post, where its translation is drawn beside its words.
+        if let people {
+            acting.post = session.postOffer(
+                on: item, people: people, openPeople: { list in onOpenPeople(list, item.id) },
+                afterTranslate: root == nil ? { onOpenThread(item.id) } : nil
+            )
+        }
+        // Quoting it (#330): the mark live where its source lets the reader, dim with why where not;
+        // and on the reader's own post, who may quote it and its quotes.
+        acting.quote = session.quoteOffer(on: item)
+        acting.ownQuotes = session.ownQuotesOffer(on: item)
+        // Changing it (#332): the sheet opens on the reader's own copy, or the sign-in is asked.
+        if let offer = session.changeOffer(on: item) {
+            acting.change = ItemActing.Change(lock: offer.lock) {
+                if let lock = offer.lock {
+                    _ = session.askFor([.acting], host: lock.host)
+                } else {
+                    session.changes.start(item, in: session)
+                }
             }
         }
         // Taking back is an item of the row's `…` (#109), built only where the post offers it:

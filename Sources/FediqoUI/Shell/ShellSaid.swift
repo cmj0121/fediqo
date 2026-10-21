@@ -22,6 +22,40 @@ struct Said: Identifiable, Equatable, Sendable {
         /// itself, and not taken down by a save of the store. It stands until that list is
         /// next written.
         case unkept(Unkept)
+        /// A post given a time, and what its source made of it (#333): said once, as a found
+        /// text is, with the way to what waits there where that is where it went.
+        case later(UUID, Later)
+        /// A quote's act on one's own post that did not arrive (#330), by its row.
+        case quote(QuoteAct, row: String)
+        /// A quote posted whose quoted post's author is asked first (#330): it is up, and says so
+        /// until they allow it.
+        case quoteAsked(UUID, whom: String)
+    }
+
+    /// One of a quote's acts.
+    enum QuoteAct: String, Equatable, Sendable {
+        case policy
+    }
+
+    /// What became of a post given a time.
+    enum Later: Equatable, Sendable {
+        /// It waits at its source until `at`; `moved` where its time had come too near and was
+        /// moved forward.
+        case waits(at: Date, moved: Bool)
+        /// Its source sent it now, not later: its time had passed there.
+        case sentNow
+        /// Its source did not say whether it took it: it may wait there.
+        case mayWait
+        /// Its source would not take the time, in its own words.
+        case refused(String)
+
+        /// Whether its line leads on to what waits at its source.
+        var seesWhatWaits: Bool {
+            switch self {
+            case .waits, .mayWait: true
+            case .sentNow, .refused: false
+            }
+        }
     }
 
     /// One of the person's own lists, kept in a file of its own beside the store.
@@ -135,6 +169,9 @@ struct Said: Identifiable, Equatable, Sendable {
         case .found(let text, _): return "\(host)\u{1e}found\u{1e}\(text.uuidString)"
         case .unwritten(let gone): return "\u{1e}unwritten\u{1e}\(gone.rawValue)"
         case .unkept(let list): return "\u{1e}unkept\u{1e}\(list.rawValue)"
+        case .later(let text, _): return "\(host)\u{1e}later\u{1e}\(text.uuidString)"
+        case .quote(let act, let row): return "\(host)\u{1e}quote\u{1e}\(act.rawValue)\u{1e}\(row)"
+        case .quoteAsked(let text, _): return "\(host)\u{1e}quoteAsked\u{1e}\(text.uuidString)"
         }
     }
 
@@ -149,6 +186,18 @@ struct Said: Identifiable, Equatable, Sendable {
             return L10n.t("said.unwritten.\(gone.rawValue)", language: language)
         case .unkept(let list):
             return L10n.t("said.unkept.\(list.rawValue)", language: language)
+        case .quote(let act, _):
+            return String(format: L10n.t("said.quote.\(act.rawValue).failed", language: language), host)
+        case .quoteAsked(_, let whom):
+            return String(format: L10n.t("said.quote.asked", language: language), LineText.oneLine(whom))
+        case .later(_, let later):
+            switch later {
+            case .waits(let at, let moved):
+                return String(format: L10n.t(moved ? "outbox.waits.moved" : "outbox.waits", language: language), host, LaterWords.when(at, language: language))
+            case .sentNow: return String(format: L10n.t("outbox.later.sentNow", language: language), host)
+            case .mayWait: return String(format: L10n.t("outbox.later.mayWait", language: language), host)
+            case .refused(let words): return String(format: L10n.t("outbox.later.refused", language: language), host, words)
+            }
         case .notice(let act):
             return NoticeActs.words(
                 ShellNoticeActs.Said(act: act, why: why), host: host, about: about, many: many, language: language

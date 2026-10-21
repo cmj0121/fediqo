@@ -313,6 +313,8 @@ final class ShellPersonPages {
     let servers: ShellBlockedServers
     /// The report being written on its sheet (#339), where one is.
     let reports: ShellReports
+    /// Pins, quiet conversations and translations on their way, and each translation (#334).
+    let postActs: ShellPostActs
 
     init() {
         let count = PageErrands(), looks = PageReaders()
@@ -350,6 +352,7 @@ final class ShellPersonPages {
         let servers = ShellBlockedServers(errands: count, readers: looks)
         self.servers = servers
         reports = ShellReports(readers: looks)
+        postActs = ShellPostActs(hosts: hosts)
         looks.whenChanged { [weak servers] host in servers?.letGo(at: host) }
         looks.whenChanged { [weak tabs] host in tabs?.letGo(at: host) }
         looks.whenChanged { [weak acts] host in acts?.letGo(at: host) }

@@ -462,6 +462,7 @@ extension ShellPersonPages {
         // What they feature is the added source's: not drawn while their own server's word is.
         if home == nil { about.featured = featured(of: who, in: session) }
         about.keeping = keepingEntries(of: who, in: session)
+        if home == nil { about.waiting = session.waitingEntry(of: who) }
         return about
     }
 

@@ -96,13 +96,39 @@ public struct Unsent: Hashable, Sendable, Identifiable {
     /// The poll it is written with (#331), or nothing. Never beside media: a Mastodon takes no
     /// post with both, and the composer offers one or the other.
     public var poll: NewPoll?
+    /// The published post this text is a change of (#332), or nothing for a post or an answer.
+    /// **A change is no new post**: it is sent as a change of that one, lands on its row, and is
+    /// never looked for among the writer's posts — the same change sent twice lands once. Its
+    /// files already on the post are among `media`, each with its source's id and no bytes.
+    public let changes: Changes?
+    /// When its source is to send it (#333), or nothing for a post sent at once. **Given to the
+    /// source to hold**: it lands as a post that waits there, not as an item, and is not held
+    /// here once its source took it.
+    public var at: Date?
+    /// The post this one quotes (#330), by its row and its source's id; nothing where it quotes none.
+    public var quoting: Changes?
+    /// Who may quote this one, where it was chosen; nothing is the account's own default, and
+    /// nothing is sent for it (Decision 8, §7.6).
+    public var quotePolicy: QuotePolicy?
+
+    /// Which post a change is of: the row, and the id its source gave the post.
+    public struct Changes: Hashable, Sendable {
+        public let item: NoteKey
+        public let statusID: String
+
+        public init(item: NoteKey, statusID: String) {
+            self.item = item
+            self.statusID = statusID
+        }
+    }
 
     public init(
         id: UUID = UUID(), host: String, text: String, audience: Audience,
         answers: NoteKey? = nil, root: NoteKey? = nil, pressedAt: Date = Date(), standing: Standing = .fresh,
         writerID: String? = nil, writer: String? = nil, askedAt: Date? = nil,
         spoiler: String? = nil, language: String? = nil, sensitive: Bool? = nil, media: [UnsentMedia] = [],
-        poll: NewPoll? = nil
+        poll: NewPoll? = nil, changes: Changes? = nil, at: Date? = nil, quoting: Changes? = nil,
+        quotePolicy: QuotePolicy? = nil
     ) {
         self.writerID = writerID
         self.writer = writer
@@ -121,6 +147,10 @@ public struct Unsent: Hashable, Sendable, Identifiable {
         self.sensitive = sensitive
         self.media = media
         self.poll = poll
+        self.changes = changes
+        self.at = at
+        self.quoting = quoting
+        self.quotePolicy = quotePolicy
     }
 }
 

@@ -215,7 +215,7 @@ struct OfflineTests {
         session.sources = await session.store.sources()
         session.prepareCompose()
         #expect(session.composeHost == Self.host)
-        session.composeDraft = "written on a plane"
+        session.composeDraft.text = "written on a plane"
 
         #expect(session.send())
         await session.outbox.settled()

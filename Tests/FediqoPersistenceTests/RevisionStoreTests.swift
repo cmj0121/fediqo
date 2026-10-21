@@ -120,9 +120,7 @@ struct RevisionStoreTests {
         let migrations = try DatabaseQueue(path: index.path).read { db in
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier")
         }
-        #expect(migrations == [
-            "v1-index", "v10-references", "v11-one-holding", "v12-references-only", "v13-unsent", "v14-notices", "v15-compose", "v16-poll", "v17-marks", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions", "v9-language",
-        ])
+        #expect(migrations == StoreFile.migrationIDs.sorted())
     }
 
     @Test("A post in a carried-forward store that its source then changes keeps what it said, after a save and a reopen")

@@ -43,6 +43,16 @@ public enum MastodonWriteError: Error, Equatable, Sendable {
     /// thing. `ShellConversations.Absence.unfindable` draws the same distinction for the same
     /// reason one layer up.
     case unfindable
+    /// A pin the source would not take because the reader's page already holds as many as it
+    /// allows (#334): the limit as the host's own account of itself says it
+    /// (`MastodonHostSays.pinLimit`), or nothing where it says none.
+    case pinLimit(Int?)
+    /// A post no Mastodon pins: a reblog, or one only the people it mentions may read (asked of
+    /// a real one, `MastodonPostActsCaptures`). Refused here, before anything is asked.
+    case notPinnable
+    /// The source would not take the act (422), in its own sentence made fit for a line —
+    /// empty where it gave none this device could read.
+    case refused(sentence: String)
 }
 
 /// One signed-in Mastodon source, written to.
@@ -60,15 +70,15 @@ public struct MastodonWrite: Sendable {
     /// ceiling is not refused for the lines around it. Not a limit of the source's.
     static let uploadMargin = 65_536
 
-    private let door: MastodonAuthorized
-    private let store: ItemStore
+    let door: MastodonAuthorized
+    let store: ItemStore
 
     public init(door: MastodonAuthorized, store: ItemStore) {
         self.door = door
         self.store = store
     }
 
-    private var host: String { door.token.host }
+    var host: String { door.token.host }
 
     /// The header a post is sent under so that sending it again makes no second post.
     public static let idempotencyKey = "Idempotency-Key"
@@ -109,31 +119,79 @@ public struct MastodonWrite: Sendable {
     /// **`key` is the request's `Idempotency-Key`**: the same text sent again under the same key
     /// is answered, by a source that honours it, with the post it already made — which is what
     /// lets a send nobody confirmed be sent again without posting twice.
+    ///
+    /// **`again`: a try before under this key may have landed.** A quote's 404 is "not allowed"
+    /// only on a first try; on a repeat it is the source's own 404, which says nothing of the
+    /// first (#330).
     @discardableResult
     public func post(
         _ text: String, visibility: Audience, answering: Note? = nil, key: UUID? = nil,
         spoiler: String? = nil, language: String? = nil, sensitive: Bool? = nil,
-        mediaIDs: [String] = [], poll: NewPoll? = nil, pollLimits: MastodonPollLimits? = nil
+        mediaIDs: [String] = [], poll: NewPoll? = nil, pollLimits: MastodonPollLimits? = nil,
+        quoting: Note? = nil, quotePolicy: QuotePolicy? = nil, again: Bool = false
     ) async throws -> Note {
-        // A poll is refused here before anything is asked: one beside media, which a Mastodon
-        // takes on no post (#331), and one past what the source said it takes — where this run
-        // heard what that is. Where it did not, the source is the judge of its own limits.
-        if let poll {
-            if mediaIDs.contains(where: { !$0.isEmpty }) { throw MastodonWriteError.refusedHere(.pollWithMedia) }
-            if let pollLimits, let refusal = poll.refusal(within: pollLimits) {
-                throw MastodonWriteError.refusedHere(refusal)
-            }
-        }
+        // A quote (#330): the quoted post by its id, and nothing it may not carry — before anything else.
+        let quote = try Self.quoting(quoting, host: host, mediaIDs: mediaIDs, poll: poll)
+        try Self.pollRefusal(mediaIDs: mediaIDs, poll: poll, limits: pollLimits)
         guard let source = await store.sources().first(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
         }
-        var form = [("status", text), ("visibility", visibility.mastodon)]
+        var answeringID: String?
         if let answering {
             guard let id = answering.sendableID, answering.source.host == host else {
                 throw MastodonWriteError.unfindable
             }
-            form.append(("in_reply_to_id", id))
+            answeringID = id
         }
+        let form = Self.postForm(
+            text, visibility: visibility, answering: answeringID, spoiler: spoiler, language: language,
+            sensitive: sensitive, mediaIDs: mediaIDs, poll: poll
+        ) + Self.quoteForm(quote, policy: quotePolicy)
+        let sent = ReadMoment.now()
+        let data: Data
+        do {
+            data = try await door.post(
+                path: "/api/v1/statuses", form: form,
+                headers: key.map { [Self.idempotencyKey: $0.uuidString] } ?? [:]
+            )
+        } catch MastodonAuthError.http(404) where !quote.isEmpty && !(again && key != nil) {
+            // What a real one answers a quote it does not allow: the post "does not appear to exist".
+            // Only on a first try: a repeat's 404 may follow a first that landed.
+            throw MastodonQuoteError.notAllowed
+        }
+        guard let note = try? MastodonJSON.decoder.decode(StatusDTO.self, from: data)
+            .asNote(source: source, categories: Self.categories(for: visibility), sent: sent)
+        else {
+            throw MastodonWriteError.unreadable
+        }
+        try Task.checkCancellation()
+        await store.ingest([note], ifSourceHere: host)
+        return note
+    }
+
+    /// A poll refused here before anything is asked: one beside media, which a Mastodon takes on no
+    /// post (#331), and one past what the source said it takes — where this run heard what that
+    /// is (`limits`). Where it did not, the source is the judge of its own limits.
+    static func pollRefusal(mediaIDs: [String], poll: NewPoll?, limits: MastodonPollLimits?) throws {
+        guard let poll else { return }
+        if mediaIDs.contains(where: { !$0.isEmpty }) { throw MastodonWriteError.refusedHere(.pollWithMedia) }
+        if let limits, let refusal = poll.refusal(within: limits) { throw MastodonWriteError.refusedHere(refusal) }
+    }
+
+    /// What a quote adds to a post's form (#330): the quoted post's id (`quoting`), and who may
+    /// quote it where that was chosen — absent is the account's own default.
+    static func quoteForm(_ quote: [(String, String)], policy: QuotePolicy?) -> [(String, String)] {
+        quote + (policy.map { [("quote_approval_policy", $0.rawValue)] } ?? [])
+    }
+
+    /// The form a post is sent as — a new one, or one to send later (`postLater`): its words and
+    /// who may read it, what it answers by its source's id, and only what was written of the rest.
+    static func postForm(
+        _ text: String, visibility: Audience, answering: String?, spoiler: String?, language: String?,
+        sensitive: Bool?, mediaIDs: [String], poll: NewPoll?
+    ) -> [(String, String)] {
+        var form = [("status", text), ("visibility", visibility.mastodon)]
+        if let answering { form.append(("in_reply_to_id", answering)) }
         // A cover and a language are sent only where there is one. Sensitive is sent only
         // where it was chosen: absent is not a no.
         if let spoiler = Self.present(spoiler) { form.append(("spoiler_text", spoiler)) }
@@ -147,19 +205,7 @@ public struct MastodonWrite: Sendable {
             form.append(("poll[multiple]", poll.multiple ? "true" : "false"))
             form.append(("poll[hide_totals]", poll.hidesTotals ? "true" : "false"))
         }
-        let sent = ReadMoment.now()
-        let data = try await door.post(
-            path: "/api/v1/statuses", form: form,
-            headers: key.map { [Self.idempotencyKey: $0.uuidString] } ?? [:]
-        )
-        guard let note = try? MastodonJSON.decoder.decode(StatusDTO.self, from: data)
-            .asNote(source: source, categories: Self.categories(for: visibility), sent: sent)
-        else {
-            throw MastodonWriteError.unreadable
-        }
-        try Task.checkCancellation()
-        await store.ingest([note], ifSourceHere: host)
-        return note
+        return form
     }
 
     /// Uploads one file to this source and returns the id it gave it (`POST /api/v2/media`).
@@ -254,6 +300,54 @@ public struct MastodonWrite: Sendable {
         try await act(.bookmarked, on: note, path: on ? "bookmark" : "unbookmark")
     }
 
+    /// Whether a Mastodon pins `note` at all, by what this device holds of it: not a reblog, and
+    /// not a post only the people it mentions may read. **Whose it is, is not asked here**, as
+    /// `withdraw` does not ask it: the source refuses anybody else's, and what offers the act is
+    /// the one place that decides whether the post is the reader's.
+    public static func pinnable(_ note: Note) -> Bool {
+        !note.isReblog && note.audience != .mentioned
+    }
+
+    /// Pins the reader's own `note` to their page at this source, or takes the pin off (#334) —
+    /// `bookmark`'s shape, one function for both directions, and the source's answer laid over
+    /// the row as the latest word on the pin (`ReaderMark.pinned`).
+    ///
+    /// **A pin the source turns away (422) is told by the post, read again — never by the
+    /// sentence**, which a Mastodon writes in the signed-in account's own language (asked of a
+    /// real one, `MastodonPostActsCaptures`). The post says `pinned` to its author alone:
+    /// - pinned — a pin already there, from elsewhere since this device last read it — lands as
+    ///   the pin's answer;
+    /// - not pinned, the reader's own, and one that may be pinned: the page is full, `pinLimit`
+    ///   with `limit` — the host's own figure, handed in by whoever heard it;
+    /// - anything else — somebody else's post, which says nothing of a pin; one only its
+    ///   mentioned may read — is the source's own words (`refused`), and so is a refused unpin.
+    @discardableResult
+    public func pin(_ note: Note, on: Bool, limit: Int? = nil) async throws -> Note {
+        guard Self.pinnable(note) else { throw MastodonWriteError.notPinnable }
+        do {
+            return try await act(.pinned, on: note, path: on ? "pin" : "unpin", refusable: true)
+        } catch let refused as MastodonUnprocessable {
+            let sentence = if case .refused(let said) = AccountPartError.refusal(from: refused.body) { said } else { "" }
+            guard on, let id = note.sendableID else { throw MastodonWriteError.refused(sentence: sentence) }
+            let sent = ReadMoment.now()
+            let answered = try landed(try await door.get(path: "/api/v1/statuses/\(id)"), on: note, sent: sent)
+            switch answered.pinned {
+            case true?: return await settle(answered, on: note, acted: .pinned)
+            case false? where Self.pinnable(answered): throw MastodonWriteError.pinLimit(limit)
+            default: throw MastodonWriteError.refused(sentence: sentence)
+            }
+        }
+    }
+
+    /// Quiets `note`'s conversation at this source — no more notices of what is answered in it —
+    /// or lets it speak again (#334): `bookmark`'s shape, and the source's answer the latest word
+    /// on it (`ReaderMark.muted`). **Anybody's post**, the reader's own or not: a Mastodon quiets
+    /// any conversation its reader can see (asked of a real one).
+    @discardableResult
+    public func quiet(_ note: Note, on: Bool) async throws -> Note {
+        try await act(.muted, on: note, path: on ? "mute" : "unmute")
+    }
+
     /// Votes in `note`'s poll for `choices`, each by its place (#331), and returns the post as
     /// the store now holds it — with the poll as the source answered the vote.
     ///
@@ -310,7 +404,10 @@ public struct MastodonWrite: Sendable {
     ///
     /// **The store is told which mark the answer is for** (#291). A status says all three, and
     /// only the one this act moved is certainly its latest word: see `ItemStore.refresh`.
-    private func act(_ mark: ReaderMark, on note: Note, path: String) async throws -> Note {
+    ///
+    /// **`refusable`** has a 422 thrown as `MastodonUnprocessable`, with the source's own words,
+    /// for an act whose refusals say different things (`pin`).
+    private func act(_ mark: ReaderMark, on note: Note, path: String, refusable: Bool = false) async throws -> Note {
         guard await store.sources().contains(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
         }
@@ -318,15 +415,50 @@ public struct MastodonWrite: Sendable {
             throw MastodonWriteError.unfindable
         }
         let sent = ReadMoment.now()
-        let data = try await door.post(path: "/api/v1/statuses/\(id)/\(path)", form: [])
+        let address = "/api/v1/statuses/\(id)/\(path)"
+        let data = try await refusable ? door.postRefusable(path: address, form: []) : door.post(path: address, form: [])
+        return await settle(try landed(data, on: note, sent: sent), on: note, acted: mark)
+    }
+
+    /// A status the source answered about `note`, as a note of the same row, or `unreadable`
+    /// (the caller's own, where it says it otherwise).
+    func landed(
+        _ data: Data, on note: Note, sent: ReadMoment, unreadable: any Error = MastodonWriteError.unreadable
+    ) throws -> Note {
         guard let answered = try? MastodonJSON.decoder.decode(StatusDTO.self, from: data)
             .asNote(source: note.source, categories: note.categories, sent: sent)
         else {
-            throw MastodonWriteError.unreadable
+            throw unreadable
         }
         try Task.checkCancellation()
+        return answered
+    }
+
+    /// `answered` laid over the row as an act's answer is (`act`), and the store's copy back.
+    /// `mark` is the one the act moved, or nothing where it moved none (a change, #332).
+    func settle(_ answered: Note, on note: Note, acted mark: ReaderMark?) async -> Note {
         await store.refresh([answered], ifSourceHere: host, acted: mark)
         return await store.note(answered.key) ?? answered.refreshed(over: note)
+    }
+
+    /// The id of `note` — the reader's own post, or one acted on as theirs — at this sign-in's own
+    /// source: the source held here, the note of this host, by an id that names one path segment.
+    /// `unfindable` is the caller's own word for a note it cannot name.
+    func ownID(of note: Note, unfindable: any Error = MastodonWriteError.unfindable) async throws -> String {
+        guard await store.sources().contains(where: { $0.host == host }) else { throw MastodonWriteError.noSource }
+        guard let id = Self.pathID(of: note, at: host) else { throw unfindable }
+        return id
+    }
+
+    /// `note`'s id at `host`, where it is a note of that host and its id names one path segment.
+    static func pathID(of note: Note, at host: String, id: String? = nil) -> String? {
+        guard note.source.host == host, let id = id ?? note.sendableID, ListSubscription.isPathSegment(id) else { return nil }
+        return id
+    }
+
+    /// Whether `text` is an id a Mastodon gives a post: ASCII digits, and at least one.
+    static func isDigits(_ text: String) -> Bool {
+        !text.isEmpty && text.utf8.allSatisfy { (0x30...0x39).contains($0) }
     }
 }
 

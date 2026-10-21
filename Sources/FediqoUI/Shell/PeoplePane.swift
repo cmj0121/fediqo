@@ -191,6 +191,8 @@ struct PeopleSaid: Equatable {
         case .featured: "people.featured"
         case .muted: "people.muted"
         case .blocked: "people.blocked"
+        case .boostedBy: "people.boostedBy"
+        case .favouritedBy: "people.favouritedBy"
         case .following, .followers: "people"
         }
     }
@@ -235,7 +237,8 @@ struct PeopleSaid: Equatable {
             let key = switch list.which {
             case .found: "people.found.foot.farthest"
             case .suggested: "people.suggested.foot.farthest"
-            case .directory, .following, .followers, .requests, .featured, .muted, .blocked: "people.directory.foot.farthest"
+            case .directory, .following, .followers, .requests, .featured, .muted, .blocked, .boostedBy, .favouritedBy:
+                "people.directory.foot.farthest"
             }
             return String(format: L10n.t(key, language: language), L10n.grouped(people.count, language: language), source)
         case .end:
@@ -279,7 +282,7 @@ struct PeopleSaid: Equatable {
         if list.which == .featured {
             return String(format: L10n.t("people.featured.none", language: language), source)
         }
-        if list.which == .muted || list.which == .blocked {
+        if list.which == .muted || list.which == .blocked || list.which == .boostedBy || list.which == .favouritedBy {
             return String(format: L10n.t("\(Self.words(list.which)).none", language: language), source)
         }
         if list.hidden, !own {

@@ -150,6 +150,12 @@ final class DummyPrefs {
         didSet { write("noticesHidden", noticesHidden.sorted().joined(separator: ",")) }
     }
 
+    /// Whether a post's link is drawn with the preview its source fetched of the page (#335);
+    /// true, the default. Off, no preview is drawn on any post and no preview's picture is asked.
+    var linkPreviews: Bool {
+        didSet { write("linkPreviews", linkPreviews ? "" : "0") }
+    }
+
     /// The waits a person picks from, in minutes.
     static let waits = [1, 5, 15, 30, 60]
 
@@ -158,6 +164,7 @@ final class DummyPrefs {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         (keepMonths, goneDays, roomBytes, removedPostsStay, latestDate, askMinutes, noticesHidden, language, theme, fontSize) = Self.read(defaults)
+        linkPreviews = defaults.string(forKey: Self.prefix + "linkPreviews") != "0"
         L10n.language = language
     }
 
@@ -174,6 +181,8 @@ final class DummyPrefs {
         if language != read.language { language = read.language }
         if theme != read.theme { theme = read.theme }
         if fontSize != read.fontSize { fontSize = read.fontSize }
+        let previews = defaults.string(forKey: Self.prefix + "linkPreviews") != "0"
+        if linkPreviews != previews { linkPreviews = previews }
     }
 
     private static func read(_ defaults: UserDefaults) -> (

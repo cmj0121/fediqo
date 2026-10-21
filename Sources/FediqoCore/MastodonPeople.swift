@@ -8,7 +8,7 @@ public enum MastodonPeopleError: Error, Equatable, Sendable {
 }
 
 /// A Mastodon asked for a list of people (#311), a stretch at a time: `/api/v1/accounts/:id/followers`
-/// and `/following`.
+/// and `/following`, and the others `List` names — who boosted a post and who favourited it among them.
 ///
 /// **As the reader where signed in, unsigned otherwise**, as a hashtag is read (`MastodonTag`):
 /// a source gives these lists to anyone, and the signed-in door is the one a server that keeps
@@ -52,6 +52,12 @@ public struct MastodonPeople: Sendable {
         /// not the person, as following does.
         case muted
         case blocked
+        /// Who boosted a post, and who favourited it (#334), by the id the source gives the post.
+        /// Given to anyone, and read on by the source's own next — which names the boost or the
+        /// favourite and not the person, as following does (asked of a real one,
+        /// `MastodonPostActsCaptures`).
+        case boostedBy(post: String)
+        case favouritedBy(post: String)
 
         /// Where the requests to follow the reader are listed, and under it answered.
         static let requestsPath = "/api/v1/follow_requests"
@@ -68,6 +74,8 @@ public struct MastodonPeople: Sendable {
             case .followers(let id) where ListSubscription.isPathSegment(id): "/api/v1/accounts/\(id)/followers"
             case .following(let id) where ListSubscription.isPathSegment(id): "/api/v1/accounts/\(id)/following"
             case .featured(let id) where ListSubscription.isPathSegment(id): "/api/v1/accounts/\(id)/endorsements"
+            case .boostedBy(let id) where ListSubscription.isPathSegment(id): "/api/v1/statuses/\(id)/reblogged_by"
+            case .favouritedBy(let id) where ListSubscription.isPathSegment(id): "/api/v1/statuses/\(id)/favourited_by"
             case .requests: Self.requestsPath
             case .featuredByReader: Self.featuredByReaderPath
             case .muted: Self.mutedPath
@@ -81,7 +89,7 @@ public struct MastodonPeople: Sendable {
         var mayBeAbsent: Bool {
             switch self {
             case .featured, .featuredByReader: true
-            case .followers, .following, .requests, .muted, .blocked: false
+            case .followers, .following, .requests, .muted, .blocked, .boostedBy, .favouritedBy: false
             }
         }
     }

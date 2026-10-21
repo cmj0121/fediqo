@@ -49,6 +49,13 @@ struct SaidStrip: ViewModifier {
     /// The glyph before one line: the strip's own, but for the one line that is good news.
     static func symbol(of line: Said) -> String {
         if case .found = line.what { return "checkmark.circle" }
+        if case .later(_, let later) = line.what {
+            switch later {
+            case .waits: return "clock"
+            case .sentNow: return "paperplane"
+            case .mayWait, .refused: return symbol
+            }
+        }
         return symbol
     }
 
@@ -283,10 +290,12 @@ struct OutboxLine: View {
     }
 }
 
-/// One line: its glyph, its sentence whole, and the press that takes it down.
+/// One line: its glyph, its sentence whole, and the press that takes it down — and for a post
+/// given a time, the way to what waits at its source (#333).
 struct SaidLine: View {
     let line: Said
     let takeDown: () -> Void
+    @Environment(ShellSession.self) private var session: ShellSession?
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.shellSaidProbe) private var probe
@@ -307,6 +316,11 @@ struct SaidLine: View {
                 // A listener who is on the sentence takes it down from there, too.
                 .accessibilityAction(named: L10n.t("said.close"), takeDown)
                 .modifier(SaidProbed(.words(line.id), probe: probe))
+            if case .later(_, let later) = line.what, later.seesWhatWaits, let session {
+                ShellLinkButton(L10n.t("outbox.waits.see")) { session.later.show(host: line.host, in: session) }
+                    .fixedSize()
+                    .accessibilityLabel(String(format: L10n.t("outbox.waits.see.spoken"), line.host))
+            }
             ShellIconButton("xmark", name: "said.close", action: takeDown)
                 .fixedSize()
                 .modifier(SaidProbed(.close(line.id), probe: probe))

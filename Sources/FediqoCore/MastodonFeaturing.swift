@@ -58,7 +58,7 @@ public enum AccountPartError: Error, Equatable, Sendable {
     }
 
     /// What a 422 says: its `error`, made fit for a line.
-    static func refusal(from body: Data) -> AccountPartError {
+    public static func refusal(from body: Data) -> AccountPartError {
         guard body.count <= refusalLength,
               let said = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
               let sentence = said["error"] as? String

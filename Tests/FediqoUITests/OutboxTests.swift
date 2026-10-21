@@ -226,7 +226,7 @@ struct OutboxTests {
 
     private func post(_ words: String, to host: String = host, in session: ShellSession) -> Bool {
         session.composeHost = host
-        session.composeDraft = words
+        session.composeDraft.text = words
         return session.send()
     }
 
@@ -256,7 +256,7 @@ struct OutboxTests {
         let took: Bool = post("  hello there \n", in: session)
 
         #expect(took)
-        #expect(session.composeDraft.isEmpty, "the composer opened again shows no text: it left for the outbox")
+        #expect(session.composeDraft.text.isEmpty, "the composer opened again shows no text: it left for the outbox")
         let entry = try #require(session.outbox.sendings.first)
         #expect(entry.unsent.text == "hello there" && entry.unsent.audience == .everyone && entry.unsent.host == Self.host)
         #expect(entry.isOut)
@@ -332,7 +332,7 @@ struct OutboxTests {
         let entry = try #require(session.outbox.sendings.first)
         #expect(entry.standing == .failed(why))
         #expect(entry.unsent.text == words)
-        #expect(session.composeDraft.isEmpty)
+        #expect(session.composeDraft.text.isEmpty)
         #expect(try disk.texts().map(\.text) == [words])
         #expect(try disk.texts().first?.standing == written, "never written down as maybe landed")
         #expect(heard.count == 2 && heard.last == line(entry, in: session), "said aloud once")
@@ -495,7 +495,7 @@ struct OutboxTests {
         #expect(post("first", in: session))
         #expect(post("second", in: session))
         #expect(post("elsewhere", to: Self.other, in: session))
-        #expect(session.composeDraft.isEmpty)
+        #expect(session.composeDraft.text.isEmpty)
         await met("one post is at each source", by: sending(session)) { await server.posts.count == 2 }
 
         #expect(Set(await server.posts.map { $0.url?.host }) == [Self.host, Self.other], "one on the wire a source")
@@ -794,7 +794,7 @@ struct OutboxTests {
         await session.outbox.settled()
         let id = try #require(session.outbox.sendings.first?.id)
         let before = try #require(session.outbox.sendings.first)
-        session.composeDraft = "another draft entirely"
+        session.composeDraft.text = "another draft entirely"
 
         #expect(session.outbox.edit(id, in: session))
         #expect(session.editingUnsent == UnsentAsk(id: id) && session.raisesOverPages)
@@ -807,7 +807,7 @@ struct OutboxTests {
         #expect(try disk.texts().map(\.id) == [id])
         #expect(try disk.texts().first?.text == "did not go")
         #expect(session.outbox.draft(id) == "did not go, said better ", "and nothing typed is lost")
-        #expect(session.composeDraft == "another draft entirely", "no draft is touched")
+        #expect(session.composeDraft.text == "another draft entirely", "no draft is touched")
         #expect(await server.posts.count == 1)
 
         #expect(session.outbox.edit(id, in: session))

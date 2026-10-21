@@ -67,22 +67,22 @@ struct ComposerSheet: View {
         let host = session.composeHost
         let limit = host.map(session.postLimit(of:)) ?? MastodonWrite.defaultLimit
         WritingSheet(
-            titleKey: "compose.title",
-            sendKey: "compose.post",
+            titleKey: session.composeDraft.quoting == nil ? "compose.title" : "compose.title.quote",
+            sendKey: session.composeDraft.at == nil ? "compose.post" : "compose.later.post",
             bodyKey: "compose.body",
-            draft: $session.composeDraft,
+            draft: $session.composeDraft.text,
             limit: limit,
             canSend: session.canPost,
             height: 640,
             hidesScrollIndicators: true,
             speaksLimitLine: true,
             writes: { failed in
-                Self.surface(offered: offered, draft: session.composeDraft, failed: failed) == .composing
+                Self.surface(offered: offered, draft: session.composeDraft.text, failed: failed) == .composing
             },
             send: { session.send() },
             failedAt: { Self.failedAt(session) }
         ) { failed in
-            if Self.surface(offered: offered, draft: session.composeDraft, failed: failed) == .empty {
+            if Self.surface(offered: offered, draft: session.composeDraft.text, failed: failed) == .empty {
                 ShellNotice(
                     symbol: "square.and.pencil",
                     title: L10n.t("compose.none.title"),
@@ -94,15 +94,19 @@ struct ComposerSheet: View {
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             } else if !offered.isEmpty {
+                // A quote (#330): the quoted post above, the source fixed to where it was read.
+                if session.composeDraft.quoting != nil { QuoteHead(session: session) }
                 ComposeChoices(session: session, offered: offered)
                     .pickerStyle(.menu)
-                ComposeExtras(session: session, limit: limit)
+                ComposeExtras(draft: $session.composeDraft, controls: .composer(session, limit: limit)) { EmptyView() }
             }
         }
         .onAppear { session.prepareCompose() }
         .task(id: session.composeHost) {
             await session.refreshPostLimit()
             await session.loadComposeDefaults()
+            // Whether the source has quotes, by its own account of itself (D6).
+            if let host = session.composeHost { await session.quoting.hosts?.hear(host, in: session) }
         }
         .fileImporter(
             isPresented: $session.composeImporting,
@@ -149,15 +153,18 @@ private struct ComposeChoices: View {
 
     @ViewBuilder
     private var choices: some View {
-        Picker(L10n.t("compose.source"), selection: $session.composeHost) {
-            ForEach(offered, id: \.host) { source in
-                Text(source.host).tag(Optional(source.host))
+        // A quote's source is the quoted post's: no choice of it (X0 §3).
+        if session.composeDraft.quoting == nil {
+            Picker(L10n.t("compose.source"), selection: $session.composeHost) {
+                ForEach(offered, id: \.host) { source in
+                    Text(source.host).tag(Optional(source.host))
+                }
             }
+            .shellFont(.meta)
+            .accessibilityLabel(L10n.t("compose.source"))
         }
-        .shellFont(.meta)
-        .accessibilityLabel(L10n.t("compose.source"))
         Picker(L10n.t("compose.visibility"), selection: Binding(
-            get: { session.composeAudience },
+            get: { session.composeDraft.audience },
             set: { session.chooseAudience($0) }
         )) {
             ForEach(Audience.allCases, id: \.self) { audience in
@@ -166,6 +173,9 @@ private struct ComposeChoices: View {
         }
         .shellFont(.meta)
         .accessibilityLabel(L10n.t("compose.visibility"))
+        if let host = session.composeHost, session.quotesOffered(host: host) == true {
+            QuotePolicyMenu(draft: $session.composeDraft, host: host)
+        }
     }
 }
 
@@ -200,6 +210,9 @@ struct WritingSheet<Above: View>: View {
     let send: @MainActor () -> Bool
     /// The source a refused press is said against, asked when it is refused.
     let failedAt: @MainActor () -> String?
+    /// Cancel pressed: whether the sheet closes now. Nothing is a sheet that always does; the
+    /// change sheet asks first over a change typed and not saved (#332).
+    let cancel: (@MainActor () -> Bool)?
     let above: (_ failed: String?) -> Above
 
     init(
@@ -208,6 +221,7 @@ struct WritingSheet<Above: View>: View {
         writes: @escaping (String?) -> Bool = { _ in true },
         send: @escaping @MainActor () -> Bool,
         failedAt: @escaping @MainActor () -> String?,
+        cancel: (@MainActor () -> Bool)? = nil,
         @ViewBuilder above: @escaping (_ failed: String?) -> Above
     ) {
         self.titleKey = titleKey
@@ -222,6 +236,7 @@ struct WritingSheet<Above: View>: View {
         self.writes = writes
         self.send = send
         self.failedAt = failedAt
+        self.cancel = cancel
         self.above = above
     }
 
@@ -268,7 +283,7 @@ struct WritingSheet<Above: View>: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(L10n.t("compose.cancel")) {
-                        dismiss()
+                        if cancel?() ?? true { dismiss() }
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -332,189 +347,5 @@ private struct HiddenIndicators: ViewModifier {
 enum WritingRoom {
     static func floor(_ asked: CGFloat, compact: Bool) -> CGFloat? {
         compact ? nil : asked
-    }
-}
-
-/// The cover, the language, whether the media is covered, and the files — above the editor,
-/// so an answer, which shares the sheet, does not grow them.
-private struct ComposeExtras: View {
-    @Bindable var session: ShellSession
-    let limit: Int
-
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        let host = session.composeHost ?? ""
-        let limits = session.composeHost.map { session.mediaLimits(of: $0) } ?? .unstated
-        VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            TextField(L10n.t("compose.cover"), text: $session.composeCover, axis: .vertical)
-                .lineLimit(1...3)
-                .shellFont(.body)
-                .accessibilityLabel(L10n.t("compose.cover"))
-            let coverLeft = ComposerSheet.remaining(session.composeCover, limit: limit)
-            let coverLine = ComposerSheet.limitLine(remaining: coverLeft, limit: limit)
-            Text(coverLine)
-                .shellFont(.reading)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                .accessibilityLabel(coverLine)
-            TextField(L10n.t("compose.language"), text: Binding(
-                get: { session.composeLanguage },
-                set: { session.chooseLanguage($0) }
-            ))
-            .shellFont(.body)
-            .accessibilityLabel(L10n.t("compose.language"))
-            Toggle(L10n.t("compose.sensitive"), isOn: Binding(
-                get: { session.composeCoversMedia == true },
-                set: { session.chooseCoversMedia($0) }
-            ))
-            .shellFont(.meta)
-            .accessibilityLabel(L10n.t("compose.sensitive"))
-            let countLine = String(format: L10n.t("compose.media.count"), session.composeMedia.count, limits.count)
-            Text(countLine)
-                .shellFont(.reading)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                .accessibilityLabel(countLine)
-            ForEach(session.composeMedia) { piece in
-                mediaRow(piece, descriptionLimit: limits.descriptionLimit)
-            }
-            Button(L10n.t("compose.media.add")) { session.composeAddMedia() }
-                .accessibilityLabel(L10n.t("compose.media.add"))
-            ComposePoll(session: session)
-            if let note = session.composeMediaNote {
-                Text(note)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel(note)
-            }
-        }
-    }
-
-    private func mediaRow(_ piece: UnsentMedia, descriptionLimit: Int) -> some View {
-        VStack(alignment: .leading, spacing: ShellSpace.hair) {
-            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
-                Text(piece.name)
-                    .shellFont(.meta)
-                    .lineLimit(1)
-                    .accessibilityLabel(piece.name)
-                Spacer(minLength: ShellSpace.snug)
-                Button(L10n.t("compose.media.remove")) { session.composeRemoveMedia(piece.id) }
-                    .accessibilityLabel(L10n.t("compose.media.remove"))
-            }
-            TextField(L10n.t("compose.media.description"), text: Binding(
-                get: { session.composeMedia.first { $0.id == piece.id }?.description ?? "" },
-                set: { next in
-                    guard let index = session.composeMedia.firstIndex(where: { $0.id == piece.id }) else { return }
-                    session.composeMedia[index].description = next
-                }
-            ), axis: .vertical)
-            .lineLimit(1...4)
-            .shellFont(.body)
-            .accessibilityLabel(L10n.t("compose.media.description"))
-            if piece.description.count > descriptionLimit {
-                let over = String(format: L10n.t("compose.media.description.over"), descriptionLimit)
-                Text(over)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .accessibilityLabel(over)
-            }
-        }
-    }
-}
-
-/// The poll a post is written with (#331): its choices, whether more than one may be chosen,
-/// how long it runs and whether its figures wait for the end — **held to what the source said
-/// it takes**, which the composer reads beside the post's own length. A press to add one beside
-/// a file says why there is none, as adding a file beside a poll does.
-private struct ComposePoll: View {
-    @Bindable var session: ShellSession
-
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        let limits = session.composePollLimits
-        VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            if let poll = session.composePoll {
-                editing(poll, least: limits.leastChoices, most: limits.choices, runs: limits.offeredRuns)
-            } else {
-                Button(L10n.t("compose.poll.add")) { session.composeAddPoll() }
-                    .accessibilityLabel(L10n.t("compose.poll.add"))
-            }
-            if let line = session.composePollSays {
-                Text(line)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel(line)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func editing(_ poll: NewPoll, least: Int, most: Int, runs: [Int]) -> some View {
-        let count = String(format: L10n.t("compose.poll.count"), poll.choices.count, most)
-        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
-            Text(count)
-                .shellFont(.reading)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                .accessibilityLabel(count)
-            Spacer(minLength: ShellSpace.snug)
-            Button(L10n.t("compose.poll.remove")) { session.composeRemovePoll() }
-                .accessibilityLabel(L10n.t("compose.poll.remove"))
-        }
-        ForEach(Array(poll.choices.indices), id: \.self) { index in
-            choice(index, of: poll, least: least)
-        }
-        if poll.choices.count < most {
-            Button(L10n.t("compose.poll.addChoice")) { session.composeAddChoice() }
-                .accessibilityLabel(L10n.t("compose.poll.addChoice"))
-        }
-        Toggle(L10n.t("compose.poll.multiple"), isOn: field(\.multiple))
-            .shellFont(.meta)
-            .accessibilityLabel(L10n.t("compose.poll.multiple"))
-        Toggle(L10n.t("compose.poll.hide"), isOn: field(\.hidesTotals))
-            .shellFont(.meta)
-            .accessibilityLabel(L10n.t("compose.poll.hide"))
-        Picker(L10n.t("compose.poll.runs"), selection: field(\.runs)) {
-            ForEach(runs, id: \.self) { run in
-                Text(ComposeWords.runsLine(run)).tag(run)
-            }
-        }
-        .pickerStyle(.menu)
-        .shellFont(.meta)
-        .accessibilityLabel(L10n.t("compose.poll.runs"))
-    }
-
-    private func choice(_ index: Int, of poll: NewPoll, least: Int) -> some View {
-        let name = String(format: L10n.t("compose.poll.choice"), index + 1)
-        return HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
-            TextField(name, text: Binding(
-                get: { session.composePoll?.choices[safe: index] ?? "" },
-                set: { next in
-                    guard session.composePoll?.choices.indices.contains(index) == true else { return }
-                    session.composePoll?.choices[index] = next
-                }
-            ))
-            .shellFont(.body)
-            .accessibilityLabel(name)
-            if poll.choices.count > least {
-                Button(L10n.t("compose.poll.removeChoice")) { session.composeRemoveChoice(at: index) }
-                    .accessibilityLabel(String(format: L10n.t("compose.poll.removeChoice.named"), index + 1))
-            }
-        }
-    }
-
-    /// One field of the poll, as a binding the controls write through the session.
-    private func field<Value>(_ path: WritableKeyPath<NewPoll, Value>) -> Binding<Value> {
-        Binding(
-            get: { (session.composePoll ?? .fresh)[keyPath: path] },
-            set: { next in session.composePoll?[keyPath: path] = next }
-        )
-    }
-}
-
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
     }
 }

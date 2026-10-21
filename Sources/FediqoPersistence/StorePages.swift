@@ -33,9 +33,12 @@ extension StoreFile {
         "CREATE INDEX IF NOT EXISTS note_cites_many ON note(host) WHERE instr(refs, '\"id\"') > 0 AND \(citesMany)",
         // `note_cites` and `note_cites_many` answer what `note_refers` did (#360).
         "DROP INDEX IF EXISTS note_refers",
-        // `note_marked_vote` answers what `note_marked` did, and a vote with it (#331).
+        // `note_marked_quote` answers what `note_marked`, `note_marked_vote` and
+        // `note_marked_standing` did, and the reader's word on quoting with them (#331, #334, #330).
         "DROP INDEX IF EXISTS note_marked",
-        "CREATE INDEX IF NOT EXISTS note_marked_vote ON note(host) WHERE \(readerSaidOrOwing)",
+        "DROP INDEX IF EXISTS note_marked_vote",
+        "DROP INDEX IF EXISTS note_marked_standing",
+        "CREATE INDEX IF NOT EXISTS note_marked_quote ON note(host) WHERE \(readerSaidOrOwing)",
         // The rows of each kind of the reader's marks by host (#317), which a read of them asks
         // for every one of (`keys(host:in:)`): partial, so each holds only those.
         "CREATE INDEX IF NOT EXISTS note_bookmarks ON note(host) WHERE \(markedRows("bookmarks"))",
@@ -1159,7 +1162,7 @@ extension StoreFile {
             // by the marks it is losing, as `ItemStore.forgetReaderMarks` judges it.
             let (named, arguments) = try rows(of: hosts)
             try db.execute(sql: """
-                UPDATE note SET bookmarked = NULL,
+                UPDATE note SET bookmarked = NULL, pinned = NULL, muted = NULL, may_quote = NULL,
                 facts = CASE WHEN json_valid(facts) THEN json_remove(facts, '$.boosted', '$.favourited', '$.poll.voted', '$.poll.ownVotes') ELSE facts END,
                 refs_due = CASE WHEN refs_due AND \(arrivedAsReader) THEN 0 ELSE refs_due END
                 WHERE \(named) AND \(readerSaidOrOwing) AND \(readerMarked)
@@ -1179,10 +1182,10 @@ extension StoreFile {
         String(decoding: try JSONEncoder().encode(values), as: UTF8.self)
     }
 
-    /// What a reader's reads said they did: a boost, a favourite, a bookmark, a vote — any word
-    /// on it.
+    /// What a reader's reads said they did: a boost, a favourite, a bookmark, a pin, a quieted
+    /// conversation, a vote — any word on it.
     static let readerSaid = """
-        (bookmarked IS NOT NULL OR (CASE WHEN json_valid(facts) THEN \
+        (bookmarked IS NOT NULL OR pinned IS NOT NULL OR muted IS NOT NULL OR may_quote IS NOT NULL OR (CASE WHEN json_valid(facts) THEN \
         json_extract(facts, '$.boosted') IS NOT NULL OR json_extract(facts, '$.favourited') IS NOT NULL \
         OR json_extract(facts, '$.poll.voted') IS NOT NULL ELSE 0 END))
         """
@@ -1197,7 +1200,7 @@ extension StoreFile {
         OR \(readerSaid)))
         """
 
-    /// Every row the taking back of a reader's marks may change, as `note_marked_vote` holds them: a
+    /// Every row the taking back of a reader's marks may change, as `note_marked_quote` holds them: a
     /// statement names it word for word for the index to answer it.
     static let readerSaidOrOwing = "(\(readerSaid) OR refs_due)"
 

@@ -798,7 +798,7 @@ public actor ItemStore {
                     merged = merged.revised(by: note, was: existing)
                     // The poll as the change says it, and the reader's vote in it as the marks
                     // are: not this copy's word where it was sent before their own vote landed.
-                    if older { merged.poll = Poll.later(note.poll, over: existing.poll, reader: false) }
+                    if older { merged.poll = Poll.later(note.poll, over: existing.poll, reader: false, revised: true) }
                 }
                 // The same source handing the post over again is the source having it (#179):
                 // a mark it once earned comes off.
@@ -2984,6 +2984,95 @@ public actor ItemStore {
     /// A read of the file that failed: the rows it was for are not laid in, and nothing else.
     private static func unread(_ error: any Error) {
         NetLog.index.error("Rows of the index could not be read: \(String(describing: type(of: error)), privacy: .public)")
+    }
+
+    // MARK: - What a changed post said before, asked of its source (#332)
+
+    /// One changed post whose history is to be asked: by the source's own id, for the moment of
+    /// the change the row says (`editedAt`, to the millisecond, as rows are compared).
+    public struct HistoryOwed: Sendable, Hashable {
+        public let item: NoteKey
+        public let statusID: String
+        public let editedAt: Date
+        /// Whether the post quotes another (`MastodonPost.history`'s `quotes`).
+        public let quotes: Bool
+
+        init?(_ note: Note) {
+            // `Note.historyOwed`, with the change's moment read once.
+            guard note.source.kind == .mastodon, !note.isReblog, let statusID = note.sendableID,
+                  let editedAt = note.editedAt
+            else { return nil }
+            let edited = Note.moment(editedAt)
+            if let historyAt = note.historyAt, Note.moment(historyAt) >= edited { return nil }
+            item = note.key
+            self.statusID = statusID
+            self.editedAt = Date(timeIntervalSince1970: Double(edited) / 1000)
+            quotes = note.quotesReference != nil
+        }
+    }
+
+    /// The history asks taken this run — on their way, or given up — each for one change of one
+    /// post. **Of this run only, and never written down**: what is written is the row's
+    /// `historyAt`, and a launch asks again only what that says is owed. Held here and not by
+    /// whoever asks, so two sessions on one store never ask the same thing twice at once.
+    private var historyTaken: Set<HistoryOwed> = []
+
+    /// The changed posts held from `host` whose history is still owed (`Note.historyOwed`),
+    /// newest first, less what is taken this run — or only of `items`, where given. Nothing
+    /// where `host` is not a source here. **Each is the item's own source, by its own id.**
+    public func historyOwed(host raw: String, among items: Set<NoteKey>? = nil) -> [HistoryOwed] {
+        let host = raw.lowercased()
+        guard sourceList.contains(where: { $0.host == host }) else { return [] }
+        if let items { pool(items) }
+        let candidates: [Note] = items.map { $0.compactMap { notes[$0] } } ?? Array(notes.values)
+        // What owes first, and only that sorted: most rows owe nothing.
+        let owing = candidates.compactMap { note -> (Note, HistoryOwed)? in
+            guard note.key.host == host, let owed = HistoryOwed(note), !historyTaken.contains(owed) else { return nil }
+            return (note, owed)
+        }
+        let arrival = self.arrival
+        return owing.sorted { Self.storeOrder($0.0, $1.0, arrival) }.map(\.1)
+    }
+
+    /// Takes `owed` to be asked: whether it was there to take — the row held, its source here,
+    /// still owing that very change, and not taken already this run.
+    public func takeHistory(_ owed: HistoryOwed) -> Bool {
+        pool([owed.item])
+        guard sourceList.contains(where: { $0.host == owed.item.host }),
+              let note = notes[owed.item], HistoryOwed(note) == owed
+        else { return false }
+        return historyTaken.insert(owed).inserted
+    }
+
+    /// Lets go of a take that landed nothing: `givenUp`, it stays taken for the run — tried as
+    /// often as it is, or answered with nothing to keep — and otherwise it may be taken again.
+    public func releaseHistory(_ owed: HistoryOwed, givenUp: Bool) {
+        if !givenUp { historyTaken.remove(owed) }
+    }
+
+    /// The source's history of `owed`, landed: the row's earlier wordings become the history's,
+    /// bounded, and its `historyAt` the change they were asked for. Whether the row took them.
+    ///
+    /// **Only over the change that was asked about**: a row that says another `editedAt` now —
+    /// read again meanwhile — or whose source is gone, takes nothing, and owes what it owes. And
+    /// **only a history that ends in what the row says**: its newest wording's words and cover
+    /// line are the row's. One that ends otherwise is a source changed again since, whose words
+    /// the row does not hold yet. **No moment of the history is compared with the row's**: a
+    /// server holding another server's post may date each entry when it heard of it, which need
+    /// not be the moment the author's server says it changed.
+    @discardableResult
+    public func landHistory(_ history: PostHistory, for owed: HistoryOwed) -> Bool {
+        historyTaken.remove(owed)
+        pool([owed.item])
+        guard sourceList.contains(where: { $0.host == owed.item.host }),
+              let note = notes[owed.item], HistoryOwed(note) == owed,
+              let now = history.now, now.body == note.body, (now.spoiler ?? "") == (note.spoiler ?? "")
+        else { return false }
+        let filled = note.withHistory(history.earlier, at: owed.editedAt)
+        guard filled != note else { return false }
+        notes[owed.item] = filled
+        changed(shown: true, replies: filled.isPartOfTopic)
+        return true
     }
 
     // MARK: - What an item refers to, loaded (#293)

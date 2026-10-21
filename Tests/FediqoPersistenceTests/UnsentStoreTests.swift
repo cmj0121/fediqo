@@ -145,7 +145,8 @@ struct UnsentStoreTests {
             // so without the tables and the word of those steps this is its file.
             try await file.db.write { db in
                 for table in ["unsent", "notice", "notice_reach"] { try db.execute(sql: "DROP TABLE \(table)") }
-                try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier IN ('v13-unsent', 'v14-notices', 'v15-compose', 'v16-poll', 'v17-marks')")
+                try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier IN (\(StoreFile.steps(from: "v13-unsent")))")
+                for column in ["pinned", "muted", "card", "quote_approval", "may_quote"] { try db.execute(sql: "ALTER TABLE note DROP COLUMN \(column)") }
             }
         }
         #expect(try migrations(index) == Self.before, "the premise: a store no step after v12-references-only has touched")
@@ -159,7 +160,7 @@ struct UnsentStoreTests {
         #expect(opened.notes.map(\.kept) == [false, true, false])
         #expect(opened.unsent.isEmpty)
         #expect(opened.notices.isEmpty)
-        #expect(try migrations(index) == Self.before + ["v13-unsent", "v14-notices", "v15-compose", "v16-poll", "v17-marks"])
+        #expect(try migrations(index) == StoreFile.migrationIDs)
         #expect(try tables(index).isSuperset(of: ["unsent", "notice", "notice_reach"]))
 
         // And it is this build's from here: a text and a notice are held in it, beside what it held.
@@ -373,5 +374,13 @@ struct UnsentStoreTests {
         #expect(try staged.loadUnsent().isEmpty)
         #expect(try staged.load().notes.map(\.id) == ["1"])
         #expect(try files(in: dir, holding: "from-somewhere-else-entirely").isEmpty)
+    }
+}
+
+extension StoreFile {
+    /// Every store step from `first` on, quoted for a SQL list: what a store set back before
+    /// `first` has not taken.
+    static func steps(from first: String) -> String {
+        migrationIDs.drop { $0 != first }.map { "'\($0)'" }.joined(separator: ", ")
     }
 }

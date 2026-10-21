@@ -16,7 +16,7 @@ struct PersonAboutSaid: Equatable {
     /// One block of the tab, top to bottom: what the lamp stops on.
     enum Block: String, CaseIterable {
         case view, sentences, picture, words, fields, featuredTags, featuredPeople, figures, none, stands, boosts, notices, home,
-             requests, muted, blocked, servers, you
+             requests, muted, blocked, servers, waiting, you
     }
 
     /// The host of the source that says, and whose copies the pictures are.
@@ -45,6 +45,8 @@ struct PersonAboutSaid: Equatable {
     /// The ways to whom the reader mutes and blocks, and the servers they block, on their own
     /// page (#314): one each, or the one lock where the sign-in does not see them.
     var keeping: [KeepingEntry] = []
+    /// The way to the posts waiting to be sent at this source, on the reader's own page (#333).
+    var waiting: WaitingEntry?
     /// What they feature on their profile (#315, #318), or nothing where it is not asked.
     var featured: FeaturedSaid?
 
@@ -114,6 +116,7 @@ struct PersonAboutSaid: Equatable {
             case .muted: keeping.contains { $0.which == .muted }
             case .blocked: keeping.contains { $0.which == .blocked }
             case .servers: keeping.contains { $0.which == .servers }
+            case .waiting: waiting != nil
             case .you: followed != nil
             }
         }
@@ -197,6 +200,8 @@ struct PersonAbout<Lead: View>: View {
     @ViewBuilder var lead: Lead
 
     @Environment(\.colorScheme) private var colorScheme
+    /// What the line to what waits opens through; nothing where the tab is drawn alone.
+    @Environment(ShellSession.self) private var session: ShellSession?
     @ShellMetric(relativeTo: .body) private var bandHeight: CGFloat = 96
     @ShellMetric(relativeTo: .caption2) private var sealColumn: CGFloat = 16
     @ShellMetric(relativeTo: .caption2) private var glyphColumn: CGFloat = 20
@@ -252,6 +257,7 @@ struct PersonAbout<Lead: View>: View {
         case .muted: keeping(.muted)
         case .blocked: keeping(.blocked)
         case .servers: keeping(.servers)
+        case .waiting: waitingLine
         case .you: you
         }
     }
@@ -490,6 +496,31 @@ struct PersonAbout<Lead: View>: View {
             } else {
                 Button { onRequests(entry) } label: {
                     HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                        Text(entry.words()).fixedSize(horizontal: false, vertical: true)
+                        Image(systemName: "chevron.right").shellFont(.mark).accessibilityHidden(true)
+                    }
+                    .shellFont(.reading)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(entry.words())
+            }
+        }
+    }
+
+    /// The way to the posts waiting to be sent at this source (#333, X0 §2): no count — that would
+    /// be an ask at every open of the page — and the list is read when it is opened. Dim with the
+    /// lock's words where the sign-in lacks the writing part, its press asking.
+    @ViewBuilder
+    private var waitingLine: some View {
+        if let entry = said.waiting {
+            if entry.locked != nil {
+                locked(entry.words(), asks: true, press: { session.map { _ = $0.askFor([.acting], host: entry.host) } })
+            } else {
+                Button { session.map { $0.later.show(host: entry.host, in: $0) } } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                        Image(systemName: "clock").accessibilityHidden(true)
                         Text(entry.words()).fixedSize(horizontal: false, vertical: true)
                         Image(systemName: "chevron.right").shellFont(.mark).accessibilityHidden(true)
                     }

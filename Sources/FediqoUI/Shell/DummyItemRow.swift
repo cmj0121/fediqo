@@ -388,7 +388,11 @@ struct DummyItemRow: View {
                 .modifier(Probed(\.frames, .header, probe: probe))
             mainBox(written)
                 .modifier(Probed(\.frames, .content, probe: probe))
+            // The translation is of the words, so it sits right under them, before the poll and the
+            // preview (A2 x L2).
+            translationBand
             pollBand
+            previewBand
             quoteBand(openQuote)
             if inFull { viaFoot }
             actions
@@ -1102,11 +1106,48 @@ struct DummyItemRow: View {
                             .accessibilityHidden(true)
                     }
                 } else {
-                    wordsColumn(written)
+                    listWords(written)
                     if !narrow || item.hasThumb { coveredThumb }
                 }
             }
             .modifier(HeldBand(height: thumbSide, roomAbove: !decorated, hold: bandAsked ? .asked : .held))
+            .overlay(alignment: .topLeading) { listVia }
+        }
+    }
+
+    /// The app that wrote it, in a list (V0): at the very foot of the band, at the far end of the
+    /// line, in the line it took from the words (`bodyLines`) — never floating under short words.
+    /// With no picture in the slot its end is the band's, where the marks end (here); with one,
+    /// it ends at the words' column, its foot level with the picture's (`listWords`). A post of
+    /// pictures alone has no words' column, and names no app here, as before. The pane gives it a
+    /// line of its own above the marks.
+    @ViewBuilder
+    private var listVia: some View {
+        if Self.viaLine(item.via) != nil, picturePlace == nil {
+            viaFoot
+                .modifier(Probed(\.frames, .via, probe: probe))
+                .frame(maxHeight: .infinity, alignment: .bottom)
+        }
+    }
+
+    /// The words' column in a list. Beside a picture that names its app, the column is the
+    /// picture's height with the app's line at its foot, and the words have what is left above it
+    /// — cut there, never run under it.
+    @ViewBuilder
+    private func listWords(_ written: Written) -> some View {
+        if picturePlace == .slot, Self.viaLine(item.via) != nil {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                wordsColumn(written)
+                    .modifier(Probed(\.frames, .words, probe: probe))
+                Spacer(minLength: 0)
+                viaFoot
+                    .modifier(Probed(\.frames, .via, probe: probe))
+                    .layoutPriority(1)
+            }
+            .frame(height: slotSide, alignment: .top)
+        } else {
+            wordsColumn(written)
+                .modifier(Probed(\.frames, .words, probe: probe))
         }
     }
 
@@ -1463,9 +1504,11 @@ struct DummyItemRow: View {
                 PollLine(poll: poll, acting: acting, covered: covered)
                     .modifier(Probed(\.frames, .poll, probe: probe))
             }
-            // The app that wrote it, at the foot of the words in the line it took from them
-            // (`bodyLines`); the pane gives it a line of its own above the marks.
-            if !inFull { viaFoot }
+            // A list row's preview is one line under the words, in the line it took from them
+            // (`bodyLines`); the pane draws it whole below (`previewBand`).
+            if !inFull, let preview {
+                LinkLine(preview: preview, open: openLink)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // The row a hashtag pressed in these words gives back when its page is left (#124).
@@ -1514,6 +1557,8 @@ struct DummyItemRow: View {
         if item.source.kind == .board, item.board != nil { lines -= 1 }
         // A poll's one line, in a list (#331).
         if poll != nil, !inFull { lines -= 1 }
+        // The preview's one line, in a list (#335).
+        if preview != nil, !inFull { lines -= 1 }
         // The app that wrote it, at the foot of the words.
         if Self.viaLine(item.via) != nil, !inFull { lines -= 1 }
         return max(1, lines)
@@ -1547,6 +1592,10 @@ struct DummyItemRow: View {
             )
             .frame(width: slotSide, height: slotSide)
             .modifier(Probed(\.frames, .picture, probe: probe))
+        } else if let preview, let url = preview.picture {
+            // The slot a post with no media keeps open holds its preview's picture (#335): the
+            // slot's square, so the row is the height of every row.
+            LinkPicture(preview: preview, url: url, side: slotSide, open: openLink)
         } else {
             Color.clear
                 .frame(width: slotSide, height: slotSide)
@@ -1671,6 +1720,33 @@ struct DummyItemRow: View {
         if inFull, !covered, let poll {
             PollBand(poll: poll, acting: acting)
                 .modifier(Probed(\.frames, .poll, probe: probe))
+        }
+    }
+
+    /// The preview this row draws (#335): the one its list built, and none while a cover is still
+    /// on the post — the preview is part of what the cover keeps back.
+    private var preview: LinkPreview? { covered ? nil : acting.preview }
+
+    /// The preview whole under the words, in the pane (`LinkBand`); its picture beside the words
+    /// in the slot where the pane keeps one, and in the band on a narrow page, which keeps none.
+    @ViewBuilder
+    private var previewBand: some View {
+        if inFull, let preview {
+            LinkBand(preview: preview, picture: narrow, open: openLink)
+        }
+    }
+
+    /// A preview's link, opened as a link in the words is: through the shell's own `openURL`.
+    private func openLink(_ url: URL) {
+        openURL(url)
+    }
+
+    /// The post's translation, beside its words (#334) — in the pane only, for `pollBand`'s
+    /// reason, and never under a cover: it is the covered words, in another language.
+    @ViewBuilder
+    private var translationBand: some View {
+        if inFull, !covered, let translation = acting.post?.translation {
+            TranslationBand(translation: translation, host: host)
         }
     }
 
@@ -2110,6 +2186,10 @@ enum RowBand: Hashable {
     case picture
     /// The post's poll: its one line in a list, the whole of it in the pane (#331).
     case poll
+    /// The post's words, beside the picture, in a list.
+    case words
+    /// The app that wrote it, at the band's foot in a list (V0).
+    case via
 }
 
 /// Where a hosted row laid its bands out, in the row's own space. See `DummyItemRow.probe`.

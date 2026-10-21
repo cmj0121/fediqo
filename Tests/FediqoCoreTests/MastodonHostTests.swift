@@ -17,11 +17,12 @@ struct MastodonHostTests {
         MastodonHostSays(document: Data(document.utf8))
     }
 
-    @Test("A real server's document says how many hashtags an account may feature, and of every other thing asked about it says nothing")
+    @Test("A real server's document says how many hashtags an account may feature and that it has no translator, and of every other thing asked about it says nothing")
     func theDocumentSaysLittle() {
         let said = Self.says(MastodonHostCaptures.document)
         #expect(said.featuredTagLimit == 10 && said.has(.featuredTags) == .present)
-        #expect(Self.unsaid.count == MastodonHostThing.allCases.count - 1)
+        #expect(said.translates == false && said.has(.translation) == .absent && said.pinLimit == 5)
+        #expect(Self.unsaid.count == MastodonHostThing.allCases.count - 3 && said.has(.quotes) == .present)
         for thing in Self.unsaid { #expect(said.has(thing) == .unsaid, "\(thing)") }
         for thing in MastodonHostThing.allCases { #expect(MastodonHostSays.nothing.has(thing) == .unsaid, "\(thing)") }
     }
@@ -136,7 +137,7 @@ struct MastodonHostTests {
         #expect(known == MastodonHostsKnown())
     }
 
-    @Test("What a host has is kept here and nowhere a kind of source is described; nothing of it is an address; and no version is read")
+    @Test("What a host has is kept here and nowhere a kind of source is described; nothing of it is an address; and no version string is read — only the host's own word for its API, which says whether it has quotes (D6)")
     func whereItLives() throws {
         var root = URL(fileURLWithPath: #filePath)
         while root.pathComponents.count > 1, !FileManager.default.fileExists(atPath: root.appending(path: "Package.swift").path) {
@@ -145,8 +146,13 @@ struct MastodonHostTests {
         let core = root.appending(path: "Sources/FediqoCore")
         let here = try String(contentsOf: core.appending(path: "MastodonHost.swift"), encoding: .utf8)
         let code = here.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }.joined(separator: "\n")
-        for word in ["URL", "version", "Version", "apiVersions", "http", "SourceOffers", "ProtocolKind"] {
-            #expect(!code.contains(word), "MastodonHost.swift's code names \(word)")
+        // **The one exception, decided** (#330, D6): `api_versions.mastodon` is the host's own word
+        // for which of Mastodon's APIs it speaks, and says whether it has quotes. It is read as
+        // that word and nothing else — never the version string a server names itself with.
+        let unexcepted = code.replacingOccurrences(of: "apiVersions", with: "").replacingOccurrences(of: "apiVersion", with: "")
+            .replacingOccurrences(of: "APIVersions", with: "")
+        for word in ["URL", "version", "Version", "http", "SourceOffers", "ProtocolKind"] {
+            #expect(!unexcepted.contains(word), "MastodonHost.swift's code names \(word)")
         }
         // The one reader of the document hands on three readings and reads no version for this
         // one. (`Probe.kind` does read the version string, for what KIND of server answers —

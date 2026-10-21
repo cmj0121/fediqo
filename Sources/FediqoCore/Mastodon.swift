@@ -449,6 +449,12 @@ struct StatusDTO: Decodable, Sendable {
     /// Whether the account this was fetched as has bookmarked it (#285). Absent on an unsigned
     /// read, as `reblogged` is.
     let bookmarked: Bool?
+    /// Whether the account this was fetched as pinned it (#334): sent only to the post's author,
+    /// and absent on every other read. Read leniently, as `language` is.
+    let pinned: Lenient<Bool>?
+    /// Whether the account this was fetched as quieted its conversation (#334). Absent on an
+    /// unsigned read, as `reblogged` is; read leniently, as `pinned` is.
+    let muted: Lenient<Bool>?
     let mediaAttachments: [MediaAttachment]?
     /// Whether the author covered it, and the line they covered it with. Optional because a
     /// server that did not send them has told us nothing, which is not the same as telling us
@@ -474,6 +480,13 @@ struct StatusDTO: Decodable, Sendable {
     /// The post's poll (#331), `null` on a status that has none. **Read leniently**, as `quote`
     /// is: a poll of a shape this build cannot read is no poll, and never costs the status.
     let poll: Lenient<PollDTO>?
+    /// The preview of the page it links to (#335), `null` where it has none or the source has not
+    /// fetched it yet. **Read leniently**, as `poll` is: a card of a shape this build cannot read is
+    /// no card, and never costs the status.
+    let card: Lenient<CardDTO>?
+    /// How many posts quote it, and who may (#330): on a source with quotes, read leniently.
+    let quotesCount: Lenient<Int>?
+    let quoteApproval: Lenient<QuoteApprovalDTO>?
 
     /// A value read where it can be and nothing where it cannot, rather than a failed decode.
     struct Lenient<Wrapped: Decodable & Sendable>: Decodable, Sendable {
@@ -572,6 +585,8 @@ struct StatusDTO: Decodable, Sendable {
     /// What came attached. `type` is the server's own word for it, kept rather than guessed
     /// at from the address, which rarely says.
     struct MediaAttachment: Decodable, Sendable {
+        /// The id its source gave the file: what a change of the post keeps it by (#332).
+        let id: String?
         let type: String?
         let url: String?
         let previewUrl: String?
@@ -737,6 +752,8 @@ struct StatusDTO: Decodable, Sendable {
             boosted: subject.reblogged,
             favourited: subject.favourited,
             bookmarked: subject.bookmarked,
+            pinned: subject.pinned?.value,
+            muted: subject.muted?.value,
             audience: Self.audience(subject.visibility),
             avatarURL: Host.fetchableURL(subject.account.avatar),
             attachments: subject.mediaAttachments?.compactMap { $0.asAttachment } ?? [],
@@ -757,7 +774,8 @@ struct StatusDTO: Decodable, Sendable {
             counts: Counts(
                 replies: subject.repliesCount,
                 reblogs: subject.reblogsCount,
-                favourites: subject.favouritesCount
+                favourites: subject.favouritesCount,
+                quotes: subject.quotesCount?.value.flatMap { $0 >= 0 ? $0 : nil }
             ),
             // The post's own id on this server: what the row is.
             statusID: subject.id,
@@ -765,6 +783,11 @@ struct StatusDTO: Decodable, Sendable {
             language: subject.language?.value,
             via: Self.applicationName(subject.application),
             poll: subject.poll?.value?.poll,
+            card: subject.card?.value?.card,
+            quoteApproval: subject.quoteApproval?.value?.approval,
+            // The reader's word only from a read made as them, which is one that says what they
+            // did (`favourited`): an unsigned read is told `denied` of every post (#330).
+            mayQuote: subject.favourited != nil ? subject.quoteApproval?.value?.reader : nil,
             // What it refers to, as the status says it: the post it answers, the post it quotes.
             refs: [
                 Self.answers(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),

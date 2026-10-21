@@ -106,6 +106,8 @@ final class ShellSession {
     @ObservationIgnored var loads = LoadPacer()
     /// What this session has asked its sources for of what items owe (#293).
     @ObservationIgnored let refs = ShellRefs()
+    /// What changed posts said before, asked of their sources in the same lines (#332).
+    @ObservationIgnored let history = ShellHistory()
     /// Whether this run asks for what items refer to at all. Not where the store was not read
     /// at launch (#295): a run that holds nothing it may write asks for nothing nobody pressed
     /// for. Set once by the app (`loadsStartWith`); a test sets its own.
@@ -1059,28 +1061,23 @@ final class ShellSession {
     /// The watch on the person's list, taken off as this goes.
     @ObservationIgnored private nonisolated(unsafe) var allowanceWatch: (any NSObjectProtocol)?
 
-    /// The unsent text, kept when the composer closes without sending (#56). In-session only.
-    /// A send takes it at the press (`send()`), and what is typed afterwards is a new draft.
-    var composeDraft = ""
+    /// The new post being written, kept when the composer closes without sending (#56).
+    /// In-session only. A send takes it at the press (`send()`), and what is typed afterwards is
+    /// a new draft. **Its own value** (`PostDraft`, #332): a change of a published post is
+    /// written in another, and neither writes over the other. Who it reaches starts from the
+    /// source's own default where the person has not chosen; the cover, the files and the poll
+    /// go with each post, and its language and whether it covers its media stay for the next.
+    var composeDraft = PostDraft()
+    /// A change of one's own published post, in its sheet (#332): a draft of its own.
+    @ObservationIgnored let changes = ShellChange()
+    /// What waits at a source to be sent later, in its sheet (#333).
+    @ObservationIgnored let later = ShellLater()
+    /// Quoting (#330): a quote begun, who may quote one's own posts, and their quotes.
+    @ObservationIgnored let quoting = ShellQuoting()
     /// The source the composer will write to, among those that may be written on.
     var composeHost: String?
-    /// How far the post goes. Default public, which is what a Mastodon calls everyone.
-    /// A new post starts from the source's own default where the person has not chosen.
-    var composeAudience: Audience = .everyone
-    /// The cover line. Cleared when a post is taken; not a default the source sets.
-    var composeCover = ""
-    /// The language, folded when it is taken from the source. Empty is none, and is not sent.
-    var composeLanguage = ""
-    /// Whether the post covers its media, where that was chosen. Nothing is not a no, and is
-    /// not sent.
-    var composeCoversMedia: Bool?
-    /// The files added, in order.
-    var composeMedia: [UnsentMedia] = []
     /// Why a file was not added, or nothing.
     var composeMediaNote: String?
-    /// The poll the post is written with (#331), or nothing. Never beside a file: a Mastodon
-    /// takes a poll or media on a post, not both, and the composer offers the one or the other.
-    var composePoll: NewPoll?
     /// Why the last press to add a poll added none: the post carries a file. Said only while
     /// it still does (`composePollSays`).
     var composePollRefused: String?
@@ -1219,41 +1216,34 @@ final class ShellSession {
     func adoptComposeDefaults(for host: String) {
         guard let defaults = composeDefaults[host] else { return }
         if !composeTouchedAudience, case .known(let audience)? = defaults.reach {
-            composeAudience = audience
+            composeDraft.audience = audience
         }
         if !composeTouchedLanguage {
-            composeLanguage = SourceField.languageTag(defaults.language) ?? ""
+            composeDraft.language = SourceField.languageTag(defaults.language) ?? ""
         }
         if !composeTouchedSensitive, let covers = defaults.coversMedia {
-            composeCoversMedia = covers
+            composeDraft.coversMedia = covers
         }
     }
 
     func chooseAudience(_ audience: Audience) {
         composeTouchedAudience = true
-        composeAudience = audience
+        composeDraft.audience = audience
     }
 
     func chooseLanguage(_ language: String) {
         composeTouchedLanguage = true
-        composeLanguage = language
+        composeDraft.language = language
     }
 
     func chooseCoversMedia(_ covers: Bool) {
         composeTouchedSensitive = true
-        composeCoversMedia = covers
+        composeDraft.coversMedia = covers
     }
 
     /// Whether the files already added are within what the source said it takes.
     func attachmentsOK(host: String) -> Bool {
-        let limits = mediaLimits(of: host)
-        guard composeMedia.count <= limits.count else { return false }
-        for piece in composeMedia {
-            if piece.description.count > limits.descriptionLimit { return false }
-            if !limits.allows(piece.mime) { return false }
-            if let ceiling = limits.byteLimit(for: piece.mime), piece.bytes.count > ceiling { return false }
-        }
-        return true
+        composeDraft.attachmentsOK(mediaLimits(of: host))
     }
 
     /// Adds one file the person already has in hand. Returns why it was not added, or nothing.
@@ -1262,65 +1252,40 @@ final class ShellSession {
     func composeAttach(bytes: Data, name: String, type: String, description: String = "") -> String? {
         let host = composeHost ?? ""
         let limits = composeHost.map { mediaLimits(of: $0) } ?? .unstated
-        let refusal: MastodonWriteRefusal? = if composeMedia.count >= limits.count {
-            .tooMany(count: limits.count)
-        } else if !limits.allows(type) {
-            .kind
-        } else if let ceiling = limits.byteLimit(for: type), bytes.count > ceiling {
-            .tooLarge(limit: ceiling)
-        } else if description.count > limits.descriptionLimit {
-            .description(limit: limits.descriptionLimit)
-        } else {
-            nil
-        }
-        if let refusal {
+        if let refusal = composeDraft.refusal(adding: bytes, type: type, description: description, within: limits) {
             let note = ComposeWords.refusalLine(refusal, host: host)
             composeMediaNote = note
             return note
         }
-        composeMedia.append(UnsentMedia(bytes: bytes, mime: type, name: name, description: description))
+        composeDraft.media.append(UnsentMedia(bytes: bytes, mime: type, name: name, description: description))
         composeMediaNote = nil
         return nil
-    }
-
-    func composeRemoveMedia(_ id: UUID) {
-        composeMedia.removeAll { $0.id == id }
     }
 
     /// Starts a poll on the post, where it carries no file: two empty choices, one to choose,
     /// for a day — or the shortest run the source takes, where a day is not among them.
     func composeAddPoll() {
-        guard composePoll == nil else { return }
-        guard composeMedia.isEmpty else {
+        guard composeDraft.poll == nil else { return }
+        guard composeDraft.media.isEmpty else {
             composePollRefused = ComposeWords.refusalLine(.pollWithMedia, host: composeHost ?? "")
             return
         }
         composePollRefused = nil
-        var poll = NewPoll.fresh
-        let runs = composePollLimits.offeredRuns
-        if !runs.contains(poll.runs) { poll.runs = runs.first ?? poll.runs }
-        composePoll = poll
+        composeDraft.poll = composeDraft.freshPoll(within: composePollLimits)
     }
 
     func composeRemovePoll() {
-        composePoll = nil
+        composeDraft.poll = nil
     }
 
     /// Adds an empty choice to the poll, up to as many as the source takes.
     func composeAddChoice() {
-        guard var poll = composePoll else { return }
-        guard poll.choices.count < composePollLimits.choices else { return }
-        poll.choices.append("")
-        composePoll = poll
+        composeDraft.addChoice(within: composePollLimits)
     }
 
     /// Takes one choice off the poll, where it has more than the two a poll needs.
     func composeRemoveChoice(at index: Int) {
-        guard var poll = composePoll, poll.choices.indices.contains(index),
-              poll.choices.count > MastodonPollLimits.leastChoices
-        else { return }
-        poll.choices.remove(at: index)
-        composePoll = poll
+        composeDraft.removeChoice(at: index)
     }
 
     /// How large a poll the composer's source takes, or Mastodon's own where none is chosen.
@@ -1331,13 +1296,13 @@ final class ShellSession {
     /// What the composer's poll place says: why a press added no poll, while the file that kept
     /// it out is still there — gone with the file — or why the poll cannot go as it is.
     var composePollSays: String? {
-        (composeMedia.isEmpty ? nil : composePollRefused) ?? composePollNote()
+        (composeDraft.media.isEmpty ? nil : composePollRefused) ?? composePollNote()
     }
 
     /// Why the poll cannot go as it is, in a sentence, or nothing where it can.
     func composePollNote() -> String? {
-        guard let poll = composePoll, let host = composeHost else { return nil }
-        return poll.refusal(within: composePollLimits).map { ComposeWords.refusalLine($0, host: host) }
+        guard let host = composeHost else { return nil }
+        return composeDraft.pollRefusal(within: composePollLimits).map { ComposeWords.refusalLine($0, host: host) }
     }
 
     /// The Add press. Where the sign-in already holds media, the system picker opens. Where it
@@ -1345,54 +1310,85 @@ final class ShellSession {
     /// and the picker does not open by itself when that page returns.
     func composeAddMedia() {
         guard let host = composeHost else { return }
-        // A post carries a poll or media, not both (#331): the poll goes first, by the person.
-        if composePoll != nil {
-            composeMediaNote = ComposeWords.refusalLine(.pollWithMedia, host: host)
-            return
+        switch mediaPress(host: host, hasPoll: composeDraft.poll != nil) {
+        case .refused(let note): composeMediaNote = note
+        case .opens: composeImporting = true
+        case .asked(let note): if let note { composeMediaNote = note }
         }
-        if mastodon.standing(.media, host: host) == .held {
-            composeImporting = true
-            return
-        }
-        if let place = mastodon.place(.media, host: host) {
-            composeMediaNote = String(format: L10n.t(place.key), host)
-        }
+    }
+
+    /// What the Add press over a draft at `host` does: a draft with a poll takes no file (#331),
+    /// and the poll goes first, by the person; where the sign-in holds media, the system picker
+    /// opens; where it does not, the place says why — where it can — and the part is asked for.
+    enum MediaPress: Equatable {
+        case refused(String)
+        case opens
+        case asked(String?)
+    }
+
+    /// The Add press over a draft at `host` (`MediaPress`) — the composer's, and a change's.
+    func mediaPress(host: String, hasPoll: Bool) -> MediaPress {
+        if hasPoll { return .refused(ComposeWords.refusalLine(.pollWithMedia, host: host)) }
+        if mastodon.standing(.media, host: host) == .held { return .opens }
+        let note = mastodon.place(.media, host: host).map { String(format: L10n.t($0.key), host) }
         _ = askFor([.media], host: host)
+        return .asked(note)
     }
 
     /// What the system picker handed back. A file that cannot be taken is said, and nothing
     /// already typed or already added is cleared.
     func composeRead(_ result: Result<[URL], Error>) {
+        if case .success = result, composeHost == nil { return }
+        let host = composeHost ?? ""
+        if let note = Self.readPicked(result, into: &composeDraft, host: host, limits: composeHost.map { mediaLimits(of: $0) } ?? .unstated) {
+            composeMediaNote = note
+        }
+    }
+
+    /// What the system picker handed back, added to `draft` within `limits`, a file at a time —
+    /// the composer's, and a change's. The note to show after: a file that could not be taken, or
+    /// nothing once one was (`.some(nil)`) — and nothing to change (`nil`) where the picker was
+    /// closed, or handed back nothing.
+    static func readPicked(
+        _ result: Result<[URL], Error>, into draft: inout PostDraft, host: String, limits: MastodonMediaLimits
+    ) -> String?? {
         switch result {
         case .failure(let error):
             let cocoa = error as NSError
-            if cocoa.domain == NSCocoaErrorDomain, cocoa.code == NSUserCancelledError { return }
-            composeMediaNote = L10n.t("compose.media.unreadable")
+            if cocoa.domain == NSCocoaErrorDomain, cocoa.code == NSUserCancelledError { return nil }
+            return .some(L10n.t("compose.media.unreadable"))
         case .success(let urls):
-            guard let host = composeHost else { return }
-            let limits = mediaLimits(of: host)
+            var note: String?? = nil
             for url in urls {
                 switch ComposeFile.read(url, host: host, limits: limits) {
-                case .refused(let note):
-                    composeMediaNote = note
-                    return
+                case .refused(let refused):
+                    return .some(refused)
                 case .taken(let taken):
-                    if composeAttach(bytes: taken.bytes, name: taken.name, type: taken.type) != nil { return }
+                    if let refusal = draft.refusal(adding: taken.bytes, type: taken.type, description: "", within: limits) {
+                        return .some(ComposeWords.refusalLine(refusal, host: host))
+                    }
+                    draft.media.append(UnsentMedia(bytes: taken.bytes, mime: taken.type, name: taken.name))
+                    note = .some(nil)
                 }
             }
+            return note
         }
     }
 
     var canPost: Bool {
+        // A time to send where the sign-in may not give one (#333): the post waits for that.
+        if composeDraft.at != nil, composeHost.flatMap({ laterSlot(host: $0) })?.locked != nil { return false }
+        // A quote carries neither files nor a poll (D3).
+        if composeDraft.quoting != nil, !composeDraft.media.isEmpty || composeDraft.poll != nil { return false }
         let hostOK = composeHost.map { host in writableSources.contains { $0.host == host } } ?? false
         return ComposerSheet.canSend(
-            text: composeDraft,
+            text: composeDraft.text,
             limit: composeHost.map(postLimit(of:)) ?? MastodonWrite.defaultLimit,
             hasSource: hostOK,
-            cover: composeCover,
-            attachments: composeMedia.count,
-            attachmentsOK: composeHost.map { attachmentsOK(host: $0) } ?? composeMedia.isEmpty,
-            pollOK: composePoll == nil || (composeMedia.isEmpty && composePollNote() == nil)
+            cover: composeDraft.cover,
+            attachments: composeDraft.media.count,
+            attachmentsOK: composeHost.map { attachmentsOK(host: $0) } ?? composeDraft.media.isEmpty,
+            pollOK: composeDraft.poll == nil || (composeDraft.media.isEmpty && composePollNote() == nil)
         )
     }
 
@@ -3104,7 +3100,7 @@ final class ShellSession {
     ///
     /// `again` reads the notes whatever the count says: what is drawn of them moved with no
     /// word from the store — a taking back pressed, answered or failed (`acts.leaving`).
-    private func adopt(again: Bool = false) async {
+    func adopt(again: Bool = false) async {
         // Before anything is read: what an ended sign-in's reader had done to its posts (#285).
         await forgetReaderMarksDue()
         await adoptSources()
@@ -3163,6 +3159,7 @@ final class ShellSession {
         // for**: adopting is what every landing and every press waits on, and asking a source's
         // line for a load is not part of having adopted.
         if all != nil { refs.landing(in: self) }
+        if all != nil { history.landing(in: self) }
         // What the screens draw of what was just adopted, said to the store (#359): the rows
         // it may then let go are drawn nowhere.
         await holdDrawn()
@@ -3390,6 +3387,7 @@ final class ShellSession {
         // above must have happened before anything can run between.
         await loads.letGo(host: host)
         refs.forget(host: host)
+        history.letGo(host: host)
         await emoji.forget(host: host)
         emojis.forget(host: host)
         if keepingRows { pictures.letGo(host: host) } else { pictures.forget(host: host) }
@@ -3684,6 +3682,7 @@ final class ShellSession {
             stopReadingAsYou(host: host)
             await loads.letGo(host: host)
             refs.letGo(host: host)
+            history.letGo(host: host)
             noticeList.forget(host: host)
             acts.forget(host: host)
             said.forget(host: host)

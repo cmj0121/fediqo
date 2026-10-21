@@ -115,6 +115,18 @@ Mastodon 伺服器沒有跑 worker，所以它的 seed 會替第一個帳號做�
 會移除通知的檢查會把通知用掉：兩次 seed 之間夠跑四次，超過的那一次會說要重新 seed，
 再跑一次 `make servers` 就補回用掉的。
 
+排定稍後送出的貼文和連結的預覽需要那個 worker。`FEDIQO_SERVERS_WORKER=1 make servers` 會在 seed 之後、
+在 web 程序旁把它帶起來。之後它會跑每個排隊的工作——包括 seed 刻意不跑的 fan-out，
+以及定時替建議名單排名的工作，而 seed 的建議名單正是建立在沒有人排名之上——其餘的檢查都建立在
+不跑工作的伺服器上。所以它的檢查要單獨跑（其中一個要等伺服器規定貼文至少等待的五分鐘），
+而它做過的事會一直留到伺服器被丟掉：在那之上單獨跑 `make servers` 會拒絕，並請你先跑 `make servers-down`。
+
+```text
+FEDIQO_SERVERS_WORKER=1 make servers
+FEDIQO_SERVERS_WORKER=1 swift test --filter MastodonWorkerSaysTests
+make servers-down
+```
+
 ## 怎麼用
 
 空的啟動會打開帳號頁。加入一個 Mastodon 主機或一個 Discuz 論壇當來源——從目錄挑，或自己輸入主機名稱。

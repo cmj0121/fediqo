@@ -1067,6 +1067,15 @@ public struct StoreFile: Sendable {
     static let readBackAsidePrefix = "incoming-aside-"
 }
 
+extension StoreFile {
+    /// Every store step this build knows, in the order they are taken: what a store this build
+    /// wrote has taken, and what a test holds one to.
+    static var migrationIDs: [String] { migrator.migrations }
+
+    /// The last store step this build knows.
+    static var latestMigration: String { migrationIDs.last ?? "" }
+}
+
 private var migrator: DatabaseMigrator {
     var migrator = DatabaseMigrator()
     migrator.registerMigration("v1-index") { db in
@@ -1480,6 +1489,71 @@ private var migrator: DatabaseMigrator {
     // not know, and its next save would lose every such row's category for good. The id makes it
     // refuse the store instead.
     migrator.registerMigration("v17-marks") { _ in }
+    // Whether the reader pinned a row to their page at its source, and whether they quieted its
+    // conversation, as the source last said (#334) — NULL where it never said, which every row
+    // already stored is.
+    //
+    // **A migration id for `v7-bookmarked`'s reason**: an older build's first save would write
+    // every row back without them, and a relaunch under this build would draw pinned posts as
+    // not pinned. The id makes it refuse the store.
+    migrator.registerMigration("v18-standing") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "pinned", .boolean)
+            t.add(column: "muted", .boolean)
+        }
+    }
+    // The preview of the page a row links to, as its source last said it (#335), as JSON
+    // (`CardRow`) — NULL where it has none, which every row already stored is until a read
+    // brings one.
+    //
+    // **A migration id for `v7-bookmarked`'s reason**: an older build's first save would write
+    // every row back without it. The id makes it refuse the store.
+    migrator.registerMigration("v19-card") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "card", .text)
+        }
+    }
+    // Which published post a text waiting to be sent changes (#332). NULL is a post or an answer.
+    //
+    // **A migration id for `v15-compose`'s reason**: a build from before would send the change
+    // as a new post — the same words posted twice. The id makes it refuse the store.
+    migrator.registerMigration("v20-unsent-changes") { db in
+        try db.alter(table: "unsent") { t in
+            t.add(column: "changes", .text)
+        }
+    }
+    // Who may quote a row, and whether its reader may (#330), as its source last said, as JSON
+    // (`QuoteApprovalRow`) — NULL where it never said; and how many posts quote it, among the
+    // counts its facts hold.
+    //
+    // **A migration id for `v7-bookmarked`'s reason**: an older build's first save would write
+    // every row back without either. The id makes it refuse the store.
+    migrator.registerMigration("v21-quotes") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "quote_approval", .text)
+            t.add(column: "may_quote", .text)
+        }
+    }
+    // When a text waiting to be sent is to be sent by its source (#333). NULL is at once.
+    //
+    // **A migration id for `v15-compose`'s reason**: a build from before would send the post at
+    // once, which the person asked to go later. The id makes it refuse the store.
+    migrator.registerMigration("v22-unsent-at") { db in
+        try db.alter(table: "unsent") { t in
+            t.add(column: "send_at", .datetime)
+        }
+    }
+    // The post a text waiting to be sent quotes, and who may quote it (#330). NULL is none, and
+    // the account's own default.
+    //
+    // **A migration id for `v15-compose`'s reason**: a build from before would send the post
+    // without its quote — another post than the one written. The id makes it refuse the store.
+    migrator.registerMigration("v23-unsent-quoting") { db in
+        try db.alter(table: "unsent") { t in
+            t.add(column: "quoting", .text)
+            t.add(column: "quote_policy", .text)
+        }
+    }
     return migrator
 }
 
@@ -1856,6 +1930,11 @@ private struct NoteFacts: Codable {
     /// What it says of the reader is taken off with their other marks when their sign-in ends
     /// (`StoreFile.readerSaid`).
     var poll: PollRow?
+    /// `Note.historyAt` (#332): the change the row's earlier wordings were asked of its source
+    /// for. Additive and optional, as `via` is, so no migration id: a row written before reads
+    /// as never asked, and asks once; an older build ignores the key, and a row it writes back
+    /// without it asks once again — the one thing lost is an ask already made.
+    var historyAt: Date?
 }
 
 /// `Poll` as `NoteFacts` writes it. Held to `Poll`'s own bounds on the way back, whoever wrote
@@ -1905,6 +1984,8 @@ private struct CountsRow: Codable {
     var replies: Int?
     var reblogs: Int?
     var favourites: Int?
+    /// With `v21-quotes`' id (#330).
+    var quotes: Int?
 
     /// Nothing for counts that state nothing, so a row with none writes no key.
     init?(_ counts: Counts) {
@@ -1912,9 +1993,10 @@ private struct CountsRow: Codable {
         replies = counts.replies
         reblogs = counts.reblogs
         favourites = counts.favourites
+        quotes = counts.quotes
     }
 
-    var counts: Counts { Counts(replies: replies, reblogs: reblogs, favourites: favourites) }
+    var counts: Counts { Counts(replies: replies, reblogs: reblogs, favourites: favourites, quotes: quotes) }
 }
 
 /// One timeline's listing of a row, as `NoteFacts` writes it.
@@ -1994,7 +2076,88 @@ private struct QuotationRow: Codable {
     }
 }
 
+/// One value as a cell's JSON text, and back: one encoder and one decoder for every row that
+/// writes one, and a cell read only within `longest` — `ReferenceRow.longestCell` where its row
+/// says no nearer bound.
+private enum JSONCell {
+    private static let encoder = JSONEncoder()
+    private static let decoder = JSONDecoder()
+
+    /// `value` as the cell's text, or nothing where it will not encode.
+    static func text<Value: Encodable>(_ value: Value) -> String? {
+        guard let data = try? encoder.encode(value) else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// The value a cell holds, or nothing for none, one past `longest`, or one this build cannot read.
+    static func value<Value: Decodable>(_ type: Value.Type, from text: String?, longest: Int = ReferenceRow.longestCell) -> Value? {
+        guard let text, text.utf8.count <= longest else { return nil }
+        return try? decoder.decode(type, from: Data(text.utf8))
+    }
+}
+
 /// `Wording` as `note.earlier` writes it.
+/// Who may quote a row as `note.quote_approval` writes it (#330): the two lists as the source
+/// spelled them.
+private struct QuoteApprovalRow: Codable {
+    var automatic: [String]
+    var manual: [String]
+
+    static func text(_ approval: QuoteApproval?) -> String? {
+        approval.flatMap { JSONCell.text(QuoteApprovalRow(automatic: $0.automatic, manual: $0.manual)) }
+    }
+
+    /// The approval a cell holds, or nothing where it holds nothing this build can read.
+    static func approval(_ text: String?) -> QuoteApproval? {
+        guard let row = JSONCell.value(QuoteApprovalRow.self, from: text, longest: 4_096) else { return nil }
+        // Held to the filter the wire's lists are, whoever wrote the cell.
+        return QuoteApproval(automatic: QuoteApproval.kept(row.automatic), manual: QuoteApproval.kept(row.manual))
+    }
+}
+
+/// One preview as `note.card` writes it (#335): every part, the addresses as text.
+private struct CardRow: Codable {
+    var title: String
+    var description: String?
+    var provider: String?
+    var author: String?
+    var url: String?
+    var image: String?
+    var width: Int?
+    var height: Int?
+    var missingAttribution: Bool?
+
+    init(_ card: PostCard) {
+        title = card.title
+        description = card.description
+        provider = card.provider
+        author = card.author
+        url = card.url?.absoluteString
+        image = card.image?.absoluteString
+        width = card.width
+        height = card.height
+        missingAttribution = card.missingAttribution
+    }
+
+    /// `card` as the cell's text, or nothing for none.
+    static func text(_ card: PostCard?) -> String? {
+        card.flatMap { JSONCell.text(CardRow($0)) }
+    }
+
+    /// The most a cell is read of: a card's words and two addresses are well under it.
+    static let cellLength = 8_192
+
+    /// The card a cell holds, held to every card's bounds again (`PostCard.init(stored:)`) — or
+    /// nothing where it holds nothing this build can read, or more than a card is.
+    static func card(_ text: String?) -> PostCard? {
+        guard let row = JSONCell.value(CardRow.self, from: text, longest: cellLength) else { return nil }
+        return PostCard(
+            stored: row.title, description: row.description, provider: row.provider, author: row.author, url: row.url,
+            image: row.image, width: row.width, height: row.height, missingAttribution: row.missingAttribution
+        )
+    }
+}
+
 private struct WordingRow: Codable {
     var body: String
     var spoiler: String?
@@ -2098,6 +2261,20 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var kept: Bool
     /// `Note.bookmarked` (#285). A column behind its own migration id, for the reason given on `kept`.
     var bookmarked: Bool?
+    /// `Note.pinned` and `Note.muted` (#334). Columns behind their own migration id, for the
+    /// reason given on `kept`.
+    var pinned: Bool?
+    var muted: Bool?
+    /// `Note.card` (#335) as `CardRow` JSON, or nothing for none. A column behind its own migration
+    /// id, for the reason given on `kept`; kept as text and read leniently, as `earlier` is: a
+    /// card that will not read is a row without its preview, and never a store set aside.
+    var card: String?
+    /// `Note.quoteApproval` (#330) as `QuoteApprovalRow` JSON, or nothing for none. With
+    /// `v21-quotes`' id; kept as text and read leniently, as `card` is.
+    var quote_approval: String?
+    /// `Note.mayQuote` (#330), the reader's word, as `QuoteApproval.Reader`'s spelling. With
+    /// `v21-quotes`' id; a spelling this build does not know is read as nothing.
+    var may_quote: String?
     /// `Note.editedAt` (#286). A column behind its own migration id, for the reason given on `kept`.
     var edited_at: Date?
     /// `Note.earlier` (#286) as a JSON array of `WordingRow`, or nothing where the row holds
@@ -2124,6 +2301,11 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         gone_at = note.goneSince
         kept = note.kept
         bookmarked = note.bookmarked
+        pinned = note.pinned
+        muted = note.muted
+        card = CardRow.text(note.card)
+        quote_approval = QuoteApprovalRow.text(note.quoteApproval)
+        may_quote = note.mayQuote?.rawValue
         edited_at = note.editedAt
         earlier = WordingRow.text(note.earlier)
         language = note.language
@@ -2157,7 +2339,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             kind: note.source.kind.rawValue,
             mentions: note.mentions.isEmpty ? nil : note.mentions,
             via: note.via,
-            poll: note.poll.map(PollRow.init)
+            poll: note.poll.map(PollRow.init),
+            historyAt: note.historyAt
         )
     }
 
@@ -2224,6 +2407,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             boosted: facts.boosted,
             favourited: facts.favourited,
             bookmarked: bookmarked,
+            pinned: pinned,
+            muted: muted,
             audience: facts.audience.flatMap(Audience.init(rawValue:)),
             avatarURL: facts.avatarURL,
             attachments: facts.attachments.map(\.attachment),
@@ -2245,9 +2430,13 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             editedAt: edited_at,
             // Held to the bounds every kept wording is held to, whoever wrote the cell.
             earlier: Wording.bounded(WordingRow.wordings(earlier)),
+            historyAt: facts.historyAt,
             language: language,
             via: facts.via,
             poll: facts.poll?.poll,
+            card: CardRow.card(card),
+            quoteApproval: QuoteApprovalRow.approval(quote_approval),
+            mayQuote: may_quote.flatMap(QuoteApproval.Reader.init(rawValue:)),
             refs: references,
             refsDue: refs_due
         )

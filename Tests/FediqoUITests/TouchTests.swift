@@ -36,7 +36,7 @@ struct TouchTests {
     @Test("Every key the guide names outside App can be done without one")
     func everyTimelineKeyHasATouchPath() {
         let timeline = DummyShortcut.all.filter { $0.group != .app }
-        #expect(timeline.count == 24)
+        #expect(timeline.count == 28)
         let short = timeline.filter { $0.touch == .keysOnly || $0.touch == .partly }.map(\.name)
         #expect(short.isEmpty, "no touch path for: \(short.joined(separator: ", "))")
     }

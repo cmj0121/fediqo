@@ -65,6 +65,12 @@ struct ItemActing {
         func line(language: DummyLanguage? = nil) -> String? {
             place.kind == .unasked ? nil : String(format: L10n.t(place.key, language: language), host)
         }
+
+        /// What the head of a menu says of the lock: its line, or the place's own words where it
+        /// was never asked.
+        func headLine(language: DummyLanguage? = nil) -> String {
+            line(language: language) ?? String(format: L10n.t(place.key, language: language), host)
+        }
     }
     /// Taking the post back (#109), which is never a mark: the question it asks and what its yes
     /// does, for the one destructive item of the row's `…`. Nothing where the list cannot act,
@@ -95,6 +101,21 @@ struct ItemActing {
     /// Nothing where the post is not one to report: no sign-in at its source, a kind of source
     /// with no reports, the reader's own, or one gone.
     var report: Report?
+    /// Pinning, quieting, translating, and who boosted and favourited it (#334): items of the
+    /// row's `…` (`ItemActs.postItems`), and the translation drawn beside its words. Nothing
+    /// where its source has none of them, or the list cannot act.
+    var post: PostMore?
+    /// Changing the post (#332), an item of the own post's group (`ItemActs.ownItems`).
+    var change: Change?
+    /// The quote mark (#330): live, or dim with its one reason. Nothing where quoting is none of
+    /// the post's source's, and the mark is dim as it always was.
+    var quote: QuoteMark?
+    /// Who may quote the reader's own post, and its quotes (#330): the own post's group.
+    var ownQuotes: OwnQuotes?
+    /// The preview of the page the post links to, where the row draws one (#335): previews on,
+    /// a card, no media of its own — and its picture only where the gate lets it through. Nothing
+    /// where the list cannot read, which draws no preview and asks nothing.
+    var preview: LinkPreview?
 
     struct Report {
         var lock: Lock?
@@ -404,6 +425,10 @@ extension ItemActs {
                 let count = (shown.count ?? 0) > 0 ? shown.count : nil
                 return made(kind, ShellMark(shown.glyph, shown.spoken, look: look, on: shown.done, count: count), why: why)
             case .quote:
+                if let quote = acting.quote {
+                    let mark = ShellMark("quote.bubble", L10n.t("item.act.quote", language: language), look: quote.look)
+                    return made(kind, mark, why: quote.why)
+                }
                 let mark = ShellMark("quote.bubble", L10n.t("item.act.quote", language: language), look: .dim(.notNow))
                 let label = String(format: said, mark.name, quoteLine(language: language))
                 return RowMark(kind: kind, mark: mark, label: label)
@@ -431,7 +456,10 @@ extension ItemActs {
             ShellMark.pressed(mark.mark.look, act: { acting.perform?(act) }, ask: asks(mark, acting: acting))
         case .keep:
             ShellMark.pressed(mark.mark.look, act: { acting.keep?() }, ask: nil)
-        case .quote, .more:
+        case .quote:
+            guard let quote = acting.quote else { break }
+            ShellMark.pressed(mark.mark.look, act: { quote.press?() }, ask: quote.look == .dim(.askAgain) ? quote.press : nil)
+        case .more:
             break
         }
     }
@@ -457,14 +485,18 @@ extension ItemActs {
         if let leave {
             items.append(.plain("arrow.up.forward.app", item.outwardName, act: leave))
         }
+        items += postItems(acting.post, group: .reading, language: language)
+        // Lane A's own-post items (Change it…, Who may quote it, Quotes of it) go here, before Pin and Quiet.
+        let own = ownItems(on: item, acting: acting, language: language)
+        items += own.items
+        items += postItems(acting.post, group: .own, language: language)
         // Reporting it (#339): to those who answer for its source, asked on a sheet first.
         var reportLock: String?
         if let report = acting.report {
             let name = L10n.t("item.act.report", language: language)
             if let lock = report.lock {
-                reportLock = lock.line(language: language) ?? String(format: L10n.t(lock.place.key, language: language), lock.host)
-                let dim = ShellMark(SourceRow.permissionSymbol, name, look: .dim(.askAgain))
-                items.append(ShellMoreItem.plain(dim, ask: lock.place.asks ? report.press : nil, act: {}).underHead)
+                reportLock = lock.headLine(language: language)
+                items.append(.locked(name: name, lock: lock, press: report.press))
             } else {
                 items.append(.plain(PersonActing.reportSymbol, name, act: report.press))
             }
@@ -490,7 +522,8 @@ extension ItemActs {
         // sign-in stands, where a pointer and VoiceOver hear it on the mark.
         let locked = PostAct.allCases.compactMap { acting.locks[$0]?.line(language: language) }
         let head = head(for: item, here: here, refused: acting.acts.refused, language: language)
-            + ShellMore.reasons(of: shared, language: language) + locked + quoted + [reportLock].compactMap { $0 }
+            + ShellMore.reasons(of: shared, language: language) + locked + quoted + own.head + [reportLock].compactMap { $0 }
+            + postLocks(acting.post, language: language)
         return ShellMore(head: head, items: items)
     }
 
@@ -498,6 +531,8 @@ extension ItemActs {
     /// put: only the act the sign-in must be asked again for (#285), and only in a list that can
     /// ask.
     private static func asks(_ mark: RowMark, acting: ItemActing) -> (() -> Void)? {
+        // The quote mark's lock asks for the writing part (#330).
+        if mark.kind == .quote, let quote = acting.quote, quote.look == .dim(.askAgain) { return quote.press }
         guard case .act(let act) = mark.kind, acting.acts.asks(act), let ask = acting.ask else { return nil }
         return { ask(act) }
     }

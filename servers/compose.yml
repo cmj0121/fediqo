@@ -45,7 +45,16 @@ services:
       - "[::1]:443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./card:/srv/card:ro
       - caddy-data:/data
+    # The name of the page a post links to for a preview (`servers/card`), for whoever asks
+    # from inside this network: Mastodon's worker, and nothing on this machine. A name under
+    # `example.com`, reserved for examples, because a link Mastodon reads in a post is one whose
+    # name ends in a real top-level domain and `.localhost` is not one.
+    networks:
+      default:
+        aliases:
+          - card.example.com
     depends_on:
       - mastodon-web
       - discourse
@@ -96,6 +105,29 @@ services:
       timeout: 5s
       retries: 30
       start_period: 60s
+    restart: unless-stopped
+
+  # Mastodon's background worker: what publishes a post at the time it was given and fetches a
+  # link's preview (#333, #335). Not part of `make servers`, whose checks rest on a server that
+  # runs no queued job but the ones its seed runs; it comes up only for
+  # `FEDIQO_SERVERS_WORKER=1 make servers`, after the seed, and runs every job queued from then on.
+  # The same image and env as `mastodon-web`, and one thing more: a preview is fetched from a
+  # private address only where it is allowed, and the one allowed is Caddy's own, which
+  # `servers-up` finds and writes to `.env` before this starts — stale where Caddy is recreated
+  # outside `servers-up`, until it runs again. A fixture this has run against is thrown away
+  # (`make servers-down`) before a run without it: `servers-up` refuses otherwise.
+  mastodon-sidekiq:
+    profiles: [worker]
+    image: ghcr.io/mastodon/mastodon:v4.6.6@sha256:3579200b208d4ebbc1affd1218828f3b02dc19953d83d0217eb095dacb84dc00
+    environment:
+      <<: *mastodon-env
+      ALLOWED_PRIVATE_ADDRESSES: ${FEDIQO_CARD_ADDRESS:-}
+    command: bundle exec sidekiq
+    depends_on:
+      mastodon-db:
+        condition: service_healthy
+      mastodon-redis:
+        condition: service_healthy
     restart: unless-stopped
 
   discourse-db:
