@@ -292,7 +292,9 @@ public struct FediqoRootView: View {
         )
     }
 
-    public var body: some View {
+    /// The shell and what it watches: the first third of the root's one chain, cut in three so
+    /// each part type-checks in good time on the slowest compiler CI builds with.
+    private var watching: some View {
         layout
             // The reader's time window is set on the store once at launch, before the store is
             // adopted, so a window chosen last run binds what was kept and everything read after
@@ -396,6 +398,11 @@ public struct FediqoRootView: View {
             // used to do it through a binding whose one meaning was "close the thread".
             // A tag's page in front stays, and is asked again of the new timeline (#197).
             .onChange(of: session.timelineID) { left, arrived in timelineSwitched(from: left, to: arrived) }
+    }
+
+    /// What the shell presents over itself, on what it watches: the chain's second third.
+    private var presenting: some View {
+        watching
             .sheet(isPresented: $composing) {
                 ComposerSheet()
                     #if os(iOS)
@@ -408,9 +415,7 @@ public struct FediqoRootView: View {
             .modifier(PartQuestion(session: session))
             .modifier(PersonPresenters(people: people, session: session))
             .modifier(UnsentPresenters(session: session))
-            .modifier(ChangePresenter(session: session))
-            .modifier(LaterPresenter(session: session))
-            .modifier(QuotePresenter(session: session, hosts: people.postActs.hosts, composing: $composing))
+            .modifier(WholePostPresenters(session: session, hosts: people.postActs.hosts, composing: $composing))
             // An answer, over the conversation it belongs to (#108). Driven by the session's one
             // value, so the key and the mark open the same surface by writing the same thing.
             .sheet(item: $session.answering) { target in
@@ -485,6 +490,10 @@ public struct FediqoRootView: View {
             .sheet(item: $session.editing) { draft in
                 TimelineEditor(session: session, draft: draft)
             }
+    }
+
+    public var body: some View {
+        presenting
             // The notice that a server ended a sign-in: a modifier of its own rather than spelled
             // here. See `WithdrawQuestion` for why. Remove's question and Clear's are not on the
             // root: each is asked by the `…` it is chosen from (`ShellMoreAsks`).
@@ -511,15 +520,7 @@ public struct FediqoRootView: View {
             .accessibilityHidden(viewedItem != nil)
             .overlay { viewer }
             // After the viewer, so the mascot is the first thing a launch draws over.
-            .overlay {
-                // **Drawn over, and never in the way** (#357): a press, a key or a pointer goes to
-                // the app under it, which is there and usable from the first frame.
-                if playsLanding {
-                    LandingView { showingLanding = false }
-                        .id(landingTick)
-                        .allowsHitTesting(false)
-                }
-            }
+            .modifier(LandingOverlay(plays: playsLanding, tick: landingTick, showing: $showingLanding))
             .animation(.easeInOut(duration: 0.18), value: showingShortcuts)
             .animation(.easeInOut(duration: 0.18), value: viewing)
             // A viewer whose post the last refresh took away is not a layer any more, and the id
@@ -575,12 +576,7 @@ public struct FediqoRootView: View {
             // Whether there is nothing here but a finger (#303), asked once and handed down.
             .environment(\.shellTouch, ShellHands.shared.touch)
             .environment(\.shellCovered, Self.covered(viewing: viewedItem != nil, shortcuts: showingShortcuts, landing: playsLanding))
-            .overlay(alignment: .top) {
-                if staged?.reports == true { StagedReport(session: session, counts: staged?.counts == true) }
-            }
-            .overlay {
-                if staged?.menus == true { StagedMenus(session: session) }
-            }
+            .modifier(StagedOverlays(staged: staged, session: session))
             .environment(\.locale, prefs.language.locale)
             .preferredColorScheme(prefs.theme.colorScheme)
             .dynamicTypeSize(prefs.fontSize.dynamicType)
