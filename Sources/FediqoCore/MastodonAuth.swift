@@ -812,6 +812,14 @@ public struct MastodonAuthorized: Sendable {
         try await post(path: path, form: form, headers: [:])
     }
 
+    /// `post(path:form:)`, with what was sent refused told from every other refusal (#334): a 422
+    /// throws `MastodonUnprocessable` with the source's answer, as `patch(path:form:)` does.
+    public func postRefusable(path: String, form: [(String, String)]) async throws -> Data {
+        let result = try await send(path: path, method: "POST", form: form)
+        if result.status == 422 { throw MastodonUnprocessable(body: result.body) }
+        return try await finish(result, path: path)
+    }
+
     /// `post(path:form:)`, with headers of the request's own beside the door's.
     public func post(path: String, form: [(String, String)], headers: [String: String]) async throws -> Data {
         try await finish(try await send(path: path, method: "POST", form: form, headers: headers), path: path)

@@ -167,7 +167,7 @@ struct StorePagesBenchTests {
         let copy = try DatabaseQueue(path: dir.appendingPathComponent(StoreFile.indexName).path)
         try source.backup(to: copy)
         try copy.writeWithoutTransaction { db in
-            for name in ["note_page", "note_status", "note_owing", "note_kept", "note_gone", "note_refers", "note_cites", "note_cites_many", "note_marked", "note_marked_vote"] {
+            for name in ["note_page", "note_status", "note_owing", "note_kept", "note_gone", "note_refers", "note_cites", "note_cites_many", "note_marked", "note_marked_vote", "note_marked_standing"] {
                 try db.execute(sql: "DROP INDEX IF EXISTS \(name)")
             }
         }

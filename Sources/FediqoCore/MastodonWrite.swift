@@ -43,6 +43,16 @@ public enum MastodonWriteError: Error, Equatable, Sendable {
     /// thing. `ShellConversations.Absence.unfindable` draws the same distinction for the same
     /// reason one layer up.
     case unfindable
+    /// A pin the source would not take because the reader's page already holds as many as it
+    /// allows (#334): the limit as the host's own account of itself says it
+    /// (`MastodonHostSays.pinLimit`), or nothing where it says none.
+    case pinLimit(Int?)
+    /// A post no Mastodon pins: a reblog, or one only the people it mentions may read (asked of
+    /// a real one, `MastodonPostActsCaptures`). Refused here, before anything is asked.
+    case notPinnable
+    /// The source would not take the act (422), in its own sentence made fit for a line —
+    /// empty where it gave none this device could read.
+    case refused(sentence: String)
 }
 
 /// One signed-in Mastodon source, written to.
@@ -254,6 +264,54 @@ public struct MastodonWrite: Sendable {
         try await act(.bookmarked, on: note, path: on ? "bookmark" : "unbookmark")
     }
 
+    /// Whether a Mastodon pins `note` at all, by what this device holds of it: not a reblog, and
+    /// not a post only the people it mentions may read. **Whose it is, is not asked here**, as
+    /// `withdraw` does not ask it: the source refuses anybody else's, and what offers the act is
+    /// the one place that decides whether the post is the reader's.
+    public static func pinnable(_ note: Note) -> Bool {
+        !note.isReblog && note.audience != .mentioned
+    }
+
+    /// Pins the reader's own `note` to their page at this source, or takes the pin off (#334) —
+    /// `bookmark`'s shape, one function for both directions, and the source's answer laid over
+    /// the row as the latest word on the pin (`ReaderMark.pinned`).
+    ///
+    /// **A pin the source turns away (422) is told by the post, read again — never by the
+    /// sentence**, which a Mastodon writes in the signed-in account's own language (asked of a
+    /// real one, `MastodonPostActsCaptures`). The post says `pinned` to its author alone:
+    /// - pinned — a pin already there, from elsewhere since this device last read it — lands as
+    ///   the pin's answer;
+    /// - not pinned, the reader's own, and one that may be pinned: the page is full, `pinLimit`
+    ///   with `limit` — the host's own figure, handed in by whoever heard it;
+    /// - anything else — somebody else's post, which says nothing of a pin; one only its
+    ///   mentioned may read — is the source's own words (`refused`), and so is a refused unpin.
+    @discardableResult
+    public func pin(_ note: Note, on: Bool, limit: Int? = nil) async throws -> Note {
+        guard Self.pinnable(note) else { throw MastodonWriteError.notPinnable }
+        do {
+            return try await act(.pinned, on: note, path: on ? "pin" : "unpin", refusable: true)
+        } catch let refused as MastodonUnprocessable {
+            let sentence = if case .refused(let said) = AccountPartError.refusal(from: refused.body) { said } else { "" }
+            guard on, let id = note.sendableID else { throw MastodonWriteError.refused(sentence: sentence) }
+            let sent = ReadMoment.now()
+            let answered = try landed(try await door.get(path: "/api/v1/statuses/\(id)"), on: note, sent: sent)
+            switch answered.pinned {
+            case true?: return await settle(answered, on: note, acted: .pinned)
+            case false? where Self.pinnable(answered): throw MastodonWriteError.pinLimit(limit)
+            default: throw MastodonWriteError.refused(sentence: sentence)
+            }
+        }
+    }
+
+    /// Quiets `note`'s conversation at this source — no more notices of what is answered in it —
+    /// or lets it speak again (#334): `bookmark`'s shape, and the source's answer the latest word
+    /// on it (`ReaderMark.muted`). **Anybody's post**, the reader's own or not: a Mastodon quiets
+    /// any conversation its reader can see (asked of a real one).
+    @discardableResult
+    public func quiet(_ note: Note, on: Bool) async throws -> Note {
+        try await act(.muted, on: note, path: on ? "mute" : "unmute")
+    }
+
     /// Votes in `note`'s poll for `choices`, each by its place (#331), and returns the post as
     /// the store now holds it — with the poll as the source answered the vote.
     ///
@@ -310,7 +368,10 @@ public struct MastodonWrite: Sendable {
     ///
     /// **The store is told which mark the answer is for** (#291). A status says all three, and
     /// only the one this act moved is certainly its latest word: see `ItemStore.refresh`.
-    private func act(_ mark: ReaderMark, on note: Note, path: String) async throws -> Note {
+    ///
+    /// **`refusable`** has a 422 thrown as `MastodonUnprocessable`, with the source's own words,
+    /// for an act whose refusals say different things (`pin`).
+    private func act(_ mark: ReaderMark, on note: Note, path: String, refusable: Bool = false) async throws -> Note {
         guard await store.sources().contains(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
         }
@@ -318,13 +379,24 @@ public struct MastodonWrite: Sendable {
             throw MastodonWriteError.unfindable
         }
         let sent = ReadMoment.now()
-        let data = try await door.post(path: "/api/v1/statuses/\(id)/\(path)", form: [])
+        let address = "/api/v1/statuses/\(id)/\(path)"
+        let data = try await refusable ? door.postRefusable(path: address, form: []) : door.post(path: address, form: [])
+        return await settle(try landed(data, on: note, sent: sent), on: note, acted: mark)
+    }
+
+    /// A status the source answered about `note`, as a note of the same row, or `unreadable`.
+    private func landed(_ data: Data, on note: Note, sent: ReadMoment) throws -> Note {
         guard let answered = try? MastodonJSON.decoder.decode(StatusDTO.self, from: data)
             .asNote(source: note.source, categories: note.categories, sent: sent)
         else {
             throw MastodonWriteError.unreadable
         }
         try Task.checkCancellation()
+        return answered
+    }
+
+    /// `answered` laid over the row as an act's answer is (`act`), and the store's copy back.
+    private func settle(_ answered: Note, on note: Note, acted mark: ReaderMark) async -> Note {
         await store.refresh([answered], ifSourceHere: host, acted: mark)
         return await store.note(answered.key) ?? answered.refreshed(over: note)
     }

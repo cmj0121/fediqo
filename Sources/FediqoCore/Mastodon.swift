@@ -449,6 +449,12 @@ struct StatusDTO: Decodable, Sendable {
     /// Whether the account this was fetched as has bookmarked it (#285). Absent on an unsigned
     /// read, as `reblogged` is.
     let bookmarked: Bool?
+    /// Whether the account this was fetched as pinned it (#334): sent only to the post's author,
+    /// and absent on every other read. Read leniently, as `language` is.
+    let pinned: Lenient<Bool>?
+    /// Whether the account this was fetched as quieted its conversation (#334). Absent on an
+    /// unsigned read, as `reblogged` is; read leniently, as `pinned` is.
+    let muted: Lenient<Bool>?
     let mediaAttachments: [MediaAttachment]?
     /// Whether the author covered it, and the line they covered it with. Optional because a
     /// server that did not send them has told us nothing, which is not the same as telling us
@@ -737,6 +743,8 @@ struct StatusDTO: Decodable, Sendable {
             boosted: subject.reblogged,
             favourited: subject.favourited,
             bookmarked: subject.bookmarked,
+            pinned: subject.pinned?.value,
+            muted: subject.muted?.value,
             audience: Self.audience(subject.visibility),
             avatarURL: Host.fetchableURL(subject.account.avatar),
             attachments: subject.mediaAttachments?.compactMap { $0.asAttachment } ?? [],

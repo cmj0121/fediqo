@@ -70,6 +70,10 @@ public enum MastodonHostThing: String, Sendable, Hashable, CaseIterable {
     /// its own to answer not-found: a host has none where it answered the word with an
     /// account's ordinary posts (`MastodonPerson.pinned` handing back nothing).
     case pinnedPosts
+    /// Translating a post into the reader's language (#334). **Said by the document**
+    /// (`configuration.translation.enabled`); a host whose translator is off answers a not-found
+    /// of the address besides (asked of a real one, `MastodonPostActsCaptures`).
+    case translation
 }
 
 /// What is known of one thing at one host.
@@ -94,6 +98,12 @@ public struct MastodonHostSays: Sendable, Hashable {
     /// How many hashtags an account may feature, where the host says. Nothing where it does
     /// not, or says less than none.
     public let featuredTagLimit: Int?
+    /// How many posts an account may pin to its page (#334), where the host says — what a pin
+    /// past it is told. Bounded as `featuredTagLimit` is.
+    public let pinLimit: Int?
+    /// Whether the host translates posts (#334), where it says: `false` is a host with no
+    /// translator, nothing a host that said neither.
+    public let translates: Bool?
 
     /// The most a figure a host gives for itself is believed to be. A stranger's number: one
     /// past this is theirs to send and not ours to size anything by.
@@ -102,24 +112,38 @@ public struct MastodonHostSays: Sendable, Hashable {
     /// A host that has said nothing.
     public static let nothing = MastodonHostSays(featuredTagLimit: nil)
 
-    public init(featuredTagLimit: Int?) {
-        self.featuredTagLimit = featuredTagLimit.flatMap { $0 >= 0 ? min($0, Self.most) : nil }
+    public init(featuredTagLimit: Int?, pinLimit: Int? = nil, translates: Bool? = nil) {
+        self.featuredTagLimit = Self.bounded(featuredTagLimit)
+        self.pinLimit = Self.bounded(pinLimit)
+        self.translates = translates
+    }
+
+    /// A figure as believed: none below nothing, and none past `most`.
+    private static func bounded(_ figure: Int?) -> Int? {
+        figure.flatMap { $0 >= 0 ? min($0, Self.most) : nil }
     }
 
     /// Read out of the host's document. **Never fails**: a key that is missing or of another
     /// shape costs the fact it carried, a document that is no document says nothing at all —
     /// and neither costs the reader what else the same answer was read for.
     init(document: Data) {
-        let read = try? MastodonJSON.decoder.decode(Wire.self, from: document)
-        self.init(featuredTagLimit: read?.configuration?.value?.accounts?.value?.maxFeaturedTags?.value)
+        let configuration = (try? MastodonJSON.decoder.decode(Wire.self, from: document))?.configuration?.value
+        let accounts = configuration?.accounts?.value
+        self.init(
+            featuredTagLimit: accounts?.maxFeaturedTags?.value, pinLimit: accounts?.maxPinnedStatuses?.value,
+            translates: configuration?.translation?.value?.enabled?.value
+        )
     }
 
-    /// What the document says of `thing`. Of all but one it says nothing.
+    /// What the document says of `thing`. Of all but two it says nothing.
     public func has(_ thing: MastodonHostThing) -> MastodonHostHas {
         switch thing {
         case .featuredTags:
             guard let featuredTagLimit else { return .unsaid }
             return featuredTagLimit > 0 ? .present : .absent
+        case .translation:
+            guard let translates else { return .unsaid }
+            return translates ? .present : .absent
         case .suggestions, .directory, .featuredPeople, .risingTags, .risingLinks, .announcements,
              .longerAccount, .knownServers, .activity, .pinnedPosts:
             return .unsaid
@@ -134,10 +158,16 @@ public struct MastodonHostSays: Sendable, Hashable {
 
         struct Configuration: Decodable, Sendable {
             let accounts: Lenient<Accounts>?
+            let translation: Lenient<Translation>?
         }
 
         struct Accounts: Decodable, Sendable {
             let maxFeaturedTags: Lenient<Int>?
+            let maxPinnedStatuses: Lenient<Int>?
+        }
+
+        struct Translation: Decodable, Sendable {
+            let enabled: Lenient<Bool>?
         }
     }
 }

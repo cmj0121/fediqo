@@ -1480,6 +1480,19 @@ private var migrator: DatabaseMigrator {
     // not know, and its next save would lose every such row's category for good. The id makes it
     // refuse the store instead.
     migrator.registerMigration("v17-marks") { _ in }
+    // Whether the reader pinned a row to their page at its source, and whether they quieted its
+    // conversation, as the source last said (#334) — NULL where it never said, which every row
+    // already stored is.
+    //
+    // **A migration id for `v7-bookmarked`'s reason**: an older build's first save would write
+    // every row back without them, and a relaunch under this build would draw pinned posts as
+    // not pinned. The id makes it refuse the store.
+    migrator.registerMigration("v18-standing") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "pinned", .boolean)
+            t.add(column: "muted", .boolean)
+        }
+    }
     return migrator
 }
 
@@ -2098,6 +2111,10 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var kept: Bool
     /// `Note.bookmarked` (#285). A column behind its own migration id, for the reason given on `kept`.
     var bookmarked: Bool?
+    /// `Note.pinned` and `Note.muted` (#334). Columns behind their own migration id, for the
+    /// reason given on `kept`.
+    var pinned: Bool?
+    var muted: Bool?
     /// `Note.editedAt` (#286). A column behind its own migration id, for the reason given on `kept`.
     var edited_at: Date?
     /// `Note.earlier` (#286) as a JSON array of `WordingRow`, or nothing where the row holds
@@ -2124,6 +2141,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         gone_at = note.goneSince
         kept = note.kept
         bookmarked = note.bookmarked
+        pinned = note.pinned
+        muted = note.muted
         edited_at = note.editedAt
         earlier = WordingRow.text(note.earlier)
         language = note.language
@@ -2224,6 +2243,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             boosted: facts.boosted,
             favourited: facts.favourited,
             bookmarked: bookmarked,
+            pinned: pinned,
+            muted: muted,
             audience: facts.audience.flatMap(Audience.init(rawValue:)),
             avatarURL: facts.avatarURL,
             attachments: facts.attachments.map(\.attachment),

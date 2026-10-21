@@ -410,6 +410,9 @@ public enum ReaderMark: Hashable, Sendable, CaseIterable {
     /// Whether the reader voted in the post's poll, and for what (#331): `Poll.voted` and
     /// `Poll.ownVotes`.
     case voted
+    /// Whether the reader pinned the post to their own page there (#334), and whether they
+    /// quieted its conversation: what the source says of the reader, as a bookmark is.
+    case pinned, muted
 }
 
 /// A note this device has stored. Its categories remember what it arrived through.
@@ -489,6 +492,15 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// unsigned read, and it is the server's answer that is kept rather than a press. A bookmark
     /// is the source's to hold; what this device holds of its own is `kept`.
     public let bookmarked: Bool?
+    /// Whether the reader pinned the post to their own page at its source, as the source said
+    /// (#334). `bookmarked`'s shape, for its reasons — and **said only to the post's author**: a
+    /// Mastodon sends no such word on anybody else's post, nor on any unsigned read (asked of a
+    /// real one, `MastodonPostActsCaptures`), so nothing is every post but the reader's own.
+    public let pinned: Bool?
+    /// Whether the reader quieted the post's conversation at its source — no more notices of
+    /// answers in it — as the source said (#334). `bookmarked`'s shape, for its reasons: said on
+    /// every signed-in read, and on none unsigned.
+    public let muted: Bool?
     /// Who the post was written for, as the source said (#208), or nothing where it never said —
     /// every forum post, and a row kept before 0.5.0 wrote this down until a read says it again.
     ///
@@ -674,6 +686,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         boosted: Bool? = nil,
         favourited: Bool? = nil,
         bookmarked: Bool? = nil,
+        pinned: Bool? = nil,
+        muted: Bool? = nil,
         audience: Audience? = nil,
         avatarURL: URL? = nil,
         attachments: [Attachment] = [],
@@ -721,6 +735,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         let boosted = post ? boosted : nil
         let favourited = post ? favourited : nil
         let bookmarked = post ? bookmarked : nil
+        let pinned = post ? pinned : nil
+        let muted = post ? muted : nil
         let audience = post ? audience : nil
         let attachments = post ? attachments : []
         let sensitive = post ? sensitive : nil
@@ -748,6 +764,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.boosted = boosted
         self.favourited = favourited
         self.bookmarked = bookmarked
+        self.pinned = pinned
+        self.muted = muted
         self.audience = audience
         self.avatarURL = avatarURL
         self.attachments = attachments
@@ -776,7 +794,8 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// Whether this copy says anything of what its reader did to the post: a boost, a
     /// favourite, a bookmark or a vote, either way. What a sign-in that ended takes off.
     public var saysReader: Bool {
-        boosted != nil || favourited != nil || bookmarked != nil || poll?.voted != nil
+        boosted != nil || favourited != nil || bookmarked != nil || pinned != nil || muted != nil
+            || poll?.voted != nil
     }
 
     /// What this post's words weigh, in the bytes they are written in (#294): its body, title and
@@ -852,6 +871,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             boosted: taking.contains(.boosted) ? stale.boosted ?? boosted : boosted,
             favourited: taking.contains(.favourited) ? stale.favourited ?? favourited : favourited,
             bookmarked: taking.contains(.bookmarked) ? stale.bookmarked ?? bookmarked : bookmarked,
+            pinned: taking.contains(.pinned) ? stale.pinned ?? pinned : pinned,
+            muted: taking.contains(.muted) ? stale.muted ?? muted : muted,
             audience: audience, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions, url: url,
             counts: stale.counts.filled(from: counts), statusID: statusID, opening: opening,
@@ -885,7 +906,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             id: id, source: source, author: later.author, handle: handle, body: later.body,
             title: later.title ?? title, board: board, postedAt: postedAt, categories: categories,
             boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
-            favourited: favourited, bookmarked: bookmarked, audience: later.audience ?? audience,
+            favourited: favourited, bookmarked: bookmarked, pinned: pinned, muted: muted,
+            audience: later.audience ?? audience,
             avatarURL: later.avatarURL ?? avatarURL, attachments: later.attachments,
             sensitive: later.sensitive ?? sensitive, spoiler: later.spoiler ?? spoiler,
             emojis: later.emojis, mentions: later.mentions, url: url, counts: counts, statusID: statusID, opening: opening,
@@ -931,6 +953,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             boosted: taking.contains(.boosted) ? boosted ?? held.boosted : held.boosted,
             favourited: taking.contains(.favourited) ? favourited ?? held.favourited : held.favourited,
             bookmarked: taking.contains(.bookmarked) ? bookmarked ?? held.bookmarked : held.bookmarked,
+            pinned: taking.contains(.pinned) ? pinned ?? held.pinned : held.pinned,
+            muted: taking.contains(.muted) ? muted ?? held.muted : held.muted,
             // Who it was for, whether it is covered and with what, and each count: what this read
             // left unsaid is what was held (#208), for `boosted`'s reason. A Mastodon source
             // always sends its cover line, empty where there is none, so a nil spoiler here is a
@@ -1011,6 +1035,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             boosted: stale ? boosted : other.boosted ?? boosted,
             favourited: stale ? favourited : other.favourited ?? favourited,
             bookmarked: stale ? bookmarked : other.bookmarked ?? bookmarked,
+            pinned: stale ? pinned : other.pinned ?? pinned,
+            muted: stale ? muted : other.muted ?? muted,
             audience: audience ?? other.audience, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive ?? other.sensitive, spoiler: spoiler ?? other.spoiler,
             emojis: emojis,
@@ -1057,7 +1083,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             id: id, source: source, author: author, handle: handle, body: body, title: title,
             board: board, postedAt: postedAt, categories: categories,
             boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
-            favourited: favourited, bookmarked: bookmarked, audience: audience, avatarURL: avatarURL,
+            favourited: favourited, bookmarked: bookmarked, pinned: pinned, muted: muted,
+            audience: audience, avatarURL: avatarURL,
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
@@ -1072,7 +1099,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             id: id, source: source, author: author, handle: handle, body: body, title: title,
             board: board, postedAt: postedAt, categories: categories,
             boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
-            favourited: favourited, bookmarked: bookmarked, audience: audience, avatarURL: avatarURL,
+            favourited: favourited, bookmarked: bookmarked, pinned: pinned, muted: muted,
+            audience: audience, avatarURL: avatarURL,
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
@@ -1086,8 +1114,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         Note(
             id: id, source: source, author: author, handle: handle, body: body, title: title,
             board: board, postedAt: postedAt, categories: categories,
-            boosted: boosted, favourited: favourited, bookmarked: bookmarked, audience: audience,
-            avatarURL: avatarURL, attachments: attachments, sensitive: sensitive, spoiler: spoiler,
+            boosted: boosted, favourited: favourited, bookmarked: bookmarked, pinned: pinned, muted: muted,
+            audience: audience, avatarURL: avatarURL, attachments: attachments, sensitive: sensitive, spoiler: spoiler,
             emojis: emojis, mentions: mentions, url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
             editedAt: editedAt, earlier: earlier, language: language, via: via, poll: poll, refs: refs, refsDue: refsDue

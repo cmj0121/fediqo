@@ -17,11 +17,12 @@ struct MastodonHostTests {
         MastodonHostSays(document: Data(document.utf8))
     }
 
-    @Test("A real server's document says how many hashtags an account may feature, and of every other thing asked about it says nothing")
+    @Test("A real server's document says how many hashtags an account may feature and that it has no translator, and of every other thing asked about it says nothing")
     func theDocumentSaysLittle() {
         let said = Self.says(MastodonHostCaptures.document)
         #expect(said.featuredTagLimit == 10 && said.has(.featuredTags) == .present)
-        #expect(Self.unsaid.count == MastodonHostThing.allCases.count - 1)
+        #expect(said.translates == false && said.has(.translation) == .absent && said.pinLimit == 5)
+        #expect(Self.unsaid.count == MastodonHostThing.allCases.count - 2)
         for thing in Self.unsaid { #expect(said.has(thing) == .unsaid, "\(thing)") }
         for thing in MastodonHostThing.allCases { #expect(MastodonHostSays.nothing.has(thing) == .unsaid, "\(thing)") }
     }

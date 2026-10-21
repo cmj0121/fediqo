@@ -44,7 +44,11 @@ struct MastodonHostSaysTests {
         #expect(said.kind == .mastodon && said.profile?.statusLimit == 500)
         #expect(said.has == MastodonHostSays(document: Data(MastodonHostCaptures.document.utf8)), "as it was captured")
         #expect(said.has.featuredTagLimit == 10 && said.has.has(.featuredTags) == .present)
-        for thing in MastodonHostThing.allCases where thing != .featuredTags { #expect(said.has.has(thing) == .unsaid, "\(thing)") }
+        // And, since #334, how many posts may be pinned and that it has no translator.
+        #expect(said.has.pinLimit == 5 && said.has.translates == false && said.has.has(.translation) == .absent)
+        for thing in MastodonHostThing.allCases where ![.featuredTags, .translation].contains(thing) {
+            #expect(said.has.has(thing) == .unsaid, "\(thing)")
+        }
 
         // The same bytes to anyone, and what the captures' table says is beside the one fact read.
         let plain = try await ask("/api/v2/instance"), signed = try await ask("/api/v2/instance", as: try LocalServers.writerToken())
@@ -122,7 +126,7 @@ struct MastodonHostSaysTests {
         }
         let weeks = try await ask("/api/v1/instance/activity")
         #expect(((weeks.json as? [[String: Any]])?.first?["statuses"]) is String, "every figure a string")
-        // All eleven were asked.
-        #expect(Set(open.map(\.0)).union(signed.map(\.0)) == Set(MastodonHostThing.allCases))
+        // All eleven were asked; translating is a post's, asked where posts are (`MastodonPostActsSaysTests`).
+        #expect(Set(open.map(\.0)).union(signed.map(\.0)) == Set(MastodonHostThing.allCases).subtracting([.translation]))
     }
 }
