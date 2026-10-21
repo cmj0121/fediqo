@@ -480,6 +480,10 @@ struct StatusDTO: Decodable, Sendable {
     /// The post's poll (#331), `null` on a status that has none. **Read leniently**, as `quote`
     /// is: a poll of a shape this build cannot read is no poll, and never costs the status.
     let poll: Lenient<PollDTO>?
+    /// The preview of the page it links to (#335), `null` where it has none or the source has not
+    /// fetched it yet. **Read leniently**, as `poll` is: a card of a shape this build cannot read is
+    /// no card, and never costs the status.
+    let card: Lenient<CardDTO>?
 
     /// A value read where it can be and nothing where it cannot, rather than a failed decode.
     struct Lenient<Wrapped: Decodable & Sendable>: Decodable, Sendable {
@@ -773,6 +777,7 @@ struct StatusDTO: Decodable, Sendable {
             language: subject.language?.value,
             via: Self.applicationName(subject.application),
             poll: subject.poll?.value?.poll,
+            card: subject.card?.value?.card,
             // What it refers to, as the status says it: the post it answers, the post it quotes.
             refs: [
                 Self.answers(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),

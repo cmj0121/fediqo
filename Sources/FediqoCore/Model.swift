@@ -626,6 +626,16 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// A `var` for `categories`' reason: a vote's answer and a read of the poll alone set it on
     /// the row they land over.
     public var poll: Poll?
+    /// The preview of the page the post links to, as its source last said it (#335), or nothing
+    /// on a post that links none — and on one whose source has not fetched it yet: a Mastodon's
+    /// worker attaches it a moment after the post is taken (asked of a real one,
+    /// `MastodonCardCaptures`). Cleaned and bounded where it is read (`PostCard`), and nothing on
+    /// a reblog, whose post carries its own.
+    ///
+    /// **A read that says none does not take one away**, `via`'s rule: a read sent before the
+    /// worker attached it is not the source's word that there is none. Only a change to the post
+    /// (`revised`) takes it off.
+    public let card: PostCard?
     /// What this item refers to (#290, #293): each another item on the same source, with the
     /// kind of reference it is. Held to `Reference.bounded`.
     ///
@@ -708,6 +718,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         language: String? = nil,
         via: String? = nil,
         poll: Poll? = nil,
+        card: PostCard? = nil,
         refs: [Reference] = [],
         refsDue: Bool = false
     ) {
@@ -749,6 +760,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         let earlier = post ? earlier : []
         let language = post ? language : nil
         let poll = post ? poll : nil
+        let card = post ? card : nil
         self.refsDue = refsDue
         self.id = id
         self.source = source
@@ -789,6 +801,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         // Not wiped on a reblog, and not cleaned again: the decode already made it one line.
         self.via = via
         self.poll = poll
+        self.card = card
     }
 
     /// Whether this copy says anything of what its reader did to the post: a boost, a
@@ -802,7 +815,7 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// warning, and every earlier wording held with it. What `Holdings.Kept` adds up.
     var wordBytes: Int {
         body.utf8.count + (title?.utf8.count ?? 0) + (spoiler?.utf8.count ?? 0)
-            + earlier.reduce(0) { $0 + $1.bytes }
+            + earlier.reduce(0) { $0 + $1.bytes } + (card?.bytes ?? 0)
     }
 
     /// What the post says, as a wording: its words and its author's warning, and whether it was
@@ -883,6 +896,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             poll: poll.map { held in
                 stale.poll.flatMap { $0.asksTheSame(as: held) ? Poll.later($0, over: held, reader: taking.contains(.voted)) : nil } ?? held
             },
+            card: card,
             refs: refs, refsDue: refsDue
         )
     }
@@ -921,6 +935,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             // The poll as the post says it now — none, where the change took it off — with
             // what was held of the reader where the later copy says nothing of them.
             poll: Poll.later(later.poll, over: was.poll, reader: true),
+            // The card as the changed post says it: a link taken out takes its preview with it.
+            card: later.card,
             refs: Reference.rebuilt(answers: answersReference, quotes: quotes, from: refs), refsDue: refsDue
         )
     }
@@ -987,6 +1003,10 @@ public struct Note: Identifiable, Hashable, Sendable {
             // only where `taking` says, as the marks are — and a read made signed out, which says
             // nothing of whether they voted, leaves what was held.
             poll: Poll.later(poll, over: held.poll, reader: taking.contains(.voted)),
+            // A card the source brought since stays where this read says none (#335): the worker
+            // attaches it after the post, and a read sent before it landed is not its word. A
+            // copy of the post as its author changed it since is: a link taken out takes it off.
+            card: isLater(than: held) ? card : card ?? held.card,
             // **What it reblogs is the held row's, always** (#290): a reblog's target does not
             // change once it is held, so no later copy can turn a reblog — a kept one, which
             // holds its post — towards another post.
@@ -1056,6 +1076,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             poll: poll.map { held in
                 other.poll.flatMap { $0.asksTheSame(as: held) ? Poll.later($0, over: held, reader: !stale) : nil } ?? held
             } ?? other.poll,
+            // A card the later copy brings fills where this row has none (#335).
+            card: card ?? other.card,
             refs: Reference.rebuilt(answers: answersReference, quotes: quotes, from: refs), refsDue: refsDue
         )
     }
@@ -1073,6 +1095,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
             editedAt: editedAt, earlier: earlier, language: language, via: via, poll: poll?.with(voted: nil),
+            card: card,
             refs: refs, refsDue: refsDue
         )
     }
@@ -1088,7 +1111,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, via: via, poll: poll, refs: refs, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, language: language, via: via, poll: poll, card: card, refs: refs, refsDue: refsDue
         )
     }
 
@@ -1104,7 +1127,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, via: via, poll: poll, refs: references, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, language: language, via: via, poll: poll, card: card, refs: references, refsDue: refsDue
         )
     }
 
@@ -1118,7 +1141,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             audience: audience, avatarURL: avatarURL, attachments: attachments, sensitive: sensitive, spoiler: spoiler,
             emojis: emojis, mentions: mentions, url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, via: via, poll: poll, refs: refs, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, language: language, via: via, poll: poll, card: card, refs: refs, refsDue: refsDue
         )
     }
 }

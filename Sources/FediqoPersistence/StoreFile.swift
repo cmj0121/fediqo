@@ -1493,6 +1493,17 @@ private var migrator: DatabaseMigrator {
             t.add(column: "muted", .boolean)
         }
     }
+    // The preview of the page a row links to, as its source last said it (#335), as JSON
+    // (`CardRow`) — NULL where it has none, which every row already stored is until a read
+    // brings one.
+    //
+    // **A migration id for `v7-bookmarked`'s reason**: an older build's first save would write
+    // every row back without it. The id makes it refuse the store.
+    migrator.registerMigration("v19-card") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "card", .text)
+        }
+    }
     return migrator
 }
 
@@ -2008,6 +2019,52 @@ private struct QuotationRow: Codable {
 }
 
 /// `Wording` as `note.earlier` writes it.
+/// One preview as `note.card` writes it (#335): every part, the addresses as text.
+private struct CardRow: Codable {
+    var title: String
+    var description: String?
+    var provider: String?
+    var author: String?
+    var url: String?
+    var image: String?
+    var width: Int?
+    var height: Int?
+    var missingAttribution: Bool?
+
+    init(_ card: PostCard) {
+        title = card.title
+        description = card.description
+        provider = card.provider
+        author = card.author
+        url = card.url?.absoluteString
+        image = card.image?.absoluteString
+        width = card.width
+        height = card.height
+        missingAttribution = card.missingAttribution
+    }
+
+    /// `card` as the cell's text, or nothing for none.
+    static func text(_ card: PostCard?) -> String? {
+        guard let card, let data = try? JSONEncoder().encode(CardRow(card)) else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// The most a cell is read of: a card's words and two addresses are well under it.
+    static let cellLength = 8_192
+
+    /// The card a cell holds, held to every card's bounds again (`PostCard.init(stored:)`) — or
+    /// nothing where it holds nothing this build can read, or more than a card is.
+    static func card(_ text: String?) -> PostCard? {
+        guard let text, text.utf8.count <= cellLength,
+              let row = try? JSONDecoder().decode(CardRow.self, from: Data(text.utf8))
+        else { return nil }
+        return PostCard(
+            stored: row.title, description: row.description, provider: row.provider, author: row.author, url: row.url,
+            image: row.image, width: row.width, height: row.height, missingAttribution: row.missingAttribution
+        )
+    }
+}
+
 private struct WordingRow: Codable {
     var body: String
     var spoiler: String?
@@ -2115,6 +2172,10 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     /// reason given on `kept`.
     var pinned: Bool?
     var muted: Bool?
+    /// `Note.card` (#335) as `CardRow` JSON, or nothing for none. A column behind its own migration
+    /// id, for the reason given on `kept`; kept as text and read leniently, as `earlier` is: a
+    /// card that will not read is a row without its preview, and never a store set aside.
+    var card: String?
     /// `Note.editedAt` (#286). A column behind its own migration id, for the reason given on `kept`.
     var edited_at: Date?
     /// `Note.earlier` (#286) as a JSON array of `WordingRow`, or nothing where the row holds
@@ -2143,6 +2204,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         bookmarked = note.bookmarked
         pinned = note.pinned
         muted = note.muted
+        card = CardRow.text(note.card)
         edited_at = note.editedAt
         earlier = WordingRow.text(note.earlier)
         language = note.language
@@ -2269,6 +2331,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             language: language,
             via: facts.via,
             poll: facts.poll?.poll,
+            card: CardRow.card(card),
             refs: references,
             refsDue: refs_due
         )

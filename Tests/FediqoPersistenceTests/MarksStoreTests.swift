@@ -45,7 +45,7 @@ struct MarksStoreTests {
         try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: Self.notes)
         let opened = StoreFile.open(at: dir)
         #expect(opened.notes == Self.notes)
-        #expect(try migrations(dir.appendingPathComponent("index.sqlite")).last == "v18-standing")
+        #expect(try migrations(dir.appendingPathComponent("index.sqlite")).last == "v19-card")
         // And the file names the rows of a kind by it, kept or not.
         let file = try #require(opened.file)
         #expect(Set(try file.keys(host: "one.example", in: .bookmarks).map(\.id)) == ["1", "2", "3"])
