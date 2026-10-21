@@ -105,10 +105,10 @@ public struct Poll: Hashable, Sendable {
     }
 
     /// Whether `other` is this same poll asking the same: one id, the same choices in the same
-    /// order. A poll whose author changed its choices is another question, whose votes its
-    /// source started again.
+    /// order, one to choose or several alike. A poll whose author changed either is another
+    /// question, whose votes its source started again — under the same id (#332).
     func asksTheSame(as other: Poll) -> Bool {
-        id == other.id && choices.map(\.title) == other.choices.map(\.title)
+        id == other.id && multiple == other.multiple && choices.map(\.title) == other.choices.map(\.title)
     }
 
     /// This poll as it stands, with `voted` and `ownVotes` as what is said of the reader —
@@ -131,7 +131,11 @@ public struct Poll: Hashable, Sendable {
     /// held. Where it is not taken, neither are the figures, so a read on its way when the
     /// reader voted does not draw the poll without their vote. A poll whose choices changed is
     /// another question and is the later copy's whole.
-    static func later(_ later: Poll?, over held: Poll?, reader: Bool) -> Poll? {
+    ///
+    /// `revised` is that the later copy is the post as its author changed it since (#332): a
+    /// change starts a poll's run again, and opens one that had ended, so its word on whether it
+    /// has ended is taken as it is. Otherwise a poll once ended stays so.
+    static func later(_ later: Poll?, over held: Poll?, reader: Bool, revised: Bool = false) -> Poll? {
         guard let later else { return nil }
         guard let held, later.asksTheSame(as: held) else { return later }
         guard reader else {
@@ -139,11 +143,32 @@ public struct Poll: Hashable, Sendable {
             let figures = held.voted == true && later.voted != true ? held : later
             return Poll(
                 id: later.id, choices: figures.choices, multiple: later.multiple, endsAt: later.endsAt,
-                expired: later.expired || held.expired, votes: figures.votes, voters: figures.voters,
-                voted: held.voted, ownVotes: held.ownVotes
+                expired: revised ? later.expired : later.expired || held.expired, votes: figures.votes,
+                voters: figures.voters, voted: held.voted, ownVotes: held.ownVotes
             )
         }
         return later.voted == nil ? later.with(voted: held.voted, ownVotes: held.ownVotes) : later
+    }
+
+    /// The poll a row holds once `stale` — a copy its source's own word says was read before the
+    /// row was (`Note.isEarlier`, #286) — has landed over `held`, the same poll asking the same.
+    ///
+    /// **Only its figures are taken**, as a stale copy's counts are, and what it says of the
+    /// reader only where `reader` (`later`'s rule). **What the poll is stays the held one's**:
+    /// when it ends, whether it has, one or several — a change since may have started its run
+    /// again or opened it (#332) — and a figure the held copy keeps back stays kept back, one
+    /// the stale copy keeps back stays as held.
+    static func stale(_ stale: Poll, over held: Poll, reader: Bool) -> Poll {
+        guard stale.asksTheSame(as: held), let taken = later(stale, over: held, reader: reader) else { return held }
+        return Poll(
+            id: held.id,
+            choices: zip(held.choices, taken.choices).map { was, now in
+                Choice(title: was.title, votes: was.votes == nil ? nil : now.votes ?? was.votes)
+            },
+            multiple: held.multiple, endsAt: held.endsAt, expired: held.expired,
+            votes: taken.votes ?? held.votes, voters: taken.voters ?? held.voters,
+            voted: taken.voted, ownVotes: taken.ownVotes
+        )
     }
 }
 

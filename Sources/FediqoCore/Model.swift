@@ -891,10 +891,11 @@ public struct Note: Identifiable, Hashable, Sendable {
             counts: stale.counts.filled(from: counts), statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed,
             kept: kept, editedAt: editedAt, earlier: earlier, language: language, via: via,
-            // How the poll stands is taken from the stale copy as its counts are, and whether the
-            // reader voted only where `taking` says (`Poll.later`). Its choices are this row's.
+            // The poll's figures are taken from the stale copy as its counts are, and whether the
+            // reader voted only where `taking` says. What the poll is — its choices, one or
+            // several, when it ends and whether it has — is this row's (`Poll.stale`, #332).
             poll: poll.map { held in
-                stale.poll.flatMap { $0.asksTheSame(as: held) ? Poll.later($0, over: held, reader: taking.contains(.voted)) : nil } ?? held
+                stale.poll.map { Poll.stale($0, over: held, reader: taking.contains(.voted)) } ?? held
             },
             card: card,
             refs: refs, refsDue: refsDue
@@ -1002,7 +1003,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             // The poll as this read says it, as its language is (#331); what it says of the reader
             // only where `taking` says, as the marks are — and a read made signed out, which says
             // nothing of whether they voted, leaves what was held.
-            poll: Poll.later(poll, over: held.poll, reader: taking.contains(.voted)),
+            poll: Poll.later(poll, over: held.poll, reader: taking.contains(.voted), revised: isLater(than: held)),
             // A card the source brought since stays where this read says none (#335): the worker
             // attaches it after the post, and a read sent before it landed is not its word. A
             // copy of the post as its author changed it since is: a link taken out takes it off.
@@ -1068,14 +1069,23 @@ public struct Note: Identifiable, Hashable, Sendable {
             url: url, counts: counts,
             statusID: statusID ?? other.statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed,
-            kept: kept, editedAt: editedAt, earlier: earlier, language: language ?? other.language,
+            // A language, as whom it mentions: not from a copy read before this row was, where
+            // none is the answer of a change that took it off (#332).
+            kept: kept, editedAt: editedAt, earlier: earlier,
+            language: language ?? (other.isEarlier(than: self) ? nil : other.language),
             via: via ?? other.via,
             // How the later copy's poll stands wins as its counts do (#331), and what it says of
             // the reader only where it is not the stale one. Its choices are this row's — a
-            // changed poll is the edit's to bring (`revised`) — and a row that held none takes it.
+            // changed poll is the edit's to bring (`revised`) — and a row that held none takes
+            // it, **unless the copy was read before this row was** (#332): none is then the
+            // answer of a change that took the poll off.
             poll: poll.map { held in
-                other.poll.flatMap { $0.asksTheSame(as: held) ? Poll.later($0, over: held, reader: !stale) : nil } ?? held
-            } ?? other.poll,
+                other.poll.flatMap { copy in
+                    guard copy.asksTheSame(as: held) else { return nil }
+                    // A copy read before this row was takes its figures alone (`Poll.stale`).
+                    return other.isEarlier(than: self) ? Poll.stale(copy, over: held, reader: false) : Poll.later(copy, over: held, reader: !stale)
+                } ?? held
+            } ?? (other.isEarlier(than: self) ? nil : other.poll),
             // A card the later copy brings fills where this row has none (#335).
             card: card ?? other.card,
             refs: Reference.rebuilt(answers: answersReference, quotes: quotes, from: refs), refsDue: refsDue

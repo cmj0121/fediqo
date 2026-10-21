@@ -70,15 +70,15 @@ public struct MastodonWrite: Sendable {
     /// ceiling is not refused for the lines around it. Not a limit of the source's.
     static let uploadMargin = 65_536
 
-    private let door: MastodonAuthorized
-    private let store: ItemStore
+    let door: MastodonAuthorized
+    let store: ItemStore
 
     public init(door: MastodonAuthorized, store: ItemStore) {
         self.door = door
         self.store = store
     }
 
-    private var host: String { door.token.host }
+    var host: String { door.token.host }
 
     /// The header a post is sent under so that sending it again makes no second post.
     public static let idempotencyKey = "Idempotency-Key"

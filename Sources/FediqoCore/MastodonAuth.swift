@@ -874,6 +874,18 @@ public struct MastodonAuthorized: Sendable {
         return try await finish(result, path: path)
     }
 
+    /// A PUT carrying a form through the same door (#332): a post changed. A refusal for want
+    /// of a scope throws `MastodonScopeError.outside`, as `getInScope` does; a 422 throws
+    /// `MastodonUnprocessable` with the source's answer, as `patch(path:form:)` does.
+    public func put(path: String, form: [(String, String)]) async throws -> Data {
+        let result = try await send(path: path, method: "PUT", form: form)
+        if MastodonScopeRefusal.isOne(status: result.status, body: result.body, authenticate: result.authenticate) {
+            throw MastodonScopeError.outside
+        }
+        if result.status == 422 { throw MastodonUnprocessable(body: result.body) }
+        return try await finish(result, path: path)
+    }
+
     /// Who the reader is on this source, as `@user@host` — the spelling `Note.handle` takes, so a
     /// post can be told to be theirs by comparing the two (#109).
     ///

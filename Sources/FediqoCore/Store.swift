@@ -798,7 +798,7 @@ public actor ItemStore {
                     merged = merged.revised(by: note, was: existing)
                     // The poll as the change says it, and the reader's vote in it as the marks
                     // are: not this copy's word where it was sent before their own vote landed.
-                    if older { merged.poll = Poll.later(note.poll, over: existing.poll, reader: false) }
+                    if older { merged.poll = Poll.later(note.poll, over: existing.poll, reader: false, revised: true) }
                 }
                 // The same source handing the post over again is the source having it (#179):
                 // a mark it once earned comes off.

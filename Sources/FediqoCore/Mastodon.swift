@@ -582,6 +582,8 @@ struct StatusDTO: Decodable, Sendable {
     /// What came attached. `type` is the server's own word for it, kept rather than guessed
     /// at from the address, which rarely says.
     struct MediaAttachment: Decodable, Sendable {
+        /// The id its source gave the file: what a change of the post keeps it by (#332).
+        let id: String?
         let type: String?
         let url: String?
         let previewUrl: String?
