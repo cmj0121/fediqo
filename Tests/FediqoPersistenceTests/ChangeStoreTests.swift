@@ -55,12 +55,12 @@ struct ChangeStoreTests {
     }
 
     /// Asked as `StoreFile` asks: read-only, of a migrator that knows every step this store
-    /// records but `id`, which is the last.
+    /// records but `id`, which is among them.
     private func superseded(_ index: URL, knowingNo id: String) throws -> Bool {
         let steps = try DatabaseQueue(path: index.path).read { db in
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid")
         }
-        #expect(steps.last == id)
+        #expect(steps.contains(id))
         var older = DatabaseMigrator()
         for step in steps where step != id { older.registerMigration(step) { _ in } }
         var readOnly = Configuration()

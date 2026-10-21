@@ -1513,6 +1513,18 @@ private var migrator: DatabaseMigrator {
             t.add(column: "changes", .text)
         }
     }
+    // Who may quote a row, and whether its reader may (#330), as its source last said, as JSON
+    // (`QuoteApprovalRow`) — NULL where it never said; and how many posts quote it, among the
+    // counts its facts hold.
+    //
+    // **A migration id for `v7-bookmarked`'s reason**: an older build's first save would write
+    // every row back without either. The id makes it refuse the store.
+    migrator.registerMigration("v21-quotes") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "quote_approval", .text)
+            t.add(column: "may_quote", .text)
+        }
+    }
     return migrator
 }
 
@@ -1943,6 +1955,8 @@ private struct CountsRow: Codable {
     var replies: Int?
     var reblogs: Int?
     var favourites: Int?
+    /// With `v21-quotes`' id (#330).
+    var quotes: Int?
 
     /// Nothing for counts that state nothing, so a row with none writes no key.
     init?(_ counts: Counts) {
@@ -1950,9 +1964,10 @@ private struct CountsRow: Codable {
         replies = counts.replies
         reblogs = counts.reblogs
         favourites = counts.favourites
+        quotes = counts.quotes
     }
 
-    var counts: Counts { Counts(replies: replies, reblogs: reblogs, favourites: favourites) }
+    var counts: Counts { Counts(replies: replies, reblogs: reblogs, favourites: favourites, quotes: quotes) }
 }
 
 /// One timeline's listing of a row, as `NoteFacts` writes it.
@@ -2033,6 +2048,29 @@ private struct QuotationRow: Codable {
 }
 
 /// `Wording` as `note.earlier` writes it.
+/// Who may quote a row as `note.quote_approval` writes it (#330): the two lists as the source
+/// spelled them.
+private struct QuoteApprovalRow: Codable {
+    var automatic: [String]
+    var manual: [String]
+
+    static func text(_ approval: QuoteApproval?) -> String? {
+        guard let approval,
+              let data = try? JSONEncoder().encode(QuoteApprovalRow(automatic: approval.automatic, manual: approval.manual))
+        else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// The approval a cell holds, or nothing where it holds nothing this build can read.
+    static func approval(_ text: String?) -> QuoteApproval? {
+        guard let text, text.utf8.count <= 4_096,
+              let row = try? JSONDecoder().decode(QuoteApprovalRow.self, from: Data(text.utf8))
+        else { return nil }
+        // Held to the filter the wire's lists are, whoever wrote the cell.
+        return QuoteApproval(automatic: QuoteApproval.kept(row.automatic), manual: QuoteApproval.kept(row.manual))
+    }
+}
+
 /// One preview as `note.card` writes it (#335): every part, the addresses as text.
 private struct CardRow: Codable {
     var title: String
@@ -2190,6 +2228,12 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     /// id, for the reason given on `kept`; kept as text and read leniently, as `earlier` is: a
     /// card that will not read is a row without its preview, and never a store set aside.
     var card: String?
+    /// `Note.quoteApproval` (#330) as `QuoteApprovalRow` JSON, or nothing for none. With
+    /// `v21-quotes`' id; kept as text and read leniently, as `card` is.
+    var quote_approval: String?
+    /// `Note.mayQuote` (#330), the reader's word, as `QuoteApproval.Reader`'s spelling. With
+    /// `v21-quotes`' id; a spelling this build does not know is read as nothing.
+    var may_quote: String?
     /// `Note.editedAt` (#286). A column behind its own migration id, for the reason given on `kept`.
     var edited_at: Date?
     /// `Note.earlier` (#286) as a JSON array of `WordingRow`, or nothing where the row holds
@@ -2219,6 +2263,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         pinned = note.pinned
         muted = note.muted
         card = CardRow.text(note.card)
+        quote_approval = QuoteApprovalRow.text(note.quoteApproval)
+        may_quote = note.mayQuote?.rawValue
         edited_at = note.editedAt
         earlier = WordingRow.text(note.earlier)
         language = note.language
@@ -2348,6 +2394,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             via: facts.via,
             poll: facts.poll?.poll,
             card: CardRow.card(card),
+            quoteApproval: QuoteApprovalRow.approval(quote_approval),
+            mayQuote: may_quote.flatMap(QuoteApproval.Reader.init(rawValue:)),
             refs: references,
             refsDue: refs_due
         )

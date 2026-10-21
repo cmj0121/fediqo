@@ -484,6 +484,9 @@ struct StatusDTO: Decodable, Sendable {
     /// fetched it yet. **Read leniently**, as `poll` is: a card of a shape this build cannot read is
     /// no card, and never costs the status.
     let card: Lenient<CardDTO>?
+    /// How many posts quote it, and who may (#330): on a source with quotes, read leniently.
+    let quotesCount: Lenient<Int>?
+    let quoteApproval: Lenient<QuoteApprovalDTO>?
 
     /// A value read where it can be and nothing where it cannot, rather than a failed decode.
     struct Lenient<Wrapped: Decodable & Sendable>: Decodable, Sendable {
@@ -771,7 +774,8 @@ struct StatusDTO: Decodable, Sendable {
             counts: Counts(
                 replies: subject.repliesCount,
                 reblogs: subject.reblogsCount,
-                favourites: subject.favouritesCount
+                favourites: subject.favouritesCount,
+                quotes: subject.quotesCount?.value.flatMap { $0 >= 0 ? $0 : nil }
             ),
             // The post's own id on this server: what the row is.
             statusID: subject.id,
@@ -780,6 +784,10 @@ struct StatusDTO: Decodable, Sendable {
             via: Self.applicationName(subject.application),
             poll: subject.poll?.value?.poll,
             card: subject.card?.value?.card,
+            quoteApproval: subject.quoteApproval?.value?.approval,
+            // The reader's word only from a read made as them, which is one that says what they
+            // did (`favourited`): an unsigned read is told `denied` of every post (#330).
+            mayQuote: subject.favourited != nil ? subject.quoteApproval?.value?.reader : nil,
             // What it refers to, as the status says it: the post it answers, the post it quotes.
             refs: [
                 Self.answers(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),

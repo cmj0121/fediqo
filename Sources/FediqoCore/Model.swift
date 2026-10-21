@@ -267,11 +267,14 @@ public struct Counts: Hashable, Sendable {
     public var replies: Int?
     public var reblogs: Int?
     public var favourites: Int?
+    /// How many posts quote it (#330), where its source says.
+    public var quotes: Int?
 
-    public init(replies: Int? = nil, reblogs: Int? = nil, favourites: Int? = nil) {
+    public init(replies: Int? = nil, reblogs: Int? = nil, favourites: Int? = nil, quotes: Int? = nil) {
         self.replies = replies
         self.reblogs = reblogs
         self.favourites = favourites
+        self.quotes = quotes
     }
 
     /// These counts, with each one they do not state taken from `other` (#208). A count nobody
@@ -280,7 +283,8 @@ public struct Counts: Hashable, Sendable {
         Counts(
             replies: replies ?? other.replies,
             reblogs: reblogs ?? other.reblogs,
-            favourites: favourites ?? other.favourites
+            favourites: favourites ?? other.favourites,
+            quotes: quotes ?? other.quotes
         )
     }
 }
@@ -413,6 +417,13 @@ public enum ReaderMark: Hashable, Sendable, CaseIterable {
     /// Whether the reader pinned the post to their own page there (#334), and whether they
     /// quieted its conversation: what the source says of the reader, as a bookmark is.
     case pinned, muted
+    /// Whether the reader may quote the post (#330) — `QuoteApproval.Reader`, its source's word to
+    /// them, taken only from a read made as them.
+    case mayQuote
+    /// Two things of the post the reader's own act moves, kept by the marks' rule so that a read
+    /// sent before the act landed does not put them back (#291): who may quote it — its policy,
+    /// changed by its author — and the state of its quote, which the quoted post's author revokes.
+    case quotePolicy, quoteState
 }
 
 /// A note this device has stored. Its categories remember what it arrived through.
@@ -645,6 +656,17 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// worker attached it is not the source's word that there is none. Only a change to the post
     /// (`revised`) takes it off.
     public let card: PostCard?
+    /// Who may quote the post, and whether the reader may (#330), as its source last said — or
+    /// nothing where it said nothing: a source older than quotes, and every forum. **The reader's
+    /// half is the source's word to whoever read it**: an unsigned read is told `denied`.
+    ///
+    /// `counts`' rule: a later copy's word wins where it says one, and a copy read before the
+    /// row held says nothing of it.
+    public let quoteApproval: QuoteApproval?
+    /// Whether the reader may quote the post, as its source said to them (#330): `bookmarked`'s
+    /// shape — nothing where no read made as the reader said, which every unsigned read is (a
+    /// Mastodon tells an unsigned reader `denied`, and that is not the reader's word).
+    public let mayQuote: QuoteApproval.Reader?
     /// What this item refers to (#290, #293): each another item on the same source, with the
     /// kind of reference it is. Held to `Reference.bounded`.
     ///
@@ -729,6 +751,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         via: String? = nil,
         poll: Poll? = nil,
         card: PostCard? = nil,
+        quoteApproval: QuoteApproval? = nil,
+        mayQuote: QuoteApproval.Reader? = nil,
         refs: [Reference] = [],
         refsDue: Bool = false
     ) {
@@ -772,6 +796,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         let language = post ? language : nil
         let poll = post ? poll : nil
         let card = post ? card : nil
+        let quoteApproval = post ? quoteApproval : nil
+        let mayQuote = post ? mayQuote : nil
         self.refsDue = refsDue
         self.id = id
         self.source = source
@@ -814,12 +840,14 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.via = via
         self.poll = poll
         self.card = card
+        self.quoteApproval = quoteApproval
+        self.mayQuote = mayQuote
     }
 
     /// Whether this copy says anything of what its reader did to the post: a boost, a
     /// favourite, a bookmark or a vote, either way. What a sign-in that ended takes off.
     public var saysReader: Bool {
-        boosted != nil || favourited != nil || bookmarked != nil || pinned != nil || muted != nil
+        boosted != nil || favourited != nil || bookmarked != nil || pinned != nil || muted != nil || mayQuote != nil
             || poll?.voted != nil
     }
 
@@ -910,6 +938,8 @@ public struct Note: Identifiable, Hashable, Sendable {
                 stale.poll.map { Poll.stale($0, over: held, reader: taking.contains(.voted)) } ?? held
             },
             card: card,
+            quoteApproval: taking.contains(.quotePolicy) ? stale.quoteApproval ?? quoteApproval : quoteApproval,
+            mayQuote: taking.contains(.mayQuote) ? stale.mayQuote ?? mayQuote : mayQuote,
             refs: refs, refsDue: refsDue
         )
     }
@@ -950,6 +980,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             poll: Poll.later(later.poll, over: was.poll, reader: true),
             // The card as the changed post says it: a link taken out takes its preview with it.
             card: later.card,
+            quoteApproval: later.quoteApproval ?? quoteApproval, mayQuote: mayQuote,
             refs: Reference.rebuilt(answers: answersReference, quotes: quotes, from: refs), refsDue: refsDue
         )
     }
@@ -969,9 +1000,11 @@ public struct Note: Identifiable, Hashable, Sendable {
     func refreshed(over held: Note, taking: Set<ReaderMark> = Set(ReaderMark.allCases)) -> Note {
         // The quote as the source says it now (#214) — a quote taken back reads so, and one an
         // edit took away is gone. Only a source that never says a quote leaves the held one.
-        let quotes = source.kind.saysQuotes
+        let said = source.kind.saysQuotes
             ? quotesReference.flatMap { Reference.laterQuote($0, over: held.quotesReference) }
             : Reference.laterQuote(quotesReference, over: held.quotesReference)
+        // A read sent before the quoted post's author revoked this quote does not put it back (#330).
+        let quotes = taking.contains(.quoteState) ? said : held.quotesReference
         return Note(
             id: id, source: source, author: author, handle: handle, body: body, title: title,
             board: board ?? held.board, postedAt: postedAt,
@@ -1020,6 +1053,10 @@ public struct Note: Identifiable, Hashable, Sendable {
             // attaches it after the post, and a read sent before it landed is not its word. A
             // copy of the post as its author changed it since is: a link taken out takes it off.
             card: isLater(than: held) ? card : card ?? held.card,
+            // Who may quote it, by the marks' rule (#330): a read sent before its author changed it
+            // says nothing of it; and the reader's word on it only where this read was made as them.
+            quoteApproval: taking.contains(.quotePolicy) ? quoteApproval ?? held.quoteApproval : held.quoteApproval,
+            mayQuote: taking.contains(.mayQuote) ? mayQuote ?? held.mayQuote : held.mayQuote,
             // **What it reblogs is the held row's, always** (#290): a reblog's target does not
             // change once it is held, so no later copy can turn a reblog — a kept one, which
             // holds its post — towards another post.
@@ -1055,7 +1092,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         // knows was sent before the reader's act landed (#291), which is `marksStand`.
         let stale = marksStand || other.isEarlier(than: self)
         // The later copy's quote wins, as its counts do (#214) — see `Reference.laterQuote`.
-        let quotes = Reference.laterQuote(other.quotesReference, over: quotesReference)
+        let quotes = marksStand ? quotesReference : Reference.laterQuote(other.quotesReference, over: quotesReference)
         return Note(
             id: id, source: source, author: author, handle: handle,
             body: quoteArrives ? other.body : body, title: title,
@@ -1100,6 +1137,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             } ?? (other.isEarlier(than: self) ? nil : other.poll),
             // A card the later copy brings fills where this row has none (#335).
             card: card ?? other.card,
+            quoteApproval: stale ? quoteApproval ?? other.quoteApproval : other.quoteApproval ?? quoteApproval,
+            mayQuote: stale ? mayQuote : other.mayQuote ?? mayQuote,
             refs: Reference.rebuilt(answers: answersReference, quotes: quotes, from: refs), refsDue: refsDue
         )
     }
@@ -1117,7 +1156,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
             editedAt: editedAt, earlier: earlier, historyAt: historyAt, language: language, via: via, poll: poll?.with(voted: nil),
-            card: card,
+            card: card, quoteApproval: quoteApproval, mayQuote: nil,
             refs: refs, refsDue: refsDue
         )
     }
@@ -1133,7 +1172,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, historyAt: historyAt, language: language, via: via, poll: poll, card: card, refs: refs, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, historyAt: historyAt, language: language, via: via, poll: poll, card: card, quoteApproval: quoteApproval, mayQuote: mayQuote, refs: refs, refsDue: refsDue
         )
     }
 
@@ -1151,7 +1190,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
             editedAt: editedAt, earlier: Wording.bounded(wordings), historyAt: historyAt, language: language, via: via,
-            poll: poll, card: card, refs: refs, refsDue: refsDue
+            poll: poll, card: card, quoteApproval: quoteApproval, mayQuote: mayQuote, refs: refs, refsDue: refsDue
         )
     }
 
@@ -1167,7 +1206,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, historyAt: historyAt, language: language, via: via, poll: poll, card: card, refs: references, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, historyAt: historyAt, language: language, via: via, poll: poll, card: card, quoteApproval: quoteApproval, mayQuote: mayQuote, refs: references, refsDue: refsDue
         )
     }
 
@@ -1181,7 +1220,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             audience: audience, avatarURL: avatarURL, attachments: attachments, sensitive: sensitive, spoiler: spoiler,
             emojis: emojis, mentions: mentions, url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, historyAt: historyAt, language: language, via: via, poll: poll, card: card, refs: refs, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, historyAt: historyAt, language: language, via: via, poll: poll, card: card, quoteApproval: quoteApproval, mayQuote: mayQuote, refs: refs, refsDue: refsDue
         )
     }
 }

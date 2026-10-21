@@ -6,9 +6,11 @@ import Foundation
 // so — the one document it publishes, read by the one reader this package has of it
 // (`MastodonClient.said()`) — and where that document says nothing of the thing, by a not-found
 // its own address answered, remembered for the run (`MastodonHostsKnown`). **Never by a version**: no
-// version string is read here, nor the number a host gives for how much of the API it speaks.
-// A fork, a host behind a proxy and a host its administrator narrowed all answer for
-// themselves, and a floor would be wrong about each of them.
+// version string is read here. A fork, a host behind a proxy and a host its administrator narrowed
+// all answer for themselves, and a floor would be wrong about each of them. **One exception,
+// decided (#330, D6)**: whether a host has quotes is its own word for which of Mastodon's APIs it
+// speaks, `api_versions.mastodon` — the document's own field for exactly that, not a guess made
+// from a version string.
 //
 // **Per host, and for the run.** What a kind of source has is `SourceOffers`, said once for
 // every host of that kind; what *this* host has is here, kept in memory, written nowhere, and
@@ -74,6 +76,10 @@ public enum MastodonHostThing: String, Sendable, Hashable, CaseIterable {
     /// (`configuration.translation.enabled`); a host whose translator is off answers a not-found
     /// of the address besides (asked of a real one, `MastodonPostActsCaptures`).
     case translation
+    /// Quotes: written, who may quote a post, and the quotes of one's own (#330). **Said by the
+    /// document's own word for its API** — `api_versions.mastodon` of 7 or more (D6), the version
+    /// a Mastodon's quotes came in; less is absent, and a document that names none says nothing.
+    case quotes
 }
 
 /// What is known of one thing at one host.
@@ -104,6 +110,12 @@ public struct MastodonHostSays: Sendable, Hashable {
     /// Whether the host translates posts (#334), where it says: `false` is a host with no
     /// translator, nothing a host that said neither.
     public let translates: Bool?
+    /// Which version of Mastodon's API the host says it speaks (`api_versions.mastodon`), where it
+    /// says one: what says whether it has quotes. Bounded as the figures are.
+    public let apiVersion: Int?
+
+    /// The API version quotes came in.
+    public static let quotesFrom = 7
 
     /// The most a figure a host gives for itself is believed to be. A stranger's number: one
     /// past this is theirs to send and not ours to size anything by.
@@ -112,10 +124,11 @@ public struct MastodonHostSays: Sendable, Hashable {
     /// A host that has said nothing.
     public static let nothing = MastodonHostSays(featuredTagLimit: nil)
 
-    public init(featuredTagLimit: Int?, pinLimit: Int? = nil, translates: Bool? = nil) {
+    public init(featuredTagLimit: Int?, pinLimit: Int? = nil, translates: Bool? = nil, apiVersion: Int? = nil) {
         self.featuredTagLimit = Self.bounded(featuredTagLimit)
         self.pinLimit = Self.bounded(pinLimit)
         self.translates = translates
+        self.apiVersion = Self.bounded(apiVersion)
     }
 
     /// A figure as believed: none below nothing, and none past `most`.
@@ -127,15 +140,17 @@ public struct MastodonHostSays: Sendable, Hashable {
     /// shape costs the fact it carried, a document that is no document says nothing at all —
     /// and neither costs the reader what else the same answer was read for.
     init(document: Data) {
-        let configuration = (try? MastodonJSON.decoder.decode(Wire.self, from: document))?.configuration?.value
+        let wire = try? MastodonJSON.decoder.decode(Wire.self, from: document)
+        let configuration = wire?.configuration?.value
         let accounts = configuration?.accounts?.value
         self.init(
             featuredTagLimit: accounts?.maxFeaturedTags?.value, pinLimit: accounts?.maxPinnedStatuses?.value,
-            translates: configuration?.translation?.value?.enabled?.value
+            translates: configuration?.translation?.value?.enabled?.value,
+            apiVersion: wire?.apiVersions?.value?.mastodon?.value
         )
     }
 
-    /// What the document says of `thing`. Of all but two it says nothing.
+    /// What the document says of `thing`. Of all but three it says nothing.
     public func has(_ thing: MastodonHostThing) -> MastodonHostHas {
         switch thing {
         case .featuredTags:
@@ -144,6 +159,9 @@ public struct MastodonHostSays: Sendable, Hashable {
         case .translation:
             guard let translates else { return .unsaid }
             return translates ? .present : .absent
+        case .quotes:
+            guard let apiVersion else { return .unsaid }
+            return apiVersion >= Self.quotesFrom ? .present : .absent
         case .suggestions, .directory, .featuredPeople, .risingTags, .risingLinks, .announcements,
              .longerAccount, .knownServers, .activity, .pinnedPosts:
             return .unsaid
@@ -155,6 +173,11 @@ public struct MastodonHostSays: Sendable, Hashable {
     private struct Wire: Decodable {
         typealias Lenient = StatusDTO.Lenient
         let configuration: Lenient<Configuration>?
+        let apiVersions: Lenient<APIVersions>?
+
+        struct APIVersions: Decodable, Sendable {
+            let mastodon: Lenient<Int>?
+        }
 
         struct Configuration: Decodable, Sendable {
             let accounts: Lenient<Accounts>?

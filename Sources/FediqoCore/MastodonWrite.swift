@@ -123,8 +123,11 @@ public struct MastodonWrite: Sendable {
     public func post(
         _ text: String, visibility: Audience, answering: Note? = nil, key: UUID? = nil,
         spoiler: String? = nil, language: String? = nil, sensitive: Bool? = nil,
-        mediaIDs: [String] = [], poll: NewPoll? = nil, pollLimits: MastodonPollLimits? = nil
+        mediaIDs: [String] = [], poll: NewPoll? = nil, pollLimits: MastodonPollLimits? = nil,
+        quoting: Note? = nil, quotePolicy: QuotePolicy? = nil
     ) async throws -> Note {
+        // A quote (#330): the quoted post by its id, and nothing it may not carry — before anything else.
+        let quote = try Self.quoting(quoting, host: host, mediaIDs: mediaIDs, poll: poll)
         // A poll is refused here before anything is asked: one beside media, which a Mastodon
         // takes on no post (#331), and one past what the source said it takes — where this run
         // heard what that is. Where it did not, the source is the judge of its own limits.
@@ -144,15 +147,23 @@ public struct MastodonWrite: Sendable {
             }
             answeringID = id
         }
-        let form = Self.postForm(
+        var form = Self.postForm(
             text, visibility: visibility, answering: answeringID, spoiler: spoiler, language: language,
             sensitive: sensitive, mediaIDs: mediaIDs, poll: poll
         )
+        // Who may quote it, where it was chosen: absent is the account's own default.
+        form += quote + (quotePolicy.map { [("quote_approval_policy", $0.rawValue)] } ?? [])
         let sent = ReadMoment.now()
-        let data = try await door.post(
-            path: "/api/v1/statuses", form: form,
-            headers: key.map { [Self.idempotencyKey: $0.uuidString] } ?? [:]
-        )
+        let data: Data
+        do {
+            data = try await door.post(
+                path: "/api/v1/statuses", form: form,
+                headers: key.map { [Self.idempotencyKey: $0.uuidString] } ?? [:]
+            )
+        } catch MastodonAuthError.http(404) where !quote.isEmpty {
+            // What a real one answers a quote it does not allow: the post "does not appear to exist".
+            throw MastodonQuoteError.notAllowed
+        }
         guard let note = try? MastodonJSON.decoder.decode(StatusDTO.self, from: data)
             .asNote(source: source, categories: Self.categories(for: visibility), sent: sent)
         else {
