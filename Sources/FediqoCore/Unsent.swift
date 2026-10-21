@@ -96,13 +96,29 @@ public struct Unsent: Hashable, Sendable, Identifiable {
     /// The poll it is written with (#331), or nothing. Never beside media: a Mastodon takes no
     /// post with both, and the composer offers one or the other.
     public var poll: NewPoll?
+    /// The published post this text is a change of (#332), or nothing for a post or an answer.
+    /// **A change is no new post**: it is sent as a change of that one, lands on its row, and is
+    /// never looked for among the writer's posts — the same change sent twice lands once. Its
+    /// files already on the post are among `media`, each with its source's id and no bytes.
+    public let changes: Changes?
+
+    /// Which post a change is of: the row, and the id its source gave the post.
+    public struct Changes: Hashable, Sendable {
+        public let item: NoteKey
+        public let statusID: String
+
+        public init(item: NoteKey, statusID: String) {
+            self.item = item
+            self.statusID = statusID
+        }
+    }
 
     public init(
         id: UUID = UUID(), host: String, text: String, audience: Audience,
         answers: NoteKey? = nil, root: NoteKey? = nil, pressedAt: Date = Date(), standing: Standing = .fresh,
         writerID: String? = nil, writer: String? = nil, askedAt: Date? = nil,
         spoiler: String? = nil, language: String? = nil, sensitive: Bool? = nil, media: [UnsentMedia] = [],
-        poll: NewPoll? = nil
+        poll: NewPoll? = nil, changes: Changes? = nil
     ) {
         self.writerID = writerID
         self.writer = writer
@@ -121,6 +137,7 @@ public struct Unsent: Hashable, Sendable, Identifiable {
         self.sensitive = sensitive
         self.media = media
         self.poll = poll
+        self.changes = changes
     }
 }
 

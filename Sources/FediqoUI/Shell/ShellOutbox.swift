@@ -105,6 +105,9 @@ final class ShellOutbox {
         case otherAccount(here: String?)
         /// The post it answers is not held, or its source has said it is gone.
         case answeredGone
+        /// The post a change is of is not held, or its source has said it is gone (#332): the
+        /// change has nowhere to go.
+        case changeGone
     }
 
     /// How long after a text's source was first asked it is still sent again under its key
@@ -130,6 +133,11 @@ final class ShellOutbox {
     /// The row each answer was written to and the conversation it was written from, as the
     /// sheet held them, for the run: an answer read in an open conversation is in no store.
     @ObservationIgnored private var targets: [UUID: AnswerTarget] = [:]
+    /// The post each change is of, as it was held when the change was taken or first followed
+    /// (#332): **what a change goes to while it waits**, whether or not its row is still among
+    /// what the screens hold — a row let go for room while a change of it waits is not a post
+    /// gone. For the run; a launch fills it from the store as it follows each change.
+    @ObservationIgnored private var changeTargets: [UUID: Note] = [:]
     /// The texts whose source was asked and never said yes or no in a way that settles it —
     /// this run, the one before, or through another window, as the store says (`follow`).
     /// **Once a text may have landed, nothing but a yes says otherwise**: a later try that
@@ -219,6 +227,7 @@ final class ShellOutbox {
             if text.standing == .asked { mayHaveLanded.insert(text.id) } else { mayHaveLanded.remove(text.id) }
             guard let at = sendings.firstIndex(where: { $0.id == text.id }) else {
                 sendings.append(Sending(unsent: text, standing: Self.standing(of: text, sentElsewhere: other != nil)))
+                learnTarget(of: text, in: session)
                 continue
             }
             // That it could not be written to this device is this run's to know, while the
@@ -266,16 +275,50 @@ final class ShellOutbox {
     // MARK: - The press
 
     /// Takes a text at the press. In memory before this returns; written down and sent behind it.
-    func take(_ unsent: Unsent, answering target: AnswerTarget? = nil, in session: ShellSession) {
+    /// `replacing` is a text this one takes the place of, let go of behind it (`keep`).
+    func take(
+        _ unsent: Unsent, answering target: AnswerTarget? = nil, replacing old: UUID? = nil, in session: ShellSession
+    ) {
         guard sending(unsent.id) == nil else { return }
         wroteWith[unsent.id] = session.mastodon.token(host: unsent.host)?.accessToken
         targets[unsent.id] = target
         let taken = Sending(unsent: unsent, standing: .waiting)
         sendings.append(taken)
         out.insert(unsent.id)
-        keep(unsent, in: session)
+        keep(unsent, replacing: old, in: session)
         session.said.announce(OutboxWords.line(taken, hold: nil, whom: whom(taken, in: session)))
         pump(unsent.host, in: session)
+    }
+
+    /// The post a change waiting from before is of, read from the store — its file too — where
+    /// this run has not held it yet.
+    private func learnTarget(of text: Unsent, in session: ShellSession) {
+        guard let changes = text.changes, changeTargets[text.id] == nil else { return }
+        if let held = session.note(ofRow: changes.item.rowID) {
+            changeTargets[text.id] = held
+            return
+        }
+        work {
+            guard let read = await session.store.note(changes.item), self.sending(text.id) != nil else { return }
+            self.changeTargets[text.id] = read
+        }
+    }
+
+    /// The post `id`, a change, is of, as this outbox holds it.
+    func changeTarget(_ id: UUID) -> Note? { changeTargets[id] }
+
+    /// Takes a change of a published post (#332). **One change a post**: one of the same post
+    /// that waits here and is not on its way is replaced by this, and let go of behind it; one
+    /// already on its way is followed by this, in order, as every text to one source is.
+    func takeChange(_ unsent: Unsent, in session: ShellSession) {
+        guard let changes = unsent.changes else { return take(unsent, in: session) }
+        let waiting = sendings.first { $0.unsent.changes?.item == changes.item && !$0.isOut && !leaving($0.id) }?.id
+        if let waiting {
+            unask([waiting], in: session)
+            drop(waiting)
+        }
+        if let held = session.note(ofRow: changes.item.rowID) { changeTargets[unsent.id] = held }
+        take(unsent, replacing: waiting, in: session)
     }
 
     /// The strip's Send again: the same text under the same name, as who wrote it. False where
@@ -289,7 +332,9 @@ final class ShellOutbox {
               sendings[at].standing != .unkept, hold(sendings[at], in: session) == nil
         else { return false }
         out.insert(id)
-        guard mayHaveLanded.contains(id) else {
+        // **A change is never looked for** (#332): the same change sent twice lands once, so
+        // Send again sends it again, whatever became of the try before.
+        guard mayHaveLanded.contains(id), sendings[at].unsent.changes == nil else {
             sendings[at].standing = .waiting
             pump(sendings[at].unsent.host, in: session)
             return true
@@ -334,6 +379,11 @@ final class ShellOutbox {
     @discardableResult
     func edit(_ id: UUID, in session: ShellSession) -> Bool {
         guard let held = sending(id), !held.isOut, !leaving(id) else { return false }
+        // A change opens the sheet that changes the post, as typed (#332).
+        if held.unsent.changes != nil {
+            session.changes.reopen(held.unsent, in: session)
+            return true
+        }
         session.editingUnsent = UnsentAsk(id: id)
         return true
     }
@@ -473,6 +523,7 @@ final class ShellOutbox {
         edits[id] = nil
         wroteWith[id] = nil
         targets[id] = nil
+        changeTargets[id] = nil
         keeps[id] = nil
         mayHaveLanded.remove(id)
         sentUnkept.remove(id)
@@ -522,7 +573,19 @@ final class ShellOutbox {
             return .otherAccount(here: session.mastodon.reader(host: host)?.shown)
         }
         if sending.unsent.answers != nil, answered(sending.unsent, in: session) == nil { return .answeredGone }
+        if sending.unsent.changes != nil, changed(sending.unsent, in: session) == nil { return .changeGone }
         return nil
+    }
+
+    /// The post a change is of, where it is held — on the screens, or kept here for the change
+    /// (`changeTargets`) — at the change's own source, by the id it was taken for, and not gone.
+    private func changed(_ unsent: Unsent, in session: ShellSession) -> Note? {
+        guard let changes = unsent.changes,
+              let note = session.note(ofRow: changes.item.rowID) ?? changeTargets[unsent.id],
+              note.key == changes.item, note.key.host == unsent.host, note.source.host == unsent.host,
+              note.goneSince == nil, note.sendableID == changes.statusID
+        else { return nil }
+        return note
     }
 
     /// Whether the sign-in at a text's source is shown to be who wrote it: the same account,
@@ -890,6 +953,9 @@ final class ShellOutbox {
             return await missed(id, .unreachable, in: session)
         }
         lastAsked[id] = asking
+        if unsent.changes != nil, let post = answering {
+            return await sendChange(unsent, of: post, through: door, id: id, in: session)
+        }
         do {
             let note = try await session.reach.write(door, landingIn: session.store)
                 .post(
@@ -910,6 +976,41 @@ final class ShellOutbox {
             if await wroteGone(in: session) { session.saveSoon() }
         } catch {
             session.writeFailed(error, host: host)
+            if let why = Self.notSent(error) {
+                await missed(id, why, in: session)
+            } else {
+                stand(id, .unconfirmed, in: session)
+            }
+        }
+    }
+
+    /// A change's request (#332): `PUT` of the post as changed, the answer landing on its own row
+    /// as a later wording (`MastodonWrite.change`). **No new row, and no key**: the same change
+    /// sent twice lands once. A 404 is the post gone at its source — let go here, so the change
+    /// is held as having nowhere to go; any other failure is read as a post's is.
+    private func sendChange(
+        _ unsent: Unsent, of post: Note, through door: MastodonAuthorized, id: UUID, in session: ShellSession
+    ) async {
+        let change = PostChange(
+            text: unsent.text, spoiler: unsent.spoiler ?? "", sensitive: unsent.sensitive ?? false,
+            language: unsent.language,
+            media: unsent.media.compactMap { piece in piece.remoteID.map { PostChange.Media(id: $0, description: piece.description) } },
+            poll: unsent.poll
+        )
+        do {
+            _ = try await session.reach.write(door, landingIn: session.store)
+                .change(post, to: change, pollLimits: session.composeRooms[unsent.host]?.polls)
+            await session.reloadFromStore()
+            drop(id)
+            await session.store.letGo(unsent: id)
+            if await wroteGone(in: session) { session.saveSoon() }
+        } catch MastodonAuthError.http(404) {
+            changeTargets[id]?.goneSince = Date()
+            await session.store.forget(post.key)
+            await session.reloadFromStore()
+            await missed(id, .declined, in: session)
+        } catch {
+            session.writeFailed(error, host: unsent.host)
             if let why = Self.notSent(error) {
                 await missed(id, why, in: session)
             } else {
@@ -945,10 +1046,12 @@ final class ShellOutbox {
             guard let ceiling = limits.byteLimit(for: piece.mime) else { return false }
             return piece.bytes.count > ceiling
         }
-        if session.mastodon.standing(.media, host: unsent.host) != .held
+        // A file already on the post a change keeps (#332) is not uploaded, and needs no part.
+        let uploads = unsent.media.filter { !PostDraft.kept($0) }
+        if (!uploads.isEmpty && session.mastodon.standing(.media, host: unsent.host) != .held)
             || unsent.media.count > limits.count
             || unsent.media.contains(where: { $0.description.count > limits.descriptionLimit })
-            || unsent.media.contains(where: { !limits.mimeTypes.isEmpty && !limits.allows($0.mime) })
+            || uploads.contains(where: { !limits.mimeTypes.isEmpty && !limits.allows($0.mime) })
             || overSize
         {
             return .missed(.unreachable)
@@ -989,6 +1092,7 @@ final class ShellOutbox {
               session.writableSources.contains(where: { $0.host == host }),
               writes(unsent, in: session)
         else { return nil }
+        if unsent.changes != nil { return changed(unsent, in: session).map { (door, $0) } }
         guard unsent.answers != nil else { return (door, nil) }
         guard let note = answered(unsent, in: session) else { return nil }
         return (door, note)
@@ -1043,6 +1147,15 @@ final class ShellOutbox {
     }
 }
 
+extension Unsent {
+    /// Which of the three a text is, as its words are keyed: a change of a published post
+    /// (#332), an answer, or a post.
+    var kind: String {
+        if changes != nil { return "change" }
+        return answers == nil ? "post" : "answer"
+    }
+}
+
 /// A text of the outbox's that a sheet or a question is about, by its name.
 struct UnsentAsk: Identifiable, Equatable {
     let id: UUID
@@ -1064,6 +1177,8 @@ enum OutboxWords {
         if sending.isOut { return [] }
         // Asked to go already: the one thing left is to try taking it off the disk again.
         if sending.standing == .unremoved { return [.discard] }
+        // A change whose post is gone has nothing to go to, and nothing to keep (X0 §1).
+        if hold == .changeGone { return [.discard] }
         if hold != nil { return [.copy, .discard] }
         return sending.standing == .unkept ? [.anyway, .copy, .discard] : [.again, .edit, .discard]
     }
@@ -1094,7 +1209,7 @@ enum OutboxWords {
         _ sending: ShellOutbox.Sending, hold: ShellOutbox.Hold?, whom: String?, language: DummyLanguage? = nil
     ) -> String {
         let host = sending.unsent.host
-        let kind = sending.unsent.answers == nil ? "post" : "answer"
+        let kind = sending.unsent.kind
         func said(_ key: String) -> String {
             String(format: L10n.t("outbox.\(key).\(kind)", language: language), host)
         }
@@ -1113,6 +1228,7 @@ enum OutboxWords {
         switch hold {
         case .noSource?: return said("hold.noSource")
         case .answeredGone?: return said("hold.answered")
+        case .changeGone?: return String(format: L10n.t("outbox.hold.changeGone", language: language), host)
         case .otherAccount(let here)?:
             // A handle is its source's word: set in a sentence of ours only made fit for one.
             guard let writer = sending.unsent.writer.map({ LineText.oneLine($0) }) else { return said("hold.unnamed") }
@@ -1155,25 +1271,25 @@ extension ShellSession {
         guard canPost, let host = composeHost,
               mastodon.authorized(host: host, for: .write) != nil
         else { return false }
-        if !composeMedia.isEmpty, mastodon.standing(.media, host: host) != .held { return false }
+        if !composeDraft.media.isEmpty, mastodon.standing(.media, host: host) != .held { return false }
         let writer = mastodon.reader(host: host)
-        let text = ComposerSheet.trimmed(composeDraft)
+        let text = ComposerSheet.trimmed(composeDraft.text)
         outbox.take(
             Unsent(
-                host: host, text: text, audience: composeAudience, writerID: writer?.id, writer: writer?.handle,
-                spoiler: ComposerSheet.trimmed(composeCover),
-                language: composeLanguage.isEmpty ? nil : composeLanguage,
-                sensitive: composeCoversMedia, media: composeMedia, poll: composePoll
+                host: host, text: text, audience: composeDraft.audience, writerID: writer?.id, writer: writer?.handle,
+                spoiler: ComposerSheet.trimmed(composeDraft.cover),
+                language: composeDraft.language.isEmpty ? nil : composeDraft.language,
+                sensitive: composeDraft.coversMedia, media: composeDraft.media, poll: composeDraft.poll
             ),
             in: self
         )
         // The cover, the files and the poll go with this post. Who it reaches, its language and
         // whether it covers its media stay, which is where the next one starts.
-        composeDraft = ""
-        composeCover = ""
-        composeMedia = []
+        composeDraft.text = ""
+        composeDraft.cover = ""
+        composeDraft.media = []
         composeMediaNote = nil
-        composePoll = nil
+        composeDraft.poll = nil
         composePollRefused = nil
         return true
     }

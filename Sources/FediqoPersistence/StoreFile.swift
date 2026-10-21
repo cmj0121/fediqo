@@ -1504,6 +1504,15 @@ private var migrator: DatabaseMigrator {
             t.add(column: "card", .text)
         }
     }
+    // Which published post a text waiting to be sent changes (#332). NULL is a post or an answer.
+    //
+    // **A migration id for `v15-compose`'s reason**: a build from before would send the change
+    // as a new post — the same words posted twice. The id makes it refuse the store.
+    migrator.registerMigration("v20-unsent-changes") { db in
+        try db.alter(table: "unsent") { t in
+            t.add(column: "changes", .text)
+        }
+    }
     return migrator
 }
 

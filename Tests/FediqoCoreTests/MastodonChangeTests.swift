@@ -294,6 +294,16 @@ struct MastodonChangeTests {
         #expect(runAgain.poll?.endsAt == MastodonJSON.date(from: "2026-10-21T02:40:00.000Z") && runAgain.body == "z")
     }
 
+    @Test("A post of another source is not changed, nor read back, through this sign-in: nothing is asked")
+    func onlyItsOwnSource() async throws {
+        let elsewhere = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(Captures.withMedia.utf8))
+            .asNote(source: Source(host: "other.example", kind: .mastodon), category: .home, sent: .now())
+        let (write, _, server) = try await writer(holding: [], [Self.path: .json(Captures.changed)])
+        await #expect(throws: MastodonWriteError.unfindable) { _ = try await write.change(elsewhere, to: PostChange(text: "x")) }
+        await #expect(throws: MastodonWriteError.unfindable) { _ = try await write.source(of: elsewhere) }
+        #expect(await server.requests.isEmpty)
+    }
+
     // MARK: - What it said before
 
     @Test("History reads to every wording before the one it says now, the original first, each until the next began; a change of a description alone is no new wording")

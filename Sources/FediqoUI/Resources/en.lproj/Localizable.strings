@@ -88,6 +88,20 @@
 "compose.poll.withMedia" = "%@ takes a poll or media on a post, not both.";
 "compose.none.title" = "Nothing to write to";
 "compose.none.detail" = "None of the sources you are signed in to can be written to from here.";
+"change.title" = "Change your post";
+"change.save" = "Save";
+"change.where" = "At %1$@ · %2$@";
+"change.answering" = "answering %@";
+"change.fixed" = "Who may read it, what it answers and what it quotes stay as they were.";
+"change.media.kept" = "%@ (already there)";
+"change.asking" = "Asking %@ for what it was written from…";
+"change.readFailed" = "Could not ask %@ for what it was written from, so nothing can be changed yet.";
+"change.poll.reset" = "Changing the choices, or whether more than one may be chosen, starts the poll again: its %d votes are lost.";
+"change.poll.reset.unsaid" = "Changing the choices, or whether more than one may be chosen, starts the poll again.";
+"change.poll.ask.title" = "Start the poll again?";
+"change.poll.ask.line" = "The %1$d votes in it are lost at %2$@. They do not come back.";
+"change.poll.ask.confirm" = "Save, and lose the votes";
+"change.poll.ended" = "This poll has ended. Choose how long it runs again, or remove the poll.";
 "answer.title" = "Answer";
 "answer.to" = "Answering %@";
 "answer.goesTo" = "Goes to %@";
@@ -1228,6 +1242,8 @@
 "thread.copies.from" = "From %@";
 "thread.earlier.title" = "What it said before";
 "thread.earlier.until" = "Until %@";
+"thread.earlier.first" = "As first written, %@";
+"thread.earlier.spoken" = "%1$@: %2$@";
 "blog.title" = "Blog";
 "blog.reading" = "Reading the blog…";
 "blog.refused" = "%@ would not let this app read this blog.";
@@ -1888,6 +1904,21 @@
 "work.purpose.ownPosts" = "Looking for a post of yours before sending it again";
 "outbox.found.post" = "Your post was found on %@: it had been posted, and is no longer waiting here.";
 "outbox.found.answer" = "Your answer was found on %@: it had been posted, and is no longer waiting here.";
+"outbox.sending.change" = "Sending your change to %@…";
+"outbox.failed.change" = "Your change was not sent to %@. Every word of it is kept here.";
+"outbox.refused.change" = "%@ would not let this sign-in change the post. Your change is kept here.";
+"outbox.declined.change" = "%@ did not take your change. It is kept here.";
+"outbox.unconfirmed.change" = "%@ did not say whether it took the change. Send again sends the same change.";
+"outbox.hold.changeGone" = "The post is gone at %@, so the change has nowhere to go.";
+"outbox.hold.signedOut.change" = "Your change waits here. Sign in to %@ with writing to send it.";
+"outbox.hold.noSource.change" = "%@ is no longer a source here, so your change cannot be sent.";
+"outbox.hold.other.change" = "Your change was written as %2$@, and %1$@ is signed in as %3$@. Sign in as %2$@ to send it.";
+"outbox.hold.other.unknown.change" = "Your change was written as %2$@. %1$@ has not yet said who is signed in now, so it waits. It can be sent once %1$@ answers.";
+"outbox.hold.unnamed.change" = "Nobody can say who was signed in to %@ when your change was written, so it is not sent from here.";
+"outbox.unkept.change" = "Your change could not be kept on this device, so it was not sent to %@. Sent now, it would be lost if this did not finish.";
+"outbox.unremoved.change" = "Your change for %@ could not be removed from this device. Its words are still kept here: discard it again to try once more.";
+"outbox.discard.title.change" = "Discard this change?";
+"outbox.discard.title.unconfirmed.change" = "Forget this change here?";
 
 /* P2 — somebody's page as their source says it (#310) */
 "work.purpose.person" = "Reading who someone is, and their posts";
@@ -2288,6 +2319,7 @@
 "person.act.report" = "Report…";
 "person.act.report.failed" = "Could not report %1$@ at %2$@.";
 "item.act.report" = "Report post…";
+"item.act.change" = "Change it…";
 "report.title" = "Report %@";
 "report.told" = "Those who answer for %@ are told, and nobody else unless you choose it below. What becomes of it is theirs.";
 "report.category" = "What is it?";

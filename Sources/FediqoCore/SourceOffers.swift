@@ -65,12 +65,16 @@ public struct SourceOffers: Hashable, Sendable {
     /// Whether a post or a person is reported to those who answer for it (#339), given a sign-in
     /// that may — so the `…` of a post and of a person offers it only where this is so.
     public let reports: Bool
+    /// Whether a post its reader wrote can be changed after it was published (#332), given a
+    /// sign-in that may — so the `…` of one's own post offers it only where this is so.
+    public let changesPosts: Bool
 
     public init(
         timelines: Bool = false, trends: Bool = false, boards: Bool = false, authorsAreItsOwn: Bool = false,
         writes: Bool = false, fields: [SourceField] = [], loadsReferences: Bool = false,
         saysReaderMarks: Bool = false, saysQuotes: Bool = false, notices: Bool = false, people: Bool = false,
-        follows: Bool = false, polls: Bool = false, marks: Bool = false, blocks: Bool = false, reports: Bool = false
+        follows: Bool = false, polls: Bool = false, marks: Bool = false, blocks: Bool = false, reports: Bool = false,
+        changesPosts: Bool = false
     ) {
         self.timelines = timelines
         self.trends = trends
@@ -88,6 +92,7 @@ public struct SourceOffers: Hashable, Sendable {
         self.marks = marks
         self.blocks = blocks
         self.reports = reports
+        self.changesPosts = changesPosts
     }
 
     /// The field it declares under `name`, or nothing.
@@ -140,7 +145,7 @@ extension ProtocolKind {
                 timelines: true, trends: true, writes: true,
                 fields: [.audience, .language, .covered, .reblog, .reblogOf],
                 loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true, people: true,
-                follows: true, polls: true, marks: true, blocks: true, reports: true
+                follows: true, polls: true, marks: true, blocks: true, reports: true, changesPosts: true
             )
         case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial:
             SourceOffers(timelines: true, trends: true)

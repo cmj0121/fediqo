@@ -28,13 +28,17 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
     var media: String?
     /// JSON of the poll, or NULL where there is none. A cell that will not read is no poll.
     var poll: String?
+    /// The post a change is of (#332), as its row's name and its source's id for it, joined by a
+    /// unit separator; NULL for a post or an answer. A cell that will not read is a text that
+    /// is not read at all: sent as a post, a change would be a second post.
+    var changes: String?
 
     enum CodingKeys: String, CodingKey {
         case id, host, body, audience, answers, root, standing, writer
         case pressedAt = "pressed_at"
         case writerID = "writer_id"
         case askedAt = "asked_at"
-        case spoiler, language, sensitive, media, poll
+        case spoiler, language, sensitive, media, poll, changes
     }
 
     init(_ text: Unsent) {
@@ -54,20 +58,32 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
         sensitive = text.sensitive
         media = UnsentMediaRow.text(text.media)
         poll = text.poll.flatMap { try? JSONEncoder().encode($0) }.flatMap { String(data: $0, encoding: .utf8) }
+        changes = text.changes.map { $0.item.rowID + Self.separator + $0.statusID }
+    }
+
+    private static let separator = "\u{1f}"
+
+    /// What `changes` names, or nothing where it is NULL; `.none` inside where it will not read.
+    private var changed: Unsent.Changes?? {
+        guard let changes else { return .some(nil) }
+        let parts = changes.components(separatedBy: Self.separator)
+        guard parts.count == 2, let item = NoteKey(rowID: parts[0]), !parts[1].isEmpty else { return nil }
+        return .some(Unsent.Changes(item: item, statusID: parts[1]))
     }
 
     /// **A standing this build does not know is read as asked** — the careful word: it may have
     /// landed, and is never sent again by itself. A reach it does not know is the narrowest, for
     /// the same care. A row with no name of its own cannot be sent under one, and is not read.
     var unsent: Unsent? {
-        guard let id = UUID(uuidString: id) else { return nil }
+        guard let id = UUID(uuidString: id), let changed else { return nil }
         return Unsent(
             id: id, host: host, text: body, audience: Audience(rawValue: audience) ?? .mentioned,
             answers: answers.flatMap(NoteKey.init(rowID:)), root: root.flatMap(NoteKey.init(rowID:)),
             pressedAt: pressedAt, standing: Unsent.Standing(rawValue: standing) ?? .asked,
             writerID: writerID, writer: writer, askedAt: askedAt,
             spoiler: spoiler, language: language, sensitive: sensitive, media: UnsentMediaRow.list(media),
-            poll: poll.flatMap { try? JSONDecoder().decode(NewPoll.self, from: Data($0.utf8)) }
+            poll: poll.flatMap { try? JSONDecoder().decode(NewPoll.self, from: Data($0.utf8)) },
+            changes: changed
         )
     }
 }

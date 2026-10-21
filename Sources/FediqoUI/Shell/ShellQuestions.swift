@@ -115,7 +115,7 @@ enum ShellQuestion {
     /// device's copy alone: forgetting it here takes nothing back from its source, where — if
     /// it was posted — it stays, to be taken back from its own row.
     static func discard(_ sending: ShellOutbox.Sending, language: DummyLanguage? = nil) -> ShellConfirmation {
-        let kind = sending.unsent.answers == nil ? "post" : "answer"
+        let kind = sending.unsent.kind
         let maybe = sending.standing == .unconfirmed
         let opening = OutboxWords.opening(sending.unsent.text)
         return ShellConfirmation(
@@ -130,6 +130,18 @@ enum ShellQuestion {
                 role: .destructive
             )],
             cancel: L10n.t("compose.cancel", language: language)
+        )
+    }
+
+    /// The question Cancel asks over a change typed and not saved: the profile's own (F11).
+    static func discardChange(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "trash",
+            title: L10n.t("profile.discard.title", language: language),
+            line: String(format: L10n.t("profile.discard.line", language: language), host),
+            help: nil,
+            choices: [.init("discard", L10n.t("profile.discard", language: language), role: .destructive)],
+            cancel: L10n.t("profile.discard.keep", language: language)
         )
     }
 

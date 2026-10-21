@@ -88,6 +88,20 @@
 "compose.poll.withMedia" = "%@ 的一則貼文可以帶投票或媒體，不能兩個都帶。";
 "compose.none.title" = "沒有可以發文的來源";
 "compose.none.detail" = "你已登入的來源裡，沒有可以從這裡發文的。";
+"change.title" = "修改你的貼文";
+"change.save" = "儲存";
+"change.where" = "在 %1$@ · %2$@";
+"change.answering" = "回應 %@";
+"change.fixed" = "誰能讀、回應的對象、引用的貼文，都維持原樣。";
+"change.media.kept" = "%@（已在貼文上）";
+"change.asking" = "正在向 %@ 詢問這則貼文寫成時的內容…";
+"change.readFailed" = "無法向 %@ 詢問這則貼文寫成時的內容，所以還不能修改。";
+"change.poll.reset" = "修改選項，或是否可以多選，投票會重新開始：已有的 %d 票會消失。";
+"change.poll.reset.unsaid" = "修改選項，或是否可以多選，投票會重新開始。";
+"change.poll.ask.title" = "要重新開始投票嗎？";
+"change.poll.ask.line" = "%2$@ 上已有的 %1$d 票會消失，無法復原。";
+"change.poll.ask.confirm" = "儲存，並捨棄票數";
+"change.poll.ended" = "這個投票已經結束。請重新選擇進行時間，或拿掉投票。";
 "answer.title" = "回應";
 "answer.to" = "回應 %@";
 "answer.goesTo" = "送往 %@";
@@ -1199,6 +1213,8 @@
 "thread.copies.from" = "來自 %@";
 "thread.earlier.title" = "它之前說的";
 "thread.earlier.until" = "到 %@ 為止";
+"thread.earlier.first" = "最初寫成時，%@";
+"thread.earlier.spoken" = "%1$@：%2$@";
 "blog.title" = "日誌";
 "blog.reading" = "正在讀這篇日誌…";
 "blog.refused" = "%@ 不讓這個 app 讀這篇日誌。";
@@ -1836,6 +1852,21 @@
 "work.purpose.ownPosts" = "再送一次之前，先找你的一則貼文";
 "outbox.found.post" = "在 %@ 上找到你的貼文了：它已經發佈，不再在這裡等著。";
 "outbox.found.answer" = "在 %@ 上找到你的回應了：它已經發佈，不再在這裡等著。";
+"outbox.sending.change" = "正在把你的修改送往 %@…";
+"outbox.failed.change" = "你的修改沒有送到 %@。每個字都還留在這裡。";
+"outbox.refused.change" = "%@ 不讓這個登入修改這則貼文。你的修改還留在這裡。";
+"outbox.declined.change" = "%@ 沒有收下你的修改。它還留在這裡。";
+"outbox.unconfirmed.change" = "%@ 沒有說是否收下了修改。「再送一次」會送出同樣的修改。";
+"outbox.hold.changeGone" = "這則貼文在 %@ 已經不在，修改無處可送。";
+"outbox.hold.signedOut.change" = "你的修改在這裡等著。用可以發文的方式登入 %@ 才能送出。";
+"outbox.hold.noSource.change" = "%@ 已經不是這裡的來源，你的修改無法送出。";
+"outbox.hold.other.change" = "你的修改是以 %2$@ 寫的，而 %1$@ 現在登入的是 %3$@。請以 %2$@ 登入再送出。";
+"outbox.hold.other.unknown.change" = "你的修改是以 %2$@ 寫的。%1$@ 還沒說現在登入的是誰，所以先等著。等 %1$@ 回答後就能送出。";
+"outbox.hold.unnamed.change" = "沒有人能說出寫下這個修改時登入 %@ 的是誰，所以不會從這裡送出。";
+"outbox.unkept.change" = "你的修改無法保存在這台裝置上，所以沒有送往 %@。現在送出的話，若沒有完成就會遺失。";
+"outbox.unremoved.change" = "你給 %@ 的修改無法從這台裝置移除。它的文字還留在這裡：再捨棄一次就會再試。";
+"outbox.discard.title.change" = "要捨棄這個修改嗎？";
+"outbox.discard.title.unconfirmed.change" = "要在這裡忘掉這個修改嗎？";
 
 /* P2 — somebody's page as their source says it (#310) */
 "work.purpose.person" = "讀取某個人是誰，以及他們的貼文";
@@ -2232,6 +2263,7 @@
 "person.act.report" = "檢舉…";
 "person.act.report.failed" = "無法在 %2$@ 檢舉 %1$@。";
 "item.act.report" = "檢舉貼文…";
+"item.act.change" = "修改這則貼文…";
 "report.title" = "檢舉 %@";
 "report.told" = "負責 %@ 的人會收到；除非你在下面選擇，否則不會告訴其他人。之後如何處理由他們決定。";
 "report.category" = "這是什麼？";

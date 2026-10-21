@@ -167,6 +167,7 @@ struct StagedMenus: View {
                     let _ = acting.perform = { _ in }
                     let _ = acting.keep = {}
                     let _ = acting.ask = { _ in }
+                    let _ = acting.change = session.changeOffer(on: item).map { ItemActing.Change(lock: $0.lock) {} }
                     let more = Self.more(item, acting, here: here)
                     VStack(alignment: .leading, spacing: ShellSpace.tight) {
                         Text(item.author).shellFont(.name, weight: .semibold)

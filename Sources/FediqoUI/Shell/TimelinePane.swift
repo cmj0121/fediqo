@@ -1369,6 +1369,16 @@ struct TimelinePane: View {
                 afterTranslate: root == nil ? { onOpenThread(item.id) } : nil
             )
         }
+        // Changing it (#332): the sheet opens on the reader's own copy, or the sign-in is asked.
+        if let offer = session.changeOffer(on: item) {
+            acting.change = ItemActing.Change(lock: offer.lock) {
+                if let lock = offer.lock {
+                    _ = session.askFor([.acting], host: lock.host)
+                } else {
+                    session.changes.start(item, in: session)
+                }
+            }
+        }
         // Taking back is an item of the row's `…` (#109), built only where the post offers it:
         // the question the key `d` asks, about the copy that goes, and a yes that refuses what
         // that asking refuses.

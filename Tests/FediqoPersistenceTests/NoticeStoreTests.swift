@@ -164,8 +164,8 @@ struct NoticeStoreTests {
             try await file.db.write { db in
                 try db.execute(sql: "DROP TABLE notice")
                 try db.execute(sql: "DROP TABLE notice_reach")
-                try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier IN ('v14-notices', 'v15-compose', 'v16-poll', 'v17-marks', 'v18-standing', 'v19-card')")
-                for column in ["spoiler", "language", "sensitive", "media", "poll"] {
+                try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier IN ('v14-notices', 'v15-compose', 'v16-poll', 'v17-marks', 'v18-standing', 'v19-card', 'v20-unsent-changes')")
+                for column in ["spoiler", "language", "sensitive", "media", "poll", "changes"] {
                     try db.execute(sql: "ALTER TABLE unsent DROP COLUMN \(column)")
                 }
                 for column in ["pinned", "muted", "card"] { try db.execute(sql: "ALTER TABLE note DROP COLUMN \(column)") }
@@ -180,7 +180,7 @@ struct NoticeStoreTests {
         #expect(opened.notes == notes)
         #expect(opened.unsent == [waiting])
         #expect(opened.notices.isEmpty)
-        #expect(try migrations(index).last == "v19-card")
+        #expect(try migrations(index).last == "v20-unsent-changes")
     }
 
     @Test("A build that knows no v14-notices sees this build's store as newer — one it made from nothing too — and the store is unchanged for being asked")

@@ -80,7 +80,7 @@ struct CardStoreTests {
         let steps = try await DatabaseQueue(path: index.path).read { db in
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid")
         }
-        #expect(steps.last == "v19-card")
+        #expect(steps.contains("v19-card"))
         var older = DatabaseMigrator()
         for step in steps where step != "v19-card" { older.registerMigration(step) { _ in } }
         var readOnly = Configuration()

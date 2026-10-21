@@ -161,7 +161,10 @@ extension MastodonWrite {
         guard await store.sources().contains(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
         }
-        guard let id = note.sendableID, ListSubscription.isPathSegment(id) else {
+        // Only a post of this sign-in's own source, by that source's id for it.
+        guard note.source.host.lowercased() == host.lowercased(), let id = note.sendableID,
+              ListSubscription.isPathSegment(id)
+        else {
             throw MastodonWriteError.unfindable
         }
         async let words = door.get(path: "/api/v1/statuses/\(id)/source")
@@ -208,7 +211,10 @@ extension MastodonWrite {
         guard await store.sources().contains(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
         }
-        guard let id = note.sendableID, ListSubscription.isPathSegment(id) else {
+        // Only a post of this sign-in's own source, by that source's id for it.
+        guard note.source.host.lowercased() == host.lowercased(), let id = note.sendableID,
+              ListSubscription.isPathSegment(id)
+        else {
             throw MastodonWriteError.unfindable
         }
         let sent = ReadMoment.now()
@@ -227,7 +233,10 @@ extension MastodonWrite {
     /// What `note` said before, as its source keeps it: `MastodonPost.history`, through this
     /// sign-in. Nothing is written to the store.
     public func history(of note: Note) async throws -> [Wording] {
-        guard let id = note.sendableID, ListSubscription.isPathSegment(id) else {
+        // Only a post of this sign-in's own source, by that source's id for it.
+        guard note.source.host.lowercased() == host.lowercased(), let id = note.sendableID,
+              ListSubscription.isPathSegment(id)
+        else {
             throw MastodonWriteError.unfindable
         }
         return try await MastodonPost(door: door).history(id: id, quotes: note.quotesReference != nil)

@@ -4,10 +4,9 @@ import SwiftUI
 /// What a post said before its source changed it (#286), under the post where it is opened: each
 /// wording this device held, oldest first, headed by when the source said it changed from that.
 ///
-/// **Only where the post is opened, and only what this device held.** A row says the post was
-/// changed and no more — a list under a thumb is not where two wordings are compared — and a
-/// post already changed when it was first read has nothing here, since nothing is asked of its
-/// source for what it said before.
+/// **Only where the post is opened.** A row says the post was changed and no more — a list under
+/// a thumb is not where two wordings are compared. What is listed is its source's history once
+/// that was asked (#332, Decision 1), the original first; until then, what this device saw.
 ///
 /// **An earlier wording is the author's, cover and all.** One that was covered then — by a line
 /// of warning, or marked sensitive with none — or that belongs to a post covered now, shows what
@@ -20,6 +19,20 @@ import SwiftUI
 ///
 /// Drawn as the copies a post was carried in are (`DummyThreadPane.carried`): a quiet heading
 /// and plain, selectable text, with no mark of its own and nothing the keys walk.
+/// Show it, or cover it again, as a covered wording's action to VoiceOver — where it has one.
+private struct CoverAction: ViewModifier {
+    let line: EarlierWordings.Line
+    let toggle: () -> Void
+
+    func body(content: Content) -> some View {
+        if line.covered || line.pressedOpen {
+            content.accessibilityAction(named: Text(L10n.t(line.covered ? "item.covered.show" : "item.covered.again")), toggle)
+        } else {
+            content
+        }
+    }
+}
+
 struct EarlierWordings: View {
     let item: DummyItem
     /// Whether the reader has lifted the post's own cover, for this run.
@@ -82,10 +95,14 @@ struct EarlierWordings: View {
     /// so what is drawn and what a test reads are the same.
     ///
     /// `lifted` is the post's own cover lifted; `shown` are the wordings uncovered one by one.
+    ///
+    /// **Where the list is its source's history** (#332, `DummyItem.earlierFromSource`), its
+    /// first line is the post as first written, headed by when it was published; every other
+    /// line by when it stopped being what the post says.
     static func lines(
         of item: DummyItem, lifted: Bool, shown: Shown = Shown(), language: DummyLanguage? = nil
     ) -> [Line] {
-        item.earlier.map { wording in
+        item.earlier.enumerated().map { place, wording in
             let key = Key(wording)
             let line = wording.spoiler ?? ""
             let coverable = (item.covered || wording.covered) && !lifted
@@ -95,12 +112,20 @@ struct EarlierWordings: View {
                 : String(format: L10n.t("item.covered.warning", language: language), line)
             return Line(
                 id: key,
-                until: String(format: L10n.t("thread.earlier.until", language: language), when(wording.until, language: language)),
+                until: place == 0 && item.earlierFromSource
+                    ? String(format: L10n.t("thread.earlier.first", language: language), when(item.postedAt, language: language))
+                    : String(format: L10n.t("thread.earlier.until", language: language), when(wording.until, language: language)),
                 warning: warning,
                 words: covered ? nil : wording.body,
                 pressedOpen: coverable && !covered
             )
         }
+    }
+
+    /// One wording as VoiceOver hears it: when, then what it said — or what it was covered with.
+    static func spoken(_ line: Line, language: DummyLanguage? = nil) -> String {
+        let said = [line.warning, line.words].compactMap { $0 }.joined(separator: ", ")
+        return said.isEmpty ? line.until : String(format: L10n.t("thread.earlier.spoken", language: language), line.until, said)
     }
 
     /// A moment as the pane says it: the day and the minute, in the shell's language.
@@ -136,12 +161,16 @@ struct EarlierWordings: View {
                     }
                 }
                 // One wording, one thing heard: when it changed, then what it said — and never
-                // the words of one still covered, which are not in the tree at all.
-                .accessibilityElement(children: .combine)
+                // the words of one still covered, which are not in the tree at all. Show it, and
+                // covering it again, are its action (X0 §5).
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Self.spoken(line))
+                .modifier(CoverAction(line: line) { shown.toggle(line.id) })
                 if line.covered || line.pressedOpen {
                     ShellLinkButton(L10n.t(line.covered ? "item.covered.show" : "item.covered.again")) {
                         shown.toggle(line.id)
                     }
+                    .accessibilityHidden(true)
                 }
             }
         }

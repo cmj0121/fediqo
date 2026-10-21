@@ -103,7 +103,7 @@ struct YouThereTests {
         #expect(await server.bearers == ["Bearer tok"])
         #expect(work.record.map(\.purpose) == [.ownSettings] && work.record.allSatisfy { $0.reached == Self.host && $0.source == Self.host })
         #expect(you.said(at: Self.host, in: session) == YouThereSaid(source: Self.host, reading: .said(Self.unlisted)))
-        #expect(session.notes.isEmpty && session.composeAudience == .everyone, "nothing is held, and no post starts from it")
+        #expect(session.notes.isEmpty && session.composeDraft.audience == .everyone, "nothing is held, and no post starts from it")
         #expect(await session.store.held(host: Self.host).isEmpty)
 
         await you.opened(Self.host, in: session)

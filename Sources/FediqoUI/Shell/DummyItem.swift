@@ -165,6 +165,9 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// changes when it hears of them, and the row is drawn as one copy — so what it says it said
     /// before is what that copy said before.
     public var earlier: [Wording] = []
+    /// Whether `earlier` is its source's history and not only what this device saw (#332,
+    /// `Note.historyAt`): its first wording is then the post as first written.
+    public var earlierFromSource = false
     /// Where a timeline this copy arrived through is not whole next to it — `Note.gaps`, carried
     /// so the list can say so at its place (#201). **This copy's**, of its own source's timelines.
     public var gaps: Set<TimelineGap> = []
@@ -557,6 +560,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         goneSince = identity.goneSince
         editedAt = note.editedAt
         earlier = note.earlier
+        earlierFromSource = note.historyAt != nil
         gaps = identity.gaps
         sensitive = note.sensitive
         spoiler = note.spoiler

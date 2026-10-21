@@ -99,6 +99,8 @@ struct ItemActing {
     /// row's `…` (`ItemActs.postItems`), and the translation drawn beside its words. Nothing
     /// where its source has none of them, or the list cannot act.
     var post: PostMore?
+    /// Changing the post (#332), an item of the own post's group (`ItemActs.ownItems`).
+    var change: Change?
     /// The preview of the page the post links to, where the row draws one (#335): previews on,
     /// a card, no media of its own — and its picture only where the gate lets it through. Nothing
     /// where the list cannot read, which draws no preview and asks nothing.
@@ -467,6 +469,8 @@ extension ItemActs {
         }
         items += postItems(acting.post, group: .reading, language: language)
         // Lane A's own-post items (Change it…, Who may quote it, Quotes of it) go here, before Pin and Quiet.
+        let own = ownItems(on: item, acting: acting, language: language)
+        items += own.items
         items += postItems(acting.post, group: .own, language: language)
         // Reporting it (#339): to those who answer for its source, asked on a sheet first.
         var reportLock: String?
@@ -501,7 +505,7 @@ extension ItemActs {
         // sign-in stands, where a pointer and VoiceOver hear it on the mark.
         let locked = PostAct.allCases.compactMap { acting.locks[$0]?.line(language: language) }
         let head = head(for: item, here: here, refused: acting.acts.refused, language: language)
-            + ShellMore.reasons(of: shared, language: language) + locked + quoted + [reportLock].compactMap { $0 }
+            + ShellMore.reasons(of: shared, language: language) + locked + quoted + own.head + [reportLock].compactMap { $0 }
             + postLocks(acting.post, language: language)
         return ShellMore(head: head, items: items)
     }
