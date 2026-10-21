@@ -65,6 +65,12 @@ struct ItemActing {
         func line(language: DummyLanguage? = nil) -> String? {
             place.kind == .unasked ? nil : String(format: L10n.t(place.key, language: language), host)
         }
+
+        /// What the head of a menu says of the lock: its line, or the place's own words where it
+        /// was never asked.
+        func headLine(language: DummyLanguage? = nil) -> String {
+            line(language: language) ?? String(format: L10n.t(place.key, language: language), host)
+        }
     }
     /// Taking the post back (#109), which is never a mark: the question it asks and what its yes
     /// does, for the one destructive item of the row's `…`. Nothing where the list cannot act,
@@ -489,9 +495,8 @@ extension ItemActs {
         if let report = acting.report {
             let name = L10n.t("item.act.report", language: language)
             if let lock = report.lock {
-                reportLock = lock.line(language: language) ?? String(format: L10n.t(lock.place.key, language: language), lock.host)
-                let dim = ShellMark(SourceRow.permissionSymbol, name, look: .dim(.askAgain))
-                items.append(ShellMoreItem.plain(dim, ask: lock.place.asks ? report.press : nil, act: {}).underHead)
+                reportLock = lock.headLine(language: language)
+                items.append(.locked(name: name, lock: lock, press: report.press))
             } else {
                 items.append(.plain(PersonActing.reportSymbol, name, act: report.press))
             }

@@ -117,9 +117,9 @@ struct MastodonQuoteWriteSaysTests {
             let firstID = try #require(first.statusID)
             let notTheirs = try await ask("/api/v1/statuses/\(id)/quotes/\(firstID)/revoke", as: seeded.other, "POST")
             #expect(notTheirs.status == 403 && String(decoding: notTheirs.body, as: UTF8.self) == MastodonQuoteWriteCaptures.notTheirs)
-            let revoked = try await writer.write.revoke(first, of: quoted)
+            let revoked = try await writer.write.withdrawQuote(first, of: quoted)
             #expect(revoked.quote?.state == .revoked && revoked.quote?.post == nil)
-            #expect(try await writer.write.revoke(first, of: quoted).quote?.state == .revoked, "taken back again, the same")
+            #expect(try await writer.write.withdrawQuote(first, of: quoted).quote?.state == .revoked, "taken back again, the same")
             #expect(try await MastodonPost(door: writer.door).post(id: id, source: Self.source).counts.quotes == 1)
 
             // There is no way to approve a waiting quote: each address a page of the server's own.

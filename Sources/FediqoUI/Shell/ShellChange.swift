@@ -153,9 +153,11 @@ final class ShellChange {
         guard let note = session.note(ofRow: copy.id),
               let door = session.mastodon.authorized(host: copy.source.host, within: session.reload.deadline, for: .write)
         else { return settle(opening, nil, from: unsent) }
-        let said = try? await session.reach.write(door, landingIn: session.store).source(of: note)
-        await session.refreshPostLimit(of: copy.source.host)
-        settle(opening, said, from: unsent)
+        // The source's words and its post limit, asked together.
+        async let said = try? session.reach.write(door, landingIn: session.store).source(of: note)
+        async let limit: Void = session.refreshPostLimit(of: copy.source.host)
+        let (words, _) = await (said, limit)
+        settle(opening, words, from: unsent)
     }
 
     private func settle(_ opening: Open, _ said: PostSource?, from unsent: Unsent?) {
@@ -249,41 +251,17 @@ final class ShellChange {
 
     private func addMedia(in session: ShellSession) {
         guard !quotesFixed else { return }
-        if draft.poll != nil {
-            mediaNote = ComposeWords.refusalLine(.pollWithMedia, host: host)
-            return
+        switch session.mediaPress(host: host, hasPoll: draft.poll != nil) {
+        case .refused(let note): mediaNote = note
+        case .opens: importing = true
+        case .asked(let note): if let note { mediaNote = note }
         }
-        if session.mastodon.standing(.media, host: host) == .held {
-            importing = true
-            return
-        }
-        if let place = session.mastodon.place(.media, host: host) { mediaNote = String(format: L10n.t(place.key), host) }
-        _ = session.askFor([.media], host: host)
     }
 
     /// What the system picker handed back, added within what the source takes.
     func read(_ result: Result<[URL], Error>, in session: ShellSession) {
-        switch result {
-        case .failure(let error):
-            let cocoa = error as NSError
-            if cocoa.domain == NSCocoaErrorDomain, cocoa.code == NSUserCancelledError { return }
-            mediaNote = L10n.t("compose.media.unreadable")
-        case .success(let urls):
-            let limits = session.mediaLimits(of: host)
-            for url in urls {
-                switch ComposeFile.read(url, host: host, limits: limits) {
-                case .refused(let note):
-                    mediaNote = note
-                    return
-                case .taken(let taken):
-                    if let refusal = draft.refusal(adding: taken.bytes, type: taken.type, description: "", within: limits) {
-                        mediaNote = ComposeWords.refusalLine(refusal, host: host)
-                        return
-                    }
-                    draft.media.append(UnsentMedia(bytes: taken.bytes, mime: taken.type, name: taken.name))
-                    mediaNote = nil
-                }
-            }
+        if let note = ShellSession.readPicked(result, into: &draft, host: host, limits: session.mediaLimits(of: host)) {
+            mediaNote = note
         }
     }
 

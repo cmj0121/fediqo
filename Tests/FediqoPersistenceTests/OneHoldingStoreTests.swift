@@ -181,11 +181,7 @@ struct OneHoldingStoreTests {
 
         #expect(try !columns(index).contains("holding"))
         #expect(try Data(contentsOf: index).range(of: Data("aside".utf8)) == nil, "the word is still readable in the file")
-        #expect(try migrations(index) == [
-            "v1-index", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions",
-            "v9-language", "v10-references", "v11-one-holding", "v12-references-only", "v13-unsent", "v14-notices", "v15-compose", "v16-poll", "v17-marks",
-            "v18-standing", "v19-card", "v20-unsent-changes", "v21-quotes", "v22-unsent-at", "v23-unsent-quoting",
-        ])
+        #expect(try migrations(index) == StoreFile.migrationIDs)
     }
 
     @Test("A save by this build and a relaunch leave them where they stood")

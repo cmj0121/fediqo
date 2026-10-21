@@ -259,7 +259,7 @@ struct QuoteTests {
         let quoting = try #require(session.quoting.rows.first)
         #expect(session.quoting.open != nil && !QuoteWords.revoked(quoting))
         #expect(QuoteWords.revokeQuestion(quoting).warns)
-        session.quoting.revoke(quoting, of: try #require(session.quoting.open?.post), in: session)
+        session.quoting.withdrawQuote(quoting, of: try #require(session.quoting.open?.post), in: session)
         await session.quoting.settled()
         #expect(session.quoting.rows.first.map(QuoteWords.revoked) == true)
     }

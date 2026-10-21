@@ -310,25 +310,25 @@ struct MastodonChangeTests {
     func historyReads() async throws {
         let now = try note(Captures.changed)
         let (write, store, server) = try await writer(holding: [now], ["\(Self.path)/history": .json(Captures.history)])
-        let wordings = try await write.history(of: now)
+        let wordings = try await write.earlier(of: now)
         let changedAt = try #require(MastodonJSON.date(from: "2026-10-21T00:24:13.007Z"))
         #expect(wordings == [Wording(body: "media probe", spoiler: "", sensitive: false, until: changedAt)])
         #expect(await server.paths == ["\(Self.path)/history"])
         #expect(await store.all() == [now])
 
         let (never, _, _) = try await writer(holding: [], ["\(Self.path)/history": .json(Captures.historyUnchanged)])
-        #expect(try await never.history(of: now).isEmpty, "a post never changed has nothing before")
+        #expect(try await never.earlier(of: now).isEmpty, "a post never changed has nothing before")
     }
 
     @Test("Several wordings come oldest first, each until the next one that says something else, the cover line a wording too; an entry with no moment is passed over")
     func historyOrdered() throws {
         let at = { (s: TimeInterval) in Date(timeIntervalSince1970: 1_000_000 + s) }
-        let said: [(words: Wording, since: Date)] = [
-            (Wording(body: "three", until: at(3)), at(3)),
-            (Wording(body: "one", until: at(0)), at(0)),
-            (Wording(body: "two", until: at(1)), at(1)),
-            (Wording(body: "two", spoiler: "", sensitive: true, until: at(2)), at(2)),
-            (Wording(body: "three", spoiler: "cw", until: at(4)), at(4)),
+        let said: [Wording] = [
+            Wording(body: "three", until: at(3)),
+            Wording(body: "one", until: at(0)),
+            Wording(body: "two", until: at(1)),
+            Wording(body: "two", spoiler: "", sensitive: true, until: at(2)),
+            Wording(body: "three", spoiler: "cw", until: at(4)),
         ]
         #expect(MastodonPost.wordings(said) == [
             Wording(body: "one", until: at(1)), Wording(body: "two", until: at(3)), Wording(body: "three", until: at(4)),
@@ -340,9 +340,18 @@ struct MastodonChangeTests {
     func historyLenient() async throws {
         let post = try note(Captures.changed)
         let (bad, _, _) = try await writer(holding: [], ["\(Self.path)/history": .json(#"{"error":"x"}"#)])
-        await #expect(throws: MastodonWriteError.unreadable) { _ = try await bad.history(of: post) }
+        await #expect(throws: MastodonWriteError.unreadable) { _ = try await bad.earlier(of: post) }
         let odd = #"[{"content":"<p>a</p>","created_at":"2026-10-21T00:00:00.000Z"},{"content":7},{"content":"<p>b</p>","created_at":"later"},{"content":"<p>c</p>","created_at":"2026-10-21T00:01:00.000Z"}]"#
         let (lenient, _, _) = try await writer(holding: [], ["\(Self.path)/history": .json(odd)])
-        #expect(try await lenient.history(of: post).map(\.body) == ["a"])
+        #expect(try await lenient.earlier(of: post).map(\.body) == ["a"])
+    }
+}
+
+extension MastodonWrite {
+    /// What `note` said before, as its source keeps it: `MastodonPost.fullHistory`'s earlier
+    /// wordings, through this sign-in.
+    func earlier(of note: Note) async throws -> [Wording] {
+        let id = try #require(note.sendableID)
+        return try await MastodonPost(door: door).fullHistory(id: id, quotes: note.quotesReference != nil).earlier
     }
 }

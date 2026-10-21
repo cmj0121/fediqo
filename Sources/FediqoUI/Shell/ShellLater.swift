@@ -192,7 +192,7 @@ final class ShellLater {
                     old, to: ComposerSheet.trimmed(draft.text), visibility: draft.audience, at: at, spoiler: draft.cover,
                     language: draft.language.isEmpty ? nil : draft.language, sensitive: draft.coversMedia, mediaIDs: ids,
                     poll: draft.poll, pollLimits: session.composeRooms[host]?.polls, sourceNow: clock,
-                    quotePolicy: .some(draft.quotePolicySent)
+                    quotePolicy: draft.quotePolicySent
                 )
                 if changed.oldStays {
                     self.pairs[host, default: []].append(Pair(new: changed.new?.id, old: old.id, lostMedia: changed.oldLostMedia))

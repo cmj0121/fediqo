@@ -6,6 +6,15 @@ import SwiftUI
 // the own post's items, before Report. Each is drawn from `ItemActing.PostMore` alone, so the
 // menu and a hold on the row read one value.
 
+extension ShellMoreItem {
+    /// An item whose act the sign-in lacks the part for: dim with the lock's glyph, under the
+    /// menu's head that says why, its press only asking — where asking is what changes it.
+    static func locked(name: String, lock: ItemActing.Lock, press: @escaping () -> Void) -> ShellMoreItem {
+        let dim = ShellMark(SourceRow.permissionSymbol, name, look: .dim(.askAgain))
+        return ShellMoreItem.plain(dim, ask: lock.place.asks ? press : nil, act: {}).underHead
+    }
+}
+
 extension ItemActs {
     /// Which of the two places in the menu the items go to.
     enum PostGroup {
@@ -59,10 +68,7 @@ extension ItemActs {
         _ turn: ItemActing.PostMore.Turn, symbol: String, names: (on: String, off: String), language: DummyLanguage?
     ) -> ShellMoreItem {
         let name = L10n.t(turn.on ? names.off : names.on, language: language)
-        if let lock = turn.lock {
-            let dim = ShellMark(SourceRow.permissionSymbol, name, look: .dim(.askAgain))
-            return ShellMoreItem.plain(dim, ask: lock.place.asks ? turn.press : nil, act: {}).underHead
-        }
+        if let lock = turn.lock { return .locked(name: name, lock: lock, press: turn.press) }
         let mark = ShellMark(symbol, name, look: turn.out ? .dim(.notNow) : .live, on: turn.on)
         return .plain(mark, act: turn.press)
     }
@@ -70,9 +76,7 @@ extension ItemActs {
     /// The locks' own lines, for the head of the menu: what a finger is told of how the sign-in
     /// stands to a pin or a quiet, once each.
     static func postLocks(_ post: ItemActing.PostMore?, language: DummyLanguage? = nil) -> [String] {
-        let locks = [post?.pin?.lock, post?.quiet?.lock].compactMap { lock in
-            lock.map { $0.line(language: language) ?? String(format: L10n.t($0.place.key, language: language), $0.host) }
-        }
+        let locks = [post?.pin?.lock, post?.quiet?.lock].compactMap { $0?.headLine(language: language) }
         let signIn = post?.translateSignedOut.map { String(format: L10n.t("item.act.translate.signIn", language: language), $0) }
         return locks + [signIn].compactMap { $0 }
     }

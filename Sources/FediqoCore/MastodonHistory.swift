@@ -67,7 +67,7 @@ public struct MastodonHistoryFill: Sendable {
                 await store.landHistory(history, for: owed)
                 return .answered()
             } catch {
-                switch Self.status(of: error) {
+                switch NetLog.status(of: error) {
                 case 429: return .slowDown()
                 case .some(400..<500): return .answered()
                 default: return error is MastodonWriteError ? .answered() : .failed
@@ -83,11 +83,5 @@ public struct MastodonHistoryFill: Sendable {
             await store.releaseHistory(owed, givenUp: false)
         }
         return end
-    }
-
-    private static func status(of error: any Error) -> Int? {
-        if let refused = error as? MastodonRequestError, case .http(let status) = refused { return status }
-        if let refused = error as? MastodonAuthError, case .http(let status) = refused { return status }
-        return nil
     }
 }

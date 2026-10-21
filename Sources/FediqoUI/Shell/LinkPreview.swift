@@ -39,6 +39,17 @@ struct LinkPreview: Equatable {
     let leadsTo: String?
     /// The picture, only where the gate lets it through for this source.
     let picture: URL?
+    /// Whether the card is called by the host it leads to — one whose page gave it no title
+    /// (`PostCard`): the host is then said once, as its name, and not again as where it leads.
+    let namedByHost: Bool
+
+    init(card: PostCard, host: String, leadsTo: String?, picture: URL?) {
+        self.card = card
+        self.host = host
+        self.leadsTo = leadsTo
+        self.picture = picture
+        namedByHost = leadsTo != nil && SourceWork.fold(card.title) == leadsTo
+    }
 
     /// The preview of `item`, where it has one to draw: previews on, a card, no media of its own.
     /// `admits` is the gate's word on the picture's host for the post's source.
@@ -46,14 +57,8 @@ struct LinkPreview: Equatable {
         guard shown, let card = item.card, item.attachments.isEmpty else { return nil }
         let host = item.source.host
         // The gate compares hosts in its own one spelling (`SourceWork.fold`), and is asked in it.
-        let picture = card.image.flatMap { url in url.host().map { admits(SourceWork.fold($0), host) } == true ? url : nil }
-        return LinkPreview(card: card, host: host, leadsTo: card.url?.host().map(SourceWork.fold), picture: picture)
-    }
-
-    /// Whether the card is called by the host it leads to — one whose page gave it no title
-    /// (`PostCard`): the host is then said once, as its name, and not again as where it leads.
-    var namedByHost: Bool {
-        leadsTo != nil && SourceWork.fold(card.title) == leadsTo
+        let picture = card.image.flatMap { url in item.cardPictureHost.map { admits($0, host) } == true ? url : nil }
+        return LinkPreview(card: card, host: host, leadsTo: item.cardLeadsTo, picture: picture)
     }
 
     /// What the card is called, as drawn: the host it leads to where that is its name.

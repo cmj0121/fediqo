@@ -102,7 +102,7 @@ public struct MastodonTranslator: Sendable {
     /// **A not-found is the caller's to remember** (D6), and only where the host's document said
     /// nothing of translating: `MastodonHostsKnown.translationNotFound(at:)`.
     public func translate(_ note: Note, into language: String) async throws -> PostTranslation {
-        guard let id = Self.translatedID(note), ListSubscription.isPathSegment(id), note.source.host == door.token.host,
+        guard let translated = Self.translatedID(note), let id = MastodonWrite.pathID(of: note, at: door.token.host, id: translated),
               let lang = SourceField.languageTag(language)
         else { throw MastodonTranslationError.invalid }
         let body: Data
@@ -130,16 +130,15 @@ public struct MastodonTranslator: Sendable {
 
         var translation: PostTranslation {
             // Markup and entities taken out as the words' are, then made one line.
-            let spoiler = spoilerText?.value.map {
-                LineText.oneLine(HTMLText.plain(AccountDTO.cut($0, to: MastodonTranslator.bodyLength)), limit: MastodonTranslator.bodyLength)
-                    .trimmingCharacters(in: .whitespaces)
-            }
+            let spoiler = LineText.cleanLine(
+                spoilerText?.value, limit: MastodonTranslator.bodyLength, cut: MastodonTranslator.bodyLength
+            )
             let provider = provider?.value.map {
                 LineText.oneLine($0, limit: MastodonTranslator.providerLength).trimmingCharacters(in: .whitespaces)
             }
             return PostTranslation(
                 body: HTMLText.plain(AccountDTO.cut(content, to: MastodonTranslator.bodyLength)),
-                spoiler: spoiler?.isEmpty == false ? spoiler : nil,
+                spoiler: spoiler,
                 from: SourceField.languageTag(detectedSourceLanguage?.value),
                 provider: provider?.isEmpty == false ? provider : nil
             )

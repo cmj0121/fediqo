@@ -100,14 +100,14 @@ final class ShellQuoting {
 
     /// Takes back `quoting`'s permission, at the yes: the row reads taken back once its source
     /// says so, and is drawn as it was on a miss, saying why.
-    func revoke(_ quoting: Note, of post: Note, in session: ShellSession) {
+    func withdrawQuote(_ quoting: Note, of post: Note, in session: ShellSession) {
         guard open?.post.key == post.key, let door = door(post.source.host, in: session) else { return }
         missed = nil
         revoking.insert(quoting.key.rowID)
         task = Task {
             defer { self.revoking.remove(quoting.key.rowID) }
             do {
-                let answered = try await session.reach.write(door, landingIn: session.store).revoke(quoting, of: post)
+                let answered = try await session.reach.write(door, landingIn: session.store).withdrawQuote(quoting, of: post)
                 if let index = self.rows.firstIndex(where: { $0.key == quoting.key }) { self.rows[index] = answered }
             } catch {
                 self.missed = String(format: L10n.t("quotes.revoke.missed"), post.source.host)
@@ -204,14 +204,14 @@ extension ShellSession {
         let post = quotedPost(of: item)
         let host = post.source.host
         guard sources.first(where: { $0.host == host })?.kind.offers.saysQuotes == true,
-              mastodon.token(host: host) != nil, let held = note(ofRow: post.id), held.sendableID != nil,
+              mastodon.grants[host] != nil, let held = note(ofRow: post.id), held.sendableID != nil,
               held.goneSince == nil
         else { return nil }
         if quotesOffered(host: host) == false {
             return .init(look: .dim(.never), why: String(format: L10n.t("item.act.quote.host"), host))
         }
         if mastodon.standing(.acting, host: host) != .held {
-            let place = mastodon.place(.acting, host: host) ?? PartWords.Place(kind: .none, key: "part.ask.partly")
+            let place = mastodon.place(.acting, host: host) ?? .partly
             return .init(look: .dim(.askAgain), why: String(format: L10n.t(place.key), host)) { [weak self] in
                 _ = self?.askFor([.acting], host: host)
             }

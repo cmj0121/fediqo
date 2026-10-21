@@ -28,11 +28,11 @@ enum LaterWords {
     /// What the host said when it would not take what was asked, in its own words, where it
     /// said any.
     static func words(of error: any Error) -> String? {
+        // Read as any refusal's sentence is: a bounded body, one line (`AccountPartError.refusal`).
         guard let refused = error as? MastodonUnprocessable,
-              let said = try? JSONSerialization.jsonObject(with: refused.body) as? [String: Any],
-              let words = said["error"] as? String, !words.isEmpty
+              case .refused(let words) = AccountPartError.refusal(from: refused.body), !words.isEmpty
         else { return nil }
-        return LineText.oneLine(words, limit: 200)
+        return words
     }
 
     /// A time come too near by the source's clock, moved forward, as a press on the list says it.
@@ -92,7 +92,7 @@ extension ShellSession {
     func laterSlot(host: String) -> DraftControls.LaterSlot? {
         guard sources.first(where: { $0.host == host })?.kind.offers.sendsLater == true else { return nil }
         guard mastodon.standing(.acting, host: host) != .held else { return DraftControls.LaterSlot() }
-        let place = mastodon.place(.acting, host: host) ?? PartWords.Place(kind: .none, key: "part.ask.partly")
+        let place = mastodon.place(.acting, host: host) ?? .partly
         return DraftControls.LaterSlot(locked: String(format: L10n.t(place.key), host))
     }
 

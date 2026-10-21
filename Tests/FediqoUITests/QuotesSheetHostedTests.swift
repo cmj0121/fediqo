@@ -25,21 +25,18 @@ struct QuotesSheetHostedTests {
     @Test("Each state of the list lays out at 420, 390 and 320, in light and in dark, no wider than its room", arguments: 0..<2)
     func laidOut(_ dark: Int) throws {
         L10n.language = .english
-        let scheme: ColorScheme = dark == 1 ? .dark : .light
+        let scheme = HostedFit.scheme(dark)
         let rows = [try Self.note("7", state: "accepted"), try Self.note("8", state: "revoked")]
         let states: [(ShellQuoting.Reading, [Note], String?)] = [
             (.reading, [], nil), (.read, [], nil), (.failed, [], nil), (.read, rows, nil), (.read, rows, "social.example could not be reached."),
         ]
         for (reading, listed, missed) in states {
-            for (width, size) in [(CGFloat(420), DynamicTypeSize.large), (390, .large), (320, .accessibility5)] {
+            for (width, size) in HostedFit.rooms {
                 let sheet = QuotesSheet(
                     host: "social.example", rows: listed, reading: reading, more: true, revoking: [], missed: missed,
                     onRevoke: { _ in }, onReadOn: {}, onClose: {}
                 )
-                let view = NSHostingView(rootView: sheet.frame(width: width, height: 800)
-                    .environment(\.colorScheme, scheme).environment(\.dynamicTypeSize, size))
-                view.layoutSubtreeIfNeeded()
-                #expect(view.fittingSize.height > 0 && view.fittingSize.width <= width + 0.5, "\(reading) at \(width)")
+                #expect(HostedFit.fits(sheet, width: width, height: 800, scheme: scheme, size: size), "\(reading) at \(width)")
             }
         }
     }
@@ -47,14 +44,12 @@ struct QuotesSheetHostedTests {
     @Test("Who may quote it lays out unsaid, chosen and fixed at nobody, in light and in dark", arguments: 0..<2)
     func policyLaidOut(_ dark: Int) {
         L10n.language = .english
-        let scheme: ColorScheme = dark == 1 ? .dark : .light
+        let scheme = HostedFit.scheme(dark)
         for (policy, audience) in [(QuotePolicy?.none, Audience.everyone), (.followers, .everyone), (.anyone, .followers)] {
             var draft = PostDraft(quotePolicy: policy)
             draft.audience = audience
             let menu = QuotePolicyMenu(draft: .constant(draft), host: "social.example")
-            let view = NSHostingView(rootView: menu.frame(width: 320).environment(\.colorScheme, scheme))
-            view.layoutSubtreeIfNeeded()
-            #expect(view.fittingSize.height > 0 && view.fittingSize.width <= 320.5)
+            #expect(HostedFit.fits(menu, width: 320, scheme: scheme))
         }
     }
 }

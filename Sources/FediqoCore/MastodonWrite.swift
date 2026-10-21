@@ -132,15 +132,7 @@ public struct MastodonWrite: Sendable {
     ) async throws -> Note {
         // A quote (#330): the quoted post by its id, and nothing it may not carry — before anything else.
         let quote = try Self.quoting(quoting, host: host, mediaIDs: mediaIDs, poll: poll)
-        // A poll is refused here before anything is asked: one beside media, which a Mastodon
-        // takes on no post (#331), and one past what the source said it takes — where this run
-        // heard what that is. Where it did not, the source is the judge of its own limits.
-        if let poll {
-            if mediaIDs.contains(where: { !$0.isEmpty }) { throw MastodonWriteError.refusedHere(.pollWithMedia) }
-            if let pollLimits, let refusal = poll.refusal(within: pollLimits) {
-                throw MastodonWriteError.refusedHere(refusal)
-            }
-        }
+        try Self.pollRefusal(mediaIDs: mediaIDs, poll: poll, limits: pollLimits)
         guard let source = await store.sources().first(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
         }
@@ -151,12 +143,10 @@ public struct MastodonWrite: Sendable {
             }
             answeringID = id
         }
-        var form = Self.postForm(
+        let form = Self.postForm(
             text, visibility: visibility, answering: answeringID, spoiler: spoiler, language: language,
             sensitive: sensitive, mediaIDs: mediaIDs, poll: poll
-        )
-        // Who may quote it, where it was chosen: absent is the account's own default.
-        form += quote + (quotePolicy.map { [("quote_approval_policy", $0.rawValue)] } ?? [])
+        ) + Self.quoteForm(quote, policy: quotePolicy)
         let sent = ReadMoment.now()
         let data: Data
         do {
@@ -177,6 +167,21 @@ public struct MastodonWrite: Sendable {
         try Task.checkCancellation()
         await store.ingest([note], ifSourceHere: host)
         return note
+    }
+
+    /// A poll refused here before anything is asked: one beside media, which a Mastodon takes on no
+    /// post (#331), and one past what the source said it takes — where this run heard what that
+    /// is (`limits`). Where it did not, the source is the judge of its own limits.
+    static func pollRefusal(mediaIDs: [String], poll: NewPoll?, limits: MastodonPollLimits?) throws {
+        guard let poll else { return }
+        if mediaIDs.contains(where: { !$0.isEmpty }) { throw MastodonWriteError.refusedHere(.pollWithMedia) }
+        if let limits, let refusal = poll.refusal(within: limits) { throw MastodonWriteError.refusedHere(refusal) }
+    }
+
+    /// What a quote adds to a post's form (#330): the quoted post's id (`quoting`), and who may
+    /// quote it where that was chosen — absent is the account's own default.
+    static func quoteForm(_ quote: [(String, String)], policy: QuotePolicy?) -> [(String, String)] {
+        quote + (policy.map { [("quote_approval_policy", $0.rawValue)] } ?? [])
     }
 
     /// The form a post is sent as — a new one, or one to send later (`postLater`): its words and
@@ -415,21 +420,45 @@ public struct MastodonWrite: Sendable {
         return await settle(try landed(data, on: note, sent: sent), on: note, acted: mark)
     }
 
-    /// A status the source answered about `note`, as a note of the same row, or `unreadable`.
-    private func landed(_ data: Data, on note: Note, sent: ReadMoment) throws -> Note {
+    /// A status the source answered about `note`, as a note of the same row, or `unreadable`
+    /// (the caller's own, where it says it otherwise).
+    func landed(
+        _ data: Data, on note: Note, sent: ReadMoment, unreadable: any Error = MastodonWriteError.unreadable
+    ) throws -> Note {
         guard let answered = try? MastodonJSON.decoder.decode(StatusDTO.self, from: data)
             .asNote(source: note.source, categories: note.categories, sent: sent)
         else {
-            throw MastodonWriteError.unreadable
+            throw unreadable
         }
         try Task.checkCancellation()
         return answered
     }
 
     /// `answered` laid over the row as an act's answer is (`act`), and the store's copy back.
-    private func settle(_ answered: Note, on note: Note, acted mark: ReaderMark) async -> Note {
+    /// `mark` is the one the act moved, or nothing where it moved none (a change, #332).
+    func settle(_ answered: Note, on note: Note, acted mark: ReaderMark?) async -> Note {
         await store.refresh([answered], ifSourceHere: host, acted: mark)
         return await store.note(answered.key) ?? answered.refreshed(over: note)
+    }
+
+    /// The id of `note` — the reader's own post, or one acted on as theirs — at this sign-in's own
+    /// source: the source held here, the note of this host, by an id that names one path segment.
+    /// `unfindable` is the caller's own word for a note it cannot name.
+    func ownID(of note: Note, unfindable: any Error = MastodonWriteError.unfindable) async throws -> String {
+        guard await store.sources().contains(where: { $0.host == host }) else { throw MastodonWriteError.noSource }
+        guard let id = Self.pathID(of: note, at: host) else { throw unfindable }
+        return id
+    }
+
+    /// `note`'s id at `host`, where it is a note of that host and its id names one path segment.
+    static func pathID(of note: Note, at host: String, id: String? = nil) -> String? {
+        guard note.source.host == host, let id = id ?? note.sendableID, ListSubscription.isPathSegment(id) else { return nil }
+        return id
+    }
+
+    /// Whether `text` is an id a Mastodon gives a post: ASCII digits, and at least one.
+    static func isDigits(_ text: String) -> Bool {
+        !text.isEmpty && text.utf8.allSatisfy { (0x30...0x39).contains($0) }
     }
 }
 

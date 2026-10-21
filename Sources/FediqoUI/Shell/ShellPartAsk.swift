@@ -373,6 +373,10 @@ enum PartWords {
         let kind: Kind
         /// The key of its line, with the source for its one argument.
         let key: String
+
+        /// The partly line, said and not offered: what a dim slot says it waits for where the
+        /// sign-in's standing says no place of its own.
+        static let partly = Place(kind: .none, key: "part.ask.partly")
         /// Whether pressing the line asks.
         var asks: Bool { kind == .unasked || kind == .refused || kind == .partly }
     }

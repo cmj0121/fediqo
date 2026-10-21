@@ -1015,12 +1015,20 @@ final class ShellOutbox {
             // writes the texts again too, where the write of them here did not land.
             if await wroteGone(in: session) { session.saveSoon() }
         } catch {
-            session.writeFailed(error, host: host)
-            if let why = Self.notSent(error) {
-                await missed(id, why, in: session)
-            } else {
-                stand(id, .unconfirmed, in: session)
-            }
+            await failed(error, id: id, host: host, in: session)
+        }
+    }
+
+    /// A send that failed: told as a write's failure is, then held as not sent where `error`
+    /// says so (`notSent`), and as one that may have landed where it does not. `saying` is said
+    /// between the two.
+    private func failed(_ error: any Error, id: UUID, host: String, in session: ShellSession, saying: (() -> Void)? = nil) async {
+        session.writeFailed(error, host: host)
+        saying?()
+        if let why = Self.notSent(error) {
+            await missed(id, why, in: session)
+        } else {
+            stand(id, .unconfirmed, in: session)
         }
     }
 
@@ -1050,12 +1058,7 @@ final class ShellOutbox {
             await session.reloadFromStore()
             await missed(id, .declined, in: session)
         } catch {
-            session.writeFailed(error, host: unsent.host)
-            if let why = Self.notSent(error) {
-                await missed(id, why, in: session)
-            } else {
-                stand(id, .unconfirmed, in: session)
-            }
+            await failed(error, id: id, host: unsent.host, in: session)
         }
     }
 
@@ -1078,9 +1081,9 @@ final class ShellOutbox {
             if await wroteGone(in: session) { session.saveSoon() }
         }
         func look(at when: Date) async -> WaitingPost? {
-            try? await write.findWaiting(
-                unsent.text, at: when, visibility: unsent.audience, spoiler: unsent.spoiler, sensitive: unsent.sensitive,
-                mediaIDs: ids, poll: unsent.poll, quoting: unsent.quoting?.statusID
+            try? await write.find(
+                unsent.text, at: when, visibility: unsent.audience, answering: nil, spoiler: unsent.spoiler,
+                sensitive: unsent.sensitive, mediaIDs: ids, poll: unsent.poll, quoting: unsent.quoting?.statusID
             )
         }
         // **A try before may have made it**: looked for first, at the time it was sent — and never
@@ -1105,7 +1108,7 @@ final class ShellOutbox {
                 unsent.text, visibility: unsent.audience, at: when, key: id, spoiler: unsent.spoiler,
                 language: unsent.language, sensitive: unsent.sensitive, mediaIDs: ids, poll: unsent.poll,
                 pollLimits: session.composeRooms[host]?.polls, sourceNow: clock,
-                quoting: quoting, quotePolicy: unsent.quotePolicy, again: again
+                quoting: try quoting.map { try write.quotedID(of: $0) }, quotePolicy: unsent.quotePolicy, again: again
             )
             await landed(.waits(at: waiting.at, moved: moved))
         } catch MastodonLaterError.sentNow {
@@ -1116,14 +1119,10 @@ final class ShellOutbox {
             session.said.say(Said(.later(id, .mayWait), .unconfirmed, host: host))
             stand(id, .unconfirmed, in: session)
         } catch {
-            session.writeFailed(error, host: host)
-            if let words = LaterWords.words(of: error) {
-                session.said.say(Said(.later(id, .refused(words)), .declined, host: host))
-            }
-            if let why = Self.notSent(error) {
-                await missed(id, why, in: session)
-            } else {
-                stand(id, .unconfirmed, in: session)
+            await failed(error, id: id, host: host, in: session) {
+                if let words = LaterWords.words(of: error) {
+                    session.said.say(Said(.later(id, .refused(words)), .declined, host: host))
+                }
             }
         }
     }

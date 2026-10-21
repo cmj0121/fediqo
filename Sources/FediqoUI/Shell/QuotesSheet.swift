@@ -184,7 +184,7 @@ struct QuotePresenter: ViewModifier {
                 QuotesSheet(
                     host: open.host, rows: quoting.rows, reading: quoting.reading, more: quoting.next != nil,
                     revoking: quoting.revoking, missed: quoting.missed,
-                    onRevoke: { quoting.revoke($0, of: open.post, in: session) },
+                    onRevoke: { quoting.withdrawQuote($0, of: open.post, in: session) },
                     onReadOn: { quoting.readOn(in: session) },
                     onClose: { quoting.close() }
                 )

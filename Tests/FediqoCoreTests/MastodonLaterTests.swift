@@ -130,7 +130,7 @@ struct MastodonLaterTests {
         #expect(WaitingDTO.quotes(in: Data("not json".utf8)).isEmpty)
     }
 
-    @Test("A waiting quote changed stays a quote: the new one quotes the same post by its id, with who may quote it as it waits — nobody where it now goes to followers alone — and the old is let go after")
+    @Test("A waiting quote changed stays a quote: the new one quotes the same post by its id, with who may quote it as sent, and the old is let go after")
     func aQuoteChanged() async throws {
         let old = try Self.waiting(Captures.quote)
         let server = LaterServer([
@@ -141,19 +141,16 @@ struct MastodonLaterTests {
             "DELETE /api/v1/scheduled_statuses/148": [.json("{}"), .json("{}"), .json("{}"), .json("{}")],
         ])
         let (write, _) = try await writer(server)
-        let changed = try await write.change(old, to: "changed", visibility: .everyone, at: Self.at, sourceNow: Self.now)
+        let changed = try await write.change(old, to: "changed", visibility: .everyone, at: Self.at, sourceNow: Self.now, quotePolicy: old.quotePolicy)
         #expect(changed.new?.quoting == "117477716262721165" && changed.new?.quotePolicy == .followers && !changed.oldStays)
         let sent = Self.pairs(await server.requests.first)
         #expect(sent.contains { $0 == ("quoted_status_id", "117477716262721165") } && sent.contains { $0 == ("quote_approval_policy", "followers") })
-        _ = try await write.change(old, to: "changed", visibility: .followers, at: Self.at, sourceNow: Self.now)
-        let narrowed = Self.pairs(await server.requests.filter { $0.httpMethod == "POST" }.last)
-        #expect(narrowed.contains { $0 == ("quote_approval_policy", "nobody") } && narrowed.contains { $0 == ("quoted_status_id", "117477716262721165") })
 
         // Who may quote it as chosen; nothing inside it, the account's own and nothing sent.
-        _ = try await write.change(old, to: "changed", visibility: .everyone, at: Self.at, sourceNow: Self.now, quotePolicy: .some(.anyone))
+        _ = try await write.change(old, to: "changed", visibility: .everyone, at: Self.at, sourceNow: Self.now, quotePolicy: .anyone)
         var chosen = Self.pairs(await server.requests.filter { $0.httpMethod == "POST" }.last)
         #expect(chosen.contains { $0 == ("quote_approval_policy", "public") })
-        _ = try await write.change(old, to: "changed", visibility: .everyone, at: Self.at, sourceNow: Self.now, quotePolicy: .some(nil))
+        _ = try await write.change(old, to: "changed", visibility: .everyone, at: Self.at, sourceNow: Self.now, quotePolicy: nil)
         chosen = Self.pairs(await server.requests.filter { $0.httpMethod == "POST" }.last)
         #expect(!chosen.contains { $0.0 == "quote_approval_policy" } && chosen.contains { $0 == ("quoted_status_id", "117477716262721165") })
 
@@ -164,7 +161,7 @@ struct MastodonLaterTests {
             _ = try await none.change(old, to: "x", visibility: .everyone, at: Self.at, mediaIDs: ["m1"], sourceNow: Self.now)
         }
         await #expect(throws: MastodonQuoteError.unfindable) {
-            _ = try await none.postLater("x", visibility: .everyone, at: Self.at, sourceNow: Self.now, quotingID: "../1")
+            _ = try await none.postLater("x", visibility: .everyone, at: Self.at, sourceNow: Self.now, quoting: "../1")
         }
         #expect(await bare.asked.allSatisfy { !$0.hasPrefix("POST") }, "nothing sent")
     }

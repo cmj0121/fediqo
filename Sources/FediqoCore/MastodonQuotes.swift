@@ -113,9 +113,7 @@ public struct MastodonQuotes: Sendable {
 
     /// The first stretch of the posts quoting `note`, or with `next` the stretch after.
     public func quotes(of note: Note, after next: String? = nil, limit: Int? = nil) async throws -> PostStretch {
-        guard let id = note.sendableID, ListSubscription.isPathSegment(id), note.source.host == door.token.host else {
-            throw MastodonQuoteError.unfindable
-        }
+        guard let id = MastodonWrite.pathID(of: note, at: door.token.host) else { throw MastodonQuoteError.unfindable }
         let length = limit.map { [URLQueryItem(name: "limit", value: String(max(1, $0)))] } ?? []
         let sent = ReadMoment.now()
         let (body, link) = try await door.getLinked(
@@ -132,66 +130,52 @@ public struct MastodonQuotes: Sendable {
 }
 
 extension MastodonWrite {
-    /// The form a quote adds to a post: the quoted post by its own id, at the same source.
-    /// **Refused where it carries media or a poll** (D3), and where the quoted post cannot be
-    /// named there.
-    /// A quote by the id its source gave the post it quotes (a waiting quote's, #333): the same
-    /// refusals — no media, no poll, an id that names one post at this source.
+    /// A quote by the id its source gave the post it quotes (a waiting quote's, #333): the form it
+    /// adds to a post. **Refused where it carries media or a poll** (D3), and where the id names
+    /// no post a Mastodon would.
     static func quoting(id: String?, mediaIDs: [String], poll: NewPoll?) throws -> [(String, String)] {
         guard let id else { return [] }
         if poll != nil || mediaIDs.contains(where: { !$0.isEmpty }) { throw MastodonQuoteError.carries }
-        guard !id.isEmpty, id.utf8.allSatisfy({ (0x30...0x39).contains($0) }) else { throw MastodonQuoteError.unfindable }
+        guard isDigits(id) else { throw MastodonQuoteError.unfindable }
         return [("quoted_status_id", id)]
     }
 
+    /// The form a quote adds to a post: the quoted post by its own id, at the same source.
+    /// **Refused where it carries media or a poll** (D3), and where the quoted post cannot be
+    /// named there.
     static func quoting(_ quoted: Note?, host: String, mediaIDs: [String], poll: NewPoll?) throws -> [(String, String)] {
         guard let quoted else { return [] }
         if poll != nil || mediaIDs.contains(where: { !$0.isEmpty }) { throw MastodonQuoteError.carries }
-        guard let id = quoted.sendableID, ListSubscription.isPathSegment(id), quoted.source.host == host else {
-            throw MastodonQuoteError.unfindable
-        }
+        guard let id = pathID(of: quoted, at: host) else { throw MastodonQuoteError.unfindable }
         return [("quoted_status_id", id)]
+    }
+
+    /// The id a quote of `quoted` sends it by, at this source (`postLater`'s `quoting`), or
+    /// `MastodonQuoteError.unfindable` where it cannot be named here.
+    public func quotedID(of quoted: Note) throws -> String {
+        guard let id = Self.pathID(of: quoted, at: host) else { throw MastodonQuoteError.unfindable }
+        return id
     }
 
     /// Who may quote the reader's own `note` from now on (#330), and the post as the source answers
     /// — laid over the row as a read of it is. Quotes made already stay.
     @discardableResult
     public func quotePolicy(of note: Note, to policy: QuotePolicy) async throws -> Note {
-        guard await store.sources().contains(where: { $0.host == host }) else { throw MastodonWriteError.noSource }
-        guard let id = note.sendableID, ListSubscription.isPathSegment(id), note.source.host == host else {
-            throw MastodonQuoteError.unfindable
-        }
+        let id = try await ownID(of: note, unfindable: MastodonQuoteError.unfindable)
         let sent = ReadMoment.now()
         let data = try await door.put(path: "/api/v1/statuses/\(id)/interaction_policy", form: [("quote_approval_policy", policy.rawValue)])
-        return await settleRead(try landedRead(data, on: note, sent: sent), on: note, acted: .quotePolicy)
+        return await settle(try landed(data, on: note, sent: sent, unreadable: MastodonQuoteError.unreadable), on: note, acted: .quotePolicy)
     }
 
     /// Takes back `quoting`'s permission to quote the reader's own `quoted` (#330): the quoting
     /// post, as the source answers it — its quote now `revoked` — laid over the row where one is
     /// held. Taken back again, it is answered the same.
     @discardableResult
-    public func revoke(_ quoting: Note, of quoted: Note) async throws -> Note {
-        guard await store.sources().contains(where: { $0.host == host }) else { throw MastodonWriteError.noSource }
-        guard let id = quoted.sendableID, let quotingID = quoting.sendableID,
-              ListSubscription.isPathSegment(id), ListSubscription.isPathSegment(quotingID),
-              quoted.source.host == host, quoting.source.host == host
-        else { throw MastodonQuoteError.unfindable }
+    public func withdrawQuote(_ quoting: Note, of quoted: Note) async throws -> Note {
+        let id = try await ownID(of: quoted, unfindable: MastodonQuoteError.unfindable)
+        guard let quotingID = Self.pathID(of: quoting, at: host) else { throw MastodonQuoteError.unfindable }
         let sent = ReadMoment.now()
         let data = try await door.post(path: "/api/v1/statuses/\(id)/quotes/\(quotingID)/revoke", form: [])
-        return await settleRead(try landedRead(data, on: quoting, sent: sent), on: quoting, acted: .quoteState)
-    }
-
-    private func landedRead(_ data: Data, on note: Note, sent: ReadMoment) throws -> Note {
-        guard let answered = try? MastodonJSON.decoder.decode(StatusDTO.self, from: data)
-            .asNote(source: note.source, categories: note.categories, sent: sent)
-        else { throw MastodonQuoteError.unreadable }
-        try Task.checkCancellation()
-        return answered
-    }
-
-    /// `answered` laid over the row as an act's answer is, the latest word on what the act moved.
-    private func settleRead(_ answered: Note, on note: Note, acted: ReaderMark) async -> Note {
-        await store.refresh([answered], ifSourceHere: door.token.host, acted: acted)
-        return await store.note(answered.key) ?? answered.refreshed(over: note)
+        return await settle(try landed(data, on: quoting, sent: sent, unreadable: MastodonQuoteError.unreadable), on: quoting, acted: .quoteState)
     }
 }

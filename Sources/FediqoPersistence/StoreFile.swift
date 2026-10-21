@@ -1067,6 +1067,15 @@ public struct StoreFile: Sendable {
     static let readBackAsidePrefix = "incoming-aside-"
 }
 
+extension StoreFile {
+    /// Every store step this build knows, in the order they are taken: what a store this build
+    /// wrote has taken, and what a test holds one to.
+    static var migrationIDs: [String] { migrator.migrations }
+
+    /// The last store step this build knows.
+    static var latestMigration: String { migrationIDs.last ?? "" }
+}
+
 private var migrator: DatabaseMigrator {
     var migrator = DatabaseMigrator()
     migrator.registerMigration("v1-index") { db in
@@ -2067,6 +2076,26 @@ private struct QuotationRow: Codable {
     }
 }
 
+/// One value as a cell's JSON text, and back: one encoder and one decoder for every row that
+/// writes one, and a cell read only within `longest` — `ReferenceRow.longestCell` where its row
+/// says no nearer bound.
+private enum JSONCell {
+    private static let encoder = JSONEncoder()
+    private static let decoder = JSONDecoder()
+
+    /// `value` as the cell's text, or nothing where it will not encode.
+    static func text<Value: Encodable>(_ value: Value) -> String? {
+        guard let data = try? encoder.encode(value) else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// The value a cell holds, or nothing for none, one past `longest`, or one this build cannot read.
+    static func value<Value: Decodable>(_ type: Value.Type, from text: String?, longest: Int = ReferenceRow.longestCell) -> Value? {
+        guard let text, text.utf8.count <= longest else { return nil }
+        return try? decoder.decode(type, from: Data(text.utf8))
+    }
+}
+
 /// `Wording` as `note.earlier` writes it.
 /// Who may quote a row as `note.quote_approval` writes it (#330): the two lists as the source
 /// spelled them.
@@ -2075,17 +2104,12 @@ private struct QuoteApprovalRow: Codable {
     var manual: [String]
 
     static func text(_ approval: QuoteApproval?) -> String? {
-        guard let approval,
-              let data = try? JSONEncoder().encode(QuoteApprovalRow(automatic: approval.automatic, manual: approval.manual))
-        else { return nil }
-        return String(decoding: data, as: UTF8.self)
+        approval.flatMap { JSONCell.text(QuoteApprovalRow(automatic: $0.automatic, manual: $0.manual)) }
     }
 
     /// The approval a cell holds, or nothing where it holds nothing this build can read.
     static func approval(_ text: String?) -> QuoteApproval? {
-        guard let text, text.utf8.count <= 4_096,
-              let row = try? JSONDecoder().decode(QuoteApprovalRow.self, from: Data(text.utf8))
-        else { return nil }
+        guard let row = JSONCell.value(QuoteApprovalRow.self, from: text, longest: 4_096) else { return nil }
         // Held to the filter the wire's lists are, whoever wrote the cell.
         return QuoteApproval(automatic: QuoteApproval.kept(row.automatic), manual: QuoteApproval.kept(row.manual))
     }
@@ -2117,8 +2141,7 @@ private struct CardRow: Codable {
 
     /// `card` as the cell's text, or nothing for none.
     static func text(_ card: PostCard?) -> String? {
-        guard let card, let data = try? JSONEncoder().encode(CardRow(card)) else { return nil }
-        return String(decoding: data, as: UTF8.self)
+        card.flatMap { JSONCell.text(CardRow($0)) }
     }
 
     /// The most a cell is read of: a card's words and two addresses are well under it.
@@ -2127,9 +2150,7 @@ private struct CardRow: Codable {
     /// The card a cell holds, held to every card's bounds again (`PostCard.init(stored:)`) — or
     /// nothing where it holds nothing this build can read, or more than a card is.
     static func card(_ text: String?) -> PostCard? {
-        guard let text, text.utf8.count <= cellLength,
-              let row = try? JSONDecoder().decode(CardRow.self, from: Data(text.utf8))
-        else { return nil }
+        guard let row = JSONCell.value(CardRow.self, from: text, longest: cellLength) else { return nil }
         return PostCard(
             stored: row.title, description: row.description, provider: row.provider, author: row.author, url: row.url,
             image: row.image, width: row.width, height: row.height, missingAttribution: row.missingAttribution

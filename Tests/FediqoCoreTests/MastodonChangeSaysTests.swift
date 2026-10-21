@@ -108,7 +108,7 @@ struct MastodonChangeSaysTests {
             let post = try await write.post("before the change", visibility: .unlisted, language: "en", mediaIDs: [first, second])
             let id = try #require(post.statusID)
             written.append(id)
-            #expect(try await write.history(of: post).isEmpty, "a post never changed has nothing before")
+            #expect(try await write.earlier(of: post).isEmpty, "a post never changed has nothing before")
 
             // A read sent before the change, landing after it.
             let sentBefore = ReadMoment.now()
@@ -134,7 +134,7 @@ struct MastodonChangeSaysTests {
             let plain = try await Self.ask("/api/v1/statuses/\(id)/history", as: writer)
             #expect(plain.list.count == 2 && (plain.list.first?["content"] as? String) == "<p>before the change</p>")
             #expect(plain.list.allSatisfy { $0["language"] == nil && $0["created_at"] is String })
-            #expect(try await write.history(of: after) == after.earlier)
+            #expect(try await write.earlier(of: after) == after.earlier)
 
             // The same change again changes nothing at the source.
             let again = try await write.change(after, to: change)
@@ -151,7 +151,7 @@ struct MastodonChangeSaysTests {
             let relabelled = try await write.change(after, to: described)
             #expect(relabelled.editedAt != after.editedAt && relabelled.attachments.map(\.alt) == ["third alt"])
             #expect(try await Self.ask("/api/v1/statuses/\(id)/history", as: writer).list.count == 3)
-            #expect(try await write.history(of: relabelled) == after.earlier && relabelled.earlier == after.earlier)
+            #expect(try await write.earlier(of: relabelled) == after.earlier && relabelled.earlier == after.earlier)
 
             // A file left out is taken off.
             var bare = change
@@ -291,7 +291,7 @@ struct MastodonChangeSaysTests {
             await #expect(throws: MastodonScopeError.outside) { _ = try await reader.change(post, to: PostChange(text: "read only")) }
             #expect(try await Self.ask("/api/v1/statuses/\(id)", as: reading, "PUT", form: [("status", "x")]).text == MastodonChangeCaptures.outside)
             #expect(try await reader.source(of: post).text == "to be refused a change")
-            #expect(try await reader.history(of: post).isEmpty)
+            #expect(try await reader.earlier(of: post).isEmpty)
             #expect(await store.all() == held, "a refusal changed what is held")
 
             let taken = try await Self.ask("/api/v1/statuses/\(id)", as: writer, "DELETE")
@@ -302,7 +302,7 @@ struct MastodonChangeSaysTests {
                 let gone = try await Self.ask("/api/v1/statuses/\(id)/\(path)", as: writer)
                 #expect(gone.status == 404 && gone.text == MastodonChangeCaptures.gone, "\(path)")
             }
-            await #expect(throws: MastodonAuthError.http(404)) { _ = try await write.history(of: post) }
+            await #expect(throws: MastodonAuthError.http(404)) { _ = try await write.earlier(of: post) }
         }
     }
 }

@@ -207,13 +207,15 @@ struct MastodonLaterSaysTests {
         do { try await Self.waiting(as: writer) { made in
             let at = MastodonLater.earliest().addingTimeInterval(3600)
             let old = try await write.postLater(
-                "a waiting quote", visibility: .everyone, at: at, key: UUID(), quoting: quoted, quotePolicy: .followers
+                "a waiting quote", visibility: .everyone, at: at, key: UUID(), quoting: quotedID, quotePolicy: .followers
             )
             made.append(old.id)
             #expect(old.quoting == quotedID && old.quotePolicy == .followers)
             let listed = try await write.waiting().posts.first { $0.id == old.id }
             #expect(listed?.quoting == quotedID && listed?.quotePolicy == .followers, "listed as it was made")
-            let changed = try await write.change(old, to: "a waiting quote, changed", visibility: .everyone, at: at.addingTimeInterval(600))
+            let changed = try await write.change(
+                old, to: "a waiting quote, changed", visibility: .everyone, at: at.addingTimeInterval(600), quotePolicy: old.quotePolicy
+            )
             let new = try #require(changed.new)
             made.append(new.id)
             #expect(!changed.oldStays && new.quoting == quotedID && new.quotePolicy == .followers)
@@ -222,7 +224,7 @@ struct MastodonLaterSaysTests {
             #expect(try await Self.ask("/api/v1/scheduled_statuses/\(old.id)", as: writer).status == 404)
 
             // Who may quote it changed with the rest: the next one waits with the policy chosen.
-            let narrowed = try #require(try await write.change(new, to: "a waiting quote, nobody", visibility: .everyone, at: at, quotePolicy: .some(.nobody)).new)
+            let narrowed = try #require(try await write.change(new, to: "a waiting quote, nobody", visibility: .everyone, at: at, quotePolicy: .nobody).new)
             made.append(narrowed.id)
             let listedNarrowed = try await write.waiting().posts.first { $0.id == narrowed.id }
             #expect(listedNarrowed?.quoting == quotedID && listedNarrowed?.quotePolicy == .nobody)

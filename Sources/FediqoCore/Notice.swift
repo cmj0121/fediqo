@@ -316,6 +316,15 @@ public enum LineText {
         return words.count > limit ? String(words.prefix(limit)) + "…" : words
     }
 
+    /// `raw` with its markup and entities taken out — cut first to `cut`, four times `limit`
+    /// where nothing says — made one line of at most `limit`, or nothing where nothing is left.
+    static func cleanLine(_ raw: String?, limit: Int, cut: Int? = nil) -> String? {
+        guard let raw else { return nil }
+        let plain = HTMLText.plain(AccountDTO.cut(raw, to: cut ?? limit * 4))
+        let said = oneLine(plain, limit: limit).trimmingCharacters(in: .whitespaces)
+        return said.isEmpty ? nil : said
+    }
+
     /// Whether a scalar is part of a picture a joiner may stand beside.
     private static func pictured(_ scalar: Unicode.Scalar) -> Bool {
         scalar == "\u{FE0F}" || (scalar.properties.isEmoji && scalar.value > 0xFF)

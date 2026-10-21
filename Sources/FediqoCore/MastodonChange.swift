@@ -158,15 +158,8 @@ extension MastodonWrite {
     /// **Nothing here is written to the store**: a sheet opened and cancelled has changed
     /// nothing. A 404 is the post gone, or not one this sign-in may see.
     public func source(of note: Note) async throws -> PostSource {
-        guard await store.sources().contains(where: { $0.host == host }) else {
-            throw MastodonWriteError.noSource
-        }
         // Only a post of this sign-in's own source, by that source's id for it.
-        guard note.source.host.lowercased() == host.lowercased(), let id = note.sendableID,
-              ListSubscription.isPathSegment(id)
-        else {
-            throw MastodonWriteError.unfindable
-        }
+        let id = try await ownID(of: note)
         async let words = door.get(path: "/api/v1/statuses/\(id)/source")
         async let post = door.get(path: "/api/v1/statuses/\(id)")
         let (wordsData, postData) = try await (words, post)
@@ -202,44 +195,15 @@ extension MastodonWrite {
     /// nothing makes no new wording at the source.
     @discardableResult
     public func change(_ note: Note, to change: PostChange, pollLimits: MastodonPollLimits? = nil) async throws -> Note {
-        if let poll = change.poll {
-            if !change.media.isEmpty { throw MastodonWriteError.refusedHere(.pollWithMedia) }
-            if let pollLimits, let refusal = poll.refusal(within: pollLimits) {
-                throw MastodonWriteError.refusedHere(refusal)
-            }
-        }
-        guard await store.sources().contains(where: { $0.host == host }) else {
-            throw MastodonWriteError.noSource
-        }
+        // Every file the change keeps or adds stands as one beside a poll (#331).
+        try Self.pollRefusal(mediaIDs: change.media.map { $0.id.isEmpty ? "-" : $0.id }, poll: change.poll, limits: pollLimits)
         // Only a post of this sign-in's own source, by that source's id for it.
-        guard note.source.host.lowercased() == host.lowercased(), let id = note.sendableID,
-              ListSubscription.isPathSegment(id)
-        else {
-            throw MastodonWriteError.unfindable
-        }
+        let id = try await ownID(of: note)
         let sent = ReadMoment.now()
         let data = try await door.put(path: "/api/v1/statuses/\(id)", form: change.form)
-        guard let answered = try? MastodonJSON.decoder.decode(StatusDTO.self, from: data)
-            .asNote(source: note.source, categories: note.categories, sent: sent),
-            answered.statusID == id
-        else {
-            throw MastodonWriteError.unreadable
-        }
-        try Task.checkCancellation()
-        await store.refresh([answered], ifSourceHere: host)
-        return await store.note(answered.key) ?? answered.refreshed(over: note)
-    }
-
-    /// What `note` said before, as its source keeps it: `MastodonPost.history`, through this
-    /// sign-in. Nothing is written to the store.
-    public func history(of note: Note) async throws -> [Wording] {
-        // Only a post of this sign-in's own source, by that source's id for it.
-        guard note.source.host.lowercased() == host.lowercased(), let id = note.sendableID,
-              ListSubscription.isPathSegment(id)
-        else {
-            throw MastodonWriteError.unfindable
-        }
-        return try await MastodonPost(door: door).history(id: id, quotes: note.quotesReference != nil)
+        let answered = try landed(data, on: note, sent: sent)
+        guard answered.statusID == id else { throw MastodonWriteError.unreadable }
+        return await settle(answered, on: note, acted: nil)
     }
 
 }
@@ -255,34 +219,30 @@ extension MastodonPost {
     /// no new wording here — it joins the wording before. Bounded as every held wording is
     /// (`Wording.bounded`), the oldest going first. `quotes` is whether the post quotes another,
     /// whose `RE:` line each wording is read without, as the post's words are.
-    public func history(id: String, quotes: Bool) async throws -> [Wording] {
-        try await fullHistory(id: id, quotes: quotes).earlier
-    }
-
-    /// `history(id:quotes:)`, with the wording the history says the post holds now beside it —
-    /// what a history is landed against (`ItemStore.landHistory`): the newest entry's words and
-    /// cover line, its `until` the moment that entry says it began.
+    ///
+    /// With the wording the history says the post holds now beside it — what a history is landed
+    /// against (`ItemStore.landHistory`): the newest entry's words and cover line, its `until` the
+    /// moment that entry says it began.
     public func fullHistory(id: String, quotes: Bool) async throws -> PostHistory {
         let data = try await get(try Self.path(id) + "/history")
         guard let entries = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<EditDTO>].self, from: data) else {
             throw MastodonWriteError.unreadable
         }
         let said = entries.compactMap { $0.value?.wording(quotes: quotes) }
-        return PostHistory(earlier: Self.wordings(said), now: said.max { $0.since < $1.since }?.words)
+        return PostHistory(earlier: Self.wordings(said), now: said.max { $0.until < $1.until })
     }
 
-    /// `said` — each wording with the moment it began, oldest first — as the wordings before the
-    /// last, each until the next one that says something else.
-    static func wordings(_ said: [(words: Wording, since: Date)]) -> [Wording] {
-        var groups: [(words: Wording, since: Date)] = []
-        for entry in said.sorted(by: { $0.since < $1.since }) {
-            if let last = groups.last, last.words.body == entry.words.body,
-               (last.words.spoiler ?? "") == (entry.words.spoiler ?? "") { continue }
+    /// `said` — each wording dated by the moment it began (its `until`, until the next is known) —
+    /// as the wordings before the last, each until the next one that says something else.
+    static func wordings(_ said: [Wording]) -> [Wording] {
+        var groups: [Wording] = []
+        for entry in said.sorted(by: { $0.until < $1.until }) {
+            if let last = groups.last, last.body == entry.body, (last.spoiler ?? "") == (entry.spoiler ?? "") { continue }
             groups.append(entry)
         }
         guard groups.count > 1 else { return [] }
         return Wording.bounded(zip(groups, groups.dropFirst()).map { was, next in
-            Wording(body: was.words.body, spoiler: was.words.spoiler, sensitive: was.words.sensitive, until: next.since)
+            Wording(body: was.body, spoiler: was.spoiler, sensitive: was.sensitive, until: next.until)
         })
     }
 }
@@ -313,13 +273,13 @@ private struct EditDTO: Decodable, Sendable {
     let sensitive: Bool?
     let createdAt: StatusDTO.LenientMoment?
 
-    /// A wording dated by when it began, or nothing where the entry says no moment it can be
-    /// placed by. Its `until` is filled in once the next is known.
-    func wording(quotes: Bool) -> (words: Wording, since: Date)? {
+    /// A wording dated by when it began — its `until`, until the next is known — or nothing where
+    /// the entry says no moment it can be placed by.
+    func wording(quotes: Bool) -> Wording? {
         guard let since = createdAt?.value else { return nil }
         let html = content ?? ""
         let body = HTMLText.plain(quotes ? HTMLText.withoutQuoteLine(html) : html)
-        return (Wording(body: body, spoiler: spoilerText, sensitive: sensitive, until: since), since)
+        return Wording(body: body, spoiler: spoilerText, sensitive: sensitive, until: since)
     }
 }
 

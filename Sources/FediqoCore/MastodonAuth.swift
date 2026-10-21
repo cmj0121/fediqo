@@ -756,12 +756,17 @@ public struct MastodonAuthorized: Sendable {
 
     /// A moment as an HTTP header writes it (`Wed, 21 Oct 2026 04:43:08 GMT`), or nothing.
     static func httpDate(_ text: String) -> Date? {
+        httpDates.date(from: text)
+    }
+
+    /// One reader of a header's moments: made once, read only after.
+    nonisolated(unsafe) private static let httpDates: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "GMT")
         formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
-        return formatter.date(from: text)
-    }
+        return formatter
+    }()
 
     /// A form POST through the same door: the token, the 401 rule, and never off this host.
     /// As `get`, with a not-found of the address told from every other refusal: throws

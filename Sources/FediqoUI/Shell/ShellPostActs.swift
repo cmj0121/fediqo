@@ -30,6 +30,12 @@ final class ShellPostActs {
     /// One of the two acts that change how the post stands for the reader.
     enum Act: Hashable, Sendable {
         case pin, quiet
+
+        /// The part of a sign-in the act needs (asked of a real one, `MastodonPostActsCaptures`).
+        var part: MastodonPart { self == .pin ? .account : .blocks }
+
+        /// How the source last said `note` stands to the act.
+        func said(in note: Note) -> Bool? { self == .pin ? note.pinned : note.muted }
     }
 
     /// A translation of one post, by the row id of the copy it was asked through.
@@ -77,10 +83,8 @@ extension ItemActing {
     /// What a row offers of #334, built by `ShellSession.postOffer`. Nothing where its source
     /// has none of them.
     struct PostMore {
-        /// One item: where the sign-in lacks the part, its lock — the item is drawn dim with it,
-        /// and a press only asks — and the press.
+        /// One item: its press.
         struct Item {
-            var lock: Lock?
             let press: () -> Void
         }
 
@@ -124,7 +128,8 @@ extension ShellSession {
     private func signedCopy(of item: DummyItem) -> DummyItem? {
         if let writing = actingCopy(of: item, for: .boost) { return writing }
         let post = postOf(item)
-        return (post.actCopies.isEmpty ? [post] : post.actCopies).first { mastodon.token(host: $0.source.host) != nil }
+        // Who is signed in, as the sign-ins' standing already says — never a Keychain read per row.
+        return (post.actCopies.isEmpty ? [post] : post.actCopies).first { mastodon.grants[$0.source.host] != nil }
     }
 
     /// What `item`'s `…` offers of #334, in the order it is drawn, with the presses — or nothing
@@ -135,13 +140,14 @@ extension ShellSession {
     ) -> ItemActing.PostMore? {
         let post = postOf(item)
         guard let kind = kind(of: post), post.goneSince == nil else { return nil }
+        let language = ShellPostActs.language
         var more = ItemActing.PostMore()
         if kind.offers.people, post.statusID != nil {
             if let list = Self.peopleList(.boostedBy, of: post) {
-                more.boostedBy = .init(lock: nil) { openPeople(list) }
+                more.boostedBy = .init { openPeople(list) }
             }
             if let list = Self.peopleList(.favouritedBy, of: post) {
-                more.favouritedBy = .init(lock: nil) { openPeople(list) }
+                more.favouritedBy = .init { openPeople(list) }
             }
         }
         guard kind.offers.saysReaderMarks else {
@@ -151,7 +157,7 @@ extension ShellSession {
             // Signed in nowhere: a Mastodon translates for nobody unsigned (asked of a real one,
             // `MastodonPostActsCaptures`), so Translate is drawn dim with the sign-in's words.
             if let unsigned = note(ofRow: post.id),
-               MastodonTranslator.offered(unsigned, into: ShellPostActs.language, host: people.postActs.hosts.has(.translation, at: post.source.host)) {
+               MastodonTranslator.offered(unsigned, into: language, host: people.postActs.hosts.has(.translation, at: post.source.host)) {
                 more.translateSignedOut = post.source.host
             }
             return more
@@ -160,8 +166,8 @@ extension ShellSession {
         let acts = people.postActs
         // Translating (D4): not offered where the post is in the reader's language already, is
         // not one anyone may read, or the host says it has no translator.
-        if MastodonTranslator.offered(held, into: ShellPostActs.language, host: acts.hosts.has(.translation, at: host)) {
-            more.translate = .init(lock: nil) { [weak self] in
+        if MastodonTranslator.offered(held, into: language, host: acts.hosts.has(.translation, at: host)) {
+            more.translate = .init { [weak self] in
                 guard let self else { return }
                 afterTranslate?()
                 Task { await self.translate(item, people: people) }
@@ -170,18 +176,19 @@ extension ShellSession {
         }
         more.translation = acts.translations[copy.id]
         // Quieting a conversation, on anybody's post; pinning, on the reader's own that may be pinned.
-        more.quiet = turn(.quiet, held.muted, on: copy, acts: acts, part: .blocks, people: people, item: item)
+        more.quiet = turn(.quiet, ShellPostActs.Act.quiet.said(in: held), on: copy, acts: acts, people: people, item: item)
         if isMine(copy), MastodonWrite.pinnable(held) {
-            more.pin = turn(.pin, held.pinned, on: copy, acts: acts, part: .account, people: people, item: item)
+            more.pin = turn(.pin, ShellPostActs.Act.pin.said(in: held), on: copy, acts: acts, people: people, item: item)
         }
         return more
     }
 
     private func turn(
-        _ act: ShellPostActs.Act, _ said: Bool?, on copy: DummyItem, acts: ShellPostActs, part: MastodonPart,
+        _ act: ShellPostActs.Act, _ said: Bool?, on copy: DummyItem, acts: ShellPostActs,
         people: ShellPersonPages, item: DummyItem
     ) -> ItemActing.PostMore.Turn {
         let host = copy.source.host
+        let part = act.part
         let lock = mastodon.place(part, host: host).map { ItemActing.Lock(place: $0, host: host) }
         let pressed = acts.pressed(act, on: copy.id)
         return .init(on: pressed ?? (said == true), out: pressed != nil, lock: lock) { [weak self] in
@@ -207,10 +214,10 @@ extension ShellSession {
     func turn(_ act: ShellPostActs.Act, on item: DummyItem, people: ShellPersonPages) async {
         guard let copy = signedCopy(of: item), let held = note(ofRow: copy.id) else { return }
         let host = copy.source.host
-        let part: MastodonPart = act == .pin ? .account : .blocks
+        let part = act.part
         guard mastodon.place(part, host: host) == nil, let door = mastodon.authorized(host: host, for: .write) else { return }
         let acts = people.postActs
-        let to = !((act == .pin ? held.pinned : held.muted) ?? false)
+        let to = !(act.said(in: held) ?? false)
         guard acts.begin(act, on: copy.id, to: to) else { return }
         defer { acts.end(act, on: copy.id) }
         let write = reach.write(door, landingIn: store)

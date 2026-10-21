@@ -107,7 +107,7 @@ struct MastodonQuoteWriteTests {
             "POST /api/v1/statuses/7/quotes/20/revoke": .init(body: Self.status(id: "20", quote: MastodonQuoteWriteCaptures.revoked, account: "bob")),
         ])
         _ = try await write.quotePolicy(of: own, to: .nobody)
-        _ = try await write.revoke(quoting, of: own)
+        _ = try await write.withdrawQuote(quoting, of: own)
         // Both were read before either act, and land now.
         let staleOwn = try Self.held(Self.status(id: "7"), sent: early)
         let staleQuoting = try Self.held(Self.status(id: "20", quote: #"{"state":"accepted","quoted_status":\#(Self.status(id: "7"))}"#, account: "bob"), sent: early)
@@ -163,10 +163,10 @@ struct MastodonQuoteWriteTests {
         let clock = Date(timeIntervalSince1970: 1_792_000_000)
         let at = clock.addingTimeInterval(3600)
         await #expect(throws: MastodonQuoteError.notAllowed) {
-            _ = try await refused.postLater("no", visibility: .everyone, at: at, key: UUID(), sourceNow: clock, quoting: quoted)
+            _ = try await refused.postLater("no", visibility: .everyone, at: at, key: UUID(), sourceNow: clock, quoting: try refused.quotedID(of: quoted))
         }
         await #expect(throws: MastodonLaterError.mayHaveBeenMade) {
-            _ = try await refused.postLater("no", visibility: .everyone, at: at, key: UUID(), sourceNow: clock, quoting: quoted, again: true)
+            _ = try await refused.postLater("no", visibility: .everyone, at: at, key: UUID(), sourceNow: clock, quoting: try refused.quotedID(of: quoted), again: true)
         }
     }
 
@@ -197,7 +197,7 @@ struct MastodonQuoteWriteTests {
         read = try read.readingOn(try await quotes.quotes(of: own, after: read.next, limit: 1))
         #expect(read.posts.map(\.statusID) == ["20", "21"] && read.ended)
 
-        let revoked = try await write.revoke(quoting, of: own)
+        let revoked = try await write.withdrawQuote(quoting, of: own)
         #expect(revoked.quote?.state == .revoked)
         #expect(await store.note(quoting.key)?.quote?.state == .revoked)
     }
@@ -213,11 +213,11 @@ struct MastodonQuoteWriteTests {
         let quoting = try Self.held(Self.status(id: "20", account: "bob"))
         let (write, store, server) = try await Self.writing(holding: [own, quoting], [:])
         await #expect(throws: MastodonQuoteError.unfindable) { try await write.quotePolicy(of: foreign("7"), to: .nobody) }
-        await #expect(throws: MastodonQuoteError.unfindable) { try await write.revoke(foreign("20"), of: own) }
-        await #expect(throws: MastodonQuoteError.unfindable) { try await write.revoke(quoting, of: foreign("7")) }
+        await #expect(throws: MastodonQuoteError.unfindable) { try await write.withdrawQuote(foreign("20"), of: own) }
+        await #expect(throws: MastodonQuoteError.unfindable) { try await write.withdrawQuote(quoting, of: foreign("7")) }
         await store.remove(host: Self.host)
         await #expect(throws: MastodonWriteError.noSource) { try await write.quotePolicy(of: own, to: .nobody) }
-        await #expect(throws: MastodonWriteError.noSource) { try await write.revoke(quoting, of: own) }
+        await #expect(throws: MastodonWriteError.noSource) { try await write.withdrawQuote(quoting, of: own) }
         #expect(await server.asked.isEmpty)
     }
 

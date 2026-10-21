@@ -45,19 +45,15 @@ struct ChangeSheetHostedTests {
     @Test("The sheet lays out refused and filled, the reset line under the poll, in light and in dark", arguments: 0..<2)
     func laidOut(_ dark: Int) async throws {
         L10n.language = .english
-        let scheme: ColorScheme = dark == 1 ? .dark : .light
+        let scheme = HostedFit.scheme(dark)
         for refused in [true, false] {
             let session = try await session(refused: refused)
             if !refused { session.changes.draft.poll?.multiple = true }
             #expect(session.changes.phase == (refused ? .failed : .ready))
             #expect(session.changes.resets == !refused)
             for size in [DynamicTypeSize.large, .accessibility5] {
-                let view = NSHostingView(
-                    rootView: ChangeSheet().environment(session)
-                        .environment(\.colorScheme, scheme).environment(\.dynamicTypeSize, size)
-                )
-                view.layoutSubtreeIfNeeded()
-                #expect(view.fittingSize.height > 0 && view.fittingSize.width <= 600.5, "refused \(refused) at \(size)")
+                // The sheet's own room: a writing sheet's width.
+                #expect(HostedFit.fits(ChangeSheet().environment(session), room: 600, scheme: scheme, size: size), "refused \(refused) at \(size)")
             }
         }
     }

@@ -1532,10 +1532,7 @@ struct MastodonSignInTests {
         let files = try #require(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
         for case let file as URL in files where file.pathExtension == "swift" {
             let lines = try String(contentsOf: file, encoding: .utf8).split(separator: "\n", omittingEmptySubsequences: false)
-            // A quote's permission taken back (#330, `revoke(_:of:)`) is another revoke, of a post:
-            // its two known calls alone are passed over.
-            for (number, line) in lines.enumerated() where line.contains("revoke(") && !line.contains("func revoke(")
-                && !line.contains(".revoke(quoting, of:") && !line.contains("quoting.revoke(") {
+            for (number, line) in lines.enumerated() where line.contains("revoke(") && !line.contains("func revoke(") {
                 sites.append("\(file.lastPathComponent):\(number + 1)")
             }
             paths += lines.count { $0.contains("/oauth/revoke") }

@@ -8,9 +8,9 @@ import Foundation
 ///
 /// **What it may be, as well as what it is.** The rules a sheet reads — whether it can go, what
 /// a file or a poll added to it would be refused for — are functions of the value and of what
-/// its source said it takes, so a sheet and a test read the same answer. Where the post goes,
-/// whose it is and when it is sent are the sheet's: a change's source is the post's own, and a
-/// time to send and a quote are added beside these when their sheets come.
+/// its source said it takes, so a sheet and a test read the same answer. Where the post goes and
+/// whose it is are the sheet's: a change's source is the post's own. When it is sent (`at`, #333)
+/// and what it quotes and who may quote it (`quoting`, `quotePolicy`, #330) are part of the value.
 struct PostDraft: Equatable {
     var text = ""
     /// The cover line. Empty is none.

@@ -2998,10 +2998,15 @@ public actor ItemStore {
         public let quotes: Bool
 
         init?(_ note: Note) {
-            guard note.historyOwed, let statusID = note.sendableID, let editedAt = note.editedAt else { return nil }
+            // `Note.historyOwed`, with the change's moment read once.
+            guard note.source.kind == .mastodon, !note.isReblog, let statusID = note.sendableID,
+                  let editedAt = note.editedAt
+            else { return nil }
+            let edited = Note.moment(editedAt)
+            if let historyAt = note.historyAt, Note.moment(historyAt) >= edited { return nil }
             item = note.key
             self.statusID = statusID
-            self.editedAt = Date(timeIntervalSince1970: Double(Note.moment(editedAt)) / 1000)
+            self.editedAt = Date(timeIntervalSince1970: Double(edited) / 1000)
             quotes = note.quotesReference != nil
         }
     }

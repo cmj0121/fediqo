@@ -131,10 +131,7 @@ public struct PostCard: Hashable, Sendable {
     /// `raw` with its markup and entities taken out, made one line of at most `limit`, or nothing
     /// where nothing is left.
     private static func line(_ raw: String?, limit: Int) -> String? {
-        guard let raw else { return nil }
-        let plain = HTMLText.plain(AccountDTO.cut(raw, to: limit * 4))
-        let said = LineText.oneLine(plain, limit: limit).trimmingCharacters(in: .whitespaces)
-        return said.isEmpty ? nil : said
+        LineText.cleanLine(raw, limit: limit)
     }
 }
 

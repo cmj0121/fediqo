@@ -108,10 +108,7 @@ struct LanguageStoreTests {
         let migrations = try DatabaseQueue(path: index.path).read { db in
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier")
         }
-        #expect(migrations == [
-            "v1-index", "v10-references", "v11-one-holding", "v12-references-only", "v13-unsent", "v14-notices", "v15-compose", "v16-poll", "v17-marks", "v18-standing", "v19-card", "v2-categories", "v20-unsent-changes", "v21-quotes", "v22-unsent-at", "v23-unsent-quoting", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions",
-            "v9-language",
-        ])
+        #expect(migrations == StoreFile.migrationIDs.sorted())
     }
 
     @Test("A post in a carried-forward store that is read again saying its language keeps it, after a save and a reopen")

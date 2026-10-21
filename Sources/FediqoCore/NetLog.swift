@@ -79,7 +79,7 @@ public enum NetLog {
 
     /// The status a source answered with, where `error` is one: a number of three digits, and
     /// nothing it said.
-    private static func status(of error: any Error) -> Int? {
+    static func status(of error: any Error) -> Int? {
         switch error {
         case MastodonRequestError.http(let status): status
         case MastodonAuthError.http(let status): status

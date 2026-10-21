@@ -1310,41 +1310,68 @@ final class ShellSession {
     /// and the picker does not open by itself when that page returns.
     func composeAddMedia() {
         guard let host = composeHost else { return }
-        // A post carries a poll or media, not both (#331): the poll goes first, by the person.
-        if composeDraft.poll != nil {
-            composeMediaNote = ComposeWords.refusalLine(.pollWithMedia, host: host)
-            return
+        switch mediaPress(host: host, hasPoll: composeDraft.poll != nil) {
+        case .refused(let note): composeMediaNote = note
+        case .opens: composeImporting = true
+        case .asked(let note): if let note { composeMediaNote = note }
         }
-        if mastodon.standing(.media, host: host) == .held {
-            composeImporting = true
-            return
-        }
-        if let place = mastodon.place(.media, host: host) {
-            composeMediaNote = String(format: L10n.t(place.key), host)
-        }
+    }
+
+    /// What the Add press over a draft at `host` does: a draft with a poll takes no file (#331),
+    /// and the poll goes first, by the person; where the sign-in holds media, the system picker
+    /// opens; where it does not, the place says why — where it can — and the part is asked for.
+    enum MediaPress: Equatable {
+        case refused(String)
+        case opens
+        case asked(String?)
+    }
+
+    /// The Add press over a draft at `host` (`MediaPress`) — the composer's, and a change's.
+    func mediaPress(host: String, hasPoll: Bool) -> MediaPress {
+        if hasPoll { return .refused(ComposeWords.refusalLine(.pollWithMedia, host: host)) }
+        if mastodon.standing(.media, host: host) == .held { return .opens }
+        let note = mastodon.place(.media, host: host).map { String(format: L10n.t($0.key), host) }
         _ = askFor([.media], host: host)
+        return .asked(note)
     }
 
     /// What the system picker handed back. A file that cannot be taken is said, and nothing
     /// already typed or already added is cleared.
     func composeRead(_ result: Result<[URL], Error>) {
+        if case .success = result, composeHost == nil { return }
+        let host = composeHost ?? ""
+        if let note = Self.readPicked(result, into: &composeDraft, host: host, limits: composeHost.map { mediaLimits(of: $0) } ?? .unstated) {
+            composeMediaNote = note
+        }
+    }
+
+    /// What the system picker handed back, added to `draft` within `limits`, a file at a time —
+    /// the composer's, and a change's. The note to show after: a file that could not be taken, or
+    /// nothing once one was (`.some(nil)`) — and nothing to change (`nil`) where the picker was
+    /// closed, or handed back nothing.
+    static func readPicked(
+        _ result: Result<[URL], Error>, into draft: inout PostDraft, host: String, limits: MastodonMediaLimits
+    ) -> String?? {
         switch result {
         case .failure(let error):
             let cocoa = error as NSError
-            if cocoa.domain == NSCocoaErrorDomain, cocoa.code == NSUserCancelledError { return }
-            composeMediaNote = L10n.t("compose.media.unreadable")
+            if cocoa.domain == NSCocoaErrorDomain, cocoa.code == NSUserCancelledError { return nil }
+            return .some(L10n.t("compose.media.unreadable"))
         case .success(let urls):
-            guard let host = composeHost else { return }
-            let limits = mediaLimits(of: host)
+            var note: String?? = nil
             for url in urls {
                 switch ComposeFile.read(url, host: host, limits: limits) {
-                case .refused(let note):
-                    composeMediaNote = note
-                    return
+                case .refused(let refused):
+                    return .some(refused)
                 case .taken(let taken):
-                    if composeAttach(bytes: taken.bytes, name: taken.name, type: taken.type) != nil { return }
+                    if let refusal = draft.refusal(adding: taken.bytes, type: taken.type, description: "", within: limits) {
+                        return .some(ComposeWords.refusalLine(refusal, host: host))
+                    }
+                    draft.media.append(UnsentMedia(bytes: taken.bytes, mime: taken.type, name: taken.name))
+                    note = .some(nil)
                 }
             }
+            return note
         }
     }
 

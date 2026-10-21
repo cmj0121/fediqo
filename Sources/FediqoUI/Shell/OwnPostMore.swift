@@ -27,9 +27,8 @@ extension ItemActs {
         if let change = acting.change {
             let name = L10n.t("item.act.change", language: language)
             if let lock = change.lock {
-                head.append(lock.line(language: language) ?? String(format: L10n.t(lock.place.key, language: language), lock.host))
-                let dim = ShellMark(SourceRow.permissionSymbol, name, look: .dim(.askAgain))
-                items.append(ShellMoreItem.plain(dim, ask: lock.place.asks ? change.press : nil, act: {}).underHead)
+                head.append(lock.headLine(language: language))
+                items.append(.locked(name: name, lock: lock, press: change.press))
             } else {
                 items.append(.plain("pencil", name, act: change.press))
             }
@@ -51,7 +50,7 @@ extension ItemActs {
         var head = [L10n.t("item.act.quotePolicy.line", language: language)]
         if quotes.fixed { head.append(L10n.t("compose.quotePolicy.private", language: language)) }
         if let lock = quotes.lock {
-            head.append(lock.line(language: language) ?? String(format: L10n.t(lock.place.key, language: language), lock.host))
+            head.append(lock.headLine(language: language))
         }
         var items: [ShellMoreItem] = QuotePolicy.allCases.map { policy in
             let name = String(

@@ -135,10 +135,15 @@ public enum MastodonLater {
 
     /// How a time is written to a source: whole seconds, in UTC.
     static func written(_ at: Date) -> String {
+        writer.string(from: at)
+    }
+
+    /// One formatter for every time written: made once, read only after.
+    nonisolated(unsafe) private static let writer: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
-        return formatter.string(from: at)
-    }
+        return formatter
+    }()
 
     /// Whether `error` leaves it unknown whether the source made what was asked: the answer was
     /// lost on the way, could not be read, was a fault past the door, or said "no such record" to
@@ -186,21 +191,17 @@ extension MastodonWrite {
     /// made it), where a first try's 404 is the quote not allowed. A refusal of the source's own — a day already holding as
     /// many as it takes — throws `MastodonUnprocessable` with its words.
     ///
-    /// `answering` is the id at this source of the post it answers, where it answers one.
+    /// `answering` is the id at this source of the post it answers, where it answers one;
+    /// `quoting` the id of the post it quotes (`quotedID(of:)`, or a waiting quote's own).
     public func postLater(
         _ text: String, visibility: Audience, at: Date, key: UUID? = nil, answering: String? = nil,
         spoiler: String? = nil, language: String? = nil, sensitive: Bool? = nil, mediaIDs: [String] = [],
         poll: NewPoll? = nil, pollLimits: MastodonPollLimits? = nil, sourceNow: Date? = nil,
-        quoting: Note? = nil, quotePolicy: QuotePolicy? = nil, again: Bool = false, quotingID: String? = nil
+        quoting: String? = nil, quotePolicy: QuotePolicy? = nil, again: Bool = false
     ) async throws -> WaitingPost {
         // A quote sent later carries its quote (#330), as one sent now does, and nothing it may not.
-        // `quotingID` is a waiting quote's own (`change`): an id this source gave, at this source.
-        let quote = try quoting.map { try Self.quoting($0, host: host, mediaIDs: mediaIDs, poll: poll) }
-            ?? Self.quoting(id: quotingID, mediaIDs: mediaIDs, poll: poll)
-        if let poll {
-            if mediaIDs.contains(where: { !$0.isEmpty }) { throw MastodonWriteError.refusedHere(.pollWithMedia) }
-            if let pollLimits, let refusal = poll.refusal(within: pollLimits) { throw MastodonWriteError.refusedHere(refusal) }
-        }
+        let quote = try Self.quoting(id: quoting, mediaIDs: mediaIDs, poll: poll)
+        try Self.pollRefusal(mediaIDs: mediaIDs, poll: poll, limits: pollLimits)
         guard let source = await store.sources().first(where: { $0.host == host }) else { throw MastodonWriteError.noSource }
         if let answering, !ListSubscription.isPathSegment(answering) { throw MastodonWriteError.unfindable }
         let now = try await clock(sourceNow)
@@ -208,20 +209,18 @@ extension MastodonWrite {
         let form = Self.postForm(
             text, visibility: visibility, answering: answering, spoiler: spoiler, language: language,
             sensitive: sensitive, mediaIDs: mediaIDs, poll: poll
-        ) + quote + (quotePolicy.map { [("quote_approval_policy", $0.rawValue)] } ?? []) + [("scheduled_at", MastodonLater.written(at))]
+        ) + Self.quoteForm(quote, policy: quotePolicy) + [("scheduled_at", MastodonLater.written(at))]
         let sent = ReadMoment.now()
         let data: Data
         do {
             data = try await door.postRefusable(
                 path: "/api/v1/statuses", form: form, headers: key.map { [Self.idempotencyKey: $0.uuidString] } ?? [:]
             )
-        } catch MastodonAuthError.http(404) where key != nil && again {
-            // A repeat under a used key: the first may wait there, whatever it quoted.
-            throw MastodonLaterError.mayHaveBeenMade
-        } catch MastodonAuthError.http(404) where !quote.isEmpty {
+        } catch MastodonAuthError.http(404) where !quote.isEmpty && !(again && key != nil) {
             // What a real one answers a quote it does not allow (`MastodonWrite.post`), on a first try.
             throw MastodonQuoteError.notAllowed
         } catch MastodonAuthError.http(404) where key != nil {
+            // A repeat under a used key, or any post's first under one: it may wait there.
             throw MastodonLaterError.mayHaveBeenMade
         }
         if let waiting = WaitingDTO.one(from: data) {
@@ -240,37 +239,27 @@ extension MastodonWrite {
     /// read on from `after` — the id the stretch before named. Each entry that cannot be read is
     /// passed over and costs no other.
     public func waiting(after: String? = nil, limit: Int = MastodonLater.stretch) async throws -> WaitingStretch {
-        var query = [URLQueryItem(name: "limit", value: String(limit))]
-        if let after {
-            guard ListSubscription.isPathSegment(after) else { throw MastodonWriteError.unfindable }
-            query.append(URLQueryItem(name: "max_id", value: after))
-        }
+        // A cursor that names no path segment is refused as this source's own word for it.
+        if let after, !ListSubscription.isPathSegment(after) { throw MastodonWriteError.unfindable }
+        let query = [URLQueryItem(name: "limit", value: String(limit))] + (try MastodonPage.older(than: after))
         let (data, link) = try await door.getLinked(path: "/api/v1/scheduled_statuses", query: query)
         guard let entries = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<WaitingDTO>].self, from: data) else {
             throw MastodonWriteError.unreadable
         }
+        let onward = try MastodonLink.next(in: link)
+        guard onward == nil || onward != after else { throw PagingError.notPaging }
         let quotes = WaitingDTO.quotes(in: data)
-        return WaitingStretch(posts: entries.compactMap { $0.value?.waiting(quotes) }, next: try MastodonLink.next(in: link))
-    }
-
-    /// The waiting post that is the one asked for (`find`), for whoever made it under a key
-    /// whose answer could not be had (`MastodonLaterError.mayHaveBeenMade`): found, it waits.
-    public func findWaiting(
-        _ text: String, at: Date, visibility: Audience, answering: String? = nil, spoiler: String? = nil,
-        sensitive: Bool? = nil, mediaIDs: [String] = [], poll: NewPoll? = nil, quoting: String? = nil
-    ) async throws -> WaitingPost? {
-        try await find(
-            text, at: at, visibility: visibility, answering: answering, spoiler: spoiler, sensitive: sensitive,
-            mediaIDs: mediaIDs, poll: poll, quoting: quoting, except: ""
-        )
+        return WaitingStretch(posts: entries.compactMap { $0.value?.waiting(quotes) }, next: onward)
     }
 
     /// The waiting post that is the one asked for — its words, its time to the second, who may
     /// read it, what it answers and what it quotes, its cover and whether it is covered, its poll and its files —
-    /// among everything that waits, or nothing where none is: a near twin is not it.
-    func find(
+    /// among everything that waits but `old`, or nothing where none is: a near twin is not it.
+    /// For whoever made it under a key whose answer could not be had
+    /// (`MastodonLaterError.mayHaveBeenMade`): found, it waits.
+    public func find(
         _ text: String, at: Date, visibility: Audience, answering: String?, spoiler: String?, sensitive: Bool?,
-        mediaIDs: [String], poll: NewPoll?, quoting: String? = nil, except old: String
+        mediaIDs: [String], poll: NewPoll?, quoting: String?, except old: String = ""
     ) async throws -> WaitingPost? {
         let cover = spoiler?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let files = mediaIDs.filter { !$0.isEmpty }
@@ -330,24 +319,20 @@ extension MastodonWrite {
     /// - Refused by the source, or here: thrown, and the old is not touched.
     ///
     /// **What it quotes is the old one's** (#330): carried by id, never dropped — a change of a
-    /// waiting quote stays a quote. **Who may quote it may change** (Decision 8 §7.1): `quotePolicy`,
-    /// where given — nothing inside it the account's own — and the old one's where not.
+    /// waiting quote stays a quote. **Who may quote it may change** (Decision 8 §7.1): `quotePolicy`
+    /// as the caller sends it (`PostDraft.quotePolicySent`), nothing the account's own.
     public func change(
         _ old: WaitingPost, to text: String, visibility: Audience, at: Date, key: UUID = UUID(),
         spoiler: String? = nil, language: String? = nil, sensitive: Bool? = nil, mediaIDs: [String] = [],
         poll: NewPoll? = nil, pollLimits: MastodonPollLimits? = nil, sourceNow: Date? = nil,
-        quotePolicy: QuotePolicy?? = nil
+        quotePolicy: QuotePolicy? = nil
     ) async throws -> WaitingChange {
         let now = try await clock(sourceNow)
-        // Who may quote it, as it waits — but nobody where it now goes only to followers or to
-        // those it mentions, as the composer sends (`PostDraft.quotePolicySent`).
-        let chosen = quotePolicy ?? old.quotePolicy
-        let policy = visibility == .followers || visibility == .mentioned ? chosen.map { _ in .nobody } : chosen
         func make(again: Bool) async throws -> WaitingPost {
             try await postLater(
                 text, visibility: visibility, at: at, key: key, answering: old.answering, spoiler: spoiler,
                 language: language, sensitive: sensitive, mediaIDs: mediaIDs, poll: poll, pollLimits: pollLimits,
-                sourceNow: now, quotePolicy: policy, again: again, quotingID: old.quoting
+                sourceNow: now, quoting: old.quoting, quotePolicy: quotePolicy, again: again
             )
         }
         var new: WaitingPost?
@@ -449,16 +434,10 @@ struct WaitingDTO: Decodable, Sendable {
         }
         var said: [String: WaitingQuote] = [:]
         for entry in entries {
-            guard let id = entry.last("id")?.text, case .object(let pairs)? = entry.last("params") else { continue }
-            var quoting: String?
-            var policy: String?
-            for (key, value) in pairs {
-                if key == "quoted_status_id" { quoting = value.text }
-                if key == "quote_approval_policy" { policy = value.text }
-            }
+            guard let id = entry.last("id")?.text, let params = entry.last("params"), case .object = params else { continue }
             said[id] = WaitingQuote(
-                quoting: quoting.flatMap { !$0.isEmpty && $0.utf8.allSatisfy { (0x30...0x39).contains($0) } ? $0 : nil },
-                policy: policy.flatMap(QuotePolicy.init(rawValue:))
+                quoting: params.last("quoted_status_id")?.text.flatMap { MastodonWrite.isDigits($0) ? $0 : nil },
+                policy: params.last("quote_approval_policy")?.text.flatMap(QuotePolicy.init(rawValue:))
             )
         }
         return said
