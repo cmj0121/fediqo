@@ -133,6 +133,20 @@ the waiting jobs itself. The checks that dismiss a notice use notices up: four r
 between seeds, a run past that says to seed again, and `make servers` once more makes up what
 was used.
 
+A post sent for later and a link's preview need that worker. `FEDIQO_SERVERS_WORKER=1 make servers`
+starts it after the seed, beside the web process. From then on it runs every job queued — the
+fan-outs the seed leaves alone, and the scheduled ranking of people to suggest, where the seed's
+suggestions rest on nobody ranking anybody — and the rest of the checks rest on a server that
+does not. So its checks are run by themselves (one waits the five minutes the server makes a
+post wait at the least), and what it did stays until the servers are thrown away: a plain
+`make servers` on them refuses and says to run `make servers-down` first.
+
+```text
+FEDIQO_SERVERS_WORKER=1 make servers
+FEDIQO_SERVERS_WORKER=1 swift test --filter MastodonWorkerSaysTests
+make servers-down
+```
+
 ## Using it
 
 An empty launch opens Account. Add a Mastodon host or a Discuz forum from the catalog or by

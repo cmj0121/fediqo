@@ -40,6 +40,13 @@ enum LocalServers {
         ProcessInfo.processInfo.environment["FEDIQO_SERVERS_GOTOSOCIAL"] == "1"
     }
 
+    /// Mastodon's worker beside its web process, brought up only where it is asked for
+    /// (`FEDIQO_SERVERS_WORKER=1 make servers`). Nothing in the test process can ask whether the
+    /// worker is up: a check of it fails where what only it does does not happen.
+    static var workerRequested: Bool {
+        ProcessInfo.processInfo.environment["FEDIQO_SERVERS_WORKER"] == "1"
+    }
+
     /// The fourth is up, or this throws: the same two questions as the gate above.
     static func requireGoToSocial() async throws {
         guard let url = Host.httpsURL(host: gotosocial, path: "/readyz") else {

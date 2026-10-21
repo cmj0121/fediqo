@@ -43,3 +43,12 @@ gotosocial.localhost {
 		header_up X-Forwarded-Host {host}
 	}
 }
+
+# A page with Open Graph tags (`servers/card`), for a post to link to and gain a preview. Asked
+# only by Mastodon's worker (the `worker` profile of compose.yml), from inside the compose
+# network, where `card.example.com` is this container. Plain HTTP: the worker trusts no CA of
+# this machine's, and the port is not published, so nothing outside the network reaches it.
+http://card.example.com {
+	root * /srv/card
+	file_server
+}

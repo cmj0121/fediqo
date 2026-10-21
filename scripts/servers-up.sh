@@ -19,6 +19,11 @@ if [ "$WITH_GOTOSOCIAL" = "1" ]; then
     COMPOSE+=(--profile gotosocial)
 fi
 
+# Mastodon's worker (the `worker` profile of compose.yml): what publishes a post at its time and
+# fetches a link's preview. Only where it is asked for, and only after the seed, so that the seed
+# runs the jobs it means to and the three come up exactly as they did without it.
+WITH_WORKER="${FEDIQO_SERVERS_WORKER:-}"
+
 die() { echo >&2 "servers-up: $*"; exit 1; }
 
 need_docker() {
@@ -155,6 +160,64 @@ FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM pre_forum_post LIMIT 1);
 "
 }
 
+# What a worker did stays in the database and in Redis after it is stopped: posts it published,
+# previews it fetched, the people it ranked for suggesting (which the seed's own suggestions rest
+# on nobody doing). A run without it is to be what it was, so on a fixture a worker has run
+# against it refuses, and only a run that asks for the worker again goes on.
+refuse_after_worker() {
+    [ "$WITH_WORKER" = "1" ] && return 0
+    if [ -e "$RUN_DIR/worker-ran" ] \
+        || [ -n "$("${COMPOSE[@]}" --profile worker ps -a -q mastodon-sidekiq 2>/dev/null)" ]
+    then
+        die "Mastodon's worker has run against these servers, and what it did is still there.
+Throw them away first: make servers-down, then make servers."
+    fi
+}
+
+# Stopped before anything is waited on or seeded: a worker left up by an earlier run would run
+# the seed's jobs beside it.
+stop_worker() {
+    "${COMPOSE[@]}" --profile worker stop mastodon-sidekiq >/dev/null 2>&1 || true
+}
+
+# A preview is fetched from Caddy's address on the compose network, which Mastodon refuses as
+# private unless it is allowed; that one address is, and nothing else. It is read here, so a Caddy
+# recreated outside this script may come back at another address, and the worker's preview
+# fetches are then refused until this runs again.
+start_worker() {
+    local caddy address
+    caddy="$("${COMPOSE[@]}" ps -q caddy)"
+    [ -n "$caddy" ] || die "caddy is not running"
+    address="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$caddy")"
+    [ -n "$address" ] || die "caddy has no address on the compose network"
+    set_env_key FEDIQO_CARD_ADDRESS "$address"
+    touch "$RUN_DIR/worker-ran"
+    "${COMPOSE[@]}" --profile worker up -d mastodon-sidekiq
+    wait_for "mastodon-sidekiq is running" 60 worker_running
+}
+
+redis_mastodon() {
+    "${COMPOSE[@]}" exec -T mastodon-redis redis-cli "$@"
+}
+
+# The container is running and one of the processes Sidekiq lists has beaten in the last thirty
+# seconds: a worker that was killed leaves its name in the list, and its beat goes stale (and
+# the record of it is gone a minute later).
+worker_running() {
+    [ -n "$("${COMPOSE[@]}" --profile worker ps --status running -q mastodon-sidekiq)" ] || return 1
+    local now member beat
+    now="$(redis_mastodon TIME | head -1)"
+    [ -n "$now" ] || return 1
+    for member in $(redis_mastodon SMEMBERS processes); do
+        beat="$(redis_mastodon HGET "$member" beat)"
+        beat="${beat%%.*}"
+        if [ -n "$beat" ] && [ $((now - beat)) -lt 30 ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 seed_gotosocial() {
     wait_for "gotosocial is ready" 60 \
         "${COMPOSE[@]}" exec -T gotosocial \
@@ -168,11 +231,14 @@ command -v curl >/dev/null 2>&1 || die "curl is not on PATH"
 
 ensure_env
 mkdir -p "$RUN_DIR"
+refuse_after_worker
 
 echo "servers-up: pulling images (first run is the slow one)"
 "${COMPOSE[@]}" pull
 
 fill_vapid
+
+stop_worker
 
 echo "servers-up: starting databases"
 "${COMPOSE[@]}" up -d mastodon-db mastodon-redis discourse-db discourse-redis discuz-db
@@ -208,6 +274,9 @@ seed_discuz
 if [ "$WITH_GOTOSOCIAL" = "1" ]; then
     seed_gotosocial
 fi
+if [ "$WITH_WORKER" = "1" ]; then
+    start_worker
+fi
 
 wait_for "caddy has a local CA" 30 test -s "$RUN_DIR/root.crt"
 "$ROOT/scripts/servers-health.sh"
@@ -219,6 +288,10 @@ echo "  https://discourse.localhost"
 echo "  https://discuz.localhost"
 if [ "$WITH_GOTOSOCIAL" = "1" ]; then
     echo "  https://gotosocial.localhost (asked, not joined: servers/gotosocial/ask.py)"
+fi
+if [ "$WITH_WORKER" = "1" ]; then
+    echo "  mastodon-sidekiq: posts go at their time, links gain a preview; its checks run alone:"
+    echo "    FEDIQO_SERVERS_WORKER=1 swift test --filter MastodonWorkerSaysTests"
 fi
 echo
 echo "  FEDIQO_SERVERS=1 make test"
