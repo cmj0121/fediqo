@@ -604,6 +604,15 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// rides, and is gone when the row is: there is no second place a wording its author took
     /// back could be left behind in.
     public let earlier: [Wording]
+    /// The change whose wordings `earlier` holds as its source keeps them (#332, Decision 1): the
+    /// `editedAt` that was asked of the source's history and answered. Nothing where the source
+    /// was never asked — `earlier` is then only what this device saw.
+    ///
+    /// **What tells whether the history is owed, and the only thing** (`historyOwed`): a row
+    /// whose `editedAt` is a later moment than this one owes one ask, and none once answered for
+    /// it. Written with the row, so a relaunch, or another session on the same store, asks
+    /// nothing already answered.
+    public let historyAt: Date?
     /// The language the post says it is in, as its source spelled it and folded to lower case
     /// (#287), or nothing where the source said none — which is not a language, and matches no
     /// rule on one.
@@ -715,6 +724,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         kept: Bool = false,
         editedAt: Date? = nil,
         earlier: [Wording] = [],
+        historyAt: Date? = nil,
         language: String? = nil,
         via: String? = nil,
         poll: Poll? = nil,
@@ -758,6 +768,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         let opening = post ? opening : nil
         let editedAt = post ? editedAt : nil
         let earlier = post ? earlier : []
+        let historyAt = post ? historyAt : nil
         let language = post ? language : nil
         let poll = post ? poll : nil
         let card = post ? card : nil
@@ -795,6 +806,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.kept = kept
         self.editedAt = editedAt
         self.earlier = earlier
+        self.historyAt = historyAt
         // Held to what a language tag looks like wherever a note is made (#287) — off the wire,
         // back from the store, in a test — so nothing that is not one is ever on a row.
         self.language = SourceField.languageTag(language)
@@ -828,7 +840,7 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// A date read off the wire and the same date read back from disk are not always one
     /// `Double`, and compared as they are the copy just read would look a hair later than the row
     /// it is — a change every reload, written down every time.
-    private static func moment(_ date: Date) -> Int64 {
+    static func moment(_ date: Date) -> Int64 {
         Int64((date.timeIntervalSince1970 * 1000).rounded())
     }
 
@@ -890,7 +902,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions, url: url,
             counts: stale.counts.filled(from: counts), statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed,
-            kept: kept, editedAt: editedAt, earlier: earlier, language: language, via: via,
+            kept: kept, editedAt: editedAt, earlier: earlier, historyAt: historyAt, language: language, via: via,
             // The poll's figures are taken from the stale copy as its counts are, and whether the
             // reader voted only where `taking` says. What the poll is — its choices, one or
             // several, when it ends and whether it has — is this row's (`Poll.stale`, #332).
@@ -927,7 +939,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             sensitive: later.sensitive ?? sensitive, spoiler: later.spoiler ?? spoiler,
             emojis: later.emojis, mentions: later.mentions, url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed,
-            kept: kept, editedAt: later.editedAt, earlier: later.earlier(after: was),
+            kept: kept, editedAt: later.editedAt, earlier: later.earlier(after: was), historyAt: historyAt,
             // The language the post says it is in **now**, nothing included: a post changed to
             // state none no longer matches a rule on the one it used to state.
             language: later.language,
@@ -993,7 +1005,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             kept: held.kept,
             // What it said before this read changed it, kept (#286) — only where the source says
             // it changed since, and only what this device held.
-            editedAt: editedAt(over: held), earlier: earlier(after: held),
+            editedAt: editedAt(over: held), earlier: earlier(after: held), historyAt: held.historyAt,
             // A read of the post itself is the whole of what its source says of it now, so the
             // language is this copy's even where it states none — unlike the reader's marks,
             // which a signed-out read leaves unsaid rather than says no to.
@@ -1071,7 +1083,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             goneSince: goneSince, gaps: gaps, listed: listed,
             // A language, as whom it mentions: not from a copy read before this row was, where
             // none is the answer of a change that took it off (#332).
-            kept: kept, editedAt: editedAt, earlier: earlier,
+            kept: kept, editedAt: editedAt, earlier: earlier, historyAt: historyAt,
             language: language ?? (other.isEarlier(than: self) ? nil : other.language),
             via: via ?? other.via,
             // How the later copy's poll stands wins as its counts do (#331), and what it says of
@@ -1104,7 +1116,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, via: via, poll: poll?.with(voted: nil),
+            editedAt: editedAt, earlier: earlier, historyAt: historyAt, language: language, via: via, poll: poll?.with(voted: nil),
             card: card,
             refs: refs, refsDue: refsDue
         )
@@ -1121,7 +1133,25 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, via: via, poll: poll, card: card, refs: refs, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, historyAt: historyAt, language: language, via: via, poll: poll, card: card, refs: refs, refsDue: refsDue
+        )
+    }
+
+    /// This note with what it said before as its source keeps it (#332): `wordings` in place of
+    /// the earlier wordings this device saw, held to the same bounds, as answered for the change
+    /// at `historyAt`. Everything else is as it was.
+    func withHistory(_ wordings: [Wording], at historyAt: Date) -> Note {
+        Note(
+            id: id, source: source, author: author, handle: handle, body: body, title: title,
+            board: board, postedAt: postedAt, categories: categories,
+            boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
+            favourited: favourited, bookmarked: bookmarked, pinned: pinned, muted: muted,
+            audience: audience, avatarURL: avatarURL,
+            attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
+            url: url, counts: counts, statusID: statusID, opening: opening,
+            goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
+            editedAt: editedAt, earlier: Wording.bounded(wordings), historyAt: historyAt, language: language, via: via,
+            poll: poll, card: card, refs: refs, refsDue: refsDue
         )
     }
 
@@ -1137,7 +1167,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, via: via, poll: poll, card: card, refs: references, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, historyAt: historyAt, language: language, via: via, poll: poll, card: card, refs: references, refsDue: refsDue
         )
     }
 
@@ -1151,7 +1181,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             audience: audience, avatarURL: avatarURL, attachments: attachments, sensitive: sensitive, spoiler: spoiler,
             emojis: emojis, mentions: mentions, url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, via: via, poll: poll, card: card, refs: refs, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, historyAt: historyAt, language: language, via: via, poll: poll, card: card, refs: refs, refsDue: refsDue
         )
     }
 }

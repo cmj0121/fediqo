@@ -1880,6 +1880,11 @@ private struct NoteFacts: Codable {
     /// What it says of the reader is taken off with their other marks when their sign-in ends
     /// (`StoreFile.readerSaid`).
     var poll: PollRow?
+    /// `Note.historyAt` (#332): the change the row's earlier wordings were asked of its source
+    /// for. Additive and optional, as `via` is, so no migration id: a row written before reads
+    /// as never asked, and asks once; an older build ignores the key, and a row it writes back
+    /// without it asks once again — the one thing lost is an ask already made.
+    var historyAt: Date?
 }
 
 /// `Poll` as `NoteFacts` writes it. Held to `Poll`'s own bounds on the way back, whoever wrote
@@ -2238,7 +2243,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             kind: note.source.kind.rawValue,
             mentions: note.mentions.isEmpty ? nil : note.mentions,
             via: note.via,
-            poll: note.poll.map(PollRow.init)
+            poll: note.poll.map(PollRow.init),
+            historyAt: note.historyAt
         )
     }
 
@@ -2328,6 +2334,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             editedAt: edited_at,
             // Held to the bounds every kept wording is held to, whoever wrote the cell.
             earlier: Wording.bounded(WordingRow.wordings(earlier)),
+            historyAt: facts.historyAt,
             language: language,
             via: facts.via,
             poll: facts.poll?.poll,

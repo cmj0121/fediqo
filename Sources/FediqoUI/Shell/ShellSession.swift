@@ -106,6 +106,8 @@ final class ShellSession {
     @ObservationIgnored var loads = LoadPacer()
     /// What this session has asked its sources for of what items owe (#293).
     @ObservationIgnored let refs = ShellRefs()
+    /// What changed posts said before, asked of their sources in the same lines (#332).
+    @ObservationIgnored let history = ShellHistory()
     /// Whether this run asks for what items refer to at all. Not where the store was not read
     /// at launch (#295): a run that holds nothing it may write asks for nothing nobody pressed
     /// for. Set once by the app (`loadsStartWith`); a test sets its own.
@@ -3163,6 +3165,7 @@ final class ShellSession {
         // for**: adopting is what every landing and every press waits on, and asking a source's
         // line for a load is not part of having adopted.
         if all != nil { refs.landing(in: self) }
+        if all != nil { history.landing(in: self) }
         // What the screens draw of what was just adopted, said to the store (#359): the rows
         // it may then let go are drawn nowhere.
         await holdDrawn()
@@ -3390,6 +3393,7 @@ final class ShellSession {
         // above must have happened before anything can run between.
         await loads.letGo(host: host)
         refs.forget(host: host)
+        history.letGo(host: host)
         await emoji.forget(host: host)
         emojis.forget(host: host)
         if keepingRows { pictures.letGo(host: host) } else { pictures.forget(host: host) }
@@ -3684,6 +3688,7 @@ final class ShellSession {
             stopReadingAsYou(host: host)
             await loads.letGo(host: host)
             refs.letGo(host: host)
+            history.letGo(host: host)
             noticeList.forget(host: host)
             acts.forget(host: host)
             said.forget(host: host)

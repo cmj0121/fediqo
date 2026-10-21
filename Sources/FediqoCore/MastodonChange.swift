@@ -224,24 +224,42 @@ extension MastodonWrite {
         return await store.note(answered.key) ?? answered.refreshed(over: note)
     }
 
-    /// What `note` said before, as its source keeps it (`GET /statuses/:id/history`): every
-    /// wording before the one it says now, **the original first**, each with the moment its
-    /// source says it was changed from — the time of the next one.
-    ///
-    /// **A wording is the words and the cover line**, as `Wording` is: a change of a file's
-    /// description, of whether it is covered, or of the poll alone is a change at the source and
-    /// no new wording here — it joins the wording before. Bounded as every held wording is
-    /// (`Wording.bounded`), the oldest going first. Nothing is written to the store.
+    /// What `note` said before, as its source keeps it: `MastodonPost.history`, through this
+    /// sign-in. Nothing is written to the store.
     public func history(of note: Note) async throws -> [Wording] {
         guard let id = note.sendableID, ListSubscription.isPathSegment(id) else {
             throw MastodonWriteError.unfindable
         }
-        let data = try await door.get(path: "/api/v1/statuses/\(id)/history")
+        return try await MastodonPost(door: door).history(id: id, quotes: note.quotesReference != nil)
+    }
+
+}
+
+extension MastodonPost {
+    /// What the post `id` said before, as its source keeps it (`GET /statuses/:id/history`):
+    /// every wording before the one it says now, **the original first**, each with the moment its
+    /// source says it was changed from — the time of the next one. Signed in or not, as this
+    /// reader of posts is: a post anybody may read, anybody may read the history of.
+    ///
+    /// **A wording is the words and the cover line**, as `Wording` is: a change of a file's
+    /// description, of whether it is covered, or of the poll alone is a change at the source and
+    /// no new wording here — it joins the wording before. Bounded as every held wording is
+    /// (`Wording.bounded`), the oldest going first. `quotes` is whether the post quotes another,
+    /// whose `RE:` line each wording is read without, as the post's words are.
+    public func history(id: String, quotes: Bool) async throws -> [Wording] {
+        try await fullHistory(id: id, quotes: quotes).earlier
+    }
+
+    /// `history(id:quotes:)`, with the wording the history says the post holds now beside it —
+    /// what a history is landed against (`ItemStore.landHistory`): the newest entry's words and
+    /// cover line, its `until` the moment that entry says it began.
+    public func fullHistory(id: String, quotes: Bool) async throws -> PostHistory {
+        let data = try await get(try Self.path(id) + "/history")
         guard let entries = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<EditDTO>].self, from: data) else {
             throw MastodonWriteError.unreadable
         }
-        let quotes = note.quotesReference != nil
-        return Self.wordings(entries.compactMap { $0.value?.wording(quotes: quotes) })
+        let said = entries.compactMap { $0.value?.wording(quotes: quotes) }
+        return PostHistory(earlier: Self.wordings(said), now: said.max { $0.since < $1.since }?.words)
     }
 
     /// `said` — each wording with the moment it began, oldest first — as the wordings before the
@@ -257,6 +275,18 @@ extension MastodonWrite {
         return Wording.bounded(zip(groups, groups.dropFirst()).map { was, next in
             Wording(body: was.words.body, spoiler: was.words.spoiler, sensitive: was.words.sensitive, until: next.since)
         })
+    }
+}
+
+/// A post's history as its source keeps it (#332): every wording before the one it says now, the
+/// original first (`MastodonPost.wordings`), and that one — nothing where no entry could be read.
+public struct PostHistory: Equatable, Sendable {
+    public let earlier: [Wording]
+    public let now: Wording?
+
+    public init(earlier: [Wording], now: Wording?) {
+        self.earlier = earlier
+        self.now = now
     }
 }
 

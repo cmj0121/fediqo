@@ -231,6 +231,37 @@ struct MastodonChangeSaysTests {
         }
     }
 
+    @Test("A post changed three times elsewhere and read once here owes one ask of its history, which fills in all four wordings in the background through the source's line, and then owes nothing")
+    func historyFilledIn() async throws {
+        try await LocalServers.requireHealthy()
+        let (write, store, writer, _) = try Self.writer()
+        try await Self.writing(as: writer) { written in
+            let post = try await write.post("wording 0", visibility: .unlisted)
+            let id = try #require(post.statusID)
+            written.append(id)
+            for n in 1...3 {
+                let changed = try await Self.ask("/api/v1/statuses/\(id)", as: writer, "PUT", form: [("status", "wording \(n)")])
+                #expect(changed.status == 200)
+            }
+            let reader = MastodonPost(door: try Self.door(writer))
+            await store.refresh([try await reader.post(id: id, source: Self.source)], ifSourceHere: Self.host)
+            let seen = try #require(await store.note(post.key))
+            #expect(seen.body == "wording 3" && seen.earlier.map(\.body) == ["wording 0"], "what this device saw")
+
+            let owed = await store.historyOwed(host: Self.host)
+            #expect(owed.map(\.item) == [post.key])
+            var limits = LoadLimits()
+            limits.interval = 0
+            let fill = MastodonHistoryFill(store: store, loads: LoadPacer(limits: limits))
+            #expect(await fill.fill(try #require(owed.first)) { reader } == .done)
+            let held = try #require(await store.note(post.key))
+            #expect(held.earlier.map(\.body) == ["wording 0", "wording 1", "wording 2"])
+            #expect(held.earlier.last?.until == held.editedAt && held.historyAt == held.editedAt)
+            #expect(zip(held.earlier, held.earlier.dropFirst()).allSatisfy { $0.until < $1.until })
+            #expect(await store.historyOwed(host: Self.host).isEmpty)
+        }
+    }
+
     @Test("A refusal changes nothing held: empty words and words over the limit are the source's 422 in its own words; another person's post is a 404; a sign-in that only reads is outside its scopes and may still read the source and the history; a post taken back has neither")
     func refusals() async throws {
         try await LocalServers.requireHealthy()

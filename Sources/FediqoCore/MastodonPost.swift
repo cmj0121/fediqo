@@ -135,12 +135,12 @@ public struct MastodonPost: Sendable {
     }
 
     /// Checked as a list id is: this came out of a stranger's JSON or the store.
-    private static func path(_ id: String) throws -> String {
+    static func path(_ id: String) throws -> String {
         guard ListSubscription.isPathSegment(id) else { throw MastodonRequestError.invalidURL }
         return "/api/v1/statuses/\(id)"
     }
 
-    private func get(_ path: String, query: [URLQueryItem] = []) async throws -> Data {
+    func get(_ path: String, query: [URLQueryItem] = []) async throws -> Data {
         switch door {
         case .signedIn(let door):
             return try await door.get(path: path, query: query)

@@ -320,10 +320,10 @@ struct MastodonChangeTests {
             (Wording(body: "two", spoiler: "", sensitive: true, until: at(2)), at(2)),
             (Wording(body: "three", spoiler: "cw", until: at(4)), at(4)),
         ]
-        #expect(MastodonWrite.wordings(said) == [
+        #expect(MastodonPost.wordings(said) == [
             Wording(body: "one", until: at(1)), Wording(body: "two", until: at(3)), Wording(body: "three", until: at(4)),
         ])
-        #expect(MastodonWrite.wordings([]).isEmpty)
+        #expect(MastodonPost.wordings([]).isEmpty)
     }
 
     @Test("A history that is not a list is unreadable, and one entry this build cannot read costs nothing else")
