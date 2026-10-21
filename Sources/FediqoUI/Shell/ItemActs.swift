@@ -99,6 +99,10 @@ struct ItemActing {
     /// row's `…` (`ItemActs.postItems`), and the translation drawn beside its words. Nothing
     /// where its source has none of them, or the list cannot act.
     var post: PostMore?
+    /// The preview of the page the post links to, where the row draws one (#335): previews on,
+    /// a card, no media of its own — and its picture only where the gate lets it through. Nothing
+    /// where the list cannot read, which draws no preview and asks nothing.
+    var preview: LinkPreview?
 
     struct Report {
         var lock: Lock?

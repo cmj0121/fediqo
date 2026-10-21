@@ -389,6 +389,7 @@ struct DummyItemRow: View {
             mainBox(written)
                 .modifier(Probed(\.frames, .content, probe: probe))
             pollBand
+            previewBand
             translationBand
             quoteBand(openQuote)
             if inFull { viaFoot }
@@ -1464,6 +1465,11 @@ struct DummyItemRow: View {
                 PollLine(poll: poll, acting: acting, covered: covered)
                     .modifier(Probed(\.frames, .poll, probe: probe))
             }
+            // A list row's preview is one line under the words, in the line it took from them
+            // (`bodyLines`); the pane draws it whole below (`previewBand`).
+            if !inFull, let preview {
+                LinkLine(preview: preview, open: openLink)
+            }
             // The app that wrote it, at the foot of the words in the line it took from them
             // (`bodyLines`); the pane gives it a line of its own above the marks.
             if !inFull { viaFoot }
@@ -1515,6 +1521,8 @@ struct DummyItemRow: View {
         if item.source.kind == .board, item.board != nil { lines -= 1 }
         // A poll's one line, in a list (#331).
         if poll != nil, !inFull { lines -= 1 }
+        // The preview's one line, in a list (#335).
+        if preview != nil, !inFull { lines -= 1 }
         // The app that wrote it, at the foot of the words.
         if Self.viaLine(item.via) != nil, !inFull { lines -= 1 }
         return max(1, lines)
@@ -1548,6 +1556,10 @@ struct DummyItemRow: View {
             )
             .frame(width: slotSide, height: slotSide)
             .modifier(Probed(\.frames, .picture, probe: probe))
+        } else if let preview, let url = preview.picture {
+            // The slot a post with no media keeps open holds its preview's picture (#335): the
+            // slot's square, so the row is the height of every row.
+            LinkPicture(preview: preview, url: url, side: slotSide, open: openLink)
         } else {
             Color.clear
                 .frame(width: slotSide, height: slotSide)
@@ -1673,6 +1685,24 @@ struct DummyItemRow: View {
             PollBand(poll: poll, acting: acting)
                 .modifier(Probed(\.frames, .poll, probe: probe))
         }
+    }
+
+    /// The preview this row draws (#335): the one its list built, and none while a cover is still
+    /// on the post — the preview is part of what the cover keeps back.
+    private var preview: LinkPreview? { covered ? nil : acting.preview }
+
+    /// The preview whole under the words, in the pane (`LinkBand`); its picture beside the words
+    /// in the slot where the pane keeps one, and in the band on a narrow page, which keeps none.
+    @ViewBuilder
+    private var previewBand: some View {
+        if inFull, let preview {
+            LinkBand(preview: preview, picture: narrow, open: openLink)
+        }
+    }
+
+    /// A preview's link, opened as a link in the words is: through the shell's own `openURL`.
+    private func openLink(_ url: URL) {
+        openURL(url)
     }
 
     /// The post's translation, beside its words (#334) — in the pane only, for `pollBand`'s

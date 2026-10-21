@@ -3037,6 +3037,7 @@ public struct FediqoRootView: View {
                 onKeeping: { _ = keepingPressed($0) },
                 onOpenFeatured: { _ = featuredPressed($0, from: nil) },
                 onOpenPeople: { list, row in _ = postPeoplePressed(list, from: row) },
+                linkPreviews: prefs.linkPreviews,
                 onLookUp: lookUpPressed,
                 trends: stream == .trends ? trendsHead : nil
             )

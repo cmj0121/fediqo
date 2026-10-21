@@ -99,6 +99,9 @@ struct TimelinePane: View {
     /// Who boosted or favourited a post, pressed in its `…` (#334), answered by the root: a step
     /// of the walk from the row pressed.
     var onOpenPeople: (PeopleList, String) -> Void = { _, _ in }
+    /// Whether a post's link is drawn with its preview (#335): the person's preference, handed in
+    /// by the root, so building a row's acts reads nothing of the environment.
+    var linkPreviews = true
     /// The press about looking somebody up through a source, answered by the root.
     var onLookUp: (SearchLookUpLine.Press) -> Void = { _ in }
     /// Trends' tabs, where this pane is Trends: drawn in place of the timelines' names, and
@@ -1352,6 +1355,11 @@ struct TimelinePane: View {
             acting.report = ItemActing.Report(lock: offer.lock) {
                 Task { await people.reports.start(offer.who, post: offer.post, people: people, in: session) }
             }
+        }
+        // The preview of the page it links to (#335), where the person lets previews be drawn:
+        // its picture only where the gate lets it through as one its own source pointed to.
+        acting.preview = LinkPreview.of(item, shown: linkPreviews) { reached, source in
+            session.work.admits(reached: reached, source: source)
         }
         // Pinning, quieting, translating, and who boosted and favourited it (#334). Translate on a
         // list row opens the post, where its translation is drawn beside its words.

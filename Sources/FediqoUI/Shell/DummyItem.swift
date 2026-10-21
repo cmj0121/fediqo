@@ -177,6 +177,9 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let via: String?
     /// The post's poll (#331), as its source last said it — on a reblog's row, the post's.
     public let poll: Poll?
+    /// The preview of the page the post links to (#335), as its source last said it — on a
+    /// reblog's row, the post's. Nothing where it links none, or its source has not fetched it.
+    public let card: PostCard?
     /// The pictures this post is partly written in, as the post itself carried them.
     ///
     /// The post's own list and not the reading server's: `:blobcat:` registered on two servers
@@ -559,6 +562,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         spoiler = note.spoiler
         via = note.via
         poll = note.poll
+        card = note.card
         emojis = note.emojis
         mentions = note.mentions
         counts = DummyCounts(

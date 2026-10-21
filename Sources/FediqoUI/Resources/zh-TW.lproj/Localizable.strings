@@ -401,6 +401,11 @@
 "item.act.no.unnameable" = "這則貼文在它的來源上沒有名字";
 "item.act.unfavourite" = "取消收藏";
 "item.act.withdraw" = "收回你寫的貼文";
+"card.nowhere" = "不是這個 App 會開啟的連結";
+"card.spoken" = "連結：%1$@，通往 %2$@";
+"card.spoken.nowhere" = "連結預覽：%@，不是這個 App 會開啟的連結";
+"card.spoken.host" = "連結，通往 %@";
+"card.spoken.about" = "%1$@。%2$@";
 "item.act.translate" = "翻譯";
 "item.act.translate.original" = "只看原文";
 "item.act.translate.signIn" = "請先登入 %@ 才能翻譯貼文：它不為未登入的人翻譯。";
@@ -544,6 +549,10 @@
 "prefs.latest" = "只看到某一天為止";
 "prefs.latest.date" = "最晚日期";
 "prefs.latest.footer" = "每個時間軸都不顯示這一天結束後（依這台裝置的時區）發佈的貼文。較新的貼文仍留在這台裝置上；關掉這項就會再看到。";
+"prefs.previews" = "顯示連結預覽";
+"prefs.previews.head" = "連結預覽";
+"prefs.previews.brief" = "貼文的連結會顯示它通往的網頁。";
+"prefs.previews.footer" = "預覽是貼文的來源抓取到的網頁內容：標題、簡介、通往哪裡，以及圖片。關閉後，所有貼文都不顯示預覽，也不會去要預覽的圖片。";
 "prefs.askEvery" = "再問一次來源";
 "prefs.askEvery.one" = "每分鐘";
 "prefs.askEvery.many" = "每 %d 分鐘";

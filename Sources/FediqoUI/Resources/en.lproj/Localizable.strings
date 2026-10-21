@@ -403,6 +403,11 @@
 "item.act.no.unnameable" = "this post cannot be named on its server";
 "item.act.unfavourite" = "Take the favourite back";
 "item.act.withdraw" = "Take back what you wrote";
+"card.nowhere" = "not a link this app opens";
+"card.spoken" = "Link: %1$@, leads to %2$@";
+"card.spoken.nowhere" = "Link preview: %@, not a link this app opens";
+"card.spoken.host" = "Link to %@";
+"card.spoken.about" = "%1$@. %2$@";
 "item.act.translate" = "Translate";
 "item.act.translate.original" = "Show the original only";
 "item.act.translate.signIn" = "Sign in at %@ to have a post translated: it translates for nobody signed out.";
@@ -548,6 +553,10 @@
 "prefs.latest" = "Stop at a latest date";
 "prefs.latest.date" = "Latest date";
 "prefs.latest.footer" = "Every timeline shows nothing posted after the end of this day, in this device's time zone. Newer posts stay on this device; turn this off to see them again.";
+"prefs.previews" = "Show link previews";
+"prefs.previews.head" = "Link previews";
+"prefs.previews.brief" = "A post's link shows the page it leads to.";
+"prefs.previews.footer" = "The preview is what the post's source fetched of the page: its title, what it is about, where it leads, and its picture. Off, no post shows one and no preview's picture is asked for.";
 "prefs.askEvery" = "Ask the sources again";
 "prefs.askEvery.one" = "Every minute";
 "prefs.askEvery.many" = "Every %d minutes";
