@@ -1106,11 +1106,48 @@ struct DummyItemRow: View {
                             .accessibilityHidden(true)
                     }
                 } else {
-                    wordsColumn(written)
+                    listWords(written)
                     if !narrow || item.hasThumb { coveredThumb }
                 }
             }
             .modifier(HeldBand(height: thumbSide, roomAbove: !decorated, hold: bandAsked ? .asked : .held))
+            .overlay(alignment: .topLeading) { listVia }
+        }
+    }
+
+    /// The app that wrote it, in a list (V0): at the very foot of the band, at the far end of the
+    /// line, in the line it took from the words (`bodyLines`) — never floating under short words.
+    /// With no picture in the slot its end is the band's, where the marks end (here); with one,
+    /// it ends at the words' column, its foot level with the picture's (`listWords`). A post of
+    /// pictures alone has no words' column, and names no app here, as before. The pane gives it a
+    /// line of its own above the marks.
+    @ViewBuilder
+    private var listVia: some View {
+        if Self.viaLine(item.via) != nil, picturePlace == nil {
+            viaFoot
+                .modifier(Probed(\.frames, .via, probe: probe))
+                .frame(maxHeight: .infinity, alignment: .bottom)
+        }
+    }
+
+    /// The words' column in a list. Beside a picture that names its app, the column is the
+    /// picture's height with the app's line at its foot, and the words have what is left above it
+    /// — cut there, never run under it.
+    @ViewBuilder
+    private func listWords(_ written: Written) -> some View {
+        if picturePlace == .slot, Self.viaLine(item.via) != nil {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                wordsColumn(written)
+                    .modifier(Probed(\.frames, .words, probe: probe))
+                Spacer(minLength: 0)
+                viaFoot
+                    .modifier(Probed(\.frames, .via, probe: probe))
+                    .layoutPriority(1)
+            }
+            .frame(height: slotSide, alignment: .top)
+        } else {
+            wordsColumn(written)
+                .modifier(Probed(\.frames, .words, probe: probe))
         }
     }
 
@@ -1472,9 +1509,6 @@ struct DummyItemRow: View {
             if !inFull, let preview {
                 LinkLine(preview: preview, open: openLink)
             }
-            // The app that wrote it, at the foot of the words in the line it took from them
-            // (`bodyLines`); the pane gives it a line of its own above the marks.
-            if !inFull { viaFoot }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // The row a hashtag pressed in these words gives back when its page is left (#124).
@@ -2152,6 +2186,10 @@ enum RowBand: Hashable {
     case picture
     /// The post's poll: its one line in a list, the whole of it in the pane (#331).
     case poll
+    /// The post's words, beside the picture, in a list.
+    case words
+    /// The app that wrote it, at the band's foot in a list (V0).
+    case via
 }
 
 /// Where a hosted row laid its bands out, in the row's own space. See `DummyItemRow.probe`.
