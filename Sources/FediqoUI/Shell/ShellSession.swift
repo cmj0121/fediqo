@@ -1070,6 +1070,8 @@ final class ShellSession {
     var composeDraft = PostDraft()
     /// A change of one's own published post, in its sheet (#332): a draft of its own.
     @ObservationIgnored let changes = ShellChange()
+    /// What waits at a source to be sent later, in its sheet (#333).
+    @ObservationIgnored let later = ShellLater()
     /// The source the composer will write to, among those that may be written on.
     var composeHost: String?
     /// Why a file was not added, or nothing.
@@ -1345,6 +1347,8 @@ final class ShellSession {
     }
 
     var canPost: Bool {
+        // A time to send where the sign-in may not give one (#333): the post waits for that.
+        if composeDraft.at != nil, composeHost.flatMap({ laterSlot(host: $0) })?.locked != nil { return false }
         let hostOK = composeHost.map { host in writableSources.contains { $0.host == host } } ?? false
         return ComposerSheet.canSend(
             text: composeDraft.text,

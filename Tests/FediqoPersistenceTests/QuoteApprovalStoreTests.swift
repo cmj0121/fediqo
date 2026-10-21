@@ -85,7 +85,7 @@ struct QuoteApprovalStoreTests {
         let steps = try await DatabaseQueue(path: index.path).read { db in
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid")
         }
-        #expect(steps.last == "v21-quotes")
+        #expect(steps.contains("v21-quotes"))
         var older = DatabaseMigrator()
         for step in steps where step != "v21-quotes" { older.registerMigration(step) { _ in } }
         var readOnly = Configuration()

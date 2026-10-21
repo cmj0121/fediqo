@@ -68,7 +68,7 @@ struct ComposerSheet: View {
         let limit = host.map(session.postLimit(of:)) ?? MastodonWrite.defaultLimit
         WritingSheet(
             titleKey: "compose.title",
-            sendKey: "compose.post",
+            sendKey: session.composeDraft.at == nil ? "compose.post" : "compose.later.post",
             bodyKey: "compose.body",
             draft: $session.composeDraft.text,
             limit: limit,

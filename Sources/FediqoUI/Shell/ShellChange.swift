@@ -36,6 +36,14 @@ final class ShellChange {
         }
     }
 
+    /// A post that waits at its source to be sent later (#333), opened to be changed: a new post,
+    /// so everything but what it answers may change, the time among it (Decision 8, §7.1).
+    struct Waiting: Identifiable, Equatable {
+        let id = UUID()
+        let post: WaitingPost
+        let host: String
+    }
+
     enum Phase: Equatable {
         case asking
         case failed
@@ -44,6 +52,12 @@ final class ShellChange {
 
     /// The sheet's subject; nothing while no sheet is up. What presents it.
     var open: Open?
+    /// A waiting post's change, where the sheet is open on one.
+    private(set) var waiting: Waiting?
+
+    /// Which sheet is up, whichever it is open on: what presents it.
+    struct Shown: Identifiable, Equatable { let id: UUID }
+    var shown: Shown? { open.map { Shown(id: $0.id) } ?? waiting.map { Shown(id: $0.id) } }
     private(set) var phase: Phase = .asking
     /// What the post was written from, as its source said.
     private(set) var source: PostSource?
@@ -63,7 +77,7 @@ final class ShellChange {
     @ObservationIgnored private var reading: Task<Void, Never>?
 
     /// The host of the post the sheet is open on.
-    var host: String { open?.copy.source.host ?? "" }
+    var host: String { open?.copy.source.host ?? waiting?.host ?? "" }
 
     /// Whether anything was changed since the sheet opened.
     var touched: Bool { phase == .ready && draft != started }
@@ -87,8 +101,31 @@ final class ShellChange {
         begin(Open(item: held, copy: offer.copy, reopening: unsent.id, in: session), from: unsent, in: session)
     }
 
+    /// Opens the sheet on a post waiting at `host` (#333): filled from what it waits as, nothing
+    /// asked — the source holds nothing else of it.
+    ///
+    /// `draft` is what was typed in it before, where a Save could not go — the sheet opens again on
+    /// it, saying why (`refused`).
+    func startWaiting(
+        _ post: WaitingPost, host: String, in session: ShellSession, draft typed: PostDraft? = nil, refused: String? = nil
+    ) {
+        close()
+        waiting = Waiting(post: post, host: host)
+        source = nil
+        mediaNote = refused
+        let fresh = PostDraft(
+            text: post.text, cover: post.spoiler, language: post.language ?? "", coversMedia: post.sensitive,
+            media: post.media.enumerated().map { ChangeWords.kept($0.element, at: $0.offset) }, poll: post.poll,
+            audience: post.audience ?? .everyone, at: post.at
+        )
+        started = fresh
+        draft = typed ?? fresh
+        phase = .ready
+    }
+
     private func begin(_ opening: Open, from unsent: Unsent?, in session: ShellSession) {
         reading?.cancel()
+        waiting = nil
         open = opening
         phase = .asking
         source = nil
@@ -147,6 +184,7 @@ final class ShellChange {
         reading?.cancel()
         reading = nil
         open = nil
+        waiting = nil
         importing = false
         askingVotes = nil
         askingDiscard = nil
@@ -164,7 +202,13 @@ final class ShellChange {
             addMedia: { [weak self] in self?.addMedia(in: session) },
             addPoll: { [weak self] in self?.addPoll(in: session) },
             chooseLanguage: { [weak self] in self?.draft.language = $0 },
-            chooseCoversMedia: { [weak self] in self?.draft.coversMedia = $0 }
+            chooseCoversMedia: { [weak self] in self?.draft.coversMedia = $0 },
+            // A waiting post's time is part of what changes, and is never taken off.
+            later: waiting == nil ? nil : session.laterSlot(host: host).map { slot in
+                var always = slot
+                always.optional = false
+                return always
+            }
         )
     }
 
@@ -179,7 +223,8 @@ final class ShellChange {
     var resets: Bool { source.map { ChangeWords.resets($0, draft) } ?? false }
 
     func canSave(in session: ShellSession) -> Bool {
-        guard phase == .ready, open != nil else { return false }
+        guard phase == .ready, open != nil || (waiting != nil && draft.at != nil) else { return false }
+        if waiting != nil, session.laterSlot(host: host)?.locked != nil { return false }
         return draft.canSend(
             limit: session.postLimit(of: host), hasSource: session.mastodon.authorized(host: host, for: .write) != nil,
             media: session.mediaLimits(of: host), polls: session.pollLimits(of: host)
@@ -238,6 +283,13 @@ final class ShellChange {
     /// Save pressed. Where the change loses votes there are, the question goes up first and
     /// nothing is taken; otherwise the outbox takes the change. Whether the sheet closes.
     func save(in session: ShellSession) -> Bool {
+        if let waiting {
+            guard canSave(in: session) else { return false }
+            // The new one first and the old one after, by the list that shows them (Decision 2).
+            session.later.change(waiting.post, to: draft, at: waiting.host, in: session)
+            close()
+            return true
+        }
         guard canSave(in: session), let source else { return false }
         if ChangeWords.asksAtSave(source, draft) {
             askingVotes = source

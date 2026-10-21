@@ -326,7 +326,7 @@ struct RequestsTests {
         let about = try #require(pages.about(of: me, in: session))
         // The ways to whom the reader mutes and blocks stand between (#314).
         #expect(about.requests == entry && about.blocks.contains(.requests) && about.blocks.last == .you)
-        #expect(about.blocks.firstIndex(of: .requests).map { about.blocks[($0 + 1)...].allSatisfy { [.muted, .blocked, .servers, .you].contains($0) } } == true)
+        #expect(about.blocks.firstIndex(of: .requests).map { about.blocks[($0 + 1)...].allSatisfy { [.muted, .blocked, .servers, .waiting, .you].contains($0) } } == true)
         #expect(pages.walkedIDs(of: me, in: session).contains(RequestsEntry.id))
         #expect(about.press(on: RequestsEntry.id) == nil, "the step is the walk's to take")
         #expect(pages.requestsEntry(of: ada, in: session) == nil && pages.about(of: ada, in: session)?.requests == nil)

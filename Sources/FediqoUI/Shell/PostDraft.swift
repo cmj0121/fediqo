@@ -26,6 +26,9 @@ struct PostDraft: Equatable {
     var poll: NewPoll?
     /// Who may read it. Fixed on a change: the source takes none (X0 §1).
     var audience: Audience = .everyone
+    /// When its source is to send it (#333, X0 §2), or nothing to send it now. Never on an answer,
+    /// nor on a change of a published post; always on a change of one that waits.
+    var at: Date?
 
     /// Whether `piece` was on the post before this draft: it has its source's id and no bytes
     /// of this device's, so nothing is uploaded for it and no byte ceiling is asked of it.
@@ -115,6 +118,19 @@ struct DraftControls {
     var addPoll: () -> Void
     var chooseLanguage: (String) -> Void
     var chooseCoversMedia: (Bool) -> Void
+    /// The time to send (#333): where it is offered, and the lock's words where the sign-in
+    /// lacks what it needs. Nothing where the sheet offers no time — an answer, a change of a
+    /// post already sent, a source that sends nothing later.
+    var later: LaterSlot?
+
+    /// Where a time to send is offered, and how.
+    struct LaterSlot: Equatable {
+        /// The lock's words where the sign-in lacks the writing part: the switch dim, and these
+        /// beside it.
+        var locked: String?
+        /// Whether the time may be taken off: a new post's may, a waiting post's change may not.
+        var optional = true
+    }
 
     /// The composer's: the new post's source, and the session's own presses.
     @MainActor
@@ -126,7 +142,8 @@ struct DraftControls {
             polls: polls, mediaNote: session.composeMediaNote, pollSays: session.composePollSays,
             runs: polls.offeredRuns,
             addMedia: { session.composeAddMedia() }, addPoll: { session.composeAddPoll() },
-            chooseLanguage: { session.chooseLanguage($0) }, chooseCoversMedia: { session.chooseCoversMedia($0) }
+            chooseLanguage: { session.chooseLanguage($0) }, chooseCoversMedia: { session.chooseCoversMedia($0) },
+            later: session.composeHost.flatMap { session.laterSlot(host: $0) }
         )
     }
 }

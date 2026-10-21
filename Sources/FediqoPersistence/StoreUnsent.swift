@@ -32,6 +32,8 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
     /// unit separator; NULL for a post or an answer. A cell that will not read is a text that
     /// is not read at all: sent as a post, a change would be a second post.
     var changes: String?
+    /// When its source is to send it (#333); NULL for a post sent at once.
+    var at: Date?
 
     enum CodingKeys: String, CodingKey {
         case id, host, body, audience, answers, root, standing, writer
@@ -39,6 +41,7 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
         case writerID = "writer_id"
         case askedAt = "asked_at"
         case spoiler, language, sensitive, media, poll, changes
+        case at = "send_at"
     }
 
     init(_ text: Unsent) {
@@ -59,6 +62,7 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
         media = UnsentMediaRow.text(text.media)
         poll = text.poll.flatMap { try? JSONEncoder().encode($0) }.flatMap { String(data: $0, encoding: .utf8) }
         changes = text.changes.map { $0.item.rowID + Self.separator + $0.statusID }
+        at = text.at
     }
 
     private static let separator = "\u{1f}"
@@ -83,7 +87,7 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
             writerID: writerID, writer: writer, askedAt: askedAt,
             spoiler: spoiler, language: language, sensitive: sensitive, media: UnsentMediaRow.list(media),
             poll: poll.flatMap { try? JSONDecoder().decode(NewPoll.self, from: Data($0.utf8)) },
-            changes: changed
+            changes: changed, at: at
         )
     }
 }

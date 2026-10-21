@@ -45,6 +45,18 @@ struct ChangeStoreTests {
         #expect(try file.loadUnsent().isEmpty)
     }
 
+    @Test("A post given a time comes back with its time; a build that knows no v22-unsent-at sees a store with one as newer, and would not send it at once")
+    func aTimeToSendComesBack() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let at = Date(timeIntervalSince1970: 1_792_003_600)
+        let later = Unsent(host: Self.mastodon.host, text: "later", audience: .everyone, pressedAt: PackagerFixture.origin, at: at)
+        try await StoreFile(at: dir).save(unsent: [later])
+        let read = try #require(StoreFile.open(at: dir).unsent.first)
+        #expect(read == later && read.at == at)
+        #expect(try superseded(dir.appendingPathComponent("index.sqlite"), knowingNo: "v22-unsent-at"))
+    }
+
     @Test("A build that knows no v20-unsent-changes sees a store with a change waiting as newer, and would not send it as a post")
     func aBuildBeforeChangesRefusesIt() async throws {
         let dir = scratch()

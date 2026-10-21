@@ -6,7 +6,7 @@ struct ChangePresenter: ViewModifier {
     let session: ShellSession
 
     func body(content: Content) -> some View {
-        content.sheet(item: Binding(get: { session.changes.open }, set: { if $0 == nil { session.changes.close() } })) { _ in
+        content.sheet(item: Binding(get: { session.changes.shown }, set: { if $0 == nil { session.changes.close() } })) { _ in
             ChangeSheet()
                 #if os(iOS)
                 .presentationDetents([.large])
@@ -24,7 +24,7 @@ struct ChangeSheet: View {
         @Bindable var changes = session.changes
         let host = changes.host
         WritingSheet(
-            titleKey: "change.title",
+            titleKey: changes.waiting == nil ? "change.title" : "change.title.waiting",
             sendKey: "change.save",
             bodyKey: "compose.body",
             draft: $changes.draft.text,
@@ -56,6 +56,29 @@ struct ChangeSheet: View {
         }
     }
 
+    /// The head of a waiting post's change (#333): where it waits, who may read it — which may
+    /// change, as a new post's may — and that what it answers stays.
+    @ViewBuilder
+    private func waitingHead(_ changes: ShellChange, host: String) -> some View {
+        Text(String(format: L10n.t("change.waiting.where"), host))
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+        Picker(L10n.t("compose.visibility"), selection: Bindable(changes).draft.audience) {
+            ForEach(Audience.allCases, id: \.self) { audience in
+                Text(L10n.t(ComposerSheet.visibilityKey(audience))).tag(audience)
+            }
+        }
+        .pickerStyle(.menu)
+        .shellFont(.meta)
+        .accessibilityLabel(L10n.t("compose.visibility"))
+        if changes.waiting?.post.answering != nil {
+            Text(L10n.t("change.waiting.answers"))
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     /// Whether the sheet stays when swiped down: while something typed has not been saved.
     static func holdsOnSwipe(_ changes: ShellChange) -> Bool { changes.touched }
 
@@ -76,6 +99,9 @@ struct ChangeSheet: View {
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
             ShellLinkButton(L10n.t("person.retry")) { changes.retry(in: session) }
+        case .ready where changes.waiting != nil:
+            waitingHead(changes, host: host)
+            ComposeExtras(draft: Bindable(changes).draft, controls: changes.controls(in: session)) { EmptyView() }
         case .ready:
             let whereLine = ChangeWords.whereLine(host: host, audience: changes.open?.audience, answering: changes.open?.answering)
             VStack(alignment: .leading, spacing: ShellSpace.hair) {

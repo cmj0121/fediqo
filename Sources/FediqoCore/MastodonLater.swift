@@ -233,6 +233,18 @@ extension MastodonWrite {
         return WaitingStretch(posts: entries.compactMap { $0.value?.waiting }, next: try MastodonLink.next(in: link))
     }
 
+    /// The waiting post that is the one asked for (`find`), for whoever made it under a key
+    /// whose answer could not be had (`MastodonLaterError.mayHaveBeenMade`): found, it waits.
+    public func findWaiting(
+        _ text: String, at: Date, visibility: Audience, answering: String? = nil, spoiler: String? = nil,
+        sensitive: Bool? = nil, mediaIDs: [String] = [], poll: NewPoll? = nil
+    ) async throws -> WaitingPost? {
+        try await find(
+            text, at: at, visibility: visibility, answering: answering, spoiler: spoiler, sensitive: sensitive,
+            mediaIDs: mediaIDs, poll: poll, except: ""
+        )
+    }
+
     /// The waiting post that is the one asked for — its words, its time to the second, who may
     /// read it, what it answers, its cover and whether it is covered, its poll and its files —
     /// among everything that waits, or nothing where none is: a near twin is not it.

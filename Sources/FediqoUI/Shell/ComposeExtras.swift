@@ -55,6 +55,9 @@ struct ComposeExtras<PollFooter: View>: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityLabel(note)
             }
+            if let later = controls.later {
+                LaterControl(at: $draft.at, slot: later, host: controls.host)
+            }
         }
     }
 

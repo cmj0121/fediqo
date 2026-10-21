@@ -133,6 +133,18 @@ enum ShellQuestion {
         )
     }
 
+    /// Before a post waiting at its source is let go (#333): it is not sent, and does not come back.
+    static func withdrawWaiting(host: String, post: WaitingPost, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "xmark.bin",
+            title: L10n.t("waiting.withdraw.title", language: language),
+            line: String(format: L10n.t("waiting.withdraw.line", language: language), host),
+            help: OutboxWords.opening(post.text),
+            choices: [.init(yes, L10n.t("waiting.withdraw", language: language), role: .destructive)],
+            cancel: L10n.t("compose.cancel", language: language)
+        )
+    }
+
     /// The question Cancel asks over a change typed and not saved: the profile's own (F11).
     static func discardChange(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
         ShellConfirmation(

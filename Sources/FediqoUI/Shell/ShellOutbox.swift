@@ -334,7 +334,9 @@ final class ShellOutbox {
         out.insert(id)
         // **A change is never looked for** (#332): the same change sent twice lands once, so
         // Send again sends it again, whatever became of the try before.
-        guard mayHaveLanded.contains(id), sendings[at].unsent.changes == nil else {
+        // Nor a post given a time (#333): it is no post until its time, and is looked for among
+        // what waits, under its own key, as it is sent again (`sendLater`).
+        guard mayHaveLanded.contains(id), sendings[at].unsent.changes == nil, sendings[at].unsent.at == nil else {
             sendings[at].standing = .waiting
             pump(sendings[at].unsent.host, in: session)
             return true
@@ -421,7 +423,7 @@ final class ShellOutbox {
         let fresh = Unsent(
             host: old.host, text: typed, audience: old.audience, answers: old.answers, root: old.root,
             pressedAt: old.pressedAt, writerID: old.writerID, writer: old.writer,
-            spoiler: old.spoiler, language: old.language, sensitive: old.sensitive, media: old.media
+            spoiler: old.spoiler, language: old.language, sensitive: old.sensitive, media: old.media, poll: old.poll, at: old.at
         )
         sendings[at] = Sending(unsent: fresh, standing: .waiting)
         out.insert(fresh.id)
@@ -652,7 +654,8 @@ final class ShellOutbox {
     /// Lets go of every text that may have been posted and is now seen to have been: a read
     /// landed its post (`isPost`). Asked each time the session adopts what the store holds.
     func reconcile(in session: ShellSession) {
-        for held in sendings where mayHaveLanded.contains(held.id) && held.standing != .onItsWay && held.standing != .waiting {
+        for held in sendings where mayHaveLanded.contains(held.id) && held.standing != .onItsWay && held.standing != .waiting
+            && held.unsent.at == nil {
             let answering = answeredID(held.unsent, in: session)
             let last = lastAsked[held.id]
             guard session.notes.contains(where: { Self.isPost($0, of: held.unsent, answering: answering, lastAsked: last) })
@@ -956,6 +959,9 @@ final class ShellOutbox {
         if unsent.changes != nil, let post = answering {
             return await sendChange(unsent, of: post, through: door, id: id, in: session)
         }
+        if let at = unsent.at {
+            return await sendLater(unsent, at: at, through: door, id: id, in: session)
+        }
         do {
             let note = try await session.reach.write(door, landingIn: session.store)
                 .post(
@@ -1011,6 +1017,69 @@ final class ShellOutbox {
             await missed(id, .declined, in: session)
         } catch {
             session.writeFailed(error, host: unsent.host)
+            if let why = Self.notSent(error) {
+                await missed(id, why, in: session)
+            } else {
+                stand(id, .unconfirmed, in: session)
+            }
+        }
+    }
+
+    /// A post given a time (#333, X0 §2): given to its source to hold, **judged by the source's own
+    /// clock** — a time come too near is moved forward to the first it takes, and said. It lands
+    /// as a post that waits there, not as an item: its line goes, and the strip says when it goes
+    /// with the way to what waits. Under its own key, so a try whose answer was lost is looked for
+    /// among what waits before anything else is said; one its source published at once instead is
+    /// said so, never taken for waiting.
+    private func sendLater(_ unsent: Unsent, at: Date, through door: MastodonAuthorized, id: UUID, in session: ShellSession) async {
+        let write = session.reach.write(door, landingIn: session.store)
+        let host = unsent.host
+        let ids = unsent.media.compactMap(\.remoteID).filter { !$0.isEmpty }
+        func landed(_ later: Said.Later) async {
+            drop(id)
+            await session.store.letGo(unsent: id)
+            session.said.say(Said(.later(id, later), .unconfirmed, host: host))
+            if await wroteGone(in: session) { session.saveSoon() }
+        }
+        func look(at when: Date) async -> WaitingPost? {
+            try? await write.findWaiting(
+                unsent.text, at: when, visibility: unsent.audience, spoiler: unsent.spoiler, sensitive: unsent.sensitive,
+                mediaIDs: ids, poll: unsent.poll
+            )
+        }
+        // **A try before may have made it**: looked for first, at the time it was sent — and never
+        // made again blind, which past its key's life the source would take as a second post.
+        if mayHaveLanded.contains(id), let found = await look(at: at) {
+            return await landed(.waits(at: found.at, moved: false))
+        }
+        do {
+            let clock = try await write.sourceNow()
+            let (when, moved) = MastodonLater.sendable(at, now: clock)
+            // The time sent is the text's from here, on the line and in the file: what a later
+            // look searches by, and what Send again sends.
+            if moved, var kept = sending(id)?.unsent {
+                kept.at = when
+                if let index = sendings.firstIndex(where: { $0.id == id }) { sendings[index].unsent = kept }
+                if await session.store.hold(kept) { _ = await session.persistUnsent?() }
+            }
+            let waiting = try await write.postLater(
+                unsent.text, visibility: unsent.audience, at: when, key: id, spoiler: unsent.spoiler,
+                language: unsent.language, sensitive: unsent.sensitive, mediaIDs: ids, poll: unsent.poll,
+                pollLimits: session.composeRooms[host]?.polls, sourceNow: clock
+            )
+            await landed(.waits(at: waiting.at, moved: moved))
+        } catch MastodonLaterError.sentNow {
+            await session.reloadFromStore()
+            await landed(.sentNow)
+        } catch MastodonLaterError.mayHaveBeenMade {
+            if let found = await look(at: sending(id)?.unsent.at ?? at) { return await landed(.waits(at: found.at, moved: false)) }
+            session.said.say(Said(.later(id, .mayWait), .unconfirmed, host: host))
+            stand(id, .unconfirmed, in: session)
+        } catch {
+            session.writeFailed(error, host: host)
+            if let words = LaterWords.words(of: error) {
+                session.said.say(Said(.later(id, .refused(words)), .declined, host: host))
+            }
             if let why = Self.notSent(error) {
                 await missed(id, why, in: session)
             } else {
@@ -1215,6 +1284,7 @@ enum OutboxWords {
         }
         switch sending.standing {
         case .waiting, .onItsWay:
+            if sending.unsent.at != nil { return String(format: L10n.t("outbox.sending.later", language: language), host) }
             guard kind == "answer", let whom else { return said("sending") }
             return String(format: L10n.t("outbox.sending.answer.to", language: language), host, LineText.oneLine(whom))
         case .looking:
@@ -1279,7 +1349,8 @@ extension ShellSession {
                 host: host, text: text, audience: composeDraft.audience, writerID: writer?.id, writer: writer?.handle,
                 spoiler: ComposerSheet.trimmed(composeDraft.cover),
                 language: composeDraft.language.isEmpty ? nil : composeDraft.language,
-                sensitive: composeDraft.coversMedia, media: composeDraft.media, poll: composeDraft.poll
+                sensitive: composeDraft.coversMedia, media: composeDraft.media, poll: composeDraft.poll,
+                at: composeDraft.at
             ),
             in: self
         )
@@ -1290,6 +1361,7 @@ extension ShellSession {
         composeDraft.media = []
         composeMediaNote = nil
         composeDraft.poll = nil
+        composeDraft.at = nil
         composePollRefused = nil
         return true
     }

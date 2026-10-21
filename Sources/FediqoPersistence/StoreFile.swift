@@ -1525,6 +1525,15 @@ private var migrator: DatabaseMigrator {
             t.add(column: "may_quote", .text)
         }
     }
+    // When a text waiting to be sent is to be sent by its source (#333). NULL is at once.
+    //
+    // **A migration id for `v15-compose`'s reason**: a build from before would send the post at
+    // once, which the person asked to go later. The id makes it refuse the store.
+    migrator.registerMigration("v22-unsent-at") { db in
+        try db.alter(table: "unsent") { t in
+            t.add(column: "send_at", .datetime)
+        }
+    }
     return migrator
 }
 
