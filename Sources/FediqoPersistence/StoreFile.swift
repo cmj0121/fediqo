@@ -1534,6 +1534,17 @@ private var migrator: DatabaseMigrator {
             t.add(column: "send_at", .datetime)
         }
     }
+    // The post a text waiting to be sent quotes, and who may quote it (#330). NULL is none, and
+    // the account's own default.
+    //
+    // **A migration id for `v15-compose`'s reason**: a build from before would send the post
+    // without its quote — another post than the one written. The id makes it refuse the store.
+    migrator.registerMigration("v23-unsent-quoting") { db in
+        try db.alter(table: "unsent") { t in
+            t.add(column: "quoting", .text)
+            t.add(column: "quote_policy", .text)
+        }
+    }
     return migrator
 }
 

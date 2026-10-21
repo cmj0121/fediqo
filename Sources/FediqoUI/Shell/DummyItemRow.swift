@@ -388,9 +388,11 @@ struct DummyItemRow: View {
                 .modifier(Probed(\.frames, .header, probe: probe))
             mainBox(written)
                 .modifier(Probed(\.frames, .content, probe: probe))
+            // The translation is of the words, so it sits right under them, before the poll and the
+            // preview (A2 x L2).
+            translationBand
             pollBand
             previewBand
-            translationBand
             quoteBand(openQuote)
             if inFull { viaFoot }
             actions

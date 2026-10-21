@@ -135,6 +135,15 @@ extension MastodonWrite {
     /// The form a quote adds to a post: the quoted post by its own id, at the same source.
     /// **Refused where it carries media or a poll** (D3), and where the quoted post cannot be
     /// named there.
+    /// A quote by the id its source gave the post it quotes (a waiting quote's, #333): the same
+    /// refusals — no media, no poll, an id that names one post at this source.
+    static func quoting(id: String?, mediaIDs: [String], poll: NewPoll?) throws -> [(String, String)] {
+        guard let id else { return [] }
+        if poll != nil || mediaIDs.contains(where: { !$0.isEmpty }) { throw MastodonQuoteError.carries }
+        guard !id.isEmpty, id.utf8.allSatisfy({ (0x30...0x39).contains($0) }) else { throw MastodonQuoteError.unfindable }
+        return [("quoted_status_id", id)]
+    }
+
     static func quoting(_ quoted: Note?, host: String, mediaIDs: [String], poll: NewPoll?) throws -> [(String, String)] {
         guard let quoted else { return [] }
         if poll != nil || mediaIDs.contains(where: { !$0.isEmpty }) { throw MastodonQuoteError.carries }

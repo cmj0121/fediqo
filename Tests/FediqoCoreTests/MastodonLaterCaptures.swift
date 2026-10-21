@@ -27,6 +27,9 @@ import Foundation
 /// | the same, too near | 422 `Validation failed: Scheduled at date must be in the future` |
 /// | the same, onto a day holding 25 | 422 `…limit of 25 scheduled posts for today` |
 /// | the same, of another person's | 404; by a sign-in that only reads: 403 `This action is outside the authorized scopes` |
+/// | `POST /statuses` with `scheduled_at`, `quoted_status_id` and `quote_approval_policy` `followers` (2026-10-21, plain servers) | 200: **`params` names each quote key twice — `quoted_status_id` a bare number, then the same id as a string; `quote_approval_policy` a number (262144 followers, 131072 public, 0 nobody), then the word sent** — the last is the one meant. A post sent no policy: `131072`, then `"public"` |
+/// | `GET /scheduled_statuses` holding it, and `PUT` of its time | 200: the same pairs, **in another order** (the number policy before the first id), the last of each still the string and the word |
+/// | a quote of a post its author does not let the asker quote, given a time | 404 `The post you are trying to quote does not appear to exist.` — as one sent now |
 /// | `DELETE /scheduled_statuses/:id` | 200 `{}`; again: 404. **Not held to the thirty-in-half-an-hour a post's taking back is**: 27 in a row all 200 |
 enum MastodonLaterCaptures {
     /// `POST /api/v1/statuses` with `scheduled_at`, a post carrying a file: the answer, verbatim
@@ -43,6 +46,22 @@ enum MastodonLaterCaptures {
     /// The same, an answer: its `in_reply_to_id` a bare number.
     static let answer = #"""
     {"id":"3","scheduled_at":"2026-10-21T05:11:20.000Z","params":{"text":"later answer","quote_approval_policy":131072,"media_ids":null,"sensitive":null,"spoiler_text":null,"visibility":"public","language":null,"scheduled_at":null,"poll":null,"allowed_mentions":null,"idempotency":null,"with_rate_limit":false,"in_reply_to_id":117476930889022363,"application_id":3,"quoted_status_id":null,"quoted_status_id":null,"quote_approval_policy":"public"},"media_attachments":[]}
+    """#
+
+    /// `POST /api/v1/statuses` with `scheduled_at`, a quote whose quoted post anyone may quote, sent
+    /// with who may quote it `followers`: the answer, verbatim.
+    static let quote = #"""
+    {"id":"148","scheduled_at":"2026-10-21T09:28:12.000Z","params":{"text":"a waiting quote","quote_approval_policy":262144,"media_ids":null,"sensitive":null,"spoiler_text":null,"visibility":"public","language":null,"scheduled_at":null,"poll":null,"allowed_mentions":null,"idempotency":null,"with_rate_limit":false,"in_reply_to_id":null,"application_id":3,"quoted_status_id":117477716262721165,"quoted_status_id":"117477716262721165","quote_approval_policy":"followers"},"media_attachments":[]}
+    """#
+
+    /// `GET /api/v1/scheduled_statuses` holding the same one, verbatim: its keys in another order.
+    static let quoteListed = #"""
+    [{"id":"148","scheduled_at":"2026-10-21T09:28:12.000Z","params":{"poll":null,"text":"a waiting quote","language":null,"media_ids":null,"sensitive":null,"visibility":"public","idempotency":null,"scheduled_at":null,"spoiler_text":null,"application_id":3,"in_reply_to_id":null,"with_rate_limit":false,"allowed_mentions":null,"quoted_status_id":117477716262721165,"quote_approval_policy":262144,"quoted_status_id":"117477716262721165","quote_approval_policy":"followers"},"media_attachments":[]}]
+    """#
+
+    /// The same as `quote`, sent with who may quote it `nobody`.
+    static let quoteNobody = #"""
+    {"id":"150","scheduled_at":"2026-10-21T09:28:12.000Z","params":{"text":"a waiting quote nobody","quote_approval_policy":0,"media_ids":null,"sensitive":null,"spoiler_text":null,"visibility":"public","language":null,"scheduled_at":null,"poll":null,"allowed_mentions":null,"idempotency":null,"with_rate_limit":false,"in_reply_to_id":null,"application_id":3,"quoted_status_id":117477716262721165,"quoted_status_id":"117477716262721165","quote_approval_policy":"nobody"},"media_attachments":[]}
     """#
 
     /// `GET /api/v1/scheduled_statuses?limit=2`'s `Link`.

@@ -51,8 +51,10 @@ actor LaterSource: HTTPSender {
         // What waits, as the last post given a time was sent: its words, who may read it, its time.
         if next.body == Self.echo, let made = requests.last(where: { $0.httpMethod == "POST" }) {
             let form = Self.form(made)
+            // A quote's id as 4.6.6 names it last: a string (`MastodonLaterCaptures.quote`).
+            let quote = form["quoted_status_id"].map { #","quoted_status_id":"\#($0)""# } ?? ""
             return answered(
-                #"[{"id":"40","scheduled_at":"\#(form["scheduled_at"] ?? "")","params":{"text":"\#(form["status"] ?? "")","visibility":"\#(form["visibility"] ?? "")"},"media_attachments":[]}]"#,
+                #"[{"id":"40","scheduled_at":"\#(form["scheduled_at"] ?? "")","params":{"text":"\#(form["status"] ?? "")","visibility":"\#(form["visibility"] ?? "")"\#(quote)},"media_attachments":[]}]"#,
                 next.status
             )
         }
@@ -268,6 +270,50 @@ struct LaterTests {
         let pair = try #require(session.later.pairs[Self.host]?.first)
         #expect(pair.old == "1" && pair.lostMedia)
         #expect(LaterWords.pair(pair).contains("without its files"))
+    }
+
+    @Test("A waiting quote says so on its row; its change keeps what it quotes, fixed and said, its files and poll dim, and who may quote it as chosen; the new one is sent quoting the same post with the policy chosen")
+    func aWaitingQuoteChanged() async throws {
+        let at = Date().addingTimeInterval(7200)
+        // As 4.6.6 lists one (`MastodonLaterCaptures.quoteListed`): each quote key named twice, the last meant.
+        let quote = #"{"id":"1","scheduled_at":"\#(MastodonLater.written(at))","params":{"text":"before","visibility":"public","quoted_status_id":117,"quote_approval_policy":262144,"quoted_status_id":"117","quote_approval_policy":"followers"},"media_attachments":[]}"#
+        let server = LaterSource([
+            "GET /api/v1/scheduled_statuses": [("[\(quote)]", 200)],
+            "POST /api/v1/statuses": [(quote.replacingOccurrences(of: #""id":"1""#, with: #""id":"2""#), 200)],
+            "DELETE /api/v1/scheduled_statuses/1": [("{}", 200)],
+        ])
+        let session = try await run(server)
+        session.later.show(host: Self.host, in: session)
+        await session.later.settled()
+        let old = try #require(session.later.posts.first)
+        #expect(old.quoting == "117" && old.quotePolicy == .followers)
+        #expect(LaterWords.carries(old) == "a quote" && LaterWords.spoken(old).contains("a quote"))
+
+        session.changes.startWaiting(old, host: Self.host, in: session)
+        #expect(session.changes.quotesFixed)
+        #expect(session.changes.controls(in: session).quoteBlocks == "A quote cannot carry media or a poll.")
+        #expect(ChangeWords.waitingQuoteLine(old) == "What it quotes stays as it was.")
+        #expect(session.changes.draft.quotePolicy == .followers, "who may quote it, as it waits")
+        // Who may quote it changes with the rest (Decision 8 §7.1).
+        session.changes.draft.quotePolicy = .nobody
+        session.changes.draft.text = "after"
+        session.changes.draft.poll = NewPoll(choices: ["A", "B"])
+        #expect(!session.changes.canSave(in: session), "a quote carries no poll")
+        session.changes.draft.poll = nil
+        #expect(session.changes.save(in: session))
+        await session.later.settled()
+
+        let post = try #require(await server.requests.first { $0.httpMethod == "POST" })
+        let form = LaterSource.form(post)
+        #expect(form["status"] == "after" && form["quoted_status_id"] == "117" && form["quote_approval_policy"] == "nobody", "the policy chosen")
+        #expect(await server.asked.contains("DELETE /api/v1/scheduled_statuses/1"), "the old let go after")
+
+        // Set back to the account's own, nothing is sent; followers only forces nobody.
+        var draft = PostDraft(quotePolicy: nil)
+        #expect(draft.quotePolicySent == nil)
+        draft.audience = .followers
+        draft.quotePolicy = .anyone
+        #expect(draft.quotePolicySent == .nobody)
     }
 
     @Test("Your own page at the source has the line to what waits; a sign-in that only reads draws it dim with the lock's words")

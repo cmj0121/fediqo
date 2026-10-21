@@ -71,8 +71,19 @@ struct ChangeSheet: View {
         .pickerStyle(.menu)
         .shellFont(.meta)
         .accessibilityLabel(L10n.t("compose.visibility"))
+        // Who may quote it changes with the rest (Decision 8 §7.1): the composer's own control.
+        if session.quotesOffered(host: host) == true {
+            QuotePolicyMenu(draft: Bindable(changes).draft, host: host)
+        }
         if changes.waiting?.post.answering != nil {
             Text(L10n.t("change.waiting.answers"))
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        // A waiting quote: what it quotes stays, as a published quote's does (X0 §3).
+        if let line = ChangeWords.waitingQuoteLine(changes.waiting?.post) {
+            Text(line)
                 .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)

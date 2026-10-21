@@ -25,6 +25,16 @@ struct Said: Identifiable, Equatable, Sendable {
         /// A post given a time, and what its source made of it (#333): said once, as a found
         /// text is, with the way to what waits there where that is where it went.
         case later(UUID, Later)
+        /// A quote's act on one's own post that did not arrive (#330), by its row.
+        case quote(QuoteAct, row: String)
+        /// A quote posted whose quoted post's author is asked first (#330): it is up, and says so
+        /// until they allow it.
+        case quoteAsked(UUID, whom: String)
+    }
+
+    /// One of a quote's acts.
+    enum QuoteAct: String, Equatable, Sendable {
+        case policy
     }
 
     /// What became of a post given a time.
@@ -160,6 +170,8 @@ struct Said: Identifiable, Equatable, Sendable {
         case .unwritten(let gone): return "\u{1e}unwritten\u{1e}\(gone.rawValue)"
         case .unkept(let list): return "\u{1e}unkept\u{1e}\(list.rawValue)"
         case .later(let text, _): return "\(host)\u{1e}later\u{1e}\(text.uuidString)"
+        case .quote(let act, let row): return "\(host)\u{1e}quote\u{1e}\(act.rawValue)\u{1e}\(row)"
+        case .quoteAsked(let text, _): return "\(host)\u{1e}quoteAsked\u{1e}\(text.uuidString)"
         }
     }
 
@@ -174,6 +186,10 @@ struct Said: Identifiable, Equatable, Sendable {
             return L10n.t("said.unwritten.\(gone.rawValue)", language: language)
         case .unkept(let list):
             return L10n.t("said.unkept.\(list.rawValue)", language: language)
+        case .quote(let act, _):
+            return String(format: L10n.t("said.quote.\(act.rawValue).failed", language: language), host)
+        case .quoteAsked(_, let whom):
+            return String(format: L10n.t("said.quote.asked", language: language), LineText.oneLine(whom))
         case .later(_, let later):
             switch later {
             case .waits(let at, let moved):

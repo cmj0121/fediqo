@@ -29,6 +29,18 @@ struct PostDraft: Equatable {
     /// When its source is to send it (#333, X0 §2), or nothing to send it now. Never on an answer,
     /// nor on a change of a published post; always on a change of one that waits.
     var at: Date?
+    /// The post it quotes (#330, X0 §3), by its row and its source's id; nothing for none. A quote
+    /// is the composer's own draft: Don't quote it gives the post back plain.
+    var quoting: Unsent.Changes?
+    /// Who may quote it (#330): chosen, or nothing — the account's own default, and nothing sent
+    /// (Decision 8, §7.6).
+    var quotePolicy: QuotePolicy?
+
+    /// Who may quote it as sent: a post only its followers or those it names may read is quoted by
+    /// nobody, whatever was chosen — the source keeps it so (asked of 4.6.6).
+    var quotePolicySent: QuotePolicy? {
+        audience == .followers || audience == .mentioned ? .nobody : quotePolicy
+    }
 
     /// Whether `piece` was on the post before this draft: it has its source's id and no bytes
     /// of this device's, so nothing is uploaded for it and no byte ceiling is asked of it.
@@ -93,7 +105,9 @@ struct PostDraft: Equatable {
     /// Whether it may go: words or files, within `limit`, through a source, with its files and
     /// its poll as the source takes them. A cover alone cannot.
     func canSend(limit: Int, hasSource: Bool, media limits: MastodonMediaLimits, polls: MastodonPollLimits) -> Bool {
-        ComposerSheet.canSend(
+        // A quote carries neither files nor a poll (D3).
+        if quoting != nil, !media.isEmpty || poll != nil { return false }
+        return ComposerSheet.canSend(
             text: text, limit: limit, hasSource: hasSource, cover: cover, attachments: media.count,
             attachmentsOK: attachmentsOK(limits),
             pollOK: poll == nil || (media.isEmpty && pollRefusal(within: polls) == nil)
@@ -122,6 +136,9 @@ struct DraftControls {
     /// lacks what it needs. Nothing where the sheet offers no time — an answer, a change of a
     /// post already sent, a source that sends nothing later.
     var later: LaterSlot?
+    /// Why files and a poll are drawn dim, where the post quotes another (D3): their presses
+    /// take nothing, and this is said under them.
+    var quoteBlocks: String?
 
     /// Where a time to send is offered, and how.
     struct LaterSlot: Equatable {
@@ -143,7 +160,8 @@ struct DraftControls {
             runs: polls.offeredRuns,
             addMedia: { session.composeAddMedia() }, addPoll: { session.composeAddPoll() },
             chooseLanguage: { session.chooseLanguage($0) }, chooseCoversMedia: { session.chooseCoversMedia($0) },
-            later: session.composeHost.flatMap { session.laterSlot(host: $0) }
+            later: session.composeHost.flatMap { session.laterSlot(host: $0) },
+            quoteBlocks: session.composeDraft.quoting == nil ? nil : L10n.t("compose.quote.noMedia")
         )
     }
 }

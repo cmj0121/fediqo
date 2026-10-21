@@ -26,10 +26,15 @@ public struct WaitingPost: Equatable, Sendable, Identifiable {
     /// The files it carries, each by its id with its description.
     public let media: [PostSource.Media]
     public let poll: NewPoll?
+    /// The post it quotes, by its source's id, where it quotes one (#330): what its change keeps.
+    public let quoting: String?
+    /// Who may quote it once it is up, as its source keeps it.
+    public let quotePolicy: QuotePolicy?
 
     public init(
         id: String, at: Date, text: String, spoiler: String = "", sensitive: Bool = false, language: String? = nil,
-        audience: Audience? = nil, answering: String? = nil, media: [PostSource.Media] = [], poll: NewPoll? = nil
+        audience: Audience? = nil, answering: String? = nil, media: [PostSource.Media] = [], poll: NewPoll? = nil,
+        quoting: String? = nil, quotePolicy: QuotePolicy? = nil
     ) {
         self.id = id
         self.at = at
@@ -41,6 +46,8 @@ public struct WaitingPost: Equatable, Sendable, Identifiable {
         self.answering = answering
         self.media = media
         self.poll = poll
+        self.quoting = quoting
+        self.quotePolicy = quotePolicy
     }
 }
 
@@ -175,15 +182,21 @@ extension MastodonWrite {
     /// it takes throws `MastodonLaterError.tooSoon` before anything is asked — a time it has
     /// already passed it would publish at once. Where it published the post at once all the
     /// same, that throws `sentNow`, never a success. A repeat under a used key answered "no such
-    /// record" throws `mayHaveBeenMade`. A refusal of the source's own — a day already holding as
+    /// record" throws `mayHaveBeenMade` — a quote's too (`again`: a try before under `key` may have
+    /// made it), where a first try's 404 is the quote not allowed. A refusal of the source's own — a day already holding as
     /// many as it takes — throws `MastodonUnprocessable` with its words.
     ///
     /// `answering` is the id at this source of the post it answers, where it answers one.
     public func postLater(
         _ text: String, visibility: Audience, at: Date, key: UUID? = nil, answering: String? = nil,
         spoiler: String? = nil, language: String? = nil, sensitive: Bool? = nil, mediaIDs: [String] = [],
-        poll: NewPoll? = nil, pollLimits: MastodonPollLimits? = nil, sourceNow: Date? = nil
+        poll: NewPoll? = nil, pollLimits: MastodonPollLimits? = nil, sourceNow: Date? = nil,
+        quoting: Note? = nil, quotePolicy: QuotePolicy? = nil, again: Bool = false, quotingID: String? = nil
     ) async throws -> WaitingPost {
+        // A quote sent later carries its quote (#330), as one sent now does, and nothing it may not.
+        // `quotingID` is a waiting quote's own (`change`): an id this source gave, at this source.
+        let quote = try quoting.map { try Self.quoting($0, host: host, mediaIDs: mediaIDs, poll: poll) }
+            ?? Self.quoting(id: quotingID, mediaIDs: mediaIDs, poll: poll)
         if let poll {
             if mediaIDs.contains(where: { !$0.isEmpty }) { throw MastodonWriteError.refusedHere(.pollWithMedia) }
             if let pollLimits, let refusal = poll.refusal(within: pollLimits) { throw MastodonWriteError.refusedHere(refusal) }
@@ -195,17 +208,23 @@ extension MastodonWrite {
         let form = Self.postForm(
             text, visibility: visibility, answering: answering, spoiler: spoiler, language: language,
             sensitive: sensitive, mediaIDs: mediaIDs, poll: poll
-        ) + [("scheduled_at", MastodonLater.written(at))]
+        ) + quote + (quotePolicy.map { [("quote_approval_policy", $0.rawValue)] } ?? []) + [("scheduled_at", MastodonLater.written(at))]
         let sent = ReadMoment.now()
         let data: Data
         do {
             data = try await door.postRefusable(
                 path: "/api/v1/statuses", form: form, headers: key.map { [Self.idempotencyKey: $0.uuidString] } ?? [:]
             )
+        } catch MastodonAuthError.http(404) where key != nil && again {
+            // A repeat under a used key: the first may wait there, whatever it quoted.
+            throw MastodonLaterError.mayHaveBeenMade
+        } catch MastodonAuthError.http(404) where !quote.isEmpty {
+            // What a real one answers a quote it does not allow (`MastodonWrite.post`), on a first try.
+            throw MastodonQuoteError.notAllowed
         } catch MastodonAuthError.http(404) where key != nil {
             throw MastodonLaterError.mayHaveBeenMade
         }
-        if let waiting = try? MastodonJSON.decoder.decode(WaitingDTO.self, from: data).waiting {
+        if let waiting = WaitingDTO.one(from: data) {
             return waiting
         }
         guard let note = try? MastodonJSON.decoder.decode(StatusDTO.self, from: data)
@@ -230,27 +249,28 @@ extension MastodonWrite {
         guard let entries = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<WaitingDTO>].self, from: data) else {
             throw MastodonWriteError.unreadable
         }
-        return WaitingStretch(posts: entries.compactMap { $0.value?.waiting }, next: try MastodonLink.next(in: link))
+        let quotes = WaitingDTO.quotes(in: data)
+        return WaitingStretch(posts: entries.compactMap { $0.value?.waiting(quotes) }, next: try MastodonLink.next(in: link))
     }
 
     /// The waiting post that is the one asked for (`find`), for whoever made it under a key
     /// whose answer could not be had (`MastodonLaterError.mayHaveBeenMade`): found, it waits.
     public func findWaiting(
         _ text: String, at: Date, visibility: Audience, answering: String? = nil, spoiler: String? = nil,
-        sensitive: Bool? = nil, mediaIDs: [String] = [], poll: NewPoll? = nil
+        sensitive: Bool? = nil, mediaIDs: [String] = [], poll: NewPoll? = nil, quoting: String? = nil
     ) async throws -> WaitingPost? {
         try await find(
             text, at: at, visibility: visibility, answering: answering, spoiler: spoiler, sensitive: sensitive,
-            mediaIDs: mediaIDs, poll: poll, except: ""
+            mediaIDs: mediaIDs, poll: poll, quoting: quoting, except: ""
         )
     }
 
     /// The waiting post that is the one asked for — its words, its time to the second, who may
-    /// read it, what it answers, its cover and whether it is covered, its poll and its files —
+    /// read it, what it answers and what it quotes, its cover and whether it is covered, its poll and its files —
     /// among everything that waits, or nothing where none is: a near twin is not it.
     func find(
         _ text: String, at: Date, visibility: Audience, answering: String?, spoiler: String?, sensitive: Bool?,
-        mediaIDs: [String], poll: NewPoll?, except old: String
+        mediaIDs: [String], poll: NewPoll?, quoting: String? = nil, except old: String
     ) async throws -> WaitingPost? {
         let cover = spoiler?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let files = mediaIDs.filter { !$0.isEmpty }
@@ -262,7 +282,7 @@ extension MastodonWrite {
                 post.id != old && post.text == text && abs(post.at.timeIntervalSince(at)) < 1
                     && post.audience == visibility && post.answering == answering
                     && post.spoiler == cover && post.sensitive == (sensitive ?? false)
-                    && post.media.map(\.id) == files && post.poll == asked
+                    && post.media.map(\.id) == files && post.poll == asked && post.quoting == quoting
             }) {
                 return found
             }
@@ -283,7 +303,7 @@ extension MastodonWrite {
         let data = try await door.put(
             path: "/api/v1/scheduled_statuses/\(waiting.id)", form: [("scheduled_at", MastodonLater.written(at))]
         )
-        guard let moved = try? MastodonJSON.decoder.decode(WaitingDTO.self, from: data).waiting, moved.id == waiting.id else {
+        guard let moved = WaitingDTO.one(from: data), moved.id == waiting.id else {
             throw MastodonWriteError.unreadable
         }
         return moved
@@ -308,29 +328,38 @@ extension MastodonWrite {
     /// - Found, or made: the old is let go; where that fails, both wait (`oldStays`).
     /// - Not found: nothing is let go, and the pair is said with `new` nothing — it may wait.
     /// - Refused by the source, or here: thrown, and the old is not touched.
+    ///
+    /// **What it quotes is the old one's** (#330): carried by id, never dropped — a change of a
+    /// waiting quote stays a quote. **Who may quote it may change** (Decision 8 §7.1): `quotePolicy`,
+    /// where given — nothing inside it the account's own — and the old one's where not.
     public func change(
         _ old: WaitingPost, to text: String, visibility: Audience, at: Date, key: UUID = UUID(),
         spoiler: String? = nil, language: String? = nil, sensitive: Bool? = nil, mediaIDs: [String] = [],
-        poll: NewPoll? = nil, pollLimits: MastodonPollLimits? = nil, sourceNow: Date? = nil
+        poll: NewPoll? = nil, pollLimits: MastodonPollLimits? = nil, sourceNow: Date? = nil,
+        quotePolicy: QuotePolicy?? = nil
     ) async throws -> WaitingChange {
         let now = try await clock(sourceNow)
-        func make() async throws -> WaitingPost {
+        // Who may quote it, as it waits — but nobody where it now goes only to followers or to
+        // those it mentions, as the composer sends (`PostDraft.quotePolicySent`).
+        let chosen = quotePolicy ?? old.quotePolicy
+        let policy = visibility == .followers || visibility == .mentioned ? chosen.map { _ in .nobody } : chosen
+        func make(again: Bool) async throws -> WaitingPost {
             try await postLater(
                 text, visibility: visibility, at: at, key: key, answering: old.answering, spoiler: spoiler,
                 language: language, sensitive: sensitive, mediaIDs: mediaIDs, poll: poll, pollLimits: pollLimits,
-                sourceNow: now
+                sourceNow: now, quotePolicy: policy, again: again, quotingID: old.quoting
             )
         }
         var new: WaitingPost?
         do {
-            new = try await make()
+            new = try await make(again: false)
         } catch where MastodonLater.unknown(error) {
             do {
-                new = try await make()
+                new = try await make(again: true)
             } catch where MastodonLater.unknown(error) {
                 new = try? await find(
                     text, at: at, visibility: visibility, answering: old.answering, spoiler: spoiler, sensitive: sensitive,
-                    mediaIDs: mediaIDs, poll: poll, except: old.id
+                    mediaIDs: mediaIDs, poll: poll, quoting: old.quoting, except: old.id
                 )
             }
         }
@@ -398,9 +427,48 @@ struct WaitingDTO: Decodable, Sendable {
         var whole: Int? { text.flatMap(Int.init) }
     }
 
-    /// The waiting post this says, or nothing without an id and a time.
-    var waiting: WaitingPost? {
+    /// One waiting post as `data` says it, its quote read from the last of what it says.
+    static func one(from data: Data) -> WaitingPost? {
+        (try? MastodonJSON.decoder.decode(WaitingDTO.self, from: data))?.waiting(quotes(in: data))
+    }
+
+    /// What each waiting post in `data` — one, or a list — quotes and who may quote it, by its id.
+    ///
+    /// **The last of each key its `params` names** (asked of 4.6.6, `MastodonLaterCaptures`): it
+    /// names `quoted_status_id` twice — a bare number too large for a double, then the id as a
+    /// string — and `quote_approval_policy` twice — a number, then the word it was sent as. The
+    /// decoder keeps the first of a key named twice, so these two are read here.
+    static func quotes(in data: Data) -> [String: WaitingQuote] {
+        var reader = LastSaid(Array(data))
+        guard let root = reader.value() else { return [:] }
+        let entries: [LastSaid.Value]
+        switch root {
+        case .array(let all): entries = all
+        case .object: entries = [root]
+        case .scalar: return [:]
+        }
+        var said: [String: WaitingQuote] = [:]
+        for entry in entries {
+            guard let id = entry.last("id")?.text, case .object(let pairs)? = entry.last("params") else { continue }
+            var quoting: String?
+            var policy: String?
+            for (key, value) in pairs {
+                if key == "quoted_status_id" { quoting = value.text }
+                if key == "quote_approval_policy" { policy = value.text }
+            }
+            said[id] = WaitingQuote(
+                quoting: quoting.flatMap { !$0.isEmpty && $0.utf8.allSatisfy { (0x30...0x39).contains($0) } ? $0 : nil },
+                policy: policy.flatMap(QuotePolicy.init(rawValue:))
+            )
+        }
+        return said
+    }
+
+    /// The waiting post this says, or nothing without an id and a time; what it quotes is the
+    /// one `quotes` read for its id.
+    func waiting(_ quotes: [String: WaitingQuote]) -> WaitingPost? {
         guard !id.isEmpty, let at = scheduledAt?.value else { return nil }
+        let quote = quotes[id]
         let poll = params?.poll?.value.flatMap { said -> NewPoll? in
             guard let options = said.options, options.count >= MastodonPollLimits.leastChoices,
                   let runs = said.expiresIn?.whole
@@ -415,8 +483,162 @@ struct WaitingDTO: Decodable, Sendable {
             id: id, at: at, text: params?.text?.value ?? "", spoiler: params?.spoilerText?.value ?? "",
             sensitive: params?.sensitive?.yes ?? false, language: SourceField.languageTag(params?.language?.value),
             audience: params?.visibility?.value.flatMap(Audience.init(mastodon:)), answering: answering,
-            media: (mediaAttachments ?? []).compactMap { $0.value?.asSourceMedia }, poll: poll
+            media: (mediaAttachments ?? []).compactMap { $0.value?.asSourceMedia }, poll: poll,
+            quoting: quote?.quoting, quotePolicy: quote?.policy
         )
+    }
+}
+
+/// What a waiting post quotes, by its source's id, and who may quote it — as `WaitingDTO.quotes`
+/// read them.
+struct WaitingQuote: Equatable, Sendable {
+    let quoting: String?
+    let policy: QuotePolicy?
+}
+
+/// A JSON reader that keeps every key an object names, in order, **twice where it is named
+/// twice** — what `JSONDecoder` does not. Scalars are their text: a string unescaped, a number
+/// its digits as written, a boolean its word, `null` nothing. Malformed input reads as nothing.
+struct LastSaid {
+    indirect enum Value: Equatable {
+        case object([(String, Value)])
+        case array([Value])
+        case scalar(String?)
+
+        static func == (lhs: Value, rhs: Value) -> Bool {
+            switch (lhs, rhs) {
+            case let (.object(a), .object(b)): a.count == b.count && zip(a, b).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 }
+            case let (.array(a), .array(b)): a == b
+            case let (.scalar(a), .scalar(b)): a == b
+            default: false
+            }
+        }
+
+        /// The last value an object gives `key`; nothing for anything else.
+        func last(_ key: String) -> Value? {
+            guard case .object(let pairs) = self else { return nil }
+            return pairs.last { $0.0 == key }?.1
+        }
+
+        /// A scalar's text; nothing for `null`, an object or a list.
+        var text: String? {
+            guard case .scalar(let text) = self else { return nil }
+            return text
+        }
+    }
+
+    private let bytes: [UInt8]
+    private var at = 0
+    /// How deep a value may nest before the reading stops: no answer of a source's goes near it.
+    private static let deepest = 64
+
+    init(_ bytes: [UInt8]) { self.bytes = bytes }
+
+    /// The whole input as one value, or nothing where it is not one.
+    mutating func value() -> Value? {
+        guard let value = read(depth: 0) else { return nil }
+        skipSpace()
+        return at == bytes.count ? value : nil
+    }
+
+    private mutating func skipSpace() {
+        while at < bytes.count, [0x20, 0x09, 0x0A, 0x0D].contains(bytes[at]) { at += 1 }
+    }
+
+    private mutating func read(depth: Int) -> Value? {
+        guard depth < Self.deepest else { return nil }
+        skipSpace()
+        guard at < bytes.count else { return nil }
+        switch bytes[at] {
+        case UInt8(ascii: "{"):
+            at += 1
+            var pairs: [(String, Value)] = []
+            skipSpace()
+            if at < bytes.count, bytes[at] == UInt8(ascii: "}") { at += 1; return .object(pairs) }
+            while true {
+                skipSpace()
+                guard let key = string() else { return nil }
+                skipSpace()
+                guard at < bytes.count, bytes[at] == UInt8(ascii: ":") else { return nil }
+                at += 1
+                guard let value = read(depth: depth + 1) else { return nil }
+                pairs.append((key, value))
+                skipSpace()
+                guard at < bytes.count else { return nil }
+                if bytes[at] == UInt8(ascii: ",") { at += 1; continue }
+                if bytes[at] == UInt8(ascii: "}") { at += 1; return .object(pairs) }
+                return nil
+            }
+        case UInt8(ascii: "["):
+            at += 1
+            var items: [Value] = []
+            skipSpace()
+            if at < bytes.count, bytes[at] == UInt8(ascii: "]") { at += 1; return .array(items) }
+            while true {
+                guard let item = read(depth: depth + 1) else { return nil }
+                items.append(item)
+                skipSpace()
+                guard at < bytes.count else { return nil }
+                if bytes[at] == UInt8(ascii: ",") { at += 1; continue }
+                if bytes[at] == UInt8(ascii: "]") { at += 1; return .array(items) }
+                return nil
+            }
+        case UInt8(ascii: "\""):
+            return string().map { .scalar($0) }
+        default:
+            let start = at
+            while at < bytes.count, !",}] \t\n\r".utf8.contains(bytes[at]) { at += 1 }
+            guard start < at, let word = String(bytes: bytes[start..<at], encoding: .utf8) else { return nil }
+            if word == "null" { return .scalar(nil) }
+            if word == "true" || word == "false" { return .scalar(word) }
+            guard word.allSatisfy({ "0123456789+-.eE".contains($0) }) else { return nil }
+            return .scalar(word)
+        }
+    }
+
+    /// A string at `at`, unescaped, or nothing where there is none.
+    private mutating func string() -> String? {
+        guard at < bytes.count, bytes[at] == UInt8(ascii: "\"") else { return nil }
+        at += 1
+        var out: [UInt8] = []
+        while at < bytes.count {
+            let byte = bytes[at]
+            at += 1
+            switch byte {
+            case UInt8(ascii: "\""):
+                return String(bytes: out, encoding: .utf8)
+            case UInt8(ascii: "\\"):
+                guard at < bytes.count else { return nil }
+                let escaped = bytes[at]
+                at += 1
+                switch escaped {
+                case UInt8(ascii: "n"): out.append(0x0A)
+                case UInt8(ascii: "t"): out.append(0x09)
+                case UInt8(ascii: "r"): out.append(0x0D)
+                case UInt8(ascii: "b"): out.append(0x08)
+                case UInt8(ascii: "f"): out.append(0x0C)
+                case UInt8(ascii: "u"):
+                    guard at + 4 <= bytes.count, let hex = String(bytes: bytes[at..<at + 4], encoding: .ascii),
+                          let unit = UInt16(hex, radix: 16)
+                    else { return nil }
+                    at += 4
+                    // A surrogate pair's halves are read as one; a lone half as the replacement.
+                    var scalar = Unicode.Scalar(unit)
+                    if (0xD800..<0xDC00).contains(unit), at + 6 <= bytes.count, bytes[at] == UInt8(ascii: "\\"),
+                       bytes[at + 1] == UInt8(ascii: "u"),
+                       let low = String(bytes: bytes[at + 2..<at + 6], encoding: .ascii).flatMap({ UInt16($0, radix: 16) }),
+                       (0xDC00..<0xE000).contains(low) {
+                        at += 6
+                        scalar = Unicode.Scalar(0x10000 + (UInt32(unit) - 0xD800) << 10 + (UInt32(low) - 0xDC00))
+                    }
+                    out.append(contentsOf: Array(String(Character(scalar ?? "\u{FFFD}")).utf8))
+                default: out.append(escaped)
+                }
+            default:
+                out.append(byte)
+            }
+        }
+        return nil
     }
 }
 

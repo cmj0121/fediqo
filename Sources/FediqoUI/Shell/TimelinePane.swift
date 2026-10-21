@@ -1369,6 +1369,10 @@ struct TimelinePane: View {
                 afterTranslate: root == nil ? { onOpenThread(item.id) } : nil
             )
         }
+        // Quoting it (#330): the mark live where its source lets the reader, dim with why where not;
+        // and on the reader's own post, who may quote it and its quotes.
+        acting.quote = session.quoteOffer(on: item)
+        acting.ownQuotes = session.ownQuotesOffer(on: item)
         // Changing it (#332): the sheet opens on the reader's own copy, or the sign-in is asked.
         if let offer = session.changeOffer(on: item) {
             acting.change = ItemActing.Change(lock: offer.lock) {

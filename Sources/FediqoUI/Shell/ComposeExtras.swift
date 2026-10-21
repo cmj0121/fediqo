@@ -46,7 +46,15 @@ struct ComposeExtras<PollFooter: View>: View {
             }
             Button(L10n.t("compose.media.add")) { controls.addMedia() }
                 .accessibilityLabel(L10n.t("compose.media.add"))
+                .disabled(controls.quoteBlocks != nil)
             ComposePoll(draft: $draft, controls: controls)
+                .disabled(controls.quoteBlocks != nil)
+            if let blocks = controls.quoteBlocks {
+                Text(blocks)
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             pollFooter()
             if let note = controls.mediaNote {
                 Text(note)

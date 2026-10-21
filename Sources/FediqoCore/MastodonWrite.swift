@@ -119,12 +119,16 @@ public struct MastodonWrite: Sendable {
     /// **`key` is the request's `Idempotency-Key`**: the same text sent again under the same key
     /// is answered, by a source that honours it, with the post it already made — which is what
     /// lets a send nobody confirmed be sent again without posting twice.
+    ///
+    /// **`again`: a try before under this key may have landed.** A quote's 404 is "not allowed"
+    /// only on a first try; on a repeat it is the source's own 404, which says nothing of the
+    /// first (#330).
     @discardableResult
     public func post(
         _ text: String, visibility: Audience, answering: Note? = nil, key: UUID? = nil,
         spoiler: String? = nil, language: String? = nil, sensitive: Bool? = nil,
         mediaIDs: [String] = [], poll: NewPoll? = nil, pollLimits: MastodonPollLimits? = nil,
-        quoting: Note? = nil, quotePolicy: QuotePolicy? = nil
+        quoting: Note? = nil, quotePolicy: QuotePolicy? = nil, again: Bool = false
     ) async throws -> Note {
         // A quote (#330): the quoted post by its id, and nothing it may not carry — before anything else.
         let quote = try Self.quoting(quoting, host: host, mediaIDs: mediaIDs, poll: poll)
@@ -160,8 +164,9 @@ public struct MastodonWrite: Sendable {
                 path: "/api/v1/statuses", form: form,
                 headers: key.map { [Self.idempotencyKey: $0.uuidString] } ?? [:]
             )
-        } catch MastodonAuthError.http(404) where !quote.isEmpty {
+        } catch MastodonAuthError.http(404) where !quote.isEmpty && !(again && key != nil) {
             // What a real one answers a quote it does not allow: the post "does not appear to exist".
+            // Only on a first try: a repeat's 404 may follow a first that landed.
             throw MastodonQuoteError.notAllowed
         }
         guard let note = try? MastodonJSON.decoder.decode(StatusDTO.self, from: data)

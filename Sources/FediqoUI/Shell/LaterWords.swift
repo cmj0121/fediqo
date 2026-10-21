@@ -54,9 +54,11 @@ enum LaterWords {
         return String(format: L10n.t("waiting.missed", language: language), host)
     }
 
-    /// One waiting post's second line: its files and its poll, where it has them.
+    /// One waiting post's second line: that it quotes a post, its files and its poll, where it
+    /// has them.
     static func carries(_ post: WaitingPost, language: DummyLanguage? = nil) -> String? {
         var parts: [String] = []
+        if post.quoting != nil { parts.append(L10n.t("waiting.quote", language: language)) }
         if !post.media.isEmpty { parts.append(String(format: L10n.t("waiting.files", language: language), post.media.count)) }
         if post.poll != nil { parts.append(L10n.t("waiting.poll", language: language)) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")

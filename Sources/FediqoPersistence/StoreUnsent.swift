@@ -34,6 +34,11 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
     var changes: String?
     /// When its source is to send it (#333); NULL for a post sent at once.
     var at: Date?
+    /// The post it quotes (#330), as `changes` names a post; NULL for none. A cell that will not
+    /// read is a text not read at all: sent without it, it would be another post.
+    var quoting: String?
+    /// Who may quote it, where it was chosen; NULL is the account's own default.
+    var quotePolicy: String?
 
     enum CodingKeys: String, CodingKey {
         case id, host, body, audience, answers, root, standing, writer
@@ -42,6 +47,8 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
         case askedAt = "asked_at"
         case spoiler, language, sensitive, media, poll, changes
         case at = "send_at"
+        case quoting
+        case quotePolicy = "quote_policy"
     }
 
     init(_ text: Unsent) {
@@ -63,13 +70,20 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
         poll = text.poll.flatMap { try? JSONEncoder().encode($0) }.flatMap { String(data: $0, encoding: .utf8) }
         changes = text.changes.map { $0.item.rowID + Self.separator + $0.statusID }
         at = text.at
+        quoting = text.quoting.map { $0.item.rowID + Self.separator + $0.statusID }
+        quotePolicy = text.quotePolicy?.rawValue
     }
 
     private static let separator = "\u{1f}"
 
     /// What `changes` names, or nothing where it is NULL; `.none` inside where it will not read.
-    private var changed: Unsent.Changes?? {
-        guard let changes else { return .some(nil) }
+    private var changed: Unsent.Changes?? { Self.named(changes) }
+
+    /// What `quoting` names, the same way.
+    private var quoted: Unsent.Changes?? { Self.named(quoting) }
+
+    private static func named(_ cell: String?) -> Unsent.Changes?? {
+        guard let changes = cell else { return .some(nil) }
         let parts = changes.components(separatedBy: Self.separator)
         guard parts.count == 2, let item = NoteKey(rowID: parts[0]), !parts[1].isEmpty else { return nil }
         return .some(Unsent.Changes(item: item, statusID: parts[1]))
@@ -79,7 +93,7 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
     /// landed, and is never sent again by itself. A reach it does not know is the narrowest, for
     /// the same care. A row with no name of its own cannot be sent under one, and is not read.
     var unsent: Unsent? {
-        guard let id = UUID(uuidString: id), let changed else { return nil }
+        guard let id = UUID(uuidString: id), let changed, let quoted else { return nil }
         return Unsent(
             id: id, host: host, text: body, audience: Audience(rawValue: audience) ?? .mentioned,
             answers: answers.flatMap(NoteKey.init(rowID:)), root: root.flatMap(NoteKey.init(rowID:)),
@@ -87,7 +101,8 @@ private struct UnsentRecord: Codable, FetchableRecord, PersistableRecord {
             writerID: writerID, writer: writer, askedAt: askedAt,
             spoiler: spoiler, language: language, sensitive: sensitive, media: UnsentMediaRow.list(media),
             poll: poll.flatMap { try? JSONDecoder().decode(NewPoll.self, from: Data($0.utf8)) },
-            changes: changed, at: at
+            changes: changed, at: at, quoting: quoted,
+            quotePolicy: quotePolicy.flatMap(QuotePolicy.init(rawValue:))
         )
     }
 }

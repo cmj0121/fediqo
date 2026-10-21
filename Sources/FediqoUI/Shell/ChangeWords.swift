@@ -16,6 +16,13 @@ enum ChangeWords {
         return line
     }
 
+    /// A waiting quote's fixed line (#330): that what it quotes stays. Nothing for a waiting post
+    /// that quotes nothing.
+    static func waitingQuoteLine(_ post: WaitingPost?, language: DummyLanguage? = nil) -> String? {
+        guard let post, post.quoting != nil else { return nil }
+        return L10n.t("change.waiting.quote", language: language)
+    }
+
     static func fixedLine(language: DummyLanguage? = nil) -> String {
         L10n.t("change.fixed", language: language)
     }

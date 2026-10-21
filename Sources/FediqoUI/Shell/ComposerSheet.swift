@@ -67,7 +67,7 @@ struct ComposerSheet: View {
         let host = session.composeHost
         let limit = host.map(session.postLimit(of:)) ?? MastodonWrite.defaultLimit
         WritingSheet(
-            titleKey: "compose.title",
+            titleKey: session.composeDraft.quoting == nil ? "compose.title" : "compose.title.quote",
             sendKey: session.composeDraft.at == nil ? "compose.post" : "compose.later.post",
             bodyKey: "compose.body",
             draft: $session.composeDraft.text,
@@ -94,6 +94,8 @@ struct ComposerSheet: View {
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             } else if !offered.isEmpty {
+                // A quote (#330): the quoted post above, the source fixed to where it was read.
+                if session.composeDraft.quoting != nil { QuoteHead(session: session) }
                 ComposeChoices(session: session, offered: offered)
                     .pickerStyle(.menu)
                 ComposeExtras(draft: $session.composeDraft, controls: .composer(session, limit: limit)) { EmptyView() }
@@ -103,6 +105,8 @@ struct ComposerSheet: View {
         .task(id: session.composeHost) {
             await session.refreshPostLimit()
             await session.loadComposeDefaults()
+            // Whether the source has quotes, by its own account of itself (D6).
+            if let host = session.composeHost { await session.quoting.hosts?.hear(host, in: session) }
         }
         .fileImporter(
             isPresented: $session.composeImporting,
@@ -149,13 +153,16 @@ private struct ComposeChoices: View {
 
     @ViewBuilder
     private var choices: some View {
-        Picker(L10n.t("compose.source"), selection: $session.composeHost) {
-            ForEach(offered, id: \.host) { source in
-                Text(source.host).tag(Optional(source.host))
+        // A quote's source is the quoted post's: no choice of it (X0 §3).
+        if session.composeDraft.quoting == nil {
+            Picker(L10n.t("compose.source"), selection: $session.composeHost) {
+                ForEach(offered, id: \.host) { source in
+                    Text(source.host).tag(Optional(source.host))
+                }
             }
+            .shellFont(.meta)
+            .accessibilityLabel(L10n.t("compose.source"))
         }
-        .shellFont(.meta)
-        .accessibilityLabel(L10n.t("compose.source"))
         Picker(L10n.t("compose.visibility"), selection: Binding(
             get: { session.composeDraft.audience },
             set: { session.chooseAudience($0) }
@@ -166,6 +173,9 @@ private struct ComposeChoices: View {
         }
         .shellFont(.meta)
         .accessibilityLabel(L10n.t("compose.visibility"))
+        if let host = session.composeHost, session.quotesOffered(host: host) == true {
+            QuotePolicyMenu(draft: $session.composeDraft, host: host)
+        }
     }
 }
 

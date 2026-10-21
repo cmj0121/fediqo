@@ -151,6 +151,23 @@ struct MastodonQuoteWriteTests {
             "POST /api/v1/statuses": .init(body: MastodonQuoteWriteCaptures.notAllowed, status: 404),
         ])
         await #expect(throws: MastodonQuoteError.notAllowed) { try await refused.post("no", visibility: .everyone, quoting: quoted) }
+        await #expect(throws: MastodonQuoteError.notAllowed, "a first try's 404 under a key is not allowed") {
+            try await refused.post("no", visibility: .everyone, key: UUID(), quoting: quoted)
+        }
+        // A repeat under a used key: its 404 says nothing of the first, which may have landed.
+        await #expect(throws: MastodonAuthError.http(404)) {
+            try await refused.post("no", visibility: .everyone, key: UUID(), quoting: quoted, again: true)
+        }
+        // Sent later: a first try's 404 is the quote not allowed; a repeat's, under its used key,
+        // is one that may already wait there.
+        let clock = Date(timeIntervalSince1970: 1_792_000_000)
+        let at = clock.addingTimeInterval(3600)
+        await #expect(throws: MastodonQuoteError.notAllowed) {
+            _ = try await refused.postLater("no", visibility: .everyone, at: at, key: UUID(), sourceNow: clock, quoting: quoted)
+        }
+        await #expect(throws: MastodonLaterError.mayHaveBeenMade) {
+            _ = try await refused.postLater("no", visibility: .everyone, at: at, key: UUID(), sourceNow: clock, quoting: quoted, again: true)
+        }
     }
 
     @Test("Who may quote one's own post is changed by its policy and lands on its row; quotes of it are read on by the source's next to the end, none twice; one revoked reads as revoked")

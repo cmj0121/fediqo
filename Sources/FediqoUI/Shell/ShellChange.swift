@@ -116,7 +116,7 @@ final class ShellChange {
         let fresh = PostDraft(
             text: post.text, cover: post.spoiler, language: post.language ?? "", coversMedia: post.sensitive,
             media: post.media.enumerated().map { ChangeWords.kept($0.element, at: $0.offset) }, poll: post.poll,
-            audience: post.audience ?? .everyone, at: post.at
+            audience: post.audience ?? .everyone, at: post.at, quotePolicy: post.quotePolicy
         )
         started = fresh
         draft = typed ?? fresh
@@ -208,9 +208,15 @@ final class ShellChange {
                 var always = slot
                 always.optional = false
                 return always
-            }
+            },
+            // A waiting quote stays a quote (#330): files and a poll dim, as when writing one (D3).
+            quoteBlocks: quotesFixed ? L10n.t("compose.quote.noMedia") : nil
         )
     }
+
+    /// Whether the sheet is open on a waiting post that quotes another: what it quotes is fixed,
+    /// and it carries no file nor poll. Who may quote it changes, as on any waiting post.
+    var quotesFixed: Bool { waiting?.post.quoting != nil }
 
     /// What the poll's place says: that a file keeps a poll out, or why the poll cannot go.
     func pollSays(in session: ShellSession) -> String? {
@@ -225,6 +231,7 @@ final class ShellChange {
     func canSave(in session: ShellSession) -> Bool {
         guard phase == .ready, open != nil || (waiting != nil && draft.at != nil) else { return false }
         if waiting != nil, session.laterSlot(host: host)?.locked != nil { return false }
+        if quotesFixed, draft.poll != nil || !draft.media.isEmpty { return false }
         return draft.canSend(
             limit: session.postLimit(of: host), hasSource: session.mastodon.authorized(host: host, for: .write) != nil,
             media: session.mediaLimits(of: host), polls: session.pollLimits(of: host)
@@ -232,6 +239,7 @@ final class ShellChange {
     }
 
     private func addPoll(in session: ShellSession) {
+        guard !quotesFixed else { return }
         guard draft.media.isEmpty else {
             mediaNote = ComposeWords.refusalLine(.pollWithMedia, host: host)
             return
@@ -240,6 +248,7 @@ final class ShellChange {
     }
 
     private func addMedia(in session: ShellSession) {
+        guard !quotesFixed else { return }
         if draft.poll != nil {
             mediaNote = ComposeWords.refusalLine(.pollWithMedia, host: host)
             return

@@ -196,6 +196,41 @@ struct MastodonLaterSaysTests {
         }
     }
 
+    @Test("A waiting quote is listed quoting its post with who may quote it, as the last of the keys its params name twice say; changed, the new one is still that quote with that policy, and the old is gone; changed with another policy, it waits with that one")
+    func aQuoteChanged() async throws {
+        try await LocalServers.requireHealthy()
+        let (write, _, writer) = try Self.writer()
+        let quoted = try await write.post("fediqo-seams to quote \(UUID().uuidString.prefix(6))", visibility: .unlisted, quotePolicy: .anyone)
+        let quotedID = try #require(quoted.statusID)
+        // The quoted post is taken back however the check ends: one taking back, of the thirty.
+        var thrown: (any Error)?
+        do { try await Self.waiting(as: writer) { made in
+            let at = MastodonLater.earliest().addingTimeInterval(3600)
+            let old = try await write.postLater(
+                "a waiting quote", visibility: .everyone, at: at, key: UUID(), quoting: quoted, quotePolicy: .followers
+            )
+            made.append(old.id)
+            #expect(old.quoting == quotedID && old.quotePolicy == .followers)
+            let listed = try await write.waiting().posts.first { $0.id == old.id }
+            #expect(listed?.quoting == quotedID && listed?.quotePolicy == .followers, "listed as it was made")
+            let changed = try await write.change(old, to: "a waiting quote, changed", visibility: .everyone, at: at.addingTimeInterval(600))
+            let new = try #require(changed.new)
+            made.append(new.id)
+            #expect(!changed.oldStays && new.quoting == quotedID && new.quotePolicy == .followers)
+            let after = try await write.waiting().posts.first { $0.id == new.id }
+            #expect(after?.quoting == quotedID && after?.quotePolicy == .followers && after?.text == "a waiting quote, changed")
+            #expect(try await Self.ask("/api/v1/scheduled_statuses/\(old.id)", as: writer).status == 404)
+
+            // Who may quote it changed with the rest: the next one waits with the policy chosen.
+            let narrowed = try #require(try await write.change(new, to: "a waiting quote, nobody", visibility: .everyone, at: at, quotePolicy: .some(.nobody)).new)
+            made.append(narrowed.id)
+            let listedNarrowed = try await write.waiting().posts.first { $0.id == narrowed.id }
+            #expect(listedNarrowed?.quoting == quotedID && listedNarrowed?.quotePolicy == .nobody)
+        } } catch { thrown = error }
+        _ = try? await Self.ask("/api/v1/statuses/\(quotedID)", as: writer, "DELETE")
+        if let thrown { throw thrown }
+    }
+
     @Test("A waiting post changed is a new one made first and the old let go after: the new waits with the change, the old is gone, the old's file is the new one's from the moment it is made and stays when the old is let go, and nothing is held here")
     func aChange() async throws {
         try await LocalServers.requireHealthy()

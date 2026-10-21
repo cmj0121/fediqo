@@ -105,6 +105,11 @@ public struct Unsent: Hashable, Sendable, Identifiable {
     /// source to hold**: it lands as a post that waits there, not as an item, and is not held
     /// here once its source took it.
     public var at: Date?
+    /// The post this one quotes (#330), by its row and its source's id; nothing where it quotes none.
+    public var quoting: Changes?
+    /// Who may quote this one, where it was chosen; nothing is the account's own default, and
+    /// nothing is sent for it (Decision 8, §7.6).
+    public var quotePolicy: QuotePolicy?
 
     /// Which post a change is of: the row, and the id its source gave the post.
     public struct Changes: Hashable, Sendable {
@@ -122,7 +127,8 @@ public struct Unsent: Hashable, Sendable, Identifiable {
         answers: NoteKey? = nil, root: NoteKey? = nil, pressedAt: Date = Date(), standing: Standing = .fresh,
         writerID: String? = nil, writer: String? = nil, askedAt: Date? = nil,
         spoiler: String? = nil, language: String? = nil, sensitive: Bool? = nil, media: [UnsentMedia] = [],
-        poll: NewPoll? = nil, changes: Changes? = nil, at: Date? = nil
+        poll: NewPoll? = nil, changes: Changes? = nil, at: Date? = nil, quoting: Changes? = nil,
+        quotePolicy: QuotePolicy? = nil
     ) {
         self.writerID = writerID
         self.writer = writer
@@ -143,6 +149,8 @@ public struct Unsent: Hashable, Sendable, Identifiable {
         self.poll = poll
         self.changes = changes
         self.at = at
+        self.quoting = quoting
+        self.quotePolicy = quotePolicy
     }
 }
 

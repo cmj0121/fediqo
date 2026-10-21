@@ -79,7 +79,7 @@ struct MastodonLaterTests {
     }
 
     private static func waiting(_ json: String) throws -> WaitingPost {
-        try #require(try MastodonJSON.decoder.decode(WaitingDTO.self, from: Data(json.utf8)).waiting)
+        try #require(WaitingDTO.one(from: Data(json.utf8)))
     }
 
     /// A waiting post as the source answers one, at `at`, saying `text`.
@@ -106,6 +106,67 @@ struct MastodonLaterTests {
         #expect(try Self.waiting(Captures.answer).answering == "117476930889022363", "every digit of an id too large for a double")
         let huge = try Self.waiting(Self.made("4", "x", answering: "123456789012345678901234567890"))
         #expect(huge.answering == "123456789012345678901234567890", "an id past every integer type, kept as its digits")
+    }
+
+    @Test("A waiting quote reads what it quotes and who may quote it from the last of the keys its source names twice — the id as a string, the policy as its word — in either order; a post that quotes nothing quotes nothing")
+    func aWaitingQuote() async throws {
+        let quote = try Self.waiting(Captures.quote)
+        #expect(quote.quoting == "117477716262721165" && quote.quotePolicy == .followers, "the last: a string id, every digit, and the word")
+        #expect(try Self.waiting(Captures.quoteNobody).quotePolicy == .nobody)
+        #expect(try Self.waiting(Captures.withMedia).quoting == nil && Self.waiting(Captures.withMedia).quotePolicy == .anyone)
+        let server = LaterServer(["GET \(Self.list)": [.json(Captures.quoteListed)]])
+        let (write, _) = try await writer(server)
+        let listed = try await write.waiting()
+        #expect(listed.posts.map(\.quoting) == ["117477716262721165"] && listed.posts.map(\.quotePolicy) == [.followers], "listed, in the list's own order")
+
+        // The reader keeps every key named twice, and reads nothing from what is not JSON.
+        var reader = LastSaid(Array(#"{"a":1,"b":"x\"\u00e9\ud83d\ude00","a":null,"c":[true,{}]}"#.utf8))
+        let value = reader.value()
+        let read = try #require(value)
+        #expect(read.last("a") == .scalar(nil) && read.last("b")?.text == "x\"é😀")
+        var broken = LastSaid(Array(#"{"a":1,"#.utf8))
+        let none = broken.value()
+        #expect(none == nil)
+        #expect(WaitingDTO.quotes(in: Data("not json".utf8)).isEmpty)
+    }
+
+    @Test("A waiting quote changed stays a quote: the new one quotes the same post by its id, with who may quote it as it waits — nobody where it now goes to followers alone — and the old is let go after")
+    func aQuoteChanged() async throws {
+        let old = try Self.waiting(Captures.quote)
+        let server = LaterServer([
+            "POST /api/v1/statuses": [
+                .json(Captures.quote.replacingOccurrences(of: #""id":"148""#, with: #""id":"151""#)), .json(Captures.quote), .json(Captures.quote),
+                .json(Captures.quote),
+            ],
+            "DELETE /api/v1/scheduled_statuses/148": [.json("{}"), .json("{}"), .json("{}"), .json("{}")],
+        ])
+        let (write, _) = try await writer(server)
+        let changed = try await write.change(old, to: "changed", visibility: .everyone, at: Self.at, sourceNow: Self.now)
+        #expect(changed.new?.quoting == "117477716262721165" && changed.new?.quotePolicy == .followers && !changed.oldStays)
+        let sent = Self.pairs(await server.requests.first)
+        #expect(sent.contains { $0 == ("quoted_status_id", "117477716262721165") } && sent.contains { $0 == ("quote_approval_policy", "followers") })
+        _ = try await write.change(old, to: "changed", visibility: .followers, at: Self.at, sourceNow: Self.now)
+        let narrowed = Self.pairs(await server.requests.filter { $0.httpMethod == "POST" }.last)
+        #expect(narrowed.contains { $0 == ("quote_approval_policy", "nobody") } && narrowed.contains { $0 == ("quoted_status_id", "117477716262721165") })
+
+        // Who may quote it as chosen; nothing inside it, the account's own and nothing sent.
+        _ = try await write.change(old, to: "changed", visibility: .everyone, at: Self.at, sourceNow: Self.now, quotePolicy: .some(.anyone))
+        var chosen = Self.pairs(await server.requests.filter { $0.httpMethod == "POST" }.last)
+        #expect(chosen.contains { $0 == ("quote_approval_policy", "public") })
+        _ = try await write.change(old, to: "changed", visibility: .everyone, at: Self.at, sourceNow: Self.now, quotePolicy: .some(nil))
+        chosen = Self.pairs(await server.requests.filter { $0.httpMethod == "POST" }.last)
+        #expect(!chosen.contains { $0.0 == "quote_approval_policy" } && chosen.contains { $0 == ("quoted_status_id", "117477716262721165") })
+
+        // A quote carries no file nor poll; an id that is no source's is not sent.
+        let bare = LaterServer([:])
+        let (none, _) = try await writer(bare)
+        await #expect(throws: MastodonQuoteError.carries) {
+            _ = try await none.change(old, to: "x", visibility: .everyone, at: Self.at, mediaIDs: ["m1"], sourceNow: Self.now)
+        }
+        await #expect(throws: MastodonQuoteError.unfindable) {
+            _ = try await none.postLater("x", visibility: .everyone, at: Self.at, sourceNow: Self.now, quotingID: "../1")
+        }
+        #expect(await bare.asked.allSatisfy { !$0.hasPrefix("POST") }, "nothing sent")
     }
 
     @Test("What waits is read on by the id cursor, and an entry that cannot be read costs no other")

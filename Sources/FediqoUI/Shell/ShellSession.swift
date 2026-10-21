@@ -1072,6 +1072,8 @@ final class ShellSession {
     @ObservationIgnored let changes = ShellChange()
     /// What waits at a source to be sent later, in its sheet (#333).
     @ObservationIgnored let later = ShellLater()
+    /// Quoting (#330): a quote begun, who may quote one's own posts, and their quotes.
+    @ObservationIgnored let quoting = ShellQuoting()
     /// The source the composer will write to, among those that may be written on.
     var composeHost: String?
     /// Why a file was not added, or nothing.
@@ -1349,6 +1351,8 @@ final class ShellSession {
     var canPost: Bool {
         // A time to send where the sign-in may not give one (#333): the post waits for that.
         if composeDraft.at != nil, composeHost.flatMap({ laterSlot(host: $0) })?.locked != nil { return false }
+        // A quote carries neither files nor a poll (D3).
+        if composeDraft.quoting != nil, !composeDraft.media.isEmpty || composeDraft.poll != nil { return false }
         let hostOK = composeHost.map { host in writableSources.contains { $0.host == host } } ?? false
         return ComposerSheet.canSend(
             text: composeDraft.text,

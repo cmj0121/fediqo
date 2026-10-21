@@ -57,6 +57,21 @@ struct ChangeStoreTests {
         #expect(try superseded(dir.appendingPathComponent("index.sqlite"), knowingNo: "v22-unsent-at"))
     }
 
+    @Test("A quote waiting to be sent comes back with the post it quotes and who may quote it; a build that knows no v23-unsent-quoting sees a store with one as newer")
+    func aQuoteComesBack() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let quoting = Unsent.Changes(item: NoteKey(host: Self.mastodon.host, id: "https://one.example/users/ada/statuses/7"), statusID: "7")
+        let quote = Unsent(
+            host: Self.mastodon.host, text: "quoting", audience: .everyone, pressedAt: PackagerFixture.origin,
+            quoting: quoting, quotePolicy: .followers
+        )
+        try await StoreFile(at: dir).save(unsent: [quote])
+        let read = try #require(StoreFile.open(at: dir).unsent.first)
+        #expect(read == quote && read.quoting == quoting && read.quotePolicy == .followers)
+        #expect(try superseded(dir.appendingPathComponent("index.sqlite"), knowingNo: "v23-unsent-quoting"))
+    }
+
     @Test("A build that knows no v20-unsent-changes sees a store with a change waiting as newer, and would not send it as a post")
     func aBuildBeforeChangesRefusesIt() async throws {
         let dir = scratch()

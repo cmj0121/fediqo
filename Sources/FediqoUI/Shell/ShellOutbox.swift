@@ -108,6 +108,8 @@ final class ShellOutbox {
         /// The post a change is of is not held, or its source has said it is gone (#332): the
         /// change has nowhere to go.
         case changeGone
+        /// The post a quote quotes is not held, or its source has said it is gone (#330).
+        case quotedGone
     }
 
     /// How long after a text's source was first asked it is still sent again under its key
@@ -138,6 +140,9 @@ final class ShellOutbox {
     /// what the screens hold — a row let go for room while a change of it waits is not a post
     /// gone. For the run; a launch fills it from the store as it follows each change.
     @ObservationIgnored private var changeTargets: [UUID: Note] = [:]
+    /// The post each quote quotes, as it was held when the quote was taken (#330): what it goes
+    /// to while it waits, whether or not its row is still among what the screens hold.
+    @ObservationIgnored private var quoteTargets: [UUID: Note] = [:]
     /// The texts whose source was asked and never said yes or no in a way that settles it —
     /// this run, the one before, or through another window, as the store says (`follow`).
     /// **Once a text may have landed, nothing but a yes says otherwise**: a later try that
@@ -280,6 +285,7 @@ final class ShellOutbox {
         _ unsent: Unsent, answering target: AnswerTarget? = nil, replacing old: UUID? = nil, in session: ShellSession
     ) {
         guard sending(unsent.id) == nil else { return }
+        if let quoting = unsent.quoting, let held = session.note(ofRow: quoting.item.rowID) { quoteTargets[unsent.id] = held }
         wroteWith[unsent.id] = session.mastodon.token(host: unsent.host)?.accessToken
         targets[unsent.id] = target
         let taken = Sending(unsent: unsent, standing: .waiting)
@@ -526,6 +532,7 @@ final class ShellOutbox {
         wroteWith[id] = nil
         targets[id] = nil
         changeTargets[id] = nil
+        quoteTargets[id] = nil
         keeps[id] = nil
         mayHaveLanded.remove(id)
         sentUnkept.remove(id)
@@ -576,7 +583,19 @@ final class ShellOutbox {
         }
         if sending.unsent.answers != nil, answered(sending.unsent, in: session) == nil { return .answeredGone }
         if sending.unsent.changes != nil, changed(sending.unsent, in: session) == nil { return .changeGone }
+        if sending.unsent.quoting != nil, quoted(sending.unsent, in: session) == nil { return .quotedGone }
         return nil
+    }
+
+    /// The post a quote quotes, where it is held — on the screens, or kept here for the quote — at
+    /// the quote's own source, by the id it was taken for, and not gone (#330).
+    private func quoted(_ unsent: Unsent, in session: ShellSession) -> Note? {
+        guard let quoting = unsent.quoting,
+              let note = session.note(ofRow: quoting.item.rowID) ?? quoteTargets[unsent.id],
+              note.key == quoting.item, note.source.host == unsent.host, note.goneSince == nil,
+              note.sendableID == quoting.statusID
+        else { return nil }
+        return note
     }
 
     /// The post a change is of, where it is held — on the screens, or kept here for the change
@@ -823,6 +842,11 @@ final class ShellOutbox {
             return .declined
         case is MultipartError:
             return .unreachable
+        // A quote this app refused before the wire, or its source would not let through (#330).
+        case MastodonQuoteError.notAllowed:
+            return .declined
+        case is MastodonQuoteError:
+            return .unreachable
         case is OutwardRefusal:
             return .unreachable
         case let error as URLError:
@@ -951,16 +975,20 @@ final class ShellOutbox {
         // **Asked again after the waits, and nothing awaited from here to the request**: the
         // sign-in, who it is, and the post answered are as they are now, not as they were
         // before the write. Where any is not, nothing leaves, and it was never asked.
-        guard let (door, answering) = ready(unsent, in: session) else {
+        // The post a quote quotes is resolved here, once, and that note is what is sent: one gone
+        // meanwhile holds the text (`quotedGone`), never sends it as a post that quotes nothing.
+        guard let (door, answering, quoting) = ready(unsent, in: session) else {
             if let at = sendings.firstIndex(where: { $0.id == id }) { sendings[at].unsent = before }
             return await missed(id, .unreachable, in: session)
         }
+        // A try before may have landed under this key: its source's 404 is then no refusal.
+        let again = mayHaveLanded.contains(id)
         lastAsked[id] = asking
         if unsent.changes != nil, let post = answering {
             return await sendChange(unsent, of: post, through: door, id: id, in: session)
         }
         if let at = unsent.at {
-            return await sendLater(unsent, at: at, through: door, id: id, in: session)
+            return await sendLater(unsent, at: at, through: door, id: id, again: again, in: session)
         }
         do {
             let note = try await session.reach.write(door, landingIn: session.store)
@@ -968,7 +996,8 @@ final class ShellOutbox {
                     unsent.text, visibility: unsent.audience, answering: answering, key: id,
                     spoiler: unsent.spoiler, language: unsent.language, sensitive: unsent.sensitive,
                     mediaIDs: unsent.media.compactMap(\.remoteID).filter { !$0.isEmpty },
-                    poll: unsent.poll, pollLimits: session.composeRooms[host]?.polls
+                    poll: unsent.poll, pollLimits: session.composeRooms[host]?.polls,
+                    quoting: quoting, quotePolicy: unsent.quotePolicy, again: again
                 )
             if let root = unsent.root {
                 let rootID = targets[id]?.root.statusID ?? session.note(ofRow: root.rowID)?.statusID
@@ -977,6 +1006,11 @@ final class ShellOutbox {
             await session.reloadFromStore()
             drop(id)
             await session.store.letGo(unsent: id)
+            // A quote whose quoted post's author is asked first is up, and says so (X0 §3).
+            if unsent.quoting != nil, note.quote?.state == .pending {
+                let whom = session.note(ofRow: unsent.quoting?.item.rowID ?? "")?.handle ?? ""
+                session.said.say(Said(.quoteAsked(id, whom: whom), .unconfirmed, host: host))
+            }
             // The post is the source's, and is written behind its landing — by a save that
             // writes the texts again too, where the write of them here did not land.
             if await wroteGone(in: session) { session.saveSoon() }
@@ -1031,7 +1065,9 @@ final class ShellOutbox {
     /// with the way to what waits. Under its own key, so a try whose answer was lost is looked for
     /// among what waits before anything else is said; one its source published at once instead is
     /// said so, never taken for waiting.
-    private func sendLater(_ unsent: Unsent, at: Date, through door: MastodonAuthorized, id: UUID, in session: ShellSession) async {
+    private func sendLater(
+        _ unsent: Unsent, at: Date, through door: MastodonAuthorized, id: UUID, again: Bool, in session: ShellSession
+    ) async {
         let write = session.reach.write(door, landingIn: session.store)
         let host = unsent.host
         let ids = unsent.media.compactMap(\.remoteID).filter { !$0.isEmpty }
@@ -1044,12 +1080,12 @@ final class ShellOutbox {
         func look(at when: Date) async -> WaitingPost? {
             try? await write.findWaiting(
                 unsent.text, at: when, visibility: unsent.audience, spoiler: unsent.spoiler, sensitive: unsent.sensitive,
-                mediaIDs: ids, poll: unsent.poll
+                mediaIDs: ids, poll: unsent.poll, quoting: unsent.quoting?.statusID
             )
         }
         // **A try before may have made it**: looked for first, at the time it was sent — and never
         // made again blind, which past its key's life the source would take as a second post.
-        if mayHaveLanded.contains(id), let found = await look(at: at) {
+        if again, let found = await look(at: at) {
             return await landed(.waits(at: found.at, moved: false))
         }
         do {
@@ -1062,10 +1098,14 @@ final class ShellOutbox {
                 if let index = sendings.firstIndex(where: { $0.id == id }) { sendings[index].unsent = kept }
                 if await session.store.hold(kept) { _ = await session.persistUnsent?() }
             }
+            // **Asked again after the clock's wait**, nothing awaited from here to the request: a
+            // quoted post gone meanwhile holds the text (`quotedGone`), never sends it plain.
+            guard let (_, _, quoting) = ready(unsent, in: session) else { return await missed(id, .unreachable, in: session) }
             let waiting = try await write.postLater(
                 unsent.text, visibility: unsent.audience, at: when, key: id, spoiler: unsent.spoiler,
                 language: unsent.language, sensitive: unsent.sensitive, mediaIDs: ids, poll: unsent.poll,
-                pollLimits: session.composeRooms[host]?.polls, sourceNow: clock
+                pollLimits: session.composeRooms[host]?.polls, sourceNow: clock,
+                quoting: quoting, quotePolicy: unsent.quotePolicy, again: again
             )
             await landed(.waits(at: waiting.at, moved: moved))
         } catch MastodonLaterError.sentNow {
@@ -1125,7 +1165,7 @@ final class ShellOutbox {
         {
             return .missed(.unreachable)
         }
-        guard let (door, _) = ready(unsent, in: session) else { return .missed(.unreachable) }
+        guard let (door, _, _) = ready(unsent, in: session) else { return .missed(.unreachable) }
         var current = unsent
         for index in current.media.indices {
             if let remote = current.media[index].remoteID, !remote.isEmpty { continue }
@@ -1154,17 +1194,25 @@ final class ShellOutbox {
 
     /// What a text needs to leave, as things stand at this moment: a sign-in at its source that
     /// may write and is shown to be who wrote it, and — for an answer — the post it answers,
-    /// held and still answerable. Nothing where any is missing. No wait inside.
-    private func ready(_ unsent: Unsent, in session: ShellSession) -> (door: MastodonAuthorized, answering: Note?)? {
+    /// held and still answerable; for a quote, the post it quotes, held and not gone (#330).
+    /// Nothing where any is missing. No wait inside.
+    private func ready(
+        _ unsent: Unsent, in session: ShellSession
+    ) -> (door: MastodonAuthorized, answering: Note?, quoting: Note?)? {
         let host = unsent.host
         guard let door = session.mastodon.authorized(host: host, for: .write),
               session.writableSources.contains(where: { $0.host == host }),
               writes(unsent, in: session)
         else { return nil }
-        if unsent.changes != nil { return changed(unsent, in: session).map { (door, $0) } }
-        guard unsent.answers != nil else { return (door, nil) }
+        if unsent.changes != nil { return changed(unsent, in: session).map { (door, $0, nil) } }
+        var quoting: Note?
+        if unsent.quoting != nil {
+            guard let note = quoted(unsent, in: session) else { return nil }
+            quoting = note
+        }
+        guard unsent.answers != nil else { return (door, nil, quoting) }
         guard let note = answered(unsent, in: session) else { return nil }
-        return (door, note)
+        return (door, note, quoting)
     }
 
     /// A send known not to have gone: the entry says why, and what is written down says
@@ -1299,6 +1347,7 @@ enum OutboxWords {
         case .noSource?: return said("hold.noSource")
         case .answeredGone?: return said("hold.answered")
         case .changeGone?: return String(format: L10n.t("outbox.hold.changeGone", language: language), host)
+        case .quotedGone?: return String(format: L10n.t("outbox.hold.quotedGone", language: language), host)
         case .otherAccount(let here)?:
             // A handle is its source's word: set in a sentence of ours only made fit for one.
             guard let writer = sending.unsent.writer.map({ LineText.oneLine($0) }) else { return said("hold.unnamed") }
@@ -1350,7 +1399,7 @@ extension ShellSession {
                 spoiler: ComposerSheet.trimmed(composeDraft.cover),
                 language: composeDraft.language.isEmpty ? nil : composeDraft.language,
                 sensitive: composeDraft.coversMedia, media: composeDraft.media, poll: composeDraft.poll,
-                at: composeDraft.at
+                at: composeDraft.at, quoting: composeDraft.quoting, quotePolicy: composeDraft.quotePolicySent
             ),
             in: self
         )
@@ -1362,6 +1411,7 @@ extension ShellSession {
         composeMediaNote = nil
         composeDraft.poll = nil
         composeDraft.at = nil
+        composeDraft.quoting = nil
         composePollRefused = nil
         return true
     }

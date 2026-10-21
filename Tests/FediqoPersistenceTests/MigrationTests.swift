@@ -167,7 +167,7 @@ struct MigrationTests {
         #expect(opened.notes.first { $0.id == "m5" }?.boosterHandle == nil)
         #expect(Holdings(notes: opened.notes, per: .month, calendar: utc) == counted)
         #expect(counted.posts == 8)
-        #expect(try migrations(index) == ["v1-index", "v10-references", "v11-one-holding", "v12-references-only", "v13-unsent", "v14-notices", "v15-compose", "v16-poll", "v17-marks", "v18-standing", "v19-card", "v2-categories", "v20-unsent-changes", "v21-quotes", "v22-unsent-at", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions", "v9-language"])
+        #expect(try migrations(index) == ["v1-index", "v10-references", "v11-one-holding", "v12-references-only", "v13-unsent", "v14-notices", "v15-compose", "v16-poll", "v17-marks", "v18-standing", "v19-card", "v2-categories", "v20-unsent-changes", "v21-quotes", "v22-unsent-at", "v23-unsent-quoting", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions", "v9-language"])
         // And no source has been heard from about itself yet (#188): a word nothing kept is none.
         #expect(opened.said.isEmpty)
         // And no source has said any of them went (#179).

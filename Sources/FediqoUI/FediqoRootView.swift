@@ -410,6 +410,7 @@ public struct FediqoRootView: View {
             .modifier(UnsentPresenters(session: session))
             .modifier(ChangePresenter(session: session))
             .modifier(LaterPresenter(session: session))
+            .modifier(QuotePresenter(session: session, hosts: people.postActs.hosts, composing: $composing))
             // An answer, over the conversation it belongs to (#108). Driven by the session's one
             // value, so the key and the mark open the same surface by writing the same thing.
             .sheet(item: $session.answering) { target in

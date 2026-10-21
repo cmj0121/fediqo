@@ -92,6 +92,20 @@
 "compose.later.post" = "Post later";
 "compose.later.when" = "Send it at";
 "compose.later.line" = "%@ sends it then. It waits there, not on this device.";
+"compose.title.quote" = "Quote a post";
+"compose.quote.through" = "Through %@, where the quoted post was read.";
+"compose.quote.remove" = "Don't quote it";
+"compose.quote.noMedia" = "A quote cannot carry media or a poll.";
+"compose.quote.drop.title" = "Quote it, and drop what is attached?";
+"compose.quote.drop.line" = "A quote cannot carry media or a poll. What you attached goes; your words stay.";
+"compose.quote.drop.confirm" = "Drop them and quote";
+"compose.quote.drop.keep" = "Keep them, don't quote";
+"compose.quotePolicy" = "Who may quote it";
+"compose.quotePolicy.public" = "Anyone";
+"compose.quotePolicy.followers" = "Your followers";
+"compose.quotePolicy.nobody" = "Only you";
+"compose.quotePolicy.unsaid" = "As your account at %@ is set";
+"compose.quotePolicy.private" = "Others cannot quote a post only your followers or the people it mentions can read.";
 "change.title" = "Change your post";
 "change.save" = "Save";
 "change.where" = "At %1$@ · %2$@";
@@ -109,6 +123,7 @@
 "change.title.waiting" = "Change a waiting post";
 "change.waiting.where" = "Waiting at %@";
 "change.waiting.answers" = "What it answers stays as it was.";
+"change.waiting.quote" = "What it quotes stays as it was.";
 "answer.title" = "Answer";
 "answer.to" = "Answering %@";
 "answer.goesTo" = "Goes to %@";
@@ -397,6 +412,15 @@
 "quote.state.unauthorized" = "Quotes a post you may not see.";
 "quote.state.blockedAccount" = "Quotes a post by someone you blocked.";
 "quote.state.blockedDomain" = "Quotes a post from a server you blocked.";
+"quotes.title" = "Quotes of your post";
+"quotes.whose" = "As %@ says.";
+"quotes.none" = "%@ knows of no post quoting this one.";
+"quotes.failed" = "%@ could not be asked who quoted it.";
+"quotes.revoke" = "Take back your permission";
+"quotes.revoke.title" = "Take back %@'s quote?";
+"quotes.revoke.line" = "Their post stays at %@, but no longer shows yours. It does not come back.";
+"quotes.revoked" = "Taken back";
+"quotes.revoke.missed" = "%@ could not be reached, so the quote was not taken back.";
 "quote.state.mutedAccount" = "Quotes a post by someone you muted.";
 "quote.state.unknown" = "Quotes a post that cannot be shown here.";
 "quote.decorator" = "quoting %@";
@@ -455,6 +479,9 @@
 "item.act.answer" = "Answer";
 "item.act.quote" = "Quote";
 "item.act.quote.no" = "Quoting cannot be done here yet";
+"item.act.quote.denied" = "%@ does not let you quote this post.";
+"item.act.quote.manual" = "%@ is asked first; your post says so until they allow it.";
+"item.act.quote.host" = "%@ does not take quotes.";
 "item.mark.why" = "%1$@: %2$@";
 "item.act.favourite" = "Favourite";
 "item.act.bookmark" = "Bookmark";
@@ -1325,6 +1352,8 @@
 "said.unkept.allowances" = "A change to what is allowed beyond your sources could not be kept on this device. It holds for now, and is gone the next time Fediqo is opened.";
 "said.unkept.timelines" = "A change to your timelines could not be kept on this device. It holds for now, and is gone the next time Fediqo is opened.";
 "said.unkept.limits" = "The account of what the limits let go could not be cleared on this device. It is empty for now, and its lines are back the next time Fediqo is opened.";
+"said.quote.asked" = "Your post is up. %@ is asked whether it may quote theirs.";
+"said.quote.policy.failed" = "%@ did not take who may quote your post; it is as it was.";
 
 /* The shared pieces every screen is built from (#232). */
 "help.about" = "More about %@";
@@ -1917,6 +1946,7 @@
 "outbox.declined.change" = "%@ did not take your change. It is kept here.";
 "outbox.unconfirmed.change" = "%@ did not say whether it took the change. Send again sends the same change.";
 "outbox.hold.changeGone" = "The post is gone at %@, so the change has nowhere to go.";
+"outbox.hold.quotedGone" = "The post it quotes is gone at %@, so it cannot be sent as a quote.";
 "outbox.hold.signedOut.change" = "Your change waits here. Sign in to %@ with writing to send it.";
 "outbox.hold.noSource.change" = "%@ is no longer a source here, so your change cannot be sent.";
 "outbox.hold.other.change" = "Your change was written as %2$@, and %1$@ is signed in as %3$@. Sign in as %2$@ to send it.";
@@ -1964,6 +1994,7 @@
 "waiting.movedForward" = "The time had come too near at %1$@: it goes %2$@ instead.";
 "waiting.files" = "%d files";
 "waiting.poll" = "a poll";
+"waiting.quote" = "a quote";
 
 /* P2 — somebody's page as their source says it (#310) */
 "work.purpose.person" = "Reading who someone is, and their posts";
@@ -2365,6 +2396,9 @@
 "person.act.report.failed" = "Could not report %1$@ at %2$@.";
 "item.act.report" = "Report post…";
 "item.act.change" = "Change it…";
+"item.act.quotePolicy" = "Who may quote it: %@";
+"item.act.quotePolicy.line" = "Quotes already made stay; take each back from Quotes of it.";
+"item.act.quotes" = "Quotes of it (%d)";
 "report.title" = "Report %@";
 "report.told" = "Those who answer for %@ are told, and nobody else unless you choose it below. What becomes of it is theirs.";
 "report.category" = "What is it?";

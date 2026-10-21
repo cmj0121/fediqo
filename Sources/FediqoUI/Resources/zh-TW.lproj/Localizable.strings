@@ -92,6 +92,20 @@
 "compose.later.post" = "稍後發佈";
 "compose.later.when" = "送出時間";
 "compose.later.line" = "%@ 會在那時送出。它在那裡等，不在這台裝置上。";
+"compose.title.quote" = "引用貼文";
+"compose.quote.through" = "透過 %@，也就是讀到被引用貼文的地方。";
+"compose.quote.remove" = "不引用了";
+"compose.quote.noMedia" = "引用的貼文不能帶媒體或投票。";
+"compose.quote.drop.title" = "要引用，並拿掉已附上的內容嗎？";
+"compose.quote.drop.line" = "引用的貼文不能帶媒體或投票。已附上的會拿掉；你寫的字會留著。";
+"compose.quote.drop.confirm" = "拿掉並引用";
+"compose.quote.drop.keep" = "保留，不引用";
+"compose.quotePolicy" = "誰可以引用";
+"compose.quotePolicy.public" = "任何人";
+"compose.quotePolicy.followers" = "你的跟隨者";
+"compose.quotePolicy.nobody" = "只有你";
+"compose.quotePolicy.unsaid" = "依你在 %@ 的帳號設定";
+"compose.quotePolicy.private" = "只有跟隨者或被提及的人能讀的貼文，別人不能引用。";
 "change.title" = "修改你的貼文";
 "change.save" = "儲存";
 "change.where" = "在 %1$@ · %2$@";
@@ -109,6 +123,7 @@
 "change.title.waiting" = "修改等著送出的貼文";
 "change.waiting.where" = "在 %@ 等著送出";
 "change.waiting.answers" = "回應的對象維持原樣。";
+"change.waiting.quote" = "引用的貼文維持原樣。";
 "answer.title" = "回應";
 "answer.to" = "回應 %@";
 "answer.goesTo" = "送往 %@";
@@ -395,6 +410,15 @@
 "quote.state.unauthorized" = "引用了一則你無權看到的貼文。";
 "quote.state.blockedAccount" = "引用了你封鎖的人的貼文。";
 "quote.state.blockedDomain" = "引用了你封鎖的來源上的貼文。";
+"quotes.title" = "引用你貼文的貼文";
+"quotes.whose" = "依 %@ 的說法。";
+"quotes.none" = "%@ 不知道有貼文引用這則。";
+"quotes.failed" = "無法向 %@ 詢問誰引用了它。";
+"quotes.revoke" = "收回你的同意";
+"quotes.revoke.title" = "收回 %@ 的引用？";
+"quotes.revoke.line" = "他們的貼文還留在 %@，但不再顯示你的貼文。無法復原。";
+"quotes.revoked" = "已收回";
+"quotes.revoke.missed" = "連不上 %@，所以引用沒有收回。";
 "quote.state.mutedAccount" = "引用了你靜音的人的貼文。";
 "quote.state.unknown" = "引用了一則這裡無法顯示的貼文。";
 "quote.decorator" = "引用 %@";
@@ -453,6 +477,9 @@
 "item.act.answer" = "回應";
 "item.act.quote" = "引用";
 "item.act.quote.no" = "這裡還不能引用";
+"item.act.quote.denied" = "%@ 不讓你引用這則貼文。";
+"item.act.quote.manual" = "要先經過 %@ 同意；同意前你的貼文會註明這點。";
+"item.act.quote.host" = "%@ 不接受引用。";
 "item.mark.why" = "%1$@：%2$@";
 "item.act.favourite" = "收藏";
 "item.act.bookmark" = "加書籤";
@@ -1296,6 +1323,8 @@
 "said.unkept.allowances" = "你對放行清單的更動沒辦法留在這台裝置上。它現在有效，但下次打開 Fediqo 時就不在了。";
 "said.unkept.timelines" = "你對時間軸的更動沒辦法留在這台裝置上。它現在有效，但下次打開 Fediqo 時就不在了。";
 "said.unkept.limits" = "上限放下了什麼的紀錄沒辦法在這台裝置上清除。它現在是空的，但下次打開 Fediqo 時那些紀錄還會在。";
+"said.quote.asked" = "你的貼文已發佈。正在詢問 %@ 是否同意引用。";
+"said.quote.policy.failed" = "%@ 沒有收下誰可以引用你的貼文；維持原樣。";
 
 /* The shared pieces every screen is built from (#232). */
 "help.about" = "關於「%@」的說明";
@@ -1865,6 +1894,7 @@
 "outbox.declined.change" = "%@ 沒有收下你的修改。它還留在這裡。";
 "outbox.unconfirmed.change" = "%@ 沒有說是否收下了修改。「再送一次」會送出同樣的修改。";
 "outbox.hold.changeGone" = "這則貼文在 %@ 已經不在，修改無處可送。";
+"outbox.hold.quotedGone" = "它引用的貼文在 %@ 已經不在，無法以引用送出。";
 "outbox.hold.signedOut.change" = "你的修改在這裡等著。用可以發文的方式登入 %@ 才能送出。";
 "outbox.hold.noSource.change" = "%@ 已經不是這裡的來源，你的修改無法送出。";
 "outbox.hold.other.change" = "你的修改是以 %2$@ 寫的，而 %1$@ 現在登入的是 %3$@。請以 %2$@ 登入再送出。";
@@ -1912,6 +1942,7 @@
 "waiting.movedForward" = "%1$@ 那裡的時間已經太近：改在 %2$@ 送出。";
 "waiting.files" = "%d 個檔案";
 "waiting.poll" = "一個投票";
+"waiting.quote" = "一則引用";
 
 /* P2 — somebody's page as their source says it (#310) */
 "work.purpose.person" = "讀取某個人是誰，以及他們的貼文";
@@ -2309,6 +2340,9 @@
 "person.act.report.failed" = "無法在 %2$@ 檢舉 %1$@。";
 "item.act.report" = "檢舉貼文…";
 "item.act.change" = "修改這則貼文…";
+"item.act.quotePolicy" = "誰可以引用：%@";
+"item.act.quotePolicy.line" = "已經做出的引用會留著；要收回，請到「引用它的貼文」逐一收回。";
+"item.act.quotes" = "引用它的貼文（%d）";
 "report.title" = "檢舉 %@";
 "report.told" = "負責 %@ 的人會收到；除非你在下面選擇，否則不會告訴其他人。之後如何處理由他們決定。";
 "report.category" = "這是什麼？";
