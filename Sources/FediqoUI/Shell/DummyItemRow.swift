@@ -389,6 +389,7 @@ struct DummyItemRow: View {
             mainBox(written)
                 .modifier(Probed(\.frames, .content, probe: probe))
             pollBand
+            translationBand
             quoteBand(openQuote)
             if inFull { viaFoot }
             actions
@@ -1671,6 +1672,15 @@ struct DummyItemRow: View {
         if inFull, !covered, let poll {
             PollBand(poll: poll, acting: acting)
                 .modifier(Probed(\.frames, .poll, probe: probe))
+        }
+    }
+
+    /// The post's translation, beside its words (#334) — in the pane only, for `pollBand`'s
+    /// reason, and never under a cover: it is the covered words, in another language.
+    @ViewBuilder
+    private var translationBand: some View {
+        if inFull, !covered, let translation = acting.post?.translation {
+            TranslationBand(translation: translation, host: host)
         }
     }
 

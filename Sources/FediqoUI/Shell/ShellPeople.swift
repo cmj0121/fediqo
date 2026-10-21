@@ -97,6 +97,10 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         /// only as them.
         case muted
         case blocked
+        /// Who boosted a post, and who favourited it (#334): the post's, by the id its source
+        /// gave it, and given to anyone.
+        case boostedBy
+        case favouritedBy
 
         /// The two lists that are somebody's, in the order their page counts them.
         static let ofSomebody: [Which] = [.following, .followers]
@@ -137,9 +141,20 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case .following: counted = person.tally.following
         case .followers: counted = person.tally.followers
         // Not somebody's: a directory is made by `init(directoryAt:)`, and counts nobody.
-        case .directory, .found, .suggested, .requests, .featured, .muted, .blocked: counted = nil
+        case .directory, .found, .suggested, .requests, .featured, .muted, .blocked, .boostedBy, .favouritedBy: counted = nil
         }
         hidden = person.hidesLists
+    }
+
+    /// Who boosted or favourited the post `id` at `host` (#334), written by `author`: the post's
+    /// list and nobody's account, counted as the source last counted the post, hidden by nobody.
+    init(_ which: Which, ofPost id: String, at host: String, by author: String, counted: Int?) {
+        self.which = which
+        self.host = host
+        accountID = id
+        handle = author
+        self.counted = counted
+        hidden = false
     }
 
     /// The people whoever is signed in to the source at `host` mutes, or blocks (#314): of no
@@ -226,6 +241,8 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case .featured: .featured(by: accountID)
         case .muted: .muted
         case .blocked: .blocked
+        case .boostedBy: .boostedBy(post: accountID)
+        case .favouritedBy: .favouritedBy(post: accountID)
         case .directory, .found, .suggested: nil
         }
     }
@@ -241,7 +258,7 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case .directory: .directory
         case .suggested: .suggestions
         case .featured: .featuredPeople
-        case .following, .followers, .found, .requests, .muted, .blocked: nil
+        case .following, .followers, .found, .requests, .muted, .blocked, .boostedBy, .favouritedBy: nil
         }
     }
 }
@@ -520,7 +537,7 @@ final class ShellPeoplePages {
         switch said.list.which {
         case .requests: return [.acceptRequest, .refuseRequest]
         case .followers: return [.removeFollower]
-        case .following, .directory, .found, .suggested, .featured, .muted, .blocked: return []
+        case .following, .directory, .found, .suggested, .featured, .muted, .blocked, .boostedBy, .favouritedBy: return []
         }
     }
 
@@ -922,7 +939,7 @@ final class ShellPeoplePages {
         case .suggested:
             let passed = next.flatMap(MastodonSuggestions.passed) ?? 0
             return passed + stretchLength >= MastodonSuggestions.furthest
-        case .following, .followers, .requests, .featured, .muted, .blocked: return false
+        case .following, .followers, .requests, .featured, .muted, .blocked, .boostedBy, .favouritedBy: return false
 
         }
     }

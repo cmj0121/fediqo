@@ -3104,7 +3104,7 @@ final class ShellSession {
     ///
     /// `again` reads the notes whatever the count says: what is drawn of them moved with no
     /// word from the store — a taking back pressed, answered or failed (`acts.leaving`).
-    private func adopt(again: Bool = false) async {
+    func adopt(again: Bool = false) async {
         // Before anything is read: what an ended sign-in's reader had done to its posts (#285).
         await forgetReaderMarksDue()
         await adoptSources()

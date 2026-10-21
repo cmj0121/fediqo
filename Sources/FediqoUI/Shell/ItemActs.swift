@@ -95,6 +95,10 @@ struct ItemActing {
     /// Nothing where the post is not one to report: no sign-in at its source, a kind of source
     /// with no reports, the reader's own, or one gone.
     var report: Report?
+    /// Pinning, quieting, translating, and who boosted and favourited it (#334): items of the
+    /// row's `…` (`ItemActs.postItems`), and the translation drawn beside its words. Nothing
+    /// where its source has none of them, or the list cannot act.
+    var post: PostMore?
 
     struct Report {
         var lock: Lock?
@@ -457,6 +461,9 @@ extension ItemActs {
         if let leave {
             items.append(.plain("arrow.up.forward.app", item.outwardName, act: leave))
         }
+        items += postItems(acting.post, group: .reading, language: language)
+        // Lane A's own-post items (Change it…, Who may quote it, Quotes of it) go here, before Pin and Quiet.
+        items += postItems(acting.post, group: .own, language: language)
         // Reporting it (#339): to those who answer for its source, asked on a sheet first.
         var reportLock: String?
         if let report = acting.report {
@@ -491,6 +498,7 @@ extension ItemActs {
         let locked = PostAct.allCases.compactMap { acting.locks[$0]?.line(language: language) }
         let head = head(for: item, here: here, refused: acting.acts.refused, language: language)
             + ShellMore.reasons(of: shared, language: language) + locked + quoted + [reportLock].compactMap { $0 }
+            + postLocks(acting.post, language: language)
         return ShellMore(head: head, items: items)
     }
 

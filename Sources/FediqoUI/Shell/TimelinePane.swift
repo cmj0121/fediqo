@@ -96,6 +96,9 @@ struct TimelinePane: View {
     /// A hashtag somebody features, or the way to the people they feature, pressed on About
     /// of their page (#315, #318), answered by the root: a step of the walk.
     var onOpenFeatured: (FeaturedPress) -> Void = { _ in }
+    /// Who boosted or favourited a post, pressed in its `…` (#334), answered by the root: a step
+    /// of the walk from the row pressed.
+    var onOpenPeople: (PeopleList, String) -> Void = { _, _ in }
     /// The press about looking somebody up through a source, answered by the root.
     var onLookUp: (SearchLookUpLine.Press) -> Void = { _ in }
     /// Trends' tabs, where this pane is Trends: drawn in place of the timelines' names, and
@@ -1349,6 +1352,14 @@ struct TimelinePane: View {
             acting.report = ItemActing.Report(lock: offer.lock) {
                 Task { await people.reports.start(offer.who, post: offer.post, people: people, in: session) }
             }
+        }
+        // Pinning, quieting, translating, and who boosted and favourited it (#334). Translate on a
+        // list row opens the post, where its translation is drawn beside its words.
+        if let people {
+            acting.post = session.postOffer(
+                on: item, people: people, openPeople: { list in onOpenPeople(list, item.id) },
+                afterTranslate: root == nil ? { onOpenThread(item.id) } : nil
+            )
         }
         // Taking back is an item of the row's `…` (#109), built only where the post offers it:
         // the question the key `d` asks, about the copy that goes, and a yes that refuses what

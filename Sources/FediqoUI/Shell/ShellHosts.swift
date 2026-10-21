@@ -78,6 +78,17 @@ final class ShellHostsKnown {
         known.askAfresh(host)
     }
 
+    /// What the document of `host` said this run, where it came: the host's figures (#334).
+    func said(at host: String) -> MastodonHostSays? {
+        known.said(at: host)
+    }
+
+    /// A translation asked of `host` answered a not-found (#334): remembered for the run as no
+    /// translator there, only where its document said nothing of translating (D6).
+    func translationNotFound(at host: String) {
+        known.translationNotFound(at: host)
+    }
+
     /// Whether the document of `host` came this run.
     func heard(_ host: String) -> Bool {
         came.contains(Self.key(host))

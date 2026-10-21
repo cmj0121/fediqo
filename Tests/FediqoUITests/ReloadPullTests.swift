@@ -320,7 +320,7 @@ struct ReloadPullTests {
         #expect(reload.touch == .press && reload.also == .pull)
         let dismiss = try #require(DummyShortcut.all.first { $0.name == "dismiss" })
         #expect(dismiss.touch == .partly && dismiss.also == .press)
-        #expect(DummyShortcut.all.filter { $0.also != nil }.map(\.name) == ["expand", "reload", "withdraw", "edit", "dismiss"])
+        #expect(DummyShortcut.all.filter { $0.also != nil }.map(\.name) == ["expand", "translate", "reload", "withdraw", "pin", "quiet", "boostedBy", "edit", "dismiss"])
     }
 
     @Test("Stop is named in each language the app ships")

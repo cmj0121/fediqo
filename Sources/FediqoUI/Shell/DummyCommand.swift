@@ -62,6 +62,19 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// `d` — ask to take back the post the lamp is on, where the reader wrote it (#109). The key
     /// asks; it never takes anything back by itself.
     case withdraw
+    /// `i` — pin the post the lamp is on to the reader's page, or take the pin off (#334): where
+    /// they wrote it, and the source pins it. `i` for pin, and free, for the reason `p` gives.
+    case pin
+    /// `z` — quiet the conversation the post the lamp is on belongs to, or let it speak again
+    /// (#334): no more notices of what is answered in it. `z` for sleep, and free.
+    case quiet
+    /// `n` — the post the lamp is on in the reader's language, beside its words, or the original
+    /// alone again (#334). `n` for native, and free.
+    case translate
+    /// `B` and `F` — who boosted, and who favourited, the post the lamp is on (#334): `b` and `f`
+    /// held with Shift, the people behind the act those keys do.
+    case boostedBy
+    case favouritedBy
     /// `p` — the page of whoever wrote the post the lamp is on (#140). The key for what a press on
     /// a face or a name has done since #99: the one thing a row offered that no key reached.
     ///
@@ -136,14 +149,20 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
             return shift ? .previousTab : .nextTab
         }
         guard !typing else { return nil }
+        // `B` and `F` by Shift, never by the letter's case: Caps Lock is still `b` and `f`.
+        if shift, character == "b" || character == "B" { return .boostedBy }
+        if shift, character == "f" || character == "F" { return .favouritedBy }
         switch character {
         case "?": return .showShortcuts
         case "/": return .search
-        case "b": return .boost
-        case "f": return .favourite
+        case "b", "B": return .boost
+        case "f", "F": return .favourite
         case "y": return .keep
         case "w": return .answer
         case "d": return .withdraw
+        case "i": return .pin
+        case "z": return .quiet
+        case "n": return .translate
         case "p": return .openAuthor
         case "t": return .openTag
         case "o": return .openQuote
@@ -608,6 +627,8 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         DummyShortcut(group: .read, keys: ["t"], name: "tag", commands: [.openTag], touch: .press),
         // The quote under the post's words, pressed (#214).
         DummyShortcut(group: .read, keys: ["o"], name: "quote", commands: [.openQuote], touch: .press),
+        // Translate, behind the three dots under the post and in a hold on its row (#334).
+        DummyShortcut(group: .read, keys: ["n"], name: "translate", commands: [.translate], touch: .press, also: .hold),
         DummyShortcut(group: .read, keys: ["/"], name: "search", commands: [.search], touch: .press),
         // The mark in the header, pressed — and the list pulled down from its top (#307), which
         // does what the press does and is offered wherever the mark is.
@@ -632,6 +653,13 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         // It is offered on the reader's own posts only, and the key is refused on everyone
         // else's, so there is no half of it a finger cannot reach. It is not a mark of its own.
         DummyShortcut(group: .act, keys: ["d"], name: "withdraw", commands: [.withdraw], touch: .press, also: .hold),
+        // Behind the three dots under the post, and in the list a hold on the row (#334): each an
+        // item of the one list, offered where the post's source has it, and the key is refused
+        // where it is not — so there is no half of these a finger cannot reach.
+        DummyShortcut(group: .act, keys: ["i"], name: "pin", commands: [.pin], touch: .press, also: .hold),
+        DummyShortcut(group: .act, keys: ["z"], name: "quiet", commands: [.quiet], touch: .press, also: .hold),
+        // The people behind a boost and a favourite, one line for the two: `b` and `f` with Shift.
+        DummyShortcut(group: .act, keys: ["⇧B", "⇧F"], name: "boostedBy", commands: [.boostedBy, .favouritedBy], touch: .press, also: .hold),
         // Follow on somebody's page, and on a hashtag's line of its page, pressed (#313, #318).
         DummyShortcut(group: .act, keys: ["l"], name: "follow", commands: [.follow], touch: .press),
         DummyShortcut(group: .act, keys: ["c"], name: "compose", commands: [.compose], touch: .press),

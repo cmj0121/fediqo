@@ -17,8 +17,9 @@ struct ShortcutGuide: View {
         /// instead of being cut off.
         ///
         /// 440 since #124 gave Read a ninth line, `t`, and 472 since #214 gave it a tenth, `o`;
-        /// the width is unchanged.
-        static let plate = CGSize(width: 600, height: 472)
+        /// the width is unchanged; 576 since #334 gave Act pin, quiet and the people behind a boost
+        /// and a favourite, and Read translate.
+        static let plate = CGSize(width: 600, height: 576)
         /// Between the heading's parts and the page below them.
         static let gap: CGFloat = 12
     }

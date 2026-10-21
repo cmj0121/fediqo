@@ -717,6 +717,16 @@ public struct FediqoRootView: View {
             return answerFocused()
         case .withdraw:
             return place == .notices ? dismissFocusedNotice() : onFocusedItem { session.askToWithdraw($0) }
+        case .pin:
+            return postActByKey { $0.pin?.press }
+        case .quiet:
+            return postActByKey { $0.quiet?.press }
+        case .translate:
+            return postActByKey { $0.translate?.press }
+        case .boostedBy:
+            return postActByKey { $0.boostedBy?.press }
+        case .favouritedBy:
+            return postActByKey { $0.favouritedBy?.press }
         case .openAuthor:
             return place == .notices ? openFocusedNoticePerson() : openAuthor()
         case .openTag:
@@ -1427,6 +1437,23 @@ public struct FediqoRootView: View {
     ///
     /// `onFocusedItem` and not `onActedItem`: the viewer is a picture over a post, and the post
     /// it is over is the one the lamp is on, so there is no second post for this key to mean.
+    /// `i`, `z`, `n`, `B` and `F` (#334): the item of the post's `…` the key names, pressed — the
+    /// same press, so a key on a post whose source has no such item does nothing and yields,
+    /// and one whose sign-in lacks the part only asks for it.
+    private func postActByKey(_ item: (ItemActing.PostMore) -> (() -> Void)?) -> Bool {
+        let named = item
+        return onFocusedItem { item in
+            let inThread = openLayers.contains(.thread)
+            guard let offer = session.postOffer(
+                on: item, people: people, openPeople: { list in _ = postPeoplePressed(list, from: item.id) },
+                afterTranslate: inThread ? nil : { _ = openThread(item.id) }
+            ) else { return false }
+            guard let press = named(offer) else { return false }
+            press()
+            return true
+        }
+    }
+
     private func actFocused(_ act: PostAct) -> Bool {
         onFocusedItem { item in
             guard session.acts(on: item).offers(act) else { return false }
@@ -2174,6 +2201,20 @@ public struct FediqoRootView: View {
         case .takeOff:
             return false
         }
+    }
+
+    /// Who boosted or favourited a post, pressed in its `…` (#334): the list, one more step of
+    /// the walk from the row pressed, which is lit first so leaving gives it back.
+    private func postPeoplePressed(_ list: PeopleList, from row: String) -> Bool {
+        guard Self.canWalk(place: place, open: openLayers) else { return false }
+        let before = selectedItemID
+        selectedItemID = row
+        guard walk.walk(to: .people(list), from: row) else {
+            selectedItemID = before
+            return false
+        }
+        selectedItemID = nil
+        return true
     }
 
     /// A row of such a list opened: that person's page. **The lamp and the step in one turn**,
@@ -2995,6 +3036,7 @@ public struct FediqoRootView: View {
                 onRequests: { _ = requestsPressed($0) },
                 onKeeping: { _ = keepingPressed($0) },
                 onOpenFeatured: { _ = featuredPressed($0, from: nil) },
+                onOpenPeople: { list, row in _ = postPeoplePressed(list, from: row) },
                 onLookUp: lookUpPressed,
                 trends: stream == .trends ? trendsHead : nil
             )
