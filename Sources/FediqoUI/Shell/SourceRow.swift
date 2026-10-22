@@ -566,6 +566,27 @@ extension SourceRow {
         /// no such page to open — no sign-in, a source that does not say who people are, or
         /// one that has not yet said who the reader is there — and then no item is drawn.
         var ownPage: (() -> Void)?
+        /// Opens the page of tending this server, or asks for tending's words (#380). Pressed
+        /// only through the item `tending` draws, and nothing is drawn without it.
+        var tend: () -> Void = {}
+    }
+
+    /// The item that tends a server the reader answers for (#380), where their standing there
+    /// allows it: the page, plain; or, where the sign-in lacks tending's words, that part's lock,
+    /// whose press asks for them alone. Nothing without the standing — no trace of it is drawn.
+    static func tendItem(
+        _ entry: ShellTending.Entry?, host: String, actsLive: Bool, press: @escaping () -> Void, language: DummyLanguage? = nil
+    ) -> ShellMoreItem? {
+        switch entry {
+        case nil:
+            return nil
+        case .open:
+            return .plain(TendingTab.reports.symbol, String(format: L10n.t("tend.item", language: language), host), act: press)
+        case .lock(let place):
+            let line = String(format: L10n.t(place.key, language: language), host)
+            let dim: DimReason = place.kind == .none ? .never : .notNow
+            return .plain(ShellMark(permissionSymbol, line, look: actsLive && place.asks ? .live : .dim(dim)), act: press)
+        }
     }
 
     /// The glyph and the name of the item that opens the reader's own page at a source.
@@ -594,15 +615,17 @@ extension SourceRow {
     /// not once a row each time the list is drawn.
     @MainActor
     static func more(
-        _ row: SourceRow, actsLive: Bool, marks: ShellMark? = nil, clearAsks: @escaping () -> ShellConfirmation,
+        _ row: SourceRow, actsLive: Bool, marks: ShellMark? = nil, tending: ShellTending.Entry? = nil,
+        clearAsks: @escaping () -> ShellConfirmation,
         removeAsks: @escaping () -> ShellConfirmation, presses: Presses
     ) -> ShellMore {
         func mark(_ control: Control) -> ShellMark {
             Self.mark(control, source: row.source, signedIn: row.signedIn, actsLive: actsLive)
         }
         let own = presses.ownPage.map { ShellMoreItem.plain(ownPageSymbol, ownPageLabel(row.source.host), act: $0) }
+        let tend = tendItem(tending, host: row.source.host, actsLive: actsLive, press: presses.tend)
         return ShellMore(
-            items: [own].compactMap { $0 } + [
+            items: [own, tend].compactMap { $0 } + [
                 .plain(mark(.boards), act: presses.changeBoards),
                 .plain(mark(.lists), act: presses.chooseLists),
             ] + [marks.map { ShellMoreItem.plain($0, act: presses.marks) }].compactMap { $0 } + [
@@ -751,6 +774,8 @@ struct SourceRowView: View {
     /// reads them where it does not hold it (#317): the marks item of `…` is drawn from these.
     var marksReads = false
     var marksPlace: PartWords.Place? = nil
+    /// What the row offers for tending its server (#380), where the reader's standing there allows it.
+    var tending: ShellTending.Entry? = nil
     /// How many announcements its source holds that are not seen and not dismissed (#321), as
     /// last asked — or nothing, and then no mark is drawn. Handed in: the row asks nothing.
     var announced: Int? = nil
@@ -799,7 +824,7 @@ struct SourceRowView: View {
         SourceRow.more(
             row, actsLive: actsLive,
             marks: SourceRow.marksMark(row, actsLive: actsLive, reads: marksReads, place: marksPlace),
-            clearAsks: clearAsks, removeAsks: removeAsks, presses: presses
+            tending: tending, clearAsks: clearAsks, removeAsks: removeAsks, presses: presses
         )
     }
 

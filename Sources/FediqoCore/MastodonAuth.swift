@@ -261,7 +261,8 @@ public struct MastodonOAuth: Sendable {
         as app: MastodonApp, asking page: String? = nil, through browser: any OAuthBrowser,
         pending: (@Sendable (MastodonToken) async throws -> Void)? = nil
     ) async throws -> (
-        token: MastodonToken, failed: MastodonSignInError?, accountID: String?, handle: String?, handedBack: Bool
+        token: MastodonToken, failed: MastodonSignInError?, accountID: String?, handle: String?, handedBack: Bool,
+        staff: MastodonStaff?
     ) {
         if let page, !MastodonRegistration.holds(page, on: app.scopes) {
             throw MastodonSignInError.unreadable
@@ -304,13 +305,13 @@ public struct MastodonOAuth: Sendable {
         do {
             if !handedBack { try await pending?(token) }
         } catch {
-            return (token, .keychain, nil, nil, handedBack)
+            return (token, .keychain, nil, nil, handedBack, nil)
         }
         do {
             let who = try await verify(token)
-            return (token, nil, who.id, who.handle, handedBack)
+            return (token, nil, who.id, who.handle, handedBack, who.staff)
         } catch {
-            return (token, error as? MastodonSignInError ?? .unreachable, nil, nil, handedBack)
+            return (token, error as? MastodonSignInError ?? .unreachable, nil, nil, handedBack, nil)
         }
     }
 

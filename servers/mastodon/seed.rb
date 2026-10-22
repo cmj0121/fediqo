@@ -43,7 +43,15 @@ token = Doorkeeper::AccessToken.find_or_create_by!(
 end
 
 path = "/tmp/fediqo-mastodon-token"
-File.write(path, token.token)
+# Read by the checks on this machine and by nobody else: kept to its owner, whatever the umask.
+# Written to a fresh owner-only file and moved over the old one: a file left from before at
+# another mode never holds the new token, even for a moment.
+owner_only = lambda do |target, contents|
+  fresh = "#{target}.#{Process.pid}"
+  File.open(fresh, File::WRONLY | File::CREAT | File::EXCL, 0o600) { |file| file.write(contents) }
+  File.rename(fresh, target)
+end
+owner_only.call(path, token.token)
 puts "wrote #{path}"
 
 # What the checks of what a Mastodon says need beyond one writer (#298): a second person, so
@@ -573,8 +581,62 @@ parts_sign_ins = { "parts" => every_part, "partsLacking" => every_part.sub(" wri
     { "token" => held.token, "scopes" => scopes }
   end
 
+# What the checks of tending the server need (#380, #381): somebody whose role is Admin and
+# somebody whose role is Moderator, each with a password a check signs in with and a sign-in
+# holding every word of every part this app asks for, tending's two among them; the writer —
+# whose role is nobody's — holding tending's words too, since the words may be granted to
+# anyone and only the role lets anything be done; this app as it registers itself now, for the
+# check that signs in through the server's own page; and two open reports by the other person,
+# one naming a post and a rule, one naming a post of somebody of another server. An app of
+# their own for the tokens, whose words hold tending's. **Put back every run**: whatever a run
+# did to the reports — taken on, closed — is undone, and the page's tokens left live revoked.
+staffed = lambda do |username, email, password, role|
+  found = Account.find_local(username)
+  unless found
+    made = User.new(email: email, password: password, password_confirmation: password, confirmed_at: Time.now.utc, approved: true)
+    made.account = Account.new(username: username)
+    made.skip_confirmation_notification! if made.respond_to?(:skip_confirmation_notification!)
+    made.save!(validate: false)
+    found = made.account
+  end
+  found.user.approve! if found.user.respond_to?(:approve!) && !found.user.approved?
+  found.user.update_columns(role_id: UserRole.find_by!(name: role).id) unless found.user.role_id == UserRole.find_by!(name: role).id
+  found
+end
+admin = staffed.call("fediqo_admin", "admin@example.com", "LocalOnlyPass3", "Admin")
+mod = staffed.call("fediqo_mod", "mod@example.com", "LocalOnlyPass4", "Moderator")
+everything = "#{every_part} write:media read:bookmarks read:favourites read:mutes write:mutes read:blocks write:blocks " \
+  "write:reports admin:read admin:write"
+tending_app = Doorkeeper::Application.find_or_create_by!(name: "fediqo-servers-tending") do |record|
+  record.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+  record.scopes = "read write admin:read admin:write"
+end
+tending_sign_ins = { "admin" => [admin, everything], "mod" => [mod, everything], "writer" => [writer_account, "#{reading} admin:read admin:write"] }
+  .transform_values do |(who, scopes)|
+    # Tending's tokens do not outlive the checks by long: two days, and a fresh one once lapsed.
+    held = Doorkeeper::AccessToken.where(application: tending_app, resource_owner_id: who.user.id, scopes: scopes, revoked_at: nil)
+      .detect { |token| !token.expired? } ||
+      Doorkeeper::AccessToken.create!(application: tending_app, resource_owner_id: who.user.id, scopes: scopes, expires_in: 2.days.to_i)
+    named.call(who).merge("token" => held.token, "scopes" => scopes)
+  end
+tending_ask = Doorkeeper::Application.find_or_create_by!(name: "fediqo-servers-tending-ask") do |record|
+  record.redirect_uri = "fediqo://oauth"
+  record.scopes = everything
+end
+Doorkeeper::AccessToken.where(application: tending_ask, revoked_at: nil).update_all(revoked_at: Time.now.utc)
+rule = Rule.find_by(text: "fediqo381seed rule") || Rule.create!(text: "fediqo381seed rule", priority: 0)
+reported = [
+  ["fediqo381seed one", shown, person_public, :violation, [rule.id]],
+  ["fediqo381seed two", far, far_posts.first, :spam, []],
+].map do |(words, whom, post, category, rules)|
+  report = Report.find_by(account: other, comment: words) ||
+    Report.create!(account: other, target_account: whom, status_ids: [post.id], comment: words, category: category, rule_ids: rules)
+  report.update_columns(action_taken_at: nil, action_taken_by_account_id: nil, assigned_account_id: nil)
+  report
+end
+
 more = "/tmp/fediqo-mastodon-tokens.json"
-File.write(more, JSON.generate(tokens.merge(
+owner_only.call(more, JSON.generate(tokens.merge(
   # The sign-in page is asked by this id for a scope the registration does not include.
   "client" => full.uid,
   "seeded" => {
@@ -591,6 +653,11 @@ File.write(more, JSON.generate(tokens.merge(
     "held" => waiting.call.map { |request| { "by" => request.from_account.username, "post" => request.last_status_id.to_s } }
   ),
   "signIn" => { "id" => widening.uid, "secret" => widening.secret, "scopes" => widening.scopes.to_s },
+  "tending" => tending_sign_ins.merge(
+    "adminPassword" => "LocalOnlyPass3", "adminEmail" => "admin@example.com",
+    "app" => { "id" => tending_ask.uid, "secret" => tending_ask.secret, "scopes" => tending_ask.scopes.to_s },
+    "reports" => reported.map { |report| report.id.to_s }
+  ),
   "people" => people_sign_ins.merge(
     "person" => named.call(shown), "locked" => named.call(locked), "hidden" => named.call(hidden).merge(people_sign_ins["hidden"]),
     "moved" => named.call(moved), "gone" => named.call(gone), "limited" => named.call(limited),
