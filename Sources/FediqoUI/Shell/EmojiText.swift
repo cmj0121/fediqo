@@ -42,6 +42,10 @@ struct EmojiText: View {
     /// Whom the source says these words mention (#310), each a whole handle: the only people a
     /// mention in them is read as. Empty on a label, and wherever a source lists nobody.
     let mentions: [String]
+    /// Whether the call site writes these words a step down the ramp, in `inkDim` — a quoted
+    /// post, a body under a title, a forum's words. Somebody mentioned takes the words' own ink
+    /// (#386), so this is what tells the line which one that is.
+    let quiet: Bool
 
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.displayScale) private var displayScale
@@ -82,7 +86,7 @@ struct EmojiText: View {
     /// which a call site has to ask for by name.
     init(_ text: String, emojis: [CustomEmoji], host: String, role: EmojiTextRole = .body,
          cache: EmojiCache = .shared) {
-        self.init(text, emojis: emojis, host: host, role: role, cache: cache, linked: false, mentions: [])
+        self.init(text, emojis: emojis, host: host, role: role, cache: cache, linked: false, mentions: [], quiet: false)
     }
 
     /// A post's **own words** — the one line on a row that the author wrote as writing rather
@@ -96,14 +100,16 @@ struct EmojiText: View {
     /// the three places a stranger's words are drawn.
     ///
     /// `mentions` is whom the source says the post mentions (#310). **Handed in, never read out
-    /// of the words**: with nobody listed, an `@word` is letters.
+    /// of the words**: with nobody listed, an `@word` is letters. `quiet` is whether the call
+    /// site writes the words in `inkDim` rather than `ink`; a name takes the same.
     init(prose text: String, emojis: [CustomEmoji], host: String, mentions: [String] = [],
-         cache: EmojiCache = .shared) {
-        self.init(text, emojis: emojis, host: host, role: .body, cache: cache, linked: true, mentions: mentions)
+         quiet: Bool = false, cache: EmojiCache = .shared) {
+        self.init(text, emojis: emojis, host: host, role: .body, cache: cache, linked: true,
+                  mentions: mentions, quiet: quiet)
     }
 
     private init(_ text: String, emojis: [CustomEmoji], host: String, role: EmojiTextRole,
-                 cache: EmojiCache, linked: Bool, mentions: [String]) {
+                 cache: EmojiCache, linked: Bool, mentions: [String], quiet: Bool) {
         self.text = text
         self.emojis = emojis
         self.host = host
@@ -111,6 +117,7 @@ struct EmojiText: View {
         self.cache = cache
         self.linked = linked
         self.mentions = mentions
+        self.quiet = quiet
     }
 
     /// A post's own words, drawn as prose where the reader can read them and as plain letters
@@ -127,10 +134,10 @@ struct EmojiText: View {
     /// The role is `.body` either way, which is what keeps the cover the same shape as the words
     /// under it: this chooses which cut the line is drawn from, never what size it is set in.
     static func words(_ text: String, emojis: [CustomEmoji], host: String,
-                      covered: Bool, mentions: [String] = []) -> EmojiText {
+                      covered: Bool, mentions: [String] = [], quiet: Bool = false) -> EmojiText {
         covered
             ? EmojiText(text, emojis: emojis, host: host)
-            : EmojiText(prose: text, emojis: emojis, host: host, mentions: mentions)
+            : EmojiText(prose: text, emojis: emojis, host: host, mentions: mentions, quiet: quiet)
     }
 
     var body: some View {
@@ -143,26 +150,24 @@ struct EmojiText: View {
         let baseline = request.metrics.baseline
         let links = Self.links(in: cut)
         let tagged = Self.tags(in: cut)
-        let ink = ShellChrome.selectInk(colorScheme)
-        // A tag takes the control's ink once a press opens something (#124), and only then.
-        let tagInk: Color? = tags == nil ? nil : ink
+        let inks = Self.inks(colorScheme, tags: tags != nil, names: naming != nil, quiet: quiet)
+        let linkInk = inks.link, tagInk = inks.tag, nameInk = inks.name
         // Somebody mentioned is a press once it opens their page (#310), and only then.
         let named = naming == nil ? [] : Self.mentions(in: cut)
-        let nameInk: Color? = naming == nil ? nil : ink
         let plate = ShellChrome.well(colorScheme)
 
         Group {
             if let clock = Self.clock(for: pictures, reduceMotion: reduceMotion) {
                 TimelineView(.periodic(from: .now, by: clock)) { instant in
                     Self.line(cut, pictures, at: instant.date.timeIntervalSinceReferenceDate,
-                              baseline: baseline, linkInk: ink, tagInk: tagInk, nameInk: nameInk)
+                              baseline: baseline, linkInk: linkInk, tagInk: tagInk, nameInk: nameInk)
                 }
             } else {
-                Self.line(cut, pictures, at: 0, baseline: baseline, linkInk: ink, tagInk: tagInk, nameInk: nameInk)
+                Self.line(cut, pictures, at: 0, baseline: baseline, linkInk: linkInk, tagInk: tagInk, nameInk: nameInk)
             }
         }
-        // Only where a pill is drawn: a line with no tag keeps the system's own drawing.
-        .modifier(TagPlating(plate: plate, active: Self.hasTags(cut)))
+        // Only where a pill or an underline is drawn: plain words keep the system's own drawing.
+        .modifier(ProsePainting(plate: plate, active: Self.paints(cut, links: links, named: named)))
         .font(role.font(at: typeSize))
         // One element carrying one label. Without `.ignore` the label would be landing on a
         // `TimelineView` whenever a clock is running — a container rather than a piece of text —
@@ -188,6 +193,24 @@ struct EmojiText: View {
             await cache.fetch(request)
             arrived = Arrived(request: request, frames: cache.held(request))
         }
+    }
+
+    /// The three inks a post's words write what can be pressed in (#386): an address in `link`,
+    /// the one hue outside the marks'; a tag in the quiet grey, where a press opens it; somebody
+    /// mentioned in the words' own ink — `inkDim` on a `quiet` line — where a press opens their
+    /// page. **The lamp is none of them** — it says where the reader is, and nothing in a post's
+    /// words.
+    static func inks(_ scheme: ColorScheme, tags: Bool, names: Bool,
+                     quiet: Bool = false) -> (link: Color, tag: Color?, name: Color?) {
+        let words = quiet ? ShellChrome.inkDim(scheme) : ShellChrome.ink(scheme)
+        return (ShellChrome.link(scheme), tags ? ShellChrome.inkFaint(scheme) : nil, names ? words : nil)
+    }
+
+    /// Whether a line is drawn by `ProseInks`: where it has a tag's pill, an address's underline,
+    /// or somebody to press — `named` is empty where a press on a name opens nothing. Plain words
+    /// keep the system's own drawing.
+    static func paints(_ cut: [EmojiRun], links: [PostLink], named: [PostMention]) -> Bool {
+        hasTags(cut) || !links.isEmpty || !named.isEmpty
     }
 
     /// Whether a cut line has a tag in it, and so a pill to draw.
@@ -331,12 +354,17 @@ struct EmojiText: View {
 
     /// An address, drawn as one.
     ///
-    /// **Hue and an underline, not hue alone.** The lamp's colour against the body ink is a
-    /// difference some readers cannot see at all, and this app's own contrast note already says
-    /// hierarchy is worth less than legibility; the underline is what makes a link read as a link
-    /// in both schemes and in neither colour. `selectInk` is the phosphor — the shell's one hue
-    /// for "this is a way somewhere" — and it is passed in rather than read here so that this
-    /// stays a function of its arguments and can be compared against an expected `Text`.
+    /// **Hue and an underline, not hue alone.** A blue against the body ink is a difference some
+    /// readers cannot see at all, and this app's own contrast note already says hierarchy is
+    /// worth less than legibility; the underline is what makes a link read as a link in both
+    /// schemes and in neither colour. The ink is `ShellChrome.link` (#386) — its own hue, not the
+    /// lamp's — passed in rather than read here so that this stays a function of its arguments
+    /// and can be compared against an expected `Text`.
+    ///
+    /// **The underline is the renderer's, not the text's.** At rest it is faint, in the link's
+    /// own hue; under a pointer it is drawn solid. A text attribute cannot change with where a
+    /// pointer is, and two lines — the text's faint one and the renderer's solid one — would sit
+    /// a hair apart, so `ProseInks` draws both from the run's `PostPressMark`.
     ///
     /// The letters are `link.text`: what the author typed, unaltered. `link.url` is that same
     /// string parsed. A reader looking at this is looking at the address.
@@ -344,18 +372,17 @@ struct EmojiText: View {
         var address = AttributedString(link.text)
         address.link = link.url
         address.foregroundColor = ink
-        address.underlineStyle = .single
-        return Text(address)
+        return Text(address).customAttribute(PostPressMark(target: link.url, ink: ink, ruled: true))
     }
 
     /// A hashtag, drawn as one: the word, with a little room either side of it, marked so that
-    /// `TagPlates` draws a pill of the shell's grey behind it.
+    /// `ProseInks` draws a pill of the shell's grey behind it.
     ///
     /// **A label, and drawn so that it cannot be taken for a control.** `ShellChrome.well` is the
     /// milled recess the shell puts a pill or a keycap in — neutral on purpose, because a
     /// container that borrows the lamp's hue makes every container look selected. The letters
     /// keep the line's own ink, carry no underline and no `link`, so nothing about the run says
-    /// *press here*: an address is the phosphor and a line under it, a tag is the grey and the
+    /// *press here*: an address is the link's blue and a line under it, a tag is the grey and the
     /// ordinary ink, and the two are told apart by colour, by edge and by whether there is a
     /// line under the word, which is three differences and not one. There is no press for it to
     /// have — that is a later unit — and a pill that looked pressable and did nothing would be
@@ -375,10 +402,12 @@ struct EmojiText: View {
     /// was typed, and what a screen reader hears is built from the tag and not from this.
     ///
     /// **Pressable once there is somewhere to go** (#124). With `ink` — inside the shell, where a
-    /// press opens what this device holds under the tag — the letters take the control's ink and
-    /// carry `ShellTags.url(for:)`, which is how a press on them reaches `ProseLinks`; the pill,
-    /// its grey and the absence of an underline stay exactly as they were. That is the whole of
-    /// what #124 may change about how a tag looks.
+    /// press opens what this device holds under the tag — the letters carry
+    /// `ShellTags.url(for:)`, which is how a press on them reaches `ProseLinks`. Since #386 the
+    /// ink is the quiet grey, `inkFaint`, and the letters a step heavier than the words round
+    /// them, so a tag reads as a tag and not as faded text, and a line of them reads after the
+    /// words rather than over them. No underline until a pointer rests on it: the run carries a
+    /// `PostPressMark` that is not ruled, and `ProseInks` draws the line only under the pointer.
     static func drawn(_ tag: PostTag, ink: Color? = nil) -> Text {
         guard let ink, let url = ShellTags.url(for: tag) else {
             return Text(verbatim: tagRoom + tag.text + tagRoom).customAttribute(PostTagMark())
@@ -386,13 +415,17 @@ struct EmojiText: View {
         var letters = AttributedString(tagRoom + tag.text + tagRoom)
         letters.link = url
         letters.foregroundColor = ink
-        return Text(letters).customAttribute(PostTagMark())
+        return Text(letters).fontWeight(.medium)
+            .customAttribute(PostTagMark())
+            .customAttribute(PostPressMark(target: url, ink: ink, ruled: false))
     }
 
     /// Somebody mentioned, drawn as the press they are (#310): the letters as written, in the
-    /// control's ink **and underlined** — the `@` is on every `@word`, so the ink alone would be
-    /// the only thing telling a press from letters. With no `ink` there is nothing a press
-    /// opens, and they are the letters and nothing more.
+    /// words' own ink and **bold** (#386) — a person, read as a name. Weight and not hue is what
+    /// tells them from the words, so they are told apart in every colour and in none; the `@`
+    /// on every `@word` would otherwise be the only difference. No underline until a pointer
+    /// rests on them. With no `ink` there is nothing a press opens, and they are the letters and
+    /// nothing more.
     static func drawn(_ mention: PostMention, ink: Color? = nil) -> Text {
         guard let ink, let url = ShellMentions.url(for: mention.handle) else {
             return Text(verbatim: mention.text)
@@ -400,19 +433,31 @@ struct EmojiText: View {
         var letters = AttributedString(mention.text)
         letters.link = url
         letters.foregroundColor = ink
-        letters.underlineStyle = .single
-        return Text(letters)
+        return Text(letters).bold().customAttribute(PostPressMark(target: url, ink: ink, ruled: false))
     }
 
     /// The room inside a tag's plate, each side: `U+202F NARROW NO-BREAK SPACE`.
     static let tagRoom = "\u{202F}"
 }
 
-/// The mark a hashtag's run carries, and the only thing that tells `TagPlates` where a pill goes.
+/// The mark a hashtag's run carries, and the only thing that tells `ProseInks` where a pill goes.
 ///
 /// No fields: it says *this run is a tag* and nothing about what the tag is, because the drawing
 /// needs nothing more and a mark that carried the tag would be a second copy of the cut.
 struct PostTagMark: TextAttribute {}
+
+/// The mark a run that can be pressed carries (#386): where a press goes, the ink its underline
+/// is drawn in, and whether that underline is there at rest.
+///
+/// **What `ProseInks` reads to draw an underline**, faint at rest for an address and solid under
+/// a pointer for anything pressable. `target` is what ties the runs of one press together — a
+/// word set in two faces is several runs — and what says which of them the pointer is on.
+struct PostPressMark: TextAttribute {
+    let target: URL
+    let ink: Color
+    /// An address is ruled at rest; a tag and a name are not, and gain a line only under a pointer.
+    let ruled: Bool
+}
 
 /// Draws a line with a capsule of the shell's grey behind every run marked `PostTagMark`, and
 /// otherwise exactly as the system would.
@@ -431,8 +476,15 @@ struct PostTagMark: TextAttribute {}
 /// `plateOutset` of its height and not at all upright, so it sits inside the line's own height
 /// and a line — and so a row — is exactly as tall as it was. `displayPadding` tells SwiftUI about
 /// the few points it reaches past the text's frame at either end, so they are not clipped.
-struct TagPlates: TextRenderer {
+///
+/// **And the underlines a press draws (#386).** Every run marked `PostPressMark` that is
+/// `ruled` — an address — is underlined faint in its own ink; whatever the pointer rests on is
+/// underlined solid. Drawn after the letters, from the same runs, so the faint line and the
+/// solid one are the same line at two strengths.
+struct ProseInks: TextRenderer {
     let plate: Color
+    /// Where a pointer rests on the words, in the line's own space. None on a phone.
+    var pointer: CGPoint?
 
     /// How far past its letters the capsule reaches at each end, as a share of its height. A
     /// tenth is two points at the body size: enough air round the room, and less than half the
@@ -473,7 +525,50 @@ struct TagPlates: TextRenderer {
         return plates
     }
 
+    /// One underline: where, and in what.
+    struct Rule: Equatable {
+        let rect: CGRect
+        let ink: Color
+    }
+
+    /// The press under `point`, if any: the target of the marked run whose box holds it.
+    static func target(at point: CGPoint, among runs: [(mark: PostPressMark?, bounds: CGRect)]) -> URL? {
+        runs.first { $0.mark != nil && $0.bounds.contains(point) }?.mark?.target
+    }
+
+    /// The underlines on one line: each unbroken stretch of runs pressing to one target, joined
+    /// as `plateBounds` joins a tag's, then ruled — solid where it is `pressed`, faint where it
+    /// is ruled at rest, and not at all otherwise.
+    ///
+    /// The line sits a little under the baseline and is about a twentieth of the run's height
+    /// thick, which at the body size is where and how thick the system's own underline is.
+    static func rules(_ runs: [(mark: PostPressMark?, bounds: CGRect)], pressed: URL?) -> [Rule] {
+        var stretches: [(mark: PostPressMark, bounds: CGRect)] = []
+        for run in runs {
+            guard let mark = run.mark else { continue }
+            if let last = stretches.last, last.mark.target == mark.target, last.bounds.maxX >= run.bounds.minX - 0.5 {
+                stretches[stretches.count - 1].bounds = last.bounds.union(run.bounds)
+            } else {
+                stretches.append((mark, run.bounds))
+            }
+        }
+        return stretches.compactMap { stretch in
+            let solid = stretch.mark.target == pressed
+            guard solid || stretch.mark.ruled else { return nil }
+            let box = stretch.bounds
+            let thickness = max(1, box.height * 0.055)
+            let rect = CGRect(x: box.minX, y: box.maxY - box.height * 0.11 - thickness / 2,
+                              width: box.width, height: thickness)
+            return Rule(rect: rect, ink: solid ? stretch.mark.ink : stretch.mark.ink.opacity(ShellChrome.linkRuleAtRest))
+        }
+    }
+
     func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        let pressed = pointer.flatMap { point in
+            layout.lazy.compactMap { line in
+                Self.target(at: point, among: line.map { ($0[PostPressMark.self], $0.typographicBounds.rect) })
+            }.first
+        }
         for line in layout {
             let runs = line.map { ($0[PostTagMark.self] != nil, $0.typographicBounds.rect) }
             for bounds in Self.plateBounds(runs) {
@@ -483,22 +578,43 @@ struct TagPlates: TextRenderer {
         for line in layout {
             context.draw(line)
         }
+        for line in layout {
+            let runs = line.map { ($0[PostPressMark.self], $0.typographicBounds.rect) }
+            for rule in Self.rules(runs, pressed: pressed) {
+                context.fill(Path(rule.rect), with: .color(rule.ink))
+            }
+        }
     }
 }
 
-/// The renderer, only on a line with a tag in it.
+/// The renderer, only on a line with a tag, an address or a name to press in it, and where a
+/// pointer rests on it.
 ///
 /// **Absent, not idle** — `ProseLinks`' shape. A renderer that draws every line as the system
-/// would is still a renderer in the path of every post; a post with no tag keeps the system's own
-/// drawing, which is the one way to be sure it looks exactly as it did.
-private struct TagPlating: ViewModifier {
+/// would is still a renderer in the path of every post; a post with nothing of the kind keeps the
+/// system's own drawing, which is the one way to be sure it looks exactly as it did.
+///
+/// **Under a pointer, not under a finger.** A pointer resting on a press is followed here, and its
+/// underline turns solid; a touch is not, because following a finger over the words takes a
+/// gesture of its own, and one on a line inside a scrolling page stands in the scroll's way.
+private struct ProsePainting: ViewModifier {
     let plate: Color
     let active: Bool
+    /// Where a pointer rests on the words, if it does. Held here and not on `EmojiText`, so a
+    /// pointer moving over a line redraws the line and does not re-run the view that cut it.
+    @State private var pointer: CGPoint?
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if active {
-            content.textRenderer(TagPlates(plate: plate))
+            content
+                .textRenderer(ProseInks(plate: plate, pointer: pointer))
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let point): pointer = point
+                    case .ended: pointer = nil
+                    }
+                }
         } else {
             content
         }

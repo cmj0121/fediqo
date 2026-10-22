@@ -1491,7 +1491,8 @@ struct DummyItemRow: View {
                 // this function already agrees with it: `cover` draws only while it is true and
                 // `stitched` only while it is false.
                 EmojiText.words(
-                    item.body, emojis: written.body, host: host, covered: covered, mentions: item.mentions
+                    item.body, emojis: written.body, host: host, covered: covered, mentions: item.mentions,
+                    quiet: item.title != nil
                 )
                     .foregroundStyle(
                         item.title == nil ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme)

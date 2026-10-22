@@ -1592,7 +1592,7 @@ struct ForumPostBand: View {
                 // finds none and there is nothing to fetch; what it does find is the addresses
                 // the author wrote, which is what #34 asks for in an open thread as much as in
                 // the stream. The font is the same token: `EmojiTextRole.body` is `ShellType.body`.
-                EmojiText.words(text, emojis: [], host: thread.host, covered: !linked)
+                EmojiText.words(text, emojis: [], host: thread.host, covered: !linked, quiet: true)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(lines)
                     .multilineTextAlignment(.leading)

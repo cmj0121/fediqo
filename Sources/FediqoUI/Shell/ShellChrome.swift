@@ -16,7 +16,18 @@ import SwiftUI
 /// written on a selected row and are held there, and `inkFaint` is not — it is 4.47:1 on that
 /// wash in light, so nothing is written in it there, and a row that is chosen writes a step up.
 ///
-/// The one family outside that rule is the audience ramp at the foot of this file, and
+/// **One hue outside the two, and for one thing only: a link in a post's words.** `link` is a
+/// light blue between the lamp's teal and the page's violet. It is not a mark's hue, so it does
+/// not break the rule above for marks: it is written nowhere else in Fediqo — not a link outside
+/// a post's words, not a control, not a chip. A post's words used to write their links, tags and
+/// names in the lamp, and a line of hashtags then read as a line of lamps; the lamp now says
+/// where the reader is and nothing in a post's words. `ChassisGroundTests` holds `link` to 4.5:1
+/// on every chassis plate, and `PostInkTests` holds it there on `selectFill`'s wash and under a
+/// pointer as well. **Said plainly: it is near the unlisted audience's blue** in `vis(_:_:)`
+/// (about 211° and 208° against 218° and 217°), close enough that the two may be taken for each
+/// other; whether one of them moves is the person's to decide.
+///
+/// The other family outside that rule is the audience ramp at the foot of this file, and
 /// `vis(_:_:)` says why it had to be one: how far a post travels is four facts, and four
 /// facts cannot be told apart on a ramp that has only more and less of the same grey.
 enum ShellChrome {
@@ -129,6 +140,21 @@ enum ShellChrome {
     static func filament(_ scheme: ColorScheme) -> Color {
         scheme == .dark ? rgb(0.855, 0.694, 0.404) : rgb(0.541, 0.404, 0.176)
     }
+
+    // MARK: The link
+
+    /// An address in a post's words, and nothing else — see this file's head. Near `#2B6CB0` /
+    /// `#8EC5F5`, the light value taken a step darker (`#2563A6`) so it clears 4.5:1 on the lamp's
+    /// wash over the page, where `#2B6CB0` measured 4.2:1. Its hue sits about 22 degrees past the
+    /// lamp's toward the page's violet in both schemes; the underline, not the hue, is what a
+    /// reader who cannot tell the two apart reads a link by.
+    static func link(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? rgb(0.557, 0.773, 0.961) : rgb(0.145, 0.388, 0.651)
+    }
+
+    /// How strong a link's underline is while nothing rests on it: the link's own hue, faint. A
+    /// pointer resting on it draws it at full; a touch does not.
+    static let linkRuleAtRest: Double = 0.45
 
     /// The warning lamp. A refusal has to read as a refusal, and no amount of ink
     /// weight does that on its own. One place only: the line that says a host was
