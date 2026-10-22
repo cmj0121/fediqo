@@ -58,8 +58,8 @@ struct HashtagTests {
     @Test("The plate is a capsule round the run, outset sideways and not upright")
     func thePlateIsACapsule() {
         let run = CGRect(x: 10, y: 0, width: 60, height: 20)
-        let plate = TagPlates.plate(around: run)
-        let outset = run.height * TagPlates.plateOutset
+        let plate = ProseInks.plate(around: run)
+        let outset = run.height * ProseInks.plateOutset
         #expect(plate.boundingRect.minX == run.minX - outset)
         #expect(plate.boundingRect.maxX == run.maxX + outset)
         #expect(plate.boundingRect.minY == run.minY)
@@ -92,7 +92,7 @@ struct HashtagTests {
 
     @Test("A tag and an address beside it are two different drawings")
     func toldApartFromAnAddress() {
-        let ink = ShellChrome.selectInk(.dark)
+        let ink = ShellChrome.link(.dark)
         let link = PostLink("https://example.test/a")!
         let cut = EmojiRun.prose(in: "https://example.test/a #a", emojis: [])
         #expect(EmojiText.line(cut, [:], at: 0, baseline: -4, linkInk: ink)
@@ -124,7 +124,7 @@ struct HashtagTests {
     }
 
     /// What the renderer is actually handed once a line is laid out: which runs carry the mark,
-    /// and how many plates `TagPlates` would draw from them. Recorded by a renderer that draws
+    /// and how many plates `ProseInks` would draw from them. Recorded by a renderer that draws
     /// the line and nothing of its own.
     private final class Seen: Sendable {
         let pass = Mutex<(marks: [Bool], plates: Int)>(([], 0))
@@ -141,7 +141,7 @@ struct HashtagTests {
             for line in layout {
                 let runs = line.map { ($0[PostTagMark.self] != nil, $0.typographicBounds.rect) }
                 marks += runs.map(\.0)
-                plates += TagPlates.plateBounds(runs).count
+                plates += ProseInks.plateBounds(runs).count
                 context.draw(line)
             }
             seen.pass.withLock { $0 = (marks, plates) }
@@ -184,7 +184,7 @@ struct HashtagTests {
         let line = EmojiText.line(EmojiRun.prose(in: "#swift", emojis: []), [:], at: 0, baseline: -4)
         let renderer = ImageRenderer(content: line.font(.system(size: 40))
             .foregroundStyle(Color.clear)
-            .textRenderer(TagPlates(plate: Color(red: 1, green: 0, blue: 0)))
+            .textRenderer(ProseInks(plate: Color(red: 1, green: 0, blue: 0)))
             .padding(20))
         renderer.scale = 1
         let image = try #require(renderer.cgImage)
@@ -218,11 +218,11 @@ struct HashtagTests {
         let b = CGRect(x: 10, y: -1, width: 20, height: 20)
         let gap = CGRect(x: 30, y: 0, width: 4, height: 18)
         let c = CGRect(x: 34, y: 0, width: 10, height: 18)
-        #expect(TagPlates.plateBounds([(true, a), (true, b), (false, gap), (true, c)])
+        #expect(ProseInks.plateBounds([(true, a), (true, b), (false, gap), (true, c)])
             == [a.union(b), c])
-        #expect(TagPlates.plateBounds([(false, a), (false, gap)]).isEmpty)
+        #expect(ProseInks.plateBounds([(false, a), (false, gap)]).isEmpty)
         // The taller face sets the plate for the whole word.
-        #expect(TagPlates.plateBounds([(true, a), (true, b)]).first?.height == 20)
+        #expect(ProseInks.plateBounds([(true, a), (true, b)]).first?.height == 20)
     }
 
     @Test("A post that carries no tag is drawn exactly as it was")
@@ -300,7 +300,7 @@ struct HashtagTests {
     /// One line, measured with the plates drawn — the renderer the row gives a tagged line.
     private static func lineHeight(_ text: Text, plate: Color) -> CGFloat {
         let host = NSHostingView(rootView: text.font(EmojiTextRole.body.font(at: .large))
-            .textRenderer(TagPlates(plate: plate))
+            .textRenderer(ProseInks(plate: plate))
             .frame(width: 720))
         host.layoutSubtreeIfNeeded()
         return host.fittingSize.height

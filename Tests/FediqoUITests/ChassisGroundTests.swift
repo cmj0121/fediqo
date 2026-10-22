@@ -46,8 +46,9 @@ struct ChassisGroundTests {
 
     // MARK: - What is written on them
 
-    /// Every ink that is words somewhere — the ramp's three steps, the lamp, the refusal, and
-    /// the four audiences — on every plate, in both schemes.
+    /// Every ink that is words somewhere — the ramp's three steps, the lamp, the refusal, a post's
+    /// links, and the four audiences — on every plate, in both schemes. `PostInkTests` holds a
+    /// post's three inks on the washes as well.
     @Test("Every ink that is written clears 4.5:1 on every plate")
     func whatIsWrittenCanBeRead() {
         for scheme in Self.schemes {
@@ -57,6 +58,7 @@ struct ChassisGroundTests {
                 ("inkFaint", ShellChrome.inkFaint(scheme)),
                 ("phosphor", ShellChrome.phosphor(scheme)),
                 ("alarm", ShellChrome.alarm(scheme)),
+                ("link", ShellChrome.link(scheme)),
             ]
             for audience in DummyAudience.allCases {
                 inks.append(("\(audience)", ShellChrome.vis(audience, scheme)))

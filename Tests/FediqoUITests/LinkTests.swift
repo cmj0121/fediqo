@@ -40,44 +40,43 @@ struct LinkTests {
     /// The address is drawn as the letters the author typed, carrying the address they typed.
     /// **Equal by construction**: the `Text` this builds is compared against one built the same
     /// way, so what the test holds is that the attributes are on it at all — the address, the
-    /// hue and the underline — and that a line missing any of them is not this line.
-    @Test("An address is drawn as a link: the address, the shell's hue, and an underline")
+    /// hue and the mark its underline is drawn from — and that a line missing any of them is not
+    /// this line.
+    @Test("An address is drawn as a link: the address, the link's hue, and an underline at rest")
     func anAddressIsDrawnAsALink() {
         let link = Self.link("https://example.test/a")
-        let ink = ShellChrome.selectInk(.dark)
+        let ink = ShellChrome.link(.dark)
         let drawn = EmojiText.drawn(link, in: ink)
+        let ruled = PostPressMark(target: link.url, ink: ink, ruled: true)
 
         var expected = AttributedString("https://example.test/a")
         expected.link = link.url
         expected.foregroundColor = ink
-        expected.underlineStyle = .single
-        #expect(drawn == Text(expected))
+        #expect(drawn == Text(expected).customAttribute(ruled))
 
         // Hue alone is a difference some readers cannot see, so the underline is part of what a
-        // link is here rather than decoration on top of it.
-        var noUnderline = AttributedString("https://example.test/a")
-        noUnderline.link = link.url
-        noUnderline.foregroundColor = ink
-        #expect(drawn != Text(noUnderline))
+        // link is here rather than decoration on top of it: ruled at rest, which a tag and a
+        // name are not.
+        #expect(drawn != Text(expected))
+        #expect(drawn != Text(expected).customAttribute(PostPressMark(target: link.url, ink: ink, ruled: false)))
 
         // And the address is on it. A line drawn without it is a line nothing can be pressed in.
         var noAddress = AttributedString("https://example.test/a")
         noAddress.foregroundColor = ink
-        noAddress.underlineStyle = .single
-        #expect(drawn != Text(noAddress))
+        #expect(drawn != Text(noAddress).customAttribute(ruled))
     }
 
     @Test("The hue follows the scheme, so a link reads as one in light and in dark")
     func bothSchemes() {
         let link = Self.link("https://example.test/a")
-        #expect(EmojiText.drawn(link, in: ShellChrome.selectInk(.light))
-            != EmojiText.drawn(link, in: ShellChrome.selectInk(.dark)))
+        #expect(EmojiText.drawn(link, in: ShellChrome.link(.light))
+            != EmojiText.drawn(link, in: ShellChrome.link(.dark)))
     }
 
     @Test("A line with an address in it is the words, then the link, then the words")
     func theLineItself() {
         let link = Self.link("https://example.test/a")
-        let ink = ShellChrome.selectInk(.light)
+        let ink = ShellChrome.link(.light)
         let cut = EmojiRun.prose(in: "see https://example.test/a now", emojis: [])
         #expect(EmojiText.line(cut, [:], at: 0, baseline: -4, linkInk: ink)
             == Text(verbatim: "") + Text(verbatim: "see ") + EmojiText.drawn(link, in: ink)
