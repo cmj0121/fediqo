@@ -101,7 +101,7 @@ struct PostActsTests {
         acting.post = unsigned
         let menu = ItemActs.more(on: theirs, acting: acting, language: .english)
         #expect(menu.items.first { $0.name == "Translate" }?.look == .dim(.notNow))
-        #expect(menu.reasons.contains(String(format: L10n.t("item.act.translate.signIn", language: .english), Self.host)))
+        #expect(menu.whys.contains(String(format: L10n.t("item.act.translate.signIn", language: .english), Self.host)))
 
         // A sign-in that only reads: Translate is offered, which needs reading alone; Pin and
         // Quiet are drawn with their locks.
@@ -147,8 +147,8 @@ struct PostActsTests {
         let menu = ItemActs.more(on: mine, acting: acting, language: .english)
         let pin = try #require(menu.items.first { $0.name == "Pin to your page" })
         #expect(pin.look == .dim(.askAgain) && pin.symbol == SourceRow.permissionSymbol)
-        #expect(menu.reasons.contains(L10n.t("part.account.unasked", language: .english)))
-        #expect(menu.reasons.contains(L10n.t("part.blocks.unasked", language: .english)))
+        #expect(menu.whys.contains(L10n.t("part.account.unasked", language: .english)))
+        #expect(menu.whys.contains(L10n.t("part.blocks.unasked", language: .english)))
         locked.pin?.press()
         #expect(session.partAsks.open?.ticked == [.account], "the press only asks")
     }

@@ -45,7 +45,7 @@ extension ItemActs {
                 let mark = ShellMark(translateSymbol, name, look: asking ? .dim(.notNow) : .live, on: post.translated)
                 items.append(.plain(mark, act: translate.press))
             } else if let host = post.translateSignedOut {
-                // Dim: nobody is signed in there, said in its own words (`postLocks`).
+                // Dim: nobody is signed in there, said in its own words.
                 let mark = ShellMark(translateSymbol, L10n.t("item.act.translate", language: language), look: .dim(.notNow))
                 let why = String(format: L10n.t("item.act.translate.signIn", language: language), host)
                 items.append(ShellMoreItem.plain(mark, act: {}).because(why))
@@ -76,13 +76,6 @@ extension ItemActs {
         return .plain(mark, act: turn.press)
     }
 
-    /// The locks' own lines: how the sign-in stands to a pin or a quiet, once each, and why
-    /// translating is dim — kept with the menu for the press that says it (`ShellMore.reasons`).
-    static func postLocks(_ post: ItemActing.PostMore?, language: DummyLanguage? = nil) -> [String] {
-        let locks = [post?.pin?.lock, post?.quiet?.lock].compactMap { $0?.headLine(language: language) }
-        let signIn = post?.translateSignedOut.map { String(format: L10n.t("item.act.translate.signIn", language: language), $0) }
-        return locks + [signIn].compactMap { $0 }
-    }
 }
 
 /// The translation of a post, beside its words (#334): the words in the reader's language, the

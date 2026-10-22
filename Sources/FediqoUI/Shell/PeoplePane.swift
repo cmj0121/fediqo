@@ -323,8 +323,8 @@ struct PeopleSaid: Equatable {
     /// What the `…` of the row of `person` holds on the people a source suggests (#315), or
     /// nothing on any other list. **Where the sign-in holds the account part**: Don't suggest,
     /// asked about first — its yes is `act`. **Where it does not**: Don't suggest dim with the
-    /// lock, the part's own sentence kept with the menu, whose press is `act` too where the part
-    /// may be asked for — which then only asks.
+    /// lock, saying the part's own sentence, whose press is `act` too where the part may be asked
+    /// for — which then only asks.
     @MainActor
     func more(of person: Person, act: @escaping () -> Void, language: DummyLanguage? = nil) -> ShellMore? {
         switch dismissing {

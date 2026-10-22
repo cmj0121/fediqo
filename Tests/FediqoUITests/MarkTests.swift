@@ -280,11 +280,10 @@ struct MarkTests {
         let boards = ShellMoreItem.plain("checklist", "Boards") {}
         let lists = ShellMoreItem.plain("list.bullet", "Lists") {}
 
-        let more = ShellMore(items: [clear, boards, remove, lists], reasons: ["Reading…"])
+        let more = ShellMore(items: [clear, boards, remove, lists])
         #expect(more.ordinary.map(\.name) == ["Boards", "Lists"])
         #expect(more.dangers.map(\.name) == ["Clear", "Remove"])
         #expect(more.divides)
-        #expect(more.reasons == ["Reading…"])
 
         #expect(!ShellMore(items: [clear]).divides)
         #expect(!ShellMore(items: [boards, lists]).divides)

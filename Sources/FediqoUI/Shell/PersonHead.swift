@@ -455,10 +455,7 @@ struct PersonHead: View {
                 .accessibilityLabel(words)
                 .fixedSize(horizontal: whole, vertical: true)
         } else {
-            label
-                .help(words)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(words)
+            ShellSaysWhy(words: words) { label }
                 .fixedSize(horizontal: whole, vertical: true)
         }
     }
@@ -522,10 +519,7 @@ private struct OwnChangeAct: View {
                 .accessibilityHint(L10n.t("mark.dim.askAgain"))
                 .fixedSize()
         } else {
-            label
-                .help(words)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(words)
+            ShellSaysWhy(words: words) { label }
                 .fixedSize()
         }
     }

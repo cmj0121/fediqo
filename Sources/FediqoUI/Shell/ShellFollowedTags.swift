@@ -204,7 +204,7 @@ struct FollowedTagsSaid: Equatable {
             guard place.asks else {
                 let act = L10n.t(row.standing == .unfollowed ? "tag.follow.follow" : "tag.follow.unfollow")
                 let dim = ShellMark(SourceRow.permissionSymbol, act, look: .dim(.notNow))
-                return ShellMore(items: [ShellMoreItem.plain(dim, act: {}).because(name)], reasons: [name])
+                return ShellMore(items: [ShellMoreItem.plain(dim, act: {}).because(name)])
             }
             return ShellMore(items: [.plain(SourceRow.permissionSymbol, name, act: ask)])
         }

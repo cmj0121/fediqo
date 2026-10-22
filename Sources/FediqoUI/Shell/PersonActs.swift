@@ -390,7 +390,7 @@ struct PersonActing: Equatable {
     }
 
     /// The words of the lock a press on `act` would only ask through (`lock(of:)`): why its item
-    /// in the `…` is dim, kept with the menu (`ShellMore.reasons`).
+    /// in the `…` is dim, said after its name (`ShellMoreItem.because`).
     func lockWords(of act: PersonAct, language: DummyLanguage? = nil) -> String? {
         lock(of: act).map { String(format: L10n.t($0.key, language: language), source) }
     }
@@ -512,15 +512,13 @@ struct PersonActing: Equatable {
     /// not only somebody who must agree — and removing a follower ask a question; muting,
     /// blocking, blocking a whole server and reporting each open the sheet that is their question
     /// (`ShellMoreItem.danger(_:_:look:sheet:)`). **Featuring, where the sign-in lacks the account
-    /// part, is dim with the lock**, the part's sentence kept with the menu, and its press is
+    /// part, is dim with the lock**, saying the part's sentence after its name, and its press is
     /// `act`'s too — which only asks (`asksForPart`).
     @MainActor
     func menu(act: @escaping (PersonAct) -> Void) -> ShellMore {
-        var reasons: [String] = []
         let items: [ShellMoreItem] = (more + keeping + reporting).map { offered in
             let symbol = Self.symbol(offered), name = Self.name(offered, server: server)
             if let lock = lock(of: offered) {
-                if let words = lockWords(of: offered), !reasons.contains(words) { reasons.append(words) }
                 let dim = ShellMark(SourceRow.permissionSymbol, name, look: .dim(.askAgain))
                 return ShellMoreItem.plain(dim, ask: lock.asks ? { act(offered) } : nil, act: {}).because(lockWords(of: offered))
             }
@@ -528,7 +526,7 @@ struct PersonActing: Equatable {
             guard asksBefore(offered) else { return .plain(symbol, name) { act(offered) } }
             return .danger(symbol, name, asks: question(before: offered)) { act(offered) }
         }
-        return ShellMore(items: items, reasons: reasons)
+        return ShellMore(items: items)
     }
 
     /// The acts whose question is a sheet of their own: muting and blocking's (`asksOnASheet`), and

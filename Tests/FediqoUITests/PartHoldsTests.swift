@@ -224,14 +224,14 @@ struct PartHoldsTests {
         #expect(SourceRow.heard(row: "the row", said: []) == "the row")
         let drawn = view(row, holds: session.mastodon.holds(host: host))
         // Inverted (#385): the menu was headed by what the sign-in holds; it holds acts alone.
-        #expect(drawn.more.reasons.isEmpty)
+        #expect(drawn.more.whys.isEmpty)
         #expect(drawn.more.items.map(\.name) == view(row, holds: nil).more.items.map(\.name))
         // What a sign-in holds is not something that went wrong: `…` stays as it was.
         #expect(drawn.saying == .nothing)
         #expect(drawn.said.isEmpty)
         let refused = view(row, refusal: (host: host, key: "account.bookmarks.failed"), holds: holds)
         #expect(refused.saying == .warns)
-        #expect(refused.more.reasons.isEmpty)
+        #expect(refused.more.whys.isEmpty)
     }
 
     @Test("A listener hears the listing in place of the row's one word for reading or writing — a sign-in that only reads may hold a part that acts, and one word would say otherwise; the word stays where there is no listing, and where a write was refused")

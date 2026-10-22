@@ -150,7 +150,7 @@ struct MuteBlockTests {
         #expect(lock.asks && acting.asksForPart(.mute) && acting.asksForPart(.block) && !acting.asksForPart(.unfollow))
         let menu = acting.menu { _ in }
         let unasked = L10n.t("part.blocks.unasked")
-        #expect(menu.reasons.first == unasked && menu.reasons.filter { $0 == unasked }.count == 1, "said once for the two")
+        #expect(menu.whys.first == unasked && menu.whys.filter { $0 == unasked }.count == 1, "said once for the two")
         #expect(menu.items.suffix(3).prefix(2).allSatisfy { $0.look == .dim(.askAgain) && $0.symbol == SourceRow.permissionSymbol && $0.answers })
 
         await pages.act(.mute, on: Self.ada, in: session)

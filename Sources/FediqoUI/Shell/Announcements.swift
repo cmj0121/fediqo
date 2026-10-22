@@ -136,7 +136,7 @@ extension AnnouncementsSaid {
     }
 
     /// The `…` of one announcement: Dismiss, asked first — or, where the sign-in does not hold
-    /// the account part, dim, why kept with the menu. The `when` sentence is the card's own.
+    /// the account part, dim, saying why. The `when` sentence is the card's own.
     @MainActor
     static func more(
         _ shown: Shown, source: String, lock: PartWords.Place?, onDismiss: @escaping () -> Void,
@@ -153,7 +153,7 @@ extension AnnouncementsSaid {
         }
         let mark = ShellMark(AnnouncementsSection.dismissSymbol, name, look: .dim(lock.asks ? .askAgain : .notNow))
         let reason = String(format: L10n.t(lock.key, language: language), source)
-        return ShellMore(items: [ShellMoreItem.plain(mark, ask: lock.asks ? onAsk : nil, act: {}).because(reason)], reasons: [reason])
+        return ShellMore(items: [ShellMoreItem.plain(mark, ask: lock.asks ? onAsk : nil, act: {}).because(reason)])
     }
 }
 

@@ -125,7 +125,7 @@ struct RequestsTests {
         var pressed: [PersonAct] = []
         let menu = try #require(PeoplePane.menu(for: said, of: said.people[0], asks: .constant(nil)) { pressed.append($0) })
         let more = menu.more()
-        #expect(more.items.map(\.name) == ["Refuse"].map { _ in PersonActing.name(.refuseRequest) } && more.reasons.isEmpty)
+        #expect(more.items.map(\.name) == ["Refuse"].map { _ in PersonActing.name(.refuseRequest) } && more.whys.isEmpty)
         let question = ShellQuestion.about(.refuseRequest, "@p3@m.example", at: Self.host, language: en)
         #expect(question.title == "Refuse the request of @p3@m.example to follow you at m.example?")
         #expect(question.line == "They will not follow you. They can ask again." && question.choices.map(\.label) == ["Refuse"] && question.choices.map(\.role) == [.destructive])

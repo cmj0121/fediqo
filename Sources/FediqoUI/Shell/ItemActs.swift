@@ -443,23 +443,25 @@ extension ItemActs {
 
     /// A press on one of the row's marks, sent where its look says it goes (`ShellMark.pressed`):
     /// a live mark acts, the one that must be asked again puts its question, and any other dim
-    /// mark takes the press and does nothing. `…` is a menu and has no press of its own.
+    /// mark takes the press and does nothing — **and says why, beside it** (#385): whether the
+    /// row is to show the mark's label is what this returns. `…` has a press of its own.
     ///
     /// **Filled at the press, over a store that has not moved** (`mark`): what the source last
     /// said is what is held, and a press it does not take is put back and said. Kept is what
     /// the store holds. Each act goes to the post the row shows,
     /// and on a reblog's row keeping alone is the reblog's (#290).
-    static func press(_ mark: RowMark, acting: ItemActing) {
+    @discardableResult
+    static func press(_ mark: RowMark, acting: ItemActing) -> Bool {
         switch mark.kind {
         case .act(let act):
-            ShellMark.pressed(mark.mark.look, act: { acting.perform?(act) }, ask: asks(mark, acting: acting))
+            return ShellMark.pressed(mark.mark.look, act: { acting.perform?(act) }, ask: asks(mark, acting: acting))
         case .keep:
-            ShellMark.pressed(mark.mark.look, act: { acting.keep?() }, ask: nil)
+            return ShellMark.pressed(mark.mark.look, act: { acting.keep?() }, ask: nil)
         case .quote:
-            guard let quote = acting.quote else { break }
-            ShellMark.pressed(mark.mark.look, act: { quote.press?() }, ask: quote.look == .dim(.askAgain) ? quote.press : nil)
+            guard let quote = acting.quote else { return ShellMark.press(mark.mark.look) != .acts }
+            return ShellMark.pressed(mark.mark.look, act: { quote.press?() }, ask: quote.look == .dim(.askAgain) ? quote.press : nil)
         case .more:
-            break
+            return false
         }
     }
 
@@ -483,15 +485,12 @@ extension ItemActs {
         }
         items += postItems(acting.post, group: .reading, language: language)
         // Lane A's own-post items (Change it…, Who may quote it, Quotes of it) go here, before Pin and Quiet.
-        let own = ownItems(on: item, acting: acting, language: language)
-        items += own.items
+        items += ownItems(on: item, acting: acting, language: language)
         items += postItems(acting.post, group: .own, language: language)
         // Reporting it (#339): to those who answer for its source, asked on its sheet first.
-        var reportLock: String?
         if let report = acting.report {
             let name = L10n.t("item.act.report", language: language)
             if let lock = report.lock {
-                reportLock = lock.headLine(language: language)
                 items.append(.locked(name: name, lock: lock, language: language, press: report.press))
             } else {
                 items.append(.danger(PersonActing.reportSymbol, name, sheet: report.press))
@@ -509,8 +508,7 @@ extension ItemActs {
                 asks: withdraw.asks(), act: withdraw.yes
             ))
         }
-        let reasons = own.reasons + [reportLock].compactMap { $0 } + postLocks(acting.post, language: language)
-        return ShellMore(items: items, reasons: reasons)
+        return ShellMore(items: items)
     }
 
     /// The question a dim mark puts, on the row and in the menu alike, where there is one to

@@ -270,7 +270,7 @@ struct RowMenuTests {
     func theMenusContentsAndOrder() {
         let item = DummyItem(Self.note())
         let menu = more(item, Self.own, leave: {})
-        #expect(menu.reasons.isEmpty)
+        #expect(menu.whys.isEmpty)
         #expect(menu.ordinary.map(\.name) == [item.outwardName])
         #expect(menu.ordinary.map(\.drawn) == ["arrow.up.forward.app"])
         #expect(menu.dangers.map(\.name) == ["Take back what you wrote"] && menu.divides)
@@ -287,7 +287,7 @@ struct RowMenuTests {
         for (acting, refusal) in [(Self.signedOut, PostActRefusal.notSignedIn), (Self.forum, .protocolCannot), (Self.turnedAway, .turnedAway)] {
             for language in [DummyLanguage.english, .taiwanese] {
                 let menu = ItemActs.more(on: item, acting: acting, language: language)
-                #expect(menu.items.isEmpty && menu.reasons.isEmpty, "\(refusal): \(menu.items.map(\.name))")
+                #expect(menu.items.isEmpty && menu.whys.isEmpty, "\(refusal): \(menu.items.map(\.name))")
                 let answer = ItemActs.marks(on: item, acting: acting, language: language)[0]
                 #expect(answer.label.contains(ItemActs.refusalLine(refusal, language: language)), "\(answer.label)")
             }
@@ -392,7 +392,7 @@ struct RowMenuTests {
         for item in items {
             for acting in [Self.writes, Self.own, Self.signedOut, Self.forum] {
                 let menu = ItemActs.more(on: item, acting: acting, leave: {}, language: .english)
-                let said = menu.items.map(\.name) + menu.reasons
+                let said = menu.items.map(\.name) + menu.whys
                 for line in [DummyItemRow.spokenNames(item), DummyItemRow.exact(DummyItemRow.headerTime(item)),
                              DummyItemRow.spokenAudience(.everyone), L10n.t("item.gone.detail"), L10n.t("item.left.detail"),
                              DummyItemRow.spokenSource(item), ItemActs.refusalLine(.notSignedIn)] {

@@ -36,16 +36,19 @@ struct MorePanelTests {
         #expect(ShellMorePanelRows(ShellMore(items: [.plain("pencil", "Change") {}])).divider == nil)
     }
 
-    @Test("The keyboard starts on the first item that answers and walks only those, up and down, stopping at the ends")
+    @Test("The keyboard starts on the first item that answers and walks every item, dim ones too, up and down, stopping at the ends")
     func theKeyboardWalks() {
         let rows = ShellMorePanelRows(Self.menu())
         #expect(rows.first == 0)
-        #expect(rows.step(from: 0, up: false) == 2, "the dim item is stepped over")
-        #expect(rows.step(from: 2, up: false) == 3)
+        #expect(rows.step(from: 0, up: false) == 1, "the dim item is landed on: Return there says why")
+        #expect(!rows.items[1].answers)
+        #expect(rows.step(from: 1, up: false) == 2)
         #expect(rows.step(from: 3, up: false) == 3, "it stops at the last")
-        #expect(rows.step(from: 2, up: true) == 0)
+        #expect(rows.step(from: 2, up: true) == 1)
         #expect(rows.step(from: 0, up: true) == 0, "and at the first")
         #expect(rows.step(from: nil, up: false) == 0)
+        let allDim = ShellMorePanelRows(ShellMore(items: [.plain(ShellMark("checklist", "Boards", look: .dim(.never))) {}]))
+        #expect(allDim.first == 0, "a panel of dim items starts on the first, to say why")
     }
 
     @Test("A chosen item is done only once the panel has closed: an ordinary one acts then, one that takes something away puts its question then, and only its yes acts")

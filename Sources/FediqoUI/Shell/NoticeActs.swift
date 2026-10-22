@@ -7,8 +7,8 @@ import SwiftUI
 /// sentence can be asked for without drawing a row.
 ///
 /// **An act is offered only where the sign-in may act.** Dismissing, letting through and
-/// letting go change the source, so a sign-in that only reads is shown the item dim, its
-/// reason kept with the menu (`ShellMore.reasons`).
+/// letting go change the source, so a sign-in that only reads is shown the item dim, saying
+/// why after its name (`ShellMoreItem.because`).
 @MainActor
 enum NoticeActs {
     static let dismissSymbol = "bell.slash"
@@ -32,7 +32,7 @@ enum NoticeActs {
     }
 
     private static func menu(_ items: [ShellMoreItem], why: String?) -> ShellMore {
-        ShellMore(items: items.map { $0.because(why) }, reasons: [why].compactMap { $0 })
+        ShellMore(items: items.map { $0.because(why) })
     }
 
     // MARK: - The menus
@@ -53,8 +53,8 @@ enum NoticeActs {
 
     /// The head's `…`: dismissing all, **one item a source** — one press, one source, one
     /// request and one answer, so the question names exactly what goes and nothing is ever
-    /// half done. A source whose sign-in may not dismiss is listed dim, its reason kept with the
-    /// menu: it is left alone. Nothing where no sign-in may read notices.
+    /// half done. A source whose sign-in may not dismiss is listed dim, saying why: it is left
+    /// alone. Nothing where no sign-in may read notices.
     ///
     /// `among` is `NoticesPane.hosts(in:)` where the caller has it worked out already.
     static func more(
@@ -64,7 +64,6 @@ enum NoticeActs {
         let acts = session.noticeList.acts
         let hosts = (known ?? NoticesPane.hosts(in: session)).filter { $0.notices == .allowed }.map(\.host)
         guard !hosts.isEmpty else { return nil }
-        var reasons: [String] = []
         let items = hosts.map { host -> ShellMoreItem in
             let why = why(host: host, in: session, language: language)
             let item = ShellMoreItem.danger(
@@ -73,10 +72,9 @@ enum NoticeActs {
                 asks: ShellQuestion.dismissAll(host: host, language: language),
                 act: { Task { await acts.dismissAll(host: host, in: session) } }
             )
-            if let why { reasons.append(why) }
             return item.because(why)
         }
-        return ShellMore(items: items, reasons: reasons)
+        return ShellMore(items: items)
     }
 
     /// A held-back request's `…`: Let through and Let go, **each asked first**. Letting through

@@ -125,8 +125,9 @@ struct ChangePostTests {
         var acting = ItemActing()
         acting.change = ItemActing.Change(lock: lock) {}
         let own = ItemActs.ownItems(on: item, acting: acting)
-        #expect(own.items.count == 1 && own.items[0].look == .dim(.askAgain) && own.items[0].symbol == SourceRow.permissionSymbol)
-        #expect(own.reasons == [lock.line() ?? String(format: L10n.t(lock.place.key), Self.host)] && !own.reasons[0].isEmpty)
+        #expect(own.count == 1 && own[0].look == .dim(.askAgain) && own[0].symbol == SourceRow.permissionSymbol)
+        let line = lock.line() ?? String(format: L10n.t(lock.place.key), Self.host)
+        #expect(ShellMore(items: own).whys == [line] && !line.isEmpty)
     }
 
     // MARK: - The sheet, and Save

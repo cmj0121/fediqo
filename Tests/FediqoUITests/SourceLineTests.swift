@@ -158,7 +158,7 @@ struct SourceLineTests {
         let drawn = Self.view(
             Self.row(source, owed: .asking), waiting: "Reading talk.example…", refusal: refusal, notice: "It did not sign in."
         )
-        #expect(drawn.more.reasons.isEmpty)
+        #expect(drawn.more.whys.isEmpty)
         #expect(!drawn.more.items.contains { drawn.said.contains($0.name) })
         #expect(drawn.saying == .warns)
         #expect(drawn.more.ordinary.map(\.symbol) == ["checklist", "list.bullet"])
@@ -170,7 +170,7 @@ struct SourceLineTests {
 
         // At rest on a source with everything, every item answers.
         let rest = Self.view(Self.row(Self.forum))
-        #expect(rest.more.reasons.isEmpty)
+        #expect(rest.more.whys.isEmpty)
         #expect(rest.more.items.map(\.name) == [
             "Change which boards you read on forum.example",
             "Choose which of your lists you read on forum.example",
@@ -325,7 +325,7 @@ struct SourceLineTests {
     func whatPermissionSays() {
         let none = Self.row(Self.micro, signedIn: true)
         #expect(none.owed == .nothing && SourceRow.permissionLine(none) == nil)
-        #expect(Self.view(none).more.reasons.isEmpty)
+        #expect(Self.view(none).more.whys.isEmpty)
 
         for owed in [SourceRow.Owed.asking, .refused] {
             let row = Self.row(Self.micro, signedIn: true, owed: owed)
@@ -334,7 +334,7 @@ struct SourceLineTests {
                 #expect(line == String(format: L10n.t("account.source.permission", language: language), "micro.example"))
                 #expect(line?.contains("micro.example") == true && line?.contains("account.source") == false)
             }
-            #expect(Self.view(row).more.reasons.isEmpty)
+            #expect(Self.view(row).more.whys.isEmpty)
         }
         #expect(L10n.t("account.source.permission", language: .taiwanese) != L10n.t("account.source.permission", language: .english))
     }
@@ -362,7 +362,7 @@ struct SourceLineTests {
 
         // Inverted (#385): each dim mark's reason headed the menu; the marks say it, and the menu holds none.
         let busy = Self.view(row, actsLive: false)
-        #expect(Self.view(row).more.reasons.isEmpty && busy.more.reasons.isEmpty)
+        #expect(Self.view(row).more.whys.isEmpty && busy.more.whys.isEmpty)
         #expect(busy.key.spoken.hasSuffix(L10n.t("mark.dim.notNow")) && held.spoken.hasSuffix(L10n.t("mark.dim.notNow")))
     }
 

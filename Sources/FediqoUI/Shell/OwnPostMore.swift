@@ -17,28 +17,24 @@ extension ItemActing {
 }
 
 extension ItemActs {
-    /// The own post's items of `…`, and why those that are dim are dim: a lock's words where the
-    /// sign-in lacks what one needs — the report item's shape — kept for the press that says it.
+    /// The own post's items of `…`: a dim one says its lock's words after its name where the
+    /// sign-in lacks what it needs — the report item's shape.
     static func ownItems(
         on item: DummyItem, acting: ItemActing, language: DummyLanguage? = nil
-    ) -> (items: [ShellMoreItem], reasons: [String]) {
+    ) -> [ShellMoreItem] {
         var items: [ShellMoreItem] = []
-        var reasons: [String] = []
         if let change = acting.change {
             let name = L10n.t("item.act.change", language: language)
             if let lock = change.lock {
-                reasons.append(lock.headLine(language: language))
                 items.append(.locked(name: name, lock: lock, language: language, press: change.press))
             } else {
                 items.append(.plain("pencil", name, act: change.press))
             }
         }
         if let quotes = acting.ownQuotes {
-            let own = quoteItems(quotes, language: language)
-            items += own.items
-            reasons += own.reasons
+            items += quoteItems(quotes, language: language)
         }
-        return (items, reasons)
+        return items
     }
 
     /// Who may quote the post — three ticked lines, the one it is set to ticked, shown at once
@@ -46,12 +42,7 @@ extension ItemActs {
     /// names may read is fixed at nobody (asked of 4.6.6), its other two dim with why.
     static func quoteItems(
         _ quotes: ItemActing.OwnQuotes, language: DummyLanguage? = nil
-    ) -> (items: [ShellMoreItem], reasons: [String]) {
-        var reasons: [String] = []
-        if quotes.fixed { reasons.append(L10n.t("compose.quotePolicy.private", language: language)) }
-        if let lock = quotes.lock {
-            reasons.append(lock.headLine(language: language))
-        }
+    ) -> [ShellMoreItem] {
         var items: [ShellMoreItem] = QuotePolicy.allCases.map { policy in
             let name = String(
                 format: L10n.t("item.act.quotePolicy", language: language), QuoteWords.policy(policy, language: language)
@@ -69,6 +60,6 @@ extension ItemActs {
         if let count = quotes.count, let open = quotes.openQuotes {
             items.append(.plain("quote.bubble", String(format: L10n.t("item.act.quotes", language: language), count), act: open))
         }
-        return (items, reasons)
+        return items
     }
 }

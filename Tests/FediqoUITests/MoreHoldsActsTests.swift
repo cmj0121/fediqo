@@ -4,6 +4,19 @@ import SwiftUI
 import Testing
 @testable import FediqoUI
 
+extension ShellMore {
+    /// What the menu's dim items say after their names, once each, in their order: what is drawn
+    /// of why they do nothing, where the menu has its own words for it (`ShellMoreItem.because`).
+    var whys: [String] {
+        var said: [String] = []
+        for item in items {
+            guard case .dim = item.look, let why = item.why, !said.contains(why) else { continue }
+            said.append(why)
+        }
+        return said
+    }
+}
+
 /// #385, what every `…` holds: acts and nothing about what it belongs to; on a post's row nothing
 /// its marks offer; and every act that takes something away red, last, and asked first — on a
 /// question of the menu's, or on the sheet the act opens.
@@ -118,8 +131,8 @@ struct MoreHoldsActsTests {
         let quotes = ItemActing.OwnQuotes(policy: .anyone, fixed: false, choose: { _ in })
         let own = ItemActs.quoteItems(quotes, language: .english)
         let stay = L10n.t("item.act.quotePolicy.line", language: .english)
-        #expect(own.items.prefix(3).allSatisfy { $0.hint == stay && $0.look == .live })
-        #expect(!own.reasons.contains(stay), "a live item's line is its hint, not a reason")
+        #expect(own.prefix(3).allSatisfy { $0.hint == stay && $0.look == .live })
+        #expect(!ShellMore(items: own).whys.contains(stay), "a live item's line is its hint, not a reason")
     }
 
     // MARK: - A post's row

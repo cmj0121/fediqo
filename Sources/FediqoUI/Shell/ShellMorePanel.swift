@@ -17,15 +17,15 @@ struct ShellMorePanelRows {
         divider = more.divides ? ordinary.count : nil
     }
 
-    /// Where the keyboard stands when the panel opens: the first item that answers a press.
-    var first: Int? { items.indices.first { items[$0].answers } }
+    /// Where the keyboard stands when the panel opens: the first item that answers a press, or
+    /// the first item where none does.
+    var first: Int? { items.indices.first { items[$0].answers } ?? items.indices.first }
 
-    /// The next item that answers a press, from `index`, a step up or down; where there is none
-    /// that way, it stays where it is.
+    /// The next item from `index`, a step up or down — dim ones too, since Return on one says why;
+    /// at either end it stays where it is.
     func step(from index: Int?, up: Bool) -> Int? {
         guard let index else { return first }
-        let way: [Int] = up ? Array(items.indices.prefix(index).reversed()) : Array(items.indices.dropFirst(index + 1))
-        return way.first { items[$0].answers } ?? index
+        return up ? max(index - 1, 0) : min(index + 1, items.count - 1)
     }
 }
 
@@ -120,6 +120,9 @@ struct ShellMorePanel: View {
     let close: () -> Void
 
     @State private var lit: Int?
+    /// The dim item pressed, by name, whose reason is showing beside it: by name and not by place,
+    /// so a menu built again in another order shows no reason against the wrong item.
+    @State private var saying: String?
     @FocusState private var focused: Bool
     @Environment(\.colorScheme) private var colorScheme
 
@@ -146,8 +149,8 @@ struct ShellMorePanel: View {
             return .handled
         }
         .onKeyPress(.return) {
-            guard let lit, rows.items.indices.contains(lit), rows.items[lit].answers else { return .ignored }
-            choose(rows.items[lit])
+            guard let lit, rows.items.indices.contains(lit) else { return .ignored }
+            press(rows.items[lit])
             return .handled
         }
         .onKeyPress(.escape) {
@@ -168,9 +171,11 @@ struct ShellMorePanel: View {
         .padding(.vertical, ShellSpace.tight)
     }
 
+    /// One item. **A dim one is pressed too** (#385): it does nothing, and says why beside it — the
+    /// menu's own sentence where it has one (`ShellMoreItem.because`), its look's word otherwise.
     private func row(_ item: ShellMoreItem, lit: Bool) -> some View {
         Button {
-            choose(item)
+            press(item)
         } label: {
             HStack(spacing: ShellSpace.step) {
                 Image(systemName: item.drawn)
@@ -188,9 +193,17 @@ struct ShellMorePanel: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!item.answers)
         .help(item.hint ?? "")
         .accessibilityHint(Text(Self.hint(item)))
+        .modifier(ShellReasonLine(
+            shown: Binding(get: { saying == item.name }, set: { if !$0 { saying = nil } }), words: item.title()
+        ))
+    }
+
+    /// A press on an item, by pointer, finger or Return: one that answers is chosen; a dim one says
+    /// why beside it and never acts.
+    private func press(_ item: ShellMoreItem) {
+        if item.answers { choose(item) } else { saying = item.name }
     }
 
     /// The ink of an item: the alarm where it takes something away, a dim mark's ink where it does
@@ -205,6 +218,47 @@ struct ShellMorePanel: View {
     static func hint(_ item: ShellMoreItem, language: DummyLanguage? = nil) -> String {
         let danger = item.isDanger ? L10n.t("mark.more.danger", language: language) : nil
         return [danger, item.hint].compactMap { $0 }.joined(separator: " ")
+    }
+}
+
+/// Why a dim mark or item does nothing, shown beside it in a small line when it is pressed (#385):
+/// what a pointer reads by resting on it, for a finger that cannot rest. A popover on a wide page
+/// and on a narrow one alike — a line, never a sheet — and gone at the next press anywhere.
+struct ShellReasonLine: ViewModifier {
+    @Binding var shown: Bool
+    let words: String
+
+    func body(content: Content) -> some View {
+        content.popover(isPresented: $shown, arrowEdge: .bottom) {
+            Text(words)
+                .shellFont(.meta)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 280, alignment: .leading)
+                .padding(ShellSpace.step)
+                .presentationCompactAdaptation(.popover)
+        }
+    }
+}
+
+/// A control that only says why it is dim — a lock that cannot be asked about from here: drawn as
+/// handed, and a press shows `words` beside it (`ShellReasonLine`), as a pointer reads them by
+/// resting and a listener hears them.
+struct ShellSaysWhy<Face: View>: View {
+    let words: String
+    @ViewBuilder let face: () -> Face
+
+    @State private var saying = false
+
+    var body: some View {
+        Button {
+            saying = true
+        } label: {
+            face().contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(words)
+        .accessibilityLabel(words)
+        .modifier(ShellReasonLine(shown: $saying, words: words))
     }
 }
 

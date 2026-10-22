@@ -192,7 +192,7 @@ struct UsageListTests {
             L10n.t("prefs.cache.clear", language: language), L10n.t("prefs.password.forget", language: language),
         ])
         #expect(more.ordinary.isEmpty && more.dangers.count == 2 && !more.divides)
-        #expect(more.reasons.isEmpty)
+        #expect(more.whys.isEmpty)
         #expect(more.items.map(\.answers) == [true, true])
         #expect(more.label(language: language) == L10n.t("mark.more", language: language))
     }
@@ -201,8 +201,8 @@ struct UsageListTests {
           arguments: [DummyLanguage.english, .taiwanese])
     func forgetSaysNoneIsSaved(_ language: DummyLanguage) {
         let more = UsageSourceDetail.more(Self.forum, in: makeSession(), language: language)
-        #expect(more.reasons == [L10n.t("prefs.password.none", language: language)])
-        #expect(more.reasons.first != "prefs.password.none")
+        #expect(more.whys == [L10n.t("prefs.password.none", language: language)])
+        #expect(more.whys.first != "prefs.password.none")
         let forget = more.items[1]
         #expect(forget.look == .dim(.notNow) && !forget.answers)
         // Changed (#385): no head says why, so the item says it after its name, in the menu's own words.
@@ -218,7 +218,7 @@ struct UsageListTests {
     @Test("Forget password is dim on a kind that saves none, and then neither asks nor acts")
     func forgetIsDimWhereNoneIsHeld() {
         let session = makeSession()
-        #expect(UsageSourceDetail.more(Self.mastodon, in: session, language: .english).reasons.isEmpty)
+        #expect(UsageSourceDetail.more(Self.mastodon, in: session, language: .english).whys.isEmpty)
         let forget = UsageSourceDetail.more(Self.mastodon, in: session, language: .english).items[1]
         #expect(forget.look == .dim(.never))
         #expect(!forget.answers)

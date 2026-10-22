@@ -2066,6 +2066,8 @@ private struct RowMarkControl: View {
     @Environment(\.shellMoreHeld) private var held
     /// Whether `…`'s panel is open, where no row around it holds the switch.
     @State private var open = false
+    /// Whether a press on this dim mark is showing why (#385): its label, beside it.
+    @State private var saying = false
 
     var body: some View {
         control
@@ -2093,10 +2095,13 @@ private struct RowMarkControl: View {
             ))
         } else {
             Button {
-                ItemActs.press(mark, acting: acting)
+                saying = ItemActs.press(mark, acting: acting)
             } label: {
                 face
             }
+            // The label is the mark's name, its reason, and why the post offers no act — the row's
+            // old sentence — so a finger reads by a press what a pointer reads by resting.
+            .modifier(ShellReasonLine(shown: $saying, words: mark.label))
         }
     }
 

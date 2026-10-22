@@ -153,12 +153,21 @@ struct ShellMark: Equatable {
     }
 
     /// A press, sent where the look says it goes: to `act` for a live mark, to `ask` for one that
-    /// must be asked again, and nowhere otherwise.
-    static func pressed(_ look: MarkLook, act: () -> Void, ask: (() -> Void)?) {
+    /// must be asked again. **Whether the press is answered by saying why instead** (#385): a dim
+    /// mark that does nothing — or one to be asked again where nothing can ask — shows its reason
+    /// beside it, which is what a finger, with no pointer to rest, is told.
+    @discardableResult
+    static func pressed(_ look: MarkLook, act: () -> Void, ask: (() -> Void)?) -> Bool {
         switch press(look) {
-        case .acts: act()
-        case .asks: ask?()
-        case .nothing: break
+        case .acts:
+            act()
+            return false
+        case .asks:
+            guard let ask else { return true }
+            ask()
+            return false
+        case .nothing:
+            return true
         }
     }
 
@@ -183,6 +192,8 @@ struct ShellMarkButton: View {
     let ask: (() -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
+    /// Whether the press of a dim mark that does nothing is showing why (#385).
+    @State private var saying = false
 
     /// `act` is the press of a live mark; `ask` puts the question a dim mark asks first, and is
     /// never called for any other look.
@@ -196,7 +207,7 @@ struct ShellMarkButton: View {
     var body: some View {
         let glyph = ink ?? ShellMark.ink(mark.look, on: mark.on, colorScheme)
         Button {
-            ShellMark.pressed(mark.look, act: act, ask: ask)
+            saying = ShellMark.pressed(mark.look, act: act, ask: ask)
         } label: {
             HStack(spacing: ShellSpace.tight) {
                 Image(systemName: mark.drawn)
@@ -222,6 +233,7 @@ struct ShellMarkButton: View {
         .accessibilityValue(mark.count.map { L10n.compact($0) } ?? "")
         // Said as selected where the mark is switched on — dim or not, since on is its state.
         .accessibilityAddTraits(mark.on ? .isSelected : [])
+        .modifier(ShellReasonLine(shown: $saying, words: mark.spoken))
     }
 }
 
@@ -452,24 +464,14 @@ struct ShellMoreItem {
 /// was built in**: the ordinary items, a divider, and the destructive ones last.
 struct ShellMore {
     let items: [ShellMoreItem]
-    /// Why the menu's dim items are dim, each in its own sentence, where the shared word their
-    /// title carries (`ShellMark.spoken`) does not say which: a lock's line, why a source may not
-    /// act. **Not drawn**: kept where it is worked out for the press on a dim item that says it
-    /// (#385), which is not built yet.
-    let reasons: [String]
-
-    init(items: [ShellMoreItem], reasons: [String] = []) {
-        self.items = items
-        self.reasons = reasons
-    }
 
     /// A menu ending in an item that may be dim for a reason the three shared ones do not say:
-    /// `reason`, in the menu's own words, is what the item says after its name (`because`), and is
-    /// kept with the menu (`reasons`). Nothing to say, and the menu is its items.
+    /// `reason`, in the menu's own words, is what the item says after its name (`because`).
+    /// Nothing to say, and the menu is its items.
     static func ending(
         in item: ShellMoreItem, dimFor reason: String?, after items: [ShellMoreItem] = []
     ) -> Self {
-        Self(items: items + [item.because(reason)], reasons: [reason].compactMap { $0 })
+        Self(items: items + [item.because(reason)])
     }
 
     static let symbol = "ellipsis"

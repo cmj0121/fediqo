@@ -827,7 +827,7 @@ struct FollowedTagsTests {
         var said = FollowedTagsSaid(page: Self.page, reading: .said, rows: [row])
         var acted = 0, asked = 0
         let unfollow = try #require(said.more(for: row, act: { _ in acted += 1 }, ask: { asked += 1 }))
-        #expect(unfollow.reasons.isEmpty)
+        #expect(unfollow.whys.isEmpty)
         #expect(unfollow.items.map(\.name) == [L10n.t("tag.follow.unfollow")])
         // Red, asking first which hashtag at which source, as About's row does.
         #expect(unfollow.dangers.count == 1 && unfollow.items.first?.question == ShellQuestion.unfollow(tag, at: Self.host))
@@ -840,7 +840,7 @@ struct FollowedTagsTests {
         row.standing = .followed
         said.changing = PartWords.Place(kind: .partly, key: "part.follows.partly.changing")
         let asks = try #require(said.more(for: row, act: { _ in acted += 1 }, ask: { asked += 1 }))
-        #expect(asks.reasons.isEmpty)
+        #expect(asks.whys.isEmpty)
         #expect(asks.items.map(\.name) == [String(format: L10n.t("part.follows.partly.changing"), Self.host)])
 
         // Said, and not to be asked about: the sentence, and nothing to press.
@@ -850,7 +850,7 @@ struct FollowedTagsTests {
         // Changed (#385): the sentence headed an empty menu; the menu is now the act, dim, saying it.
         let stated = try #require(said.more(for: row, act: { _ in acted += 1 }, ask: { asked += 1 }))
         let sentence = String(format: L10n.t("part.ask.none"), Self.host)
-        #expect(stated.items.map(\.name) == [L10n.t("tag.follow.unfollow")] && stated.reasons == [sentence])
+        #expect(stated.items.map(\.name) == [L10n.t("tag.follow.unfollow")] && stated.whys == [sentence])
         let item = try #require(stated.items.first)
         #expect(item.look == .dim(.notNow) && !item.answers)
         #expect(item.title() == ShellMark.said(L10n.t("tag.follow.unfollow"), sentence))

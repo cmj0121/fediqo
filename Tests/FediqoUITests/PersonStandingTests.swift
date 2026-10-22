@@ -396,7 +396,7 @@ struct PersonStandingTests {
         // now red and asked about every time, saying they can be followed again in one press.
         #expect(followed.asksBefore(.unfollow))
         let menu = followed.menu(act: { _ in })
-        #expect(menu.reasons.first == L10n.t("part.account.unasked") && Array(menu.items.map(\.name).prefix(2)) == [PersonActing.name(.feature), PersonActing.name(.unfollow)])
+        #expect(menu.whys.first == L10n.t("part.account.unasked") && Array(menu.items.map(\.name).prefix(2)) == [PersonActing.name(.feature), PersonActing.name(.unfollow)])
         #expect(menu.dangers.first?.name == PersonActing.name(.unfollow))
         let open = try #require(menu.dangers.first?.question)
         #expect(open == ShellQuestion.unfollow("@ada@m.example", at: Self.host, asksFirst: false))

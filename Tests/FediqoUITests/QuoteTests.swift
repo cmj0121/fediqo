@@ -243,7 +243,7 @@ struct QuoteTests {
         ])
         let own = try #require(session.ownQuotesOffer(on: try row("1", in: session)))
         #expect(own.policy == .anyone && !own.fixed && own.count == 1)
-        let items = ItemActs.quoteItems(own).items
+        let items = ItemActs.quoteItems(own)
         #expect(items.map(\.name) == ["Who may quote it: Anyone", "Who may quote it: Your followers", "Who may quote it: Only you", "Quotes of it (1)"])
         own.choose(.followers)
         #expect(session.ownQuotesOffer(on: try row("1", in: session))?.policy == .followers, "shown at once")
@@ -252,7 +252,7 @@ struct QuoteTests {
 
         let fixed = try #require(session.ownQuotesOffer(on: try row("4", in: session)))
         #expect(fixed.fixed && fixed.policy == .nobody)
-        #expect(ItemActs.quoteItems(fixed).items.prefix(2).allSatisfy { $0.look == .dim(.never) })
+        #expect(ItemActs.quoteItems(fixed).prefix(2).allSatisfy { $0.look == .dim(.never) })
 
         own.openQuotes?()
         await session.quoting.settled()

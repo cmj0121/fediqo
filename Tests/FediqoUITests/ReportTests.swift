@@ -114,7 +114,7 @@ struct ReportTests {
         acting.report = ItemActing.Report(lock: locked) {}
         let dim = ItemActs.more(on: theirs, acting: acting, language: .english)
         #expect(dim.items.last?.look == .dim(.askAgain) && dim.items.last?.answers == true)
-        #expect(dim.reasons.contains(L10n.t("part.reports.unasked", language: .english)))
+        #expect(dim.whys.contains(L10n.t("part.reports.unasked", language: .english)))
 
         let pages = ShellPersonPages()
         await pages.reports.start(Self.ada, post: theirs.statusID, people: pages, in: session)

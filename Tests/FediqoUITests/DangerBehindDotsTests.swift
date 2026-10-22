@@ -117,7 +117,7 @@ struct DangerBehindDotsTests {
             ask, figure: 2, count: { _ in (posts: 5, kept: 1) }, none: { none += 1 }, go: { went += 1 },
             language: language
         )
-        #expect(more.reasons.isEmpty)
+        #expect(more.whys.isEmpty)
         let put = await counted(more, symbol: "trash", named: L10n.t("usage.span.now", language: language), language: language)
         #expect(put?.question == ShellQuestion.letGo(ask.counting(5, kept: 1), language: language))
         #expect(put?.question != ShellQuestion.letGo(ask.counting(2), language: language))
@@ -151,7 +151,7 @@ struct DangerBehindDotsTests {
                 SpanAsk(from: day, to: day, host: nil), figure: figure,
                 count: { _ in counts += 1; return (posts: 9, kept: 0) }, none: {}, go: {}, language: language
             )
-            #expect(more.reasons == [L10n.t("usage.span.none", language: language)])
+            #expect(more.whys == [L10n.t("usage.span.none", language: language)])
             let item = more.items[0]
             #expect(item.look == .dim(.notNow) && !item.answers && more.dangers.count == 1)
             // Changed (#385): the head said why and the item its name alone; the item says it after its name now.
