@@ -216,10 +216,17 @@ public struct MastodonAdminFederation: Sendable {
         public let isV6: Bool
         /// How many leading bits name it: 32 or 128 for one address.
         public let prefix: Int
+        /// An IPv6 range that carries IPv4 addresses in its last 32 bits — mapped (`::ffff:a.b.c.d`)
+        /// or compatible (`::a.b.c.d`) — whose width is IPv4's, less the 96 bits before them.
+        public var carriesV4 = false
 
         /// Whether it reaches a great many addresses — wider than a /8 of IPv4, or a /16 of
-        /// IPv6 — so that refusing it may shut out whole networks.
-        public var isWide: Bool { prefix < (isV6 ? 16 : 8) }
+        /// IPv6 — so that refusing it may shut out whole networks. One that carries IPv4 is
+        /// judged as IPv4: `::ffff:0.0.0.0/96` is all of it.
+        public var isWide: Bool {
+            if carriesV4 { return prefix - 96 < 8 }
+            return prefix < (isV6 ? 16 : 8)
+        }
     }
 
     /// The address or range `written` names, read as the address families read them — an IPv4
@@ -234,10 +241,16 @@ public struct MastodonAdminFederation: Sendable {
         // Digits, dots and colons only: no zone (`%en0`), which the families' reader lets by.
         guard address.allSatisfy({ $0.isASCII && ($0.isHexDigit || $0 == "." || $0 == ":") }) else { return nil }
         let isV6: Bool
+        var carriesV4 = false
         if address.contains(":") {
             var bytes = in6_addr()
             guard inet_pton(AF_INET6, address, &bytes) == 1 else { return nil }
             isV6 = true
+            let octets = withUnsafeBytes(of: &bytes) { Array($0) }
+            let zeros = octets.prefix(10).allSatisfy { $0 == 0 }
+            let mapped = zeros && octets[10] == 0xff && octets[11] == 0xff
+            let compatible = zeros && octets[10] == 0 && octets[11] == 0 && address.contains(".")
+            carriesV4 = mapped || compatible
         } else {
             var bytes = in_addr()
             guard address.split(separator: ".", omittingEmptySubsequences: false).count == 4,
@@ -254,7 +267,7 @@ public struct MastodonAdminFederation: Sendable {
             else { return nil }
             prefix = read
         }
-        return AddressRange(wire: trimmed, isV6: isV6, prefix: prefix)
+        return AddressRange(wire: trimmed, isV6: isV6, prefix: prefix, carriesV4: carriesV4)
     }
 
     /// Whether `ip` is an address or a range of them this app sends (`range`).

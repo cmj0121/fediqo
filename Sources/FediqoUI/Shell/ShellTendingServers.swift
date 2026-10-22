@@ -124,6 +124,18 @@ struct FederationAsk: Equatable, Identifiable {
         }
     }
 
+    /// The name as it will be sent, where that is not as it was written — an international name
+    /// in its ASCII spelling, so a look-alike shows what it truly names. Nothing where they agree.
+    var sentAs: String? {
+        let written: String = switch kind {
+        case .block(let held): held == nil ? draft.domain : ""
+        case .allow, .mail: domain
+        case .address: ""
+        }
+        guard let wire = MastodonAdminFederation.wireDomain(written), wire != written else { return nil }
+        return wire
+    }
+
     /// Why Send is dim where what is written names nothing it can send — nothing where the field
     /// is empty, or it may be sent.
     var whyNot: String? {

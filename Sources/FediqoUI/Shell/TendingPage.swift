@@ -25,6 +25,7 @@ struct TendingPane: View {
     var reports: TendingReportsSaid?
     var people: TendingPeopleSaid?
     var servers: TendingServersSaid?
+    var server: TendingServerSaid?
     /// The head's figures, each opening its tab.
     var counts: [TendingCount] = []
     /// Whether the sign-in holds tending's word that changes: said in the head where it does not.
@@ -35,6 +36,7 @@ struct TendingPane: View {
     var onReport = TendingReportActs()
     var onPeople = TendingPeopleActs()
     var onServers = TendingServersActs()
+    var onServer = TendingServerActs()
     var onOpenPerson: (DummyPerson) -> Void
     var onReadOn: () -> Void
     var onReachFoot: () -> Void
@@ -77,6 +79,13 @@ struct TendingPane: View {
         case .servers:
             if let servers {
                 TendingServersList(said: servers, acts: onServers, selectedID: $selectedID, asked: $asked, jumpToTop: jumpToTop) { lead }
+            }
+        case .server:
+            if let server {
+                TendingServerList(
+                    said: server, acts: onServer, onOpenPerson: onOpenPerson, catalogues: catalogues, posts: posts,
+                    selectedID: $selectedID, asked: $asked, jumpToTop: jumpToTop
+                ) { lead }
             }
         }
     }
