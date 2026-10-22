@@ -93,8 +93,8 @@ struct TendingServersTests {
     @Test("The tab and each list are the role's: the servers' lists need the flag for federation, the mail domains and the ranges the flag for blocks; a role with neither has no trace of the tab, and asks nothing")
     func theTabIsTheRoles() async throws {
         let (session, _, servers) = try await session(Self.seeded())
-        #expect(ShellTending.tabs(at: Self.host, in: session) == [.reports, .people, .servers])
-        #expect(TendingTab.allowed(by: MastodonStaff(rawValue: 1)) == [.reports, .people, .servers], "the administrator is allowed every tab")
+        #expect(ShellTending.tabs(at: Self.host, in: session) == [.reports, .people, .servers, .server])
+        #expect(TendingTab.allowed(by: MastodonStaff(rawValue: 1)) == [.reports, .people, .servers, .server], "the administrator is allowed every tab")
         await servers.opened(Self.page, in: session)
         let said = servers.said(of: Self.page, in: session)
         #expect(said.blocks?.items.count == 2 && said.allows?.items.count == 1 && said.mail?.items.count == 1 && said.addresses?.items.count == 1)

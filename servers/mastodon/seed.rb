@@ -697,6 +697,36 @@ refused_ip = IpBlock.find_or_initialize_by(ip: "192.0.2.0/24")
 refused_ip.assign_attributes(severity: :sign_up_block, comment: "fediqo383seed range", expires_at: nil)
 refused_ip.save!
 
+# What the checks of a server's own page of tending need (#384): a second rule, with a hint, so
+# the rules read in their order; and a hashtag, a link and a post **waiting to be reviewed** —
+# each with a row among those rising that the server has not allowed, as a server's own count
+# would write once enough people used them (it runs no worker here, so the rows are written
+# beside the ones above). Put back every run: never reviewed, never let rise, nothing allowed.
+second_rule = Rule.find_by(text: "fediqo384seed second rule") ||
+  Rule.create!(text: "fediqo384seed second rule", hint: "fediqo384seed hint", priority: 1)
+second_rule.update!(priority: 1, hint: "fediqo384seed hint", deleted_at: nil)
+waiting_tag = Tag.find_or_create_by_names(["FediqoWaiting"]).first
+waiting_tag.update!(trendable: nil, reviewed_at: nil, requested_review_at: Time.now.utc, usable: true, listable: true)
+waiting_tag_trend = TagTrend.find_or_initialize_by(tag_id: waiting_tag.id)
+waiting_tag_trend.assign_attributes(score: 6.0, rank: 2, allowed: false, language: "")
+waiting_tag_trend.save!
+waiting_card = PreviewCard.find_or_initialize_by(url: "https://waiting.example/stories/waiting")
+waiting_card.assign_attributes(
+  title: "fediqo384seed a story waiting", description: "Waiting to be reviewed.", type: :link,
+  provider_name: "Waiting", provider_url: "https://waiting.example", trendable: nil, language: "en"
+)
+waiting_card.save!
+waiting_card_trend = PreviewCardTrend.find_or_initialize_by(preview_card_id: waiting_card.id)
+waiting_card_trend.assign_attributes(score: 5.0, rank: 2, allowed: false, language: "en")
+waiting_card_trend.save!
+riser_384 = person.call("rising_384")
+riser_384.update!(reviewed_at: nil, trendable: nil)
+waiting_post = said.call(riser_384, "fediqo384seed a post waiting")
+waiting_post.update!(trendable: nil)
+waiting_post_trend = StatusTrend.find_or_initialize_by(status_id: waiting_post.id)
+waiting_post_trend.assign_attributes(account_id: riser_384.id, score: 4.0, rank: 2, allowed: false, language: waiting_post.language)
+waiting_post_trend.save!
+
 more = "/tmp/fediqo-mastodon-tokens.json"
 owner_only.call(more, JSON.generate(tokens.merge(
   # The sign-in page is asked by this id for a scope the registration does not include.
@@ -724,6 +754,10 @@ owner_only.call(more, JSON.generate(tokens.merge(
     "servers" => {
       "suspended" => blocked["suspended"].id.to_s, "limited" => blocked["limited"].id.to_s,
       "allowed" => allowed.id.to_s, "mail" => refused_mail.id.to_s, "ip" => refused_ip.id.to_s,
+    },
+    "server" => {
+      "rules" => [rule.id.to_s, second_rule.id.to_s],
+      "tag" => waiting_tag.id.to_s, "link" => waiting_card.id.to_s, "post" => waiting_post.id.to_s,
     }
   ),
   "people" => people_sign_ins.merge(

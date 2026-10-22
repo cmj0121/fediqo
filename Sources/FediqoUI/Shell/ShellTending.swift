@@ -42,6 +42,8 @@ enum TendingTab: String, ShellTab, Sendable, CaseIterable {
     case people
     /// The servers it refuses or allows, and the addresses it refuses (#383).
     case servers
+    /// How it is doing, what waits to rise on it, and its rules (#384).
+    case server
 
     var id: String { rawValue }
     var titleKey: String { "tend.tab.\(rawValue)" }
@@ -51,6 +53,7 @@ enum TendingTab: String, ShellTab, Sendable, CaseIterable {
         case .reports: "exclamationmark.bubble"
         case .people: "person.badge.clock"
         case .servers: "network"
+        case .server: "chart.bar"
         }
     }
 
@@ -61,6 +64,7 @@ enum TendingTab: String, ShellTab, Sendable, CaseIterable {
         case .reports: [.manageReports]
         case .people: [.manageUsers]
         case .servers: [.manageFederation, .manageBlocks]
+        case .server: [.viewDashboard, .manageTaxonomies, .manageRules]
         }
     }
 
@@ -165,11 +169,14 @@ final class ShellTending {
     let people: ShellTendingPeople
     /// The Servers tab's own state (#383).
     let servers: ShellTendingServers
+    /// The Server tab's own state (#384).
+    let server: ShellTendingServer
 
     init(errands: PageErrands) {
         self.errands = errands
         people = ShellTendingPeople(errands: errands)
         servers = ShellTendingServers(errands: errands)
+        server = ShellTendingServer(errands: errands)
     }
 
     // MARK: - Who may
@@ -261,6 +268,7 @@ final class ShellTending {
         case .reports: (standing(page.host, in: session)?.rows ?? []).map { TendingReportsSaid.rowID($0.id) }
         case .people: people.walked(page, in: session)
         case .servers: servers.walked(page, in: session)
+        case .server: server.walked(page, in: session)
         }
     }
 
@@ -272,7 +280,7 @@ final class ShellTending {
             let said: (count: Int, more: Bool)? = switch tab {
             case .reports: openReports(at: page.host, in: session)
             case .people: people.waiting(at: page.host, in: session)
-            case .servers: nil
+            case .servers, .server: nil
             }
             return said.map { TendingCount(tab: tab, count: $0.count, more: $0.more) }
         }
@@ -306,6 +314,7 @@ final class ShellTending {
     func ask(of page: Tending, language: DummyLanguage? = nil) -> PageAsking {
         if page.tab == .people { return people.ask(of: page, language: language) }
         if page.tab == .servers { return servers.ask(of: page, language: language) }
+        if page.tab == .server { return server.ask(of: page, language: language) }
         guard let reports = pages[page.host] else { return PageAsking() }
         return PageAsking(
             asking: reports.asking
@@ -321,6 +330,7 @@ final class ShellTending {
     func stop(_ page: Tending) -> Bool {
         if page.tab == .people { return people.stop(page) }
         if page.tab == .servers { return servers.stop(page) }
+        if page.tab == .server { return server.stop(page) }
         let host = page.host
         guard let reports = pages[host], reports.asking || reports.readingOn else { return false }
         asks[host]?.cancel()
@@ -342,6 +352,7 @@ final class ShellTending {
         case .reports: await reportsOpened(page, in: session)
         case .people: await people.opened(page, in: session)
         case .servers: await servers.opened(page, in: session)
+        case .server: await server.opened(page, in: session)
         }
     }
 
@@ -363,6 +374,7 @@ final class ShellTending {
     func again(_ page: Tending, in session: ShellSession) async {
         if page.tab == .people { return await people.again(page, in: session) }
         if page.tab == .servers { return await servers.again(page, in: session) }
+        if page.tab == .server { return await server.again(page, in: session) }
         if pages[page.host]?.asking == true { return }
         await begin(page, fromTop: true, in: session)?.value
     }
@@ -371,8 +383,8 @@ final class ShellTending {
     /// did not come or was stopped. Reached, only after a stretch that came.
     func readOn(_ page: Tending, pressed: Bool, in session: ShellSession) async {
         if page.tab == .people { return await people.readOn(page, pressed: pressed, in: session) }
-        // The Servers tab's lists read on each by its own foot, pressed (`servers.readOn`).
-        if page.tab == .servers { return }
+        // The Servers and Server tabs' lists read on each by its own foot, pressed (`readOn`).
+        if page.tab == .servers || page.tab == .server { return }
         guard let reports = standing(page.host, in: session), pressed ? reports.readsOn : reports.reachesOn else { return }
         pages[page.host]?.held = false
         await begin(page, fromTop: false, in: session)?.value
@@ -538,5 +550,6 @@ final class ShellTending {
         halted.remove(host)
         people.letGo(at: host)
         servers.letGo(at: host)
+        server.letGo(at: host)
     }
 }
