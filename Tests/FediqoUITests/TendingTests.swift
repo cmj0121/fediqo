@@ -104,7 +104,7 @@ struct TendingTests {
             #expect(!ShellTending.drawn(Self.page, in: plain))
             #expect(SourceRow.tendItem(nil, host: Self.host, actsLive: true, press: {}) == nil)
         }
-        #expect(TendingTab.allowed(by: MastodonStaff(rawValue: 1)) == [.reports, .people], "the administrator is allowed every tab")
+        #expect(TendingTab.allowed(by: MastodonStaff(rawValue: 1)) == [.reports, .people, .servers], "the administrator is allowed every tab")
     }
 
     @Test("Holding only tending's word that reads, the page lists and offers no act: every act is dim, and pressed sends nothing")

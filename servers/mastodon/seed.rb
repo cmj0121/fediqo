@@ -671,6 +671,32 @@ acted_on.unsilence! if acted_on.silenced?
 acted_on.unsensitize! if acted_on.sensitized?
 acted_on.user.enable! if acted_on.user.disabled?
 
+# What the checks of the servers and addresses this one refuses need (#383): a server suspended
+# and one limited, with what is refused of each and why; one allowed; a mail domain refused;
+# and a range of addresses refused to sign up from. Hosts nobody reaches, and the addresses of
+# the documentation range. **Put back every run**: each made again where a check took it off,
+# and as it was where a check changed it; what a check made and left is taken off.
+DomainBlock.where(domain: %w(fediqo383.example)).destroy_all
+DomainAllow.where(domain: %w(fediqo383.example)).destroy_all
+EmailDomainBlock.where(domain: %w(fediqo383.example)).destroy_all
+IpBlock.where(ip: "198.51.100.0/24").destroy_all
+blocked = {
+  "suspended" => ["suspended.example", { severity: :suspend, reject_media: false, reject_reports: false,
+                                         private_comment: "fediqo383seed spam", public_comment: "Spam", obfuscate: false }],
+  "limited" => ["limited.example", { severity: :silence, reject_media: true, reject_reports: false,
+                                     private_comment: "", public_comment: "Too loud", obfuscate: false }],
+}.transform_values do |(domain, said)|
+  block = DomainBlock.find_or_initialize_by(domain: domain)
+  block.assign_attributes(said)
+  block.save!
+  block
+end
+allowed = DomainAllow.find_or_create_by!(domain: "allowed.example")
+refused_mail = EmailDomainBlock.find_or_create_by!(domain: "spam.example")
+refused_ip = IpBlock.find_or_initialize_by(ip: "192.0.2.0/24")
+refused_ip.assign_attributes(severity: :sign_up_block, comment: "fediqo383seed range", expires_at: nil)
+refused_ip.save!
+
 more = "/tmp/fediqo-mastodon-tokens.json"
 owner_only.call(more, JSON.generate(tokens.merge(
   # The sign-in page is asked by this id for a scope the registration does not include.
@@ -694,7 +720,11 @@ owner_only.call(more, JSON.generate(tokens.merge(
     "app" => { "id" => tending_ask.uid, "secret" => tending_ask.secret, "scopes" => tending_ask.scopes.to_s },
     "reports" => reported.map { |report| report.id.to_s },
     "waiting" => waiting_ones.transform_values { |who| named.call(who) },
-    "actedOn" => named.call(acted_on)
+    "actedOn" => named.call(acted_on),
+    "servers" => {
+      "suspended" => blocked["suspended"].id.to_s, "limited" => blocked["limited"].id.to_s,
+      "allowed" => allowed.id.to_s, "mail" => refused_mail.id.to_s, "ip" => refused_ip.id.to_s,
+    }
   ),
   "people" => people_sign_ins.merge(
     "person" => named.call(shown), "locked" => named.call(locked), "hidden" => named.call(hidden).merge(people_sign_ins["hidden"]),

@@ -3258,6 +3258,7 @@ private struct PersonPresenters: ViewModifier {
             .modifier(BlockedServersPresenter(servers: people.servers, session: session))
             .modifier(ReportSheetPresenter(people: people, session: session))
             .modifier(AccountActSheetPresenter(people: people.tending.people, session: session))
+            .modifier(FederationAskSheetPresenter(servers: people.tending.servers, session: session))
     }
 }
 
