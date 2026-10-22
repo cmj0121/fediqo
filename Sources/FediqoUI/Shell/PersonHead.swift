@@ -57,6 +57,10 @@ struct PersonHeadSaid: Equatable {
         head.face = subject.avatarURL
         head.marks = PersonSaid.marks(of: subject, source: said.source, language: language)
         head.figures = PersonSaid.figures(of: subject, tabs: tabs, language: language)
+        // Who is known in common (#377): an icon with its count, opening About, where they are.
+        if let familiar = standing?.familiar, !familiar.isEmpty, tabs.contains(.about) {
+            head.figures.append(PersonNoteWords.figure(familiar.count, language: language))
+        }
         return head
     }
 

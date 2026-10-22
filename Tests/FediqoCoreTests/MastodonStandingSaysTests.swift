@@ -382,6 +382,42 @@ struct MastodonStandingSaysTests {
         }
     }
 
+    @Test("The reader's note on somebody (#377) is written through this app's reader and is what the server's own relationship says, read back by the same one ask as the standing; empty clears it; a sign-in without the account word is refused and changes nothing; put back as it was")
+    func theReadersNote() async throws {
+        try await LocalServers.requireHealthy()
+        let seeded = try seeded()
+        let reader = try reader(seeded.writer)
+        let was = try await reader.standingNoted(to: seeded.followable).note
+        do {
+            let written = try await reader.note("Met at the fediqo checkout", on: seeded.followable)
+            #expect(written.note == "Met at the fediqo checkout", "the server's own answer")
+            let plain = try await ask(Self.stands(seeded.followable), as: seeded.writer)
+            #expect(plain.status == 200 && plain.list.first?["note"] as? String == "Met at the fediqo checkout")
+            #expect(try await reader.standingNoted(to: seeded.followable).note == "Met at the fediqo checkout")
+            // The sign-in that only sees who the reader follows holds no account word.
+            await #expect(throws: (any Error).self) { _ = try await self.reader(seeded.seeing).note("x", on: seeded.followable) }
+            #expect(try await reader.standingNoted(to: seeded.followable).note == "Met at the fediqo checkout")
+            #expect(try await reader.note("", on: seeded.followable).note == nil, "empty clears it")
+        } catch {
+            _ = try? await reader.note(was ?? "", on: seeded.followable)
+            throw error
+        }
+        _ = try await reader.note(was ?? "", on: seeded.followable)
+        #expect(try await reader.standingNoted(to: seeded.followable).note == was, "put back as it was")
+    }
+
+    @Test("Who of the people the reader follows also follow somebody (#377) is read as the server lists them, by its own one ask, and nobody in common is nobody")
+    func knownInCommon() async throws {
+        try await LocalServers.requireHealthy()
+        let seeded = try seeded()
+        let source = Source(host: Self.host, kind: .mastodon)
+        let common = try await reader(seeded.writer).familiarFollowers(of: seeded.followable, at: source)
+        let plain = try await ask("/api/v1/accounts/familiar_followers?id[]=\(seeded.followable)", as: seeded.writer)
+        #expect(plain.status == 200)
+        let listed = (plain.list.first?["accounts"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
+        #expect(common.map(\.accountID) == listed, "each the server lists, and nobody it does not")
+    }
+
     @Test("Somebody muted for a time is said to be muted until a moment, written to the second; muted for good, until none")
     func mutedForATime() async throws {
         try await LocalServers.requireHealthy()

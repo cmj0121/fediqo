@@ -80,6 +80,19 @@ struct PersonActing: Equatable {
     var reportable = false
     /// How the sign-in stands where it holds less than reporting needs, or nothing where it holds it.
     var reportsLock: PartWords.Place?
+    /// Whether the page offers the reader's own note on them (#377): where how the reader stands
+    /// to them is read here, which is where the source keeps it.
+    var notes = false
+    /// The note as drawn: the one on its way where one is, else the source's.
+    var note: String?
+    /// Whether a note written here is on its way.
+    var noteSending = false
+    /// Whether the last note written here did not arrive.
+    var noteMissed = false
+    /// What the source said where it would not keep the last note written here.
+    var noteRefused: String?
+    /// Which of the people the reader follows also follow them (#377): nobody where none.
+    var familiar: [Person] = []
 
     /// How the reader stands to them as the page draws it: what the source last said, with the
     /// press on its way drawn over it. Nothing until the source has said.
