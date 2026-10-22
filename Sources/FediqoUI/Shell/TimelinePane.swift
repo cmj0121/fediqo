@@ -768,6 +768,7 @@ struct TimelinePane: View {
                 guard let people else { return }
                 Task { await people.acts.writeNote(words, of: person, said: people.said(of: person, in: session), in: session) }
             },
+            onLanguages: { codes in Task { await people?.chooseLanguages(codes, of: person, in: session) } },
             onAskFollows: { session.askFor([PersonAct.follow.needs], host: person.host) },
             onChange: { people?.changeOwn(person, in: session) },
             onReadOn: { Task { await people?.readOn(person, in: session) } },
@@ -2154,6 +2155,11 @@ struct PersonPageAsks: ViewModifier {
             .task(id: people.flatMap { $0.acts.familiarOpening(person, said: $0.said(of: person, in: session), in: session) }) {
                 guard let people else { return }
                 await people.acts.familiarOpened(person, said: people.said(of: person, in: session), in: session)
+            }
+            // **And which languages its host knows**, once the reader follows them there (#378).
+            .task(id: people.flatMap { $0.acts.languagesOpening(person, said: $0.said(of: person, in: session), in: session) }) {
+                guard let people else { return }
+                await people.acts.languagesOpened(person, said: people.said(of: person, in: session), in: session)
             }
     }
 }

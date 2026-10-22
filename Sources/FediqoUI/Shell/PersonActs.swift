@@ -93,6 +93,11 @@ struct PersonActing: Equatable {
     var noteRefused: String?
     /// Which of the people the reader follows also follow them (#377): nobody where none.
     var familiar: [Person] = []
+    /// The languages a choice on its way says (#378) — none, every language — while it is out.
+    var languagesSending: [String]?
+    /// The languages the reader chooses among (#378): the source's own where it said them, else
+    /// the ones this device knows by a two-letter code.
+    var languagesOffered: [FollowLanguage] = []
 
     /// How the reader stands to them as the page draws it: what the source last said, with the
     /// press on its way drawn over it. Nothing until the source has said.
@@ -109,6 +114,7 @@ struct PersonActing: Equatable {
         case .hideBoosts: standing.showsBoosts = false
         case .notify: standing.notifies = true
         case .stopNotifying: standing.notifies = false
+        case .chooseLanguages: standing.languages = languagesSending?.isEmpty == false ? languagesSending : nil
         case .acceptRequest: standing.followedBy = true
         case .refuseRequest, .removeFollower: standing.followedBy = false
         case .feature: standing.featured = true
@@ -187,6 +193,14 @@ struct PersonActing: Equatable {
             standing.showsBoosts.map { Narrow(which: .boosts, on: $0) },
             standing.notifies.map { Narrow(which: .notices, on: $0) },
         ].compactMap { $0 }
+    }
+
+    /// Which languages of their posts reach Home (#378), as About draws it: **only of somebody
+    /// the reader follows** — the source keeps it on the follow — as the source last said, with a
+    /// choice on its way drawn over it. Nothing means every language.
+    var languages: PersonLanguagesWords.Row? {
+        guard let standing = shown, standing.following else { return nil }
+        return PersonLanguagesWords.Row(codes: standing.languages ?? [], offered: languagesOffered)
     }
 
     /// Whether a press on one of them is taken now: only from a sign-in that may change who
@@ -482,6 +496,7 @@ struct PersonActing: Equatable {
         case .withdraw: "arrow.uturn.backward"
         case .showBoosts, .hideBoosts: "arrow.2.squarepath"
         case .notify, .stopNotifying: "bell"
+        case .chooseLanguages: PersonLanguagesWords.symbol
         case .acceptRequest: "person.crop.circle.badge.checkmark"
         case .refuseRequest: "person.crop.circle.badge.xmark"
         case .removeFollower: "person.crop.circle.badge.minus"
@@ -504,6 +519,7 @@ struct PersonActing: Equatable {
         case .withdraw: "person.act.withdraw"
         case .showBoosts, .hideBoosts: "person.act.boosts"
         case .notify, .stopNotifying: "person.act.notify"
+        case .chooseLanguages: "person.act.languages"
         case .acceptRequest: "person.act.accept"
         case .refuseRequest: "person.act.refuse"
         case .removeFollower: "person.act.removeFollower"
@@ -567,6 +583,8 @@ struct StandingChoice: Equatable, Sendable {
     var held: Held = .hide
     /// Whether a mute keeps their notices from the reader too.
     var notices = true
+    /// The languages chosen of somebody followed (#378): none, every language.
+    var languages: [String] = []
     /// How long a mute lasts, in seconds; nothing, for good.
     var seconds: Int?
 
