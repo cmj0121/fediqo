@@ -32,6 +32,8 @@ final class ShellNoticeActs {
         /// Reading the requests a source holds.
         case requests
         case letThrough, letGo
+        /// Choosing whose notices the source holds back (#376).
+        case policy
     }
 
     /// What is said of an act at one source that changed nothing.
@@ -51,6 +53,19 @@ final class ShellNoticeActs {
     private(set) var said: [String: Said] = [:]
     /// What each source last said it holds back. One that answered `absent` is not asked again.
     private(set) var holdings: [String: NoticeHolding] = [:]
+    /// Whose notices each source holds back, and how, as it last said (#376). Nothing for a source
+    /// with no such thing, or one not asked yet.
+    private(set) var policies: [String: NoticePolicy] = [:]
+    /// The choices pressed here and on their way to their source, by host: drawn at once over
+    /// what the source last said, until its answer lands.
+    private(set) var choosing: [String: [NoticePolicy.Whose: NoticePolicy.Way]] = [:]
+    /// The sources whose line of what they hold back is open.
+    private(set) var policyOpen: Set<String> = []
+    /// When each source's answer to a choice landed, in the run's order of reads: a look at what
+    /// it holds back sent before that names the policy as it stood before, and is not taken.
+    @ObservationIgnored private var policyMoved: [String: UInt64] = [:]
+    /// The sources a choice is out to now: one at a time each.
+    @ObservationIgnored private var sendingPolicy: Set<String> = []
     /// The requests each source handed over when its held-back line was last opened.
     private(set) var requests: [String: [NoticeRequest]] = [:]
     /// The sources whose held-back line is open.
@@ -124,7 +139,7 @@ final class ShellNoticeActs {
             switch out.act {
             case .dismiss: hidden.lines.insert(name)
             case .dismissAll: hidden.hosts.insert(out.host)
-            case .ask, .requests, .letThrough, .letGo: break
+            case .ask, .requests, .letThrough, .letGo, .policy: break
             }
         }
         return hidden
@@ -207,9 +222,12 @@ final class ShellNoticeActs {
         guard known != .absent, looking.insert(host).inserted else { return }
         defer { looking.remove(host) }
         let sent = ReadMoment.now().place
-        guard case .yes(let holding) = await ask(host, for: .notices, in: session, { try await $0.held(known: known) }),
-              !outrun(sent, at: host)
+        guard case .yes(let read) = await ask(host, for: .notices, in: session, { try await $0.policy(known: known) })
         else { return }
+        // What it holds back stands as its last choice left it, whatever a look sent before said.
+        if !Self.before(sent, policyMoved[host]) { policies[host] = read.policy }
+        guard !outrun(sent, at: host) else { return }
+        let holding = read.holding
         holdings[host] = holding
         if holding.held == nil {
             requests[host] = nil
@@ -218,6 +236,84 @@ final class ShellNoticeActs {
         } else if opened.contains(host) {
             await readRequests(host: host, in: session)
         }
+    }
+
+    // MARK: - Whose notices are held back (#376)
+
+    /// Whose notices `host` holds back as drawn: what it last said, with each choice pressed here
+    /// and on its way drawn over it at once.
+    func shownPolicy(host raw: String) -> NoticePolicy? {
+        let host = raw.lowercased()
+        guard var policy = policies[host] else { return nil }
+        for (whose, way) in choosing[host] ?? [:] where policy.ways[whose] != nil { policy.ways[whose] = way }
+        return policy
+    }
+
+    /// Whether the sign-in on `host` may change what it holds back: it may change notices.
+    func mayChoose(host: String, in session: ShellSession) -> Bool {
+        session.mastodon.dismisses(host: host)
+    }
+
+    func togglePolicy(host raw: String) {
+        let host = raw.lowercased()
+        if policyOpen.contains(host) { policyOpen.remove(host) } else { policyOpen.insert(host) }
+    }
+
+    /// Sets how `host` holds back the notices of `whose`. **Drawn at once** (`choosing`), and
+    /// **sent one choice at a time a source**: a press while another is out waits, drawn as chosen,
+    /// and goes once the answer lands — so no two answers can cross, and a late one never puts back
+    /// a value since chosen. Each answer is the source's own word, **numbered as it lands** so a
+    /// look sent before it changes nothing, and taken only under the sign-in it was sent with. A
+    /// choice already standing is not sent. Where the source would not, every choice still waiting
+    /// there goes back to what it said, and the page says so.
+    func choose(_ way: NoticePolicy.Way, for whose: NoticePolicy.Whose, at raw: String, in session: ShellSession) async {
+        let host = raw.lowercased()
+        guard mayChoose(host: host, in: session), policies[host]?.ways[whose] != nil,
+              shownPolicy(host: host)?.ways[whose] != way
+        else { return }
+        choosing[host, default: [:]][whose] = way
+        if said[host]?.act == .policy { said[host] = nil }
+        // One out a source: this press is sent by the one already out, once its answer lands.
+        guard sendingPolicy.insert(host).inserted else { return }
+        defer { sendingPolicy.remove(host) }
+        while let (next, wanted) = nextChoice(at: host) {
+            let answer = await ask(host, for: .write, in: session) { try await $0.choose(wanted, for: next) }
+            switch answer {
+            case .yes(let read):
+                policyMoved[host] = ReadMoment.now().place
+                if let policy = read.policy { policies[host] = policy }
+                holdings[host] = read.holding
+                // Taken: off what is waiting, unless it was chosen again meanwhile.
+                if choosing[host]?[next] == wanted { choosing[host]?[next] = nil }
+                // What the source now says of the rest settles any that waited for it.
+                for (whose, way) in choosing[host] ?? [:] where policies[host]?.ways[whose] == way {
+                    choosing[host]?[whose] = nil
+                }
+            case .no(let why):
+                choosing[host] = nil
+                said[host] = Said(act: .policy, why: why)
+                return
+            case .nothing:
+                choosing[host] = nil
+                return
+            }
+        }
+    }
+
+    /// The next choice waiting at `host` that differs from what the source last said, in the
+    /// order the choices are offered.
+    private func nextChoice(at host: String) -> (NoticePolicy.Whose, NoticePolicy.Way)? {
+        guard let waiting = choosing[host] else { return nil }
+        for whose in NoticePolicy.Whose.allCases {
+            if let way = waiting[whose], policies[host]?.ways[whose] != way { return (whose, way) }
+        }
+        return nil
+    }
+
+    /// Whether a look sent at `sent` set out before `moved`.
+    private static func before(_ sent: UInt64?, _ moved: UInt64?) -> Bool {
+        guard let sent, let moved else { return false }
+        return sent < moved
     }
 
     /// Opens one source's held-back line, and reads the requests it holds.
@@ -447,7 +543,7 @@ final class ShellNoticeActs {
                 case .dismiss: lines.contains(miss.name)
                 case .letThrough, .letGo: listed.contains(miss.name)
                 case .dismissAll: session.noticeList.reaches[host]?.notices.isEmpty == false
-                case .ask, .requests: true
+                case .ask, .requests, .policy: true
                 }
             }
             guard left.count != misses.count else { continue }
@@ -480,6 +576,10 @@ final class ShellNoticeActs {
         unconfirmed = unconfirmed.filter { $0.value != host }
         said[host] = nil
         holdings[host] = nil
+        policies[host] = nil
+        choosing[host] = nil
+        policyOpen.remove(host)
+        policyMoved[host] = nil
         requests[host] = nil
         onWay[host] = nil
         opened.remove(host)

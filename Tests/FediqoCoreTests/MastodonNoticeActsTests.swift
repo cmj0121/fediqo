@@ -292,6 +292,49 @@ struct MastodonNoticeActsTests {
         #expect(NoticeHolding.unasked.held == nil)
     }
 
+    @Test("Whose notices a source holds back is read off the same policy: each of the five it names, in the way it names them; a word this build does not know, or a choice left out, is not offered; a source with no policy offers none")
+    func whoseNoticesAreHeld() async throws {
+        let (notices, server, _) = try acting([Self.policy: .json(Captures.policy)])
+        let read = try await notices.policy()
+        #expect(read.holding == .holds(NoticesHeld(requests: 0, notices: 0)))
+        let policy = try #require(read.policy)
+        #expect(policy.ways == [
+            .notFollowing: .accept, .notFollowers: .accept, .newAccounts: .accept,
+            .privateMentions: .filter, .limitedAccounts: .filter,
+        ])
+        #expect(policy.offered == NoticePolicy.Whose.allCases)
+        #expect(await server.asked == [Self.policy], "one read for what is held and how")
+
+        let fewer = #"{"for_not_following":"filter","for_new_accounts":"maybe","summary":{"pending_requests_count":0,"pending_notifications_count":0}}"#
+        let (older, _, _) = try acting([Self.policy: .json(fewer)])
+        #expect(try await older.policy().policy?.ways == [.notFollowing: .filter], "only what it said, in words this build knows")
+
+        let none = #"{"summary":{"pending_requests_count":0,"pending_notifications_count":0}}"#
+        let (silent, _, _) = try acting([Self.policy: .json(none)])
+        #expect(try await silent.policy().policy == nil, "a source that names no choice offers none")
+
+        let (absent, asked, _) = try acting([Self.policy: Self.missing])
+        let gone = try await absent.policy()
+        #expect(gone.holding == .absent && gone.policy == nil)
+        #expect(try await absent.policy(known: .absent).policy == nil)
+        #expect(await asked.asked == [Self.policy], "absent is asked once")
+    }
+
+    @Test("A choice is sent as the one field it changes, and the policy the source answers with is what is held — never what was asked")
+    func aChoiceIsSent() async throws {
+        let answered = #"{"for_not_following":"filter","for_not_followers":"accept","for_new_accounts":"accept","for_private_mentions":"filter","for_limited_accounts":"filter","summary":{"pending_requests_count":1,"pending_notifications_count":2}}"#
+        let patch = "PATCH " + MastodonNotices.policyPath
+        let (notices, server, _) = try acting([patch: .json(answered)])
+        let read = try await notices.choose(.filter, for: .notFollowing)
+        #expect(await server.asked == [patch])
+        #expect(await server.bodies.contains("for_not_following=filter"))
+        #expect(read.policy?.ways[.notFollowing] == .filter)
+        #expect(read.holding == .holds(NoticesHeld(requests: 1, notices: 2)))
+
+        let (refused, _, _) = try acting([patch: Self.refusal])
+        await #expect(throws: (any Error).self) { _ = try await refused.choose(.drop, for: .newAccounts) }
+    }
+
     @Test("A policy whose counts cannot be read at all says nothing of what is held, which is an error and not 'nothing held'")
     func heldBackUncounted() async throws {
         for summary in [

@@ -397,6 +397,32 @@ struct MastodonNoticesSaysTests {
 
     // MARK: - 7. What the server holds back
 
+    @Test("Whose notices are held back is read with what is held, and a choice made through this app's reader is the choice the server's own answer shows — the five words as 4.6.6 names them; a sign-in that only reads notices is refused with 403 and changes nothing; put back as it was")
+    func choosingWhoseNoticesAreHeld() async throws {
+        try await LocalServers.requireHealthy()
+        let reader = try notices(.dismissing)
+        let before = try #require(try await reader.policy().policy, "4.6.6 names its choices")
+        #expect(before.offered == NoticePolicy.Whose.allCases, "every one of the five, in a word this build knows")
+        let was = try #require(before.ways[.newAccounts])
+        let other: NoticePolicy.Way = was == .filter ? .accept : .filter
+        do {
+            let chosen = try await reader.choose(other, for: .newAccounts)
+            #expect(chosen.policy?.ways[.newAccounts] == other, "the server's own answer")
+            // Asked plainly, as the server's own page reads it.
+            let plain = try await ask(.dismissing, "GET", MastodonNotices.policyPath)
+            #expect(plain.status == 200 && plain.object["for_new_accounts"] as? String == other.rawValue)
+            #expect(try await reader.policy().policy?.ways[.newAccounts] == other, "and this app reads it back")
+            // Only reading notices: refused, and nothing changed.
+            await #expect(throws: (any Error).self) { _ = try await self.notices(.noticing).choose(was, for: .newAccounts) }
+            #expect(try await reader.policy().policy?.ways[.newAccounts] == other)
+        } catch {
+            _ = try? await reader.choose(was, for: .newAccounts)
+            throw error
+        }
+        let back = try await reader.choose(was, for: .newAccounts)
+        #expect(back.policy?.ways[.newAccounts] == was, "put back as it was")
+    }
+
     @Test("An account as it is made holds back a private mention from somebody its owner does not follow: the policy counts the requests waiting, each is listed with its person, its count as a string and the post, and none of it stands in what is read; one let through is gone from the list at once and its notice still on its way; one let go is gone, and gone again is 404; a sign-in that only reads notices may do neither")
     func whatTheServerHoldsBack() async throws {
         try await LocalServers.requireHealthy()

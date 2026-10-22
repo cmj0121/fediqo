@@ -360,6 +360,13 @@ struct NoticesPane: View {
                 ShellRule()
             }
         }
+        // Whose notices each source holds back, and how (#376): a line a source that has said.
+        ForEach(ShellNoticeList.asked(in: session).map { $0.host.lowercased() }, id: \.self) { host in
+            if NoticePolicyWords.stands(host, in: session) != .unknown {
+                NoticePolicyLine(host: host, session: session)
+                ShellRule()
+            }
+        }
         let open = holders.filter { acts.opened.contains($0) }
         if !shown.isEmpty {
             rows(shown, holding: open)

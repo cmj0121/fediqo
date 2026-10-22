@@ -424,6 +424,44 @@ public enum NoticeHolding: Hashable, Sendable {
     }
 }
 
+/// Whose notices a source holds back, and how (#376): for each kind of sender the source names,
+/// whether their notices are let in, held back, or let go.
+public struct NoticePolicy: Hashable, Sendable {
+    /// Whose notices, in the source's own words for them.
+    public enum Whose: String, CaseIterable, Sendable {
+        /// People the reader does not follow.
+        case notFollowing = "for_not_following"
+        /// People who do not follow the reader.
+        case notFollowers = "for_not_followers"
+        /// Accounts made lately.
+        case newAccounts = "for_new_accounts"
+        /// Words sent to the reader alone by somebody they do not follow.
+        case privateMentions = "for_private_mentions"
+        /// Accounts the server's moderators limited.
+        case limitedAccounts = "for_limited_accounts"
+    }
+
+    /// What becomes of them.
+    public enum Way: String, CaseIterable, Sendable {
+        /// Let in, as anybody's are.
+        case accept
+        /// Held back, to be let through or let go (#323).
+        case filter
+        /// Let go, and never shown.
+        case drop
+    }
+
+    /// The choices the source said it has, and how each stands.
+    public var ways: [Whose: Way]
+
+    public init(ways: [Whose: Way]) {
+        self.ways = ways
+    }
+
+    /// The choices the source has, in the order they are offered.
+    public var offered: [Whose] { Whose.allCases.filter { ways[$0] != nil } }
+}
+
 /// One person's notices a source is holding back, waiting to be let through or let go.
 public struct NoticeRequest: Hashable, Sendable, Identifiable {
     /// The source's own name for the request: what letting it through or go is asked by. Two
