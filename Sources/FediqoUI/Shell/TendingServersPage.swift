@@ -335,8 +335,16 @@ struct FederationAskSheet: View {
         case .address:
             String(format: L10n.t("tend.servers.address.ask", language: language), LineText.oneLine(ask.ip), ask.host)
         default:
-            String(format: L10n.t("tend.servers.suspend.ask", language: language), LineText.oneLine(ask.draft.domain), ask.host)
+            [
+                String(format: L10n.t("tend.servers.suspend.ask", language: language), LineText.oneLine(ask.draft.domain), ask.host),
+                sentAs(ask, language: language),
+            ].compactMap { $0 }.joined(separator: " ")
         }
+    }
+
+    /// What is truly sent, where it is not what was written: a look-alike name's ASCII spelling.
+    static func sentAs(_ ask: FederationAsk, language: DummyLanguage? = nil) -> String? {
+        ask.sentAs.map { String(format: L10n.t("tend.servers.sentAs", language: language), $0) }
     }
 
     /// The red yes of that question.
@@ -388,6 +396,13 @@ struct FederationAskSheet: View {
                 (TendingServersSaid.severityName(severity), nil, severity == .noAccess)
             }
             words(L10n.t("tend.servers.addressWords"), text: $ask.words)
+        }
+        // The name as it is sent, where that is not as it was written.
+        if let sentAs = Self.sentAs(ask) {
+            Text(sentAs)
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.ink(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
         }
         // Why Send is dim, where what is written names nothing it can send.
         if let whyNot = ask.whyNot {

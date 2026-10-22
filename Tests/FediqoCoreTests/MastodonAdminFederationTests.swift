@@ -110,6 +110,13 @@ struct MastodonAdminFederationTests {
         #expect(MastodonAdminFederation.range("2001:db8::")?.prefix == 128)
         #expect(MastodonAdminFederation.range("10.0.0.0/7")?.isWide == true && MastodonAdminFederation.range("10.0.0.0/8")?.isWide == false)
         #expect(MastodonAdminFederation.range("2001::/15")?.isWide == true && MastodonAdminFederation.range("2001:db8::/16")?.isWide == false)
+        // IPv4 carried in IPv6 is judged as IPv4: the 96 bits before it name nothing.
+        for wide in ["::ffff:0.0.0.0/96", "::ffff:10.0.0.0/103", "::ffff:0:0/96", "::0.0.0.0/96", "::ffff:10.0.0.0/64"] {
+            #expect(MastodonAdminFederation.range(wide)?.isWide == true, "\(wide)")
+        }
+        #expect(MastodonAdminFederation.range("::ffff:10.0.0.0/104")?.isWide == false)
+        #expect(MastodonAdminFederation.range("::ffff:192.0.2.1")?.carriesV4 == true)
+        #expect(MastodonAdminFederation.range("2001:db8::1")?.carriesV4 == false)
 
         let (reader, server) = try reader([MastodonAdminFederation.addressesPath: .json(Captures.ipAdded)])
         _ = try await reader.addAddress("  198.51.100.0/24 ", severity: .approval, words: "")

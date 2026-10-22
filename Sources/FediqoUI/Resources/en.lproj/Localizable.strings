@@ -2609,6 +2609,7 @@
 "tend.servers.busy" = "Another change to this on %@ is still on its way.";
 "tend.servers.address.ask" = "Refusing %1$@ shuts it out of %2$@: whole networks may no longer reach it.";
 "tend.servers.refuse" = "Refuse";
+"tend.servers.sentAs" = "Sent as %@.";
 "person.act.report" = "Report…";
 "person.act.report.failed" = "Could not report %1$@ at %2$@.";
 "item.act.report" = "Report post…";

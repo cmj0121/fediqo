@@ -295,6 +295,9 @@ struct TendingServersTests {
         let ask = try #require(servers.asking)
         #expect(FederationAskSheet.cutsOffLine(ask, language: .english) == "Refusing 198.51.100.0/24 shuts it out of m.example: whole networks may no longer reach it.")
         #expect(FederationAskSheet.cutsOffYes(ask, language: .english) == "Refuse")
+        servers.asking?.ip = "::ffff:0.0.0.0/96"
+        servers.asking?.addressSeverity = .signUp
+        #expect(servers.asking?.cutsOff == true, "IPv4 carried in IPv6, as wide as all of IPv4")
         for wrong in ["0.0.0.0/0", "::/0", "1.2.3.4/99", "::::"] {
             servers.asking?.ip = wrong
             #expect(servers.asking?.sendable == false && servers.asking?.whyNot == L10n.t("tend.servers.notAddress"), "\(wrong)")
@@ -305,11 +308,24 @@ struct TendingServersTests {
         servers.open(.allow, at: Self.host, in: session)
         servers.asking?.domain = "not a name"
         #expect(servers.asking?.whyNot == L10n.t("tend.servers.notDomain") && servers.asking?.sendable == false)
+        servers.asking?.domain = "allowed.example"
+        #expect(servers.asking?.sentAs == nil, "sent as written: nothing more said")
         servers.asking?.domain = "  Bücher.Example \n"
         #expect(servers.asking?.sendable == true && servers.asking?.whyNot == nil)
+        #expect(servers.asking?.sentAs == "xn--bcher-kva.example")
         await servers.send(on: Self.page, in: session)
         let body = await server.sent.last?.body
         #expect(servers.asking == nil && body == "domain=xn--bcher-kva.example")
+
+        // A look-alike — its first letter Cyrillic — is suspended only once the question has
+        // said what is truly sent.
+        servers.open(.block(nil), at: Self.host, in: session)
+        servers.asking?.draft.domain = "\u{0430}pple.com"
+        servers.asking?.draft.severity = .suspend
+        let wire = try #require(servers.asking?.sentAs)
+        #expect(wire.hasPrefix("xn--") && wire.hasSuffix(".com"))
+        let lookAlike = try #require(servers.asking)
+        #expect(FederationAskSheet.cutsOffLine(lookAlike, language: .english).hasSuffix("Sent as \(wire)."))
     }
 
     @Test("A send that cannot go says why and leaves the sheet up — a change already on its way to the row — and a sheet the role no longer allows closes with nothing sent, and says why")
@@ -389,7 +405,7 @@ struct TendingServersTests {
             "tend.servers.mailDomain", "tend.servers.ip", "tend.servers.publicWords", "tend.servers.privateWords",
             "tend.servers.addressWords", "tend.servers.tooLong", "tend.servers.send", "tend.servers.suspend", "tend.servers.suspend.ask",
             "tend.servers.notDomain", "tend.servers.notAddress", "tend.servers.gone", "tend.servers.busy", "tend.servers.address.ask",
-            "tend.servers.refuse",
+            "tend.servers.refuse", "tend.servers.sentAs",
         ]
         for list in ServerList.allCases {
             let name = list.rawValue

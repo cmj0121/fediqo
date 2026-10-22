@@ -2551,6 +2551,7 @@
 "tend.servers.busy" = "%@ 上對這一項的另一個變更還在途中。";
 "tend.servers.address.ask" = "拒絕 %1$@ 會把它擋在 %2$@ 之外：整個網路可能都無法再連上。";
 "tend.servers.refuse" = "拒絕";
+"tend.servers.sentAs" = "實際送出為 %@。";
 "person.act.report" = "檢舉…";
 "person.act.report.failed" = "無法在 %2$@ 檢舉 %1$@。";
 "item.act.report" = "檢舉貼文…";
