@@ -965,6 +965,7 @@ struct TimelinePane: View {
             tabs: ShellTending.tabs(at: page.host, in: session),
             reports: page.tab == .reports ? tending.said(of: page, in: session) : nil,
             people: page.tab == .people ? people.said(of: page, in: session) : nil,
+            servers: page.tab == .servers ? tending.servers.said(of: page, in: session) : nil,
             counts: tending.counts(of: page, in: session),
             acts: ShellTending.acts(at: page.host, in: session),
             reload: TendingPane.reloadName(page.host, canReload: ways.canReload),
@@ -1000,6 +1001,13 @@ struct TimelinePane: View {
                         on: account.id, handle: account.person?.handle ?? account.id, local: account.local, at: page.host, in: session
                     )
                 },
+                onAskWords: askWords
+            ),
+            onServers: TendingServersActs(
+                onAdd: { list in tending.servers.open(TendingServersActs.kind(of: list), at: page.host, in: session) },
+                onChange: { block in tending.servers.open(.block(block), at: page.host, in: session) },
+                onRemove: { list, id in Task { await tending.servers.remove(list, id: id, on: page, in: session) } },
+                onReadOn: { list in Task { await tending.servers.readOn(list, of: page, in: session) } },
                 onAskWords: askWords
             ),
             onOpenPerson: onOpenPerson,
