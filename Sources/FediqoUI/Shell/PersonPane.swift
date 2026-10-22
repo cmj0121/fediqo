@@ -122,6 +122,11 @@ struct PersonPane<Lead: View>: View {
     var jumpToTop: Int
     /// The foot's press: the stretch after what is drawn.
     var onReadOn: () -> Void = {}
+    /// The foot come into view, where reaching it reads on as reaching the end of a timeline
+    /// does (#379): nothing on somebody's page, whose foot reads on only when pressed.
+    var onReachFoot: (() -> Void)?
+    /// A face on a row pressed, where the list is not one person's: nothing on their own page.
+    var onOpenPerson: ((DummyPerson) -> Void)?
     /// What stands over the rows and scrolls away with them: the page's head, at a text size
     /// where it would fill the page.
     @ViewBuilder var lead: Lead
@@ -148,6 +153,7 @@ struct PersonPane<Lead: View>: View {
                     if let foot = said.foot {
                         ShellRule()
                         PersonFootRow(symbol: foot.symbol, words: foot.words, presses: foot.presses, onPress: onReadOn)
+                            .onAppear { if foot.presses { onReachFoot?() } }
                     }
                 }
             }
@@ -179,9 +185,10 @@ struct PersonPane<Lead: View>: View {
 
     /// One of theirs.
     ///
-    /// **One closure is deliberately nothing.** `onOpenPerson` is nothing because this *is*
-    /// their page — a face that opened the page it is already on is a control that promises a
-    /// journey and stands still, so it is absent rather than drawn and refused.
+    /// **One closure is deliberately nothing on their page.** `onOpenPerson` is nothing there
+    /// because this *is* their page — a face that opened the page it is already on is a control
+    /// that promises a journey and stands still, so it is absent rather than drawn and refused.
+    /// A list of anybody's posts (#379) hands one in.
     private func row(_ item: DummyItem) -> some View {
         DummyItemRow(
             item: item,
@@ -204,7 +211,7 @@ struct PersonPane<Lead: View>: View {
             },
             // Lit and opened in one, for the reader who activates a row once.
             onOpen: { onOpenThread(item.id) },
-            onOpenPerson: nil,
+            onOpenPerson: onOpenPerson,
             quoteLifted: decks.isQuoteLifted(of: item),
             onToggleQuoteCover: { decks.toggleQuoteCover(of: item) },
             onToggleCover: { _ = decks.toggleCover(item.id) },

@@ -332,7 +332,9 @@ Doorkeeper::AccessToken.where(application: widening, revoked_at: nil).update_all
 # **Nobody is told of anything here, and nothing reaches a home or a list.** Follows and the
 # one boost are made in the model, which tells nobody; a post's fan-out is left queued and never
 # run (`tell` runs only the fan-outs it is handed); nobody is mentioned. One post is public and
-# so stands in the public timeline; the rest are unlisted, for followers or for nobody. None of
+# so stands in the public timeline, and so do the three that reached here from the one of
+# another server, which carry the rising link (#379, below); the rest are unlisted, for
+# followers or for nobody. None of
 # these people follows the writer, so the checks of notices read what they read before.
 wrote = lambda do |who, words, visibility = "unlisted", **more|
   Status.where(account: who, reblog_of_id: nil).where("text LIKE ?", "%#{words}%").first ||
@@ -470,6 +472,18 @@ far = afar.call(
   fields: [{ "name" => "Home", "value" => "<a href=\"https://elsewhere.example/far\">elsewhere.example/far</a>" }]
 )
 far_posts = (1..3).map { |n| heard.call(far, n) }
+# What the checks of the posts sharing a rising link need (#379): the three that reached here
+# from them carry the link the seed made rise, as this server would have found it in them, and
+# stand public — a server lists a link's posts only where they are public, and only of somebody
+# who chose to be found, as they do below. Theirs, and nobody new's: anybody else listed by the
+# link would be listed in the directory the checks of it read, and posts of anybody else would
+# be counted where theirs are.
+far_posts.each do |post|
+  post.update_columns(visibility: "public") unless post.public_visibility?
+  PreviewCardsStatus.find_or_create_by!(status_id: post.id, preview_card_id: rising_card.id) do |row|
+    row.url = rising_card.url
+  end
+end
 fans.first(2).each { |fan| follows.call(fan, far) }
 follows.call(far, shown)
 counted.call(far, 2811, 310, 1204)

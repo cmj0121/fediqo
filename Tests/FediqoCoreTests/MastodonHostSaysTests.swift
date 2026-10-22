@@ -48,7 +48,9 @@ struct MastodonHostSaysTests {
         #expect(said.has.pinLimit == 5 && said.has.translates == false && said.has.has(.translation) == .absent)
         // And, since #330, its API's own version, which says it has quotes.
         #expect(said.has.apiVersion == 11 && said.has.has(.quotes) == .present)
-        for thing in MastodonHostThing.allCases where ![.featuredTags, .translation, .quotes].contains(thing) {
+        // And, since #379, by the same word, that it lists the posts sharing a link rising on it.
+        #expect(said.has.has(.linkPosts) == .present)
+        for thing in MastodonHostThing.allCases where ![.featuredTags, .translation, .quotes, .linkPosts].contains(thing) {
             #expect(said.has.has(thing) == .unsaid, "\(thing)")
         }
 
@@ -128,7 +130,8 @@ struct MastodonHostSaysTests {
         }
         let weeks = try await ask("/api/v1/instance/activity")
         #expect(((weeks.json as? [[String: Any]])?.first?["statuses"]) is String, "every figure a string")
-        // All eleven were asked; translating is a post's, asked where posts are (`MastodonPostActsSaysTests`).
-        #expect(Set(open.map(\.0)).union(signed.map(\.0)) == Set(MastodonHostThing.allCases).subtracting([.translation, .quotes]))
+        // All eleven were asked; translating is a post's, asked where posts are (`MastodonPostActsSaysTests`), and
+        // the posts sharing a link a rising link's (`MastodonLinkPostsSaysTests`).
+        #expect(Set(open.map(\.0)).union(signed.map(\.0)) == Set(MastodonHostThing.allCases).subtracting([.translation, .quotes, .linkPosts]))
     }
 }

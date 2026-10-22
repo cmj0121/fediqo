@@ -2135,6 +2135,12 @@
 "trends.tab.posts" = "Posts";
 "rising.tab.tags" = "Hashtags";
 "rising.tab.links" = "Links";
+"shared.heading" = "Posts that share it";
+"shared.asking" = "Asking %1$@ for the posts that share a link to %2$@…";
+"shared.unlisted" = "%@ lists no posts that share this link.";
+"shared.none" = "%@ gave no posts that share this link.";
+"shared.refused" = "%@ refused to say which posts share this link.";
+"shared.open" = "Open the page";
 "shortcut.rising" = "Go to Trends from anywhere, on the tab you left it on";
 "search.band.people" = "People · %@";
 "search.band.tags" = "Hashtags · %@";

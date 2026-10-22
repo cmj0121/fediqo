@@ -2080,6 +2080,12 @@
 "trends.tab.posts" = "貼文";
 "rising.tab.tags" = "主題標籤";
 "rising.tab.links" = "連結";
+"shared.heading" = "分享這個連結的貼文";
+"shared.asking" = "正在向 %1$@ 詢問分享 %2$@ 連結的貼文…";
+"shared.unlisted" = "%@ 沒有列出分享這個連結的貼文。";
+"shared.none" = "%@ 沒有給出分享這個連結的貼文。";
+"shared.refused" = "%@ 拒絕說出分享這個連結的貼文。";
+"shared.open" = "打開網頁";
 "shortcut.rising" = "從任何地方到「趨勢」，回到你離開時的那個分頁";
 "search.band.people" = "人 · %@";
 "search.band.tags" = "主題標籤 · %@";
