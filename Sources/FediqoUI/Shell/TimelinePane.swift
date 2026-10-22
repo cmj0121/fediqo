@@ -82,6 +82,9 @@ struct TimelinePane: View {
     /// hashtag's page, or a link through the door a post's link goes through, of the first
     /// source that named it.
     var onOpenRising: (RisingListed) -> Void = { _ in }
+    /// The page of a rising link whose posts are open (#379), answered by the root: through the
+    /// door a post's link goes through, of the first source that named it.
+    var onOpenSharedPage: (SharedLink) -> Void = { _ in }
     /// A row of what a search found at a source opened (#319), answered by the root: somebody's
     /// page, a hashtag's, or the page of all of one kind.
     var onOpenFound: (SearchFoundRow) -> Void = { _ in }
@@ -178,6 +181,8 @@ struct TimelinePane: View {
         case followed(FollowedTags)
         /// A hashtag's page: its ask of the sources, as the side in front made it.
         case tag(PostTag)
+        /// The posts sharing a rising link (#379): its asks of the sources that list them.
+        case shared(SharedLink)
         /// A tab of Trends that lists what is rising, with nothing drawn over it.
         case rising(RisingWhich)
         /// A page that asks nothing of its own: the hashtags a search found.
@@ -200,10 +205,11 @@ struct TimelinePane: View {
             guard let found = shown.found else { return nil }
             return found.which == .people ? .people(found.at.people) : .quiet
         case .followedTags(let page) where shown.drawn: return .followed(page)
+        case .shared(let page) where shown.drawn: return .shared(page)
         // Always drawn, whatever it holds.
         case .tag(let tag): return .tag(tag)
         case .thread where shown.drawn: return nil
-        case .people, .found, .followedTags, .thread, .link, nil: break
+        case .people, .found, .followedTags, .shared, .thread, .link, nil: break
         }
         // What stands in the stream's place on Trends, where a tab of what is rising is drawn.
         guard let rising, people.rising.said(rising, in: session) != nil else { return nil }
@@ -217,6 +223,7 @@ struct TimelinePane: View {
         case .people(let list): people.lists.ask(of: list, in: session)
         case .followed(let page): people.followed.ask(of: page, in: session)
         case .tag(let tag): session.reload.tagPageAsk(of: tag, on: session.stream)
+        case .shared(let page): people.shared.ask(of: page)
         case .rising(let which): people.rising.ask(of: which, in: session)
         case .quiet: PageAsking()
         }
@@ -232,6 +239,7 @@ struct TimelinePane: View {
         case .people(let list): people.lists.stop(list)
         case .followed(let page): people.followed.stop(page)
         case .tag(let tag): session.reload.stopTag(tag, on: session.stream)
+        case .shared(let page): people.shared.stop(page)
         case .rising(let which): people.rising.stop(which)
         case .quiet: false
         }
@@ -303,6 +311,13 @@ struct TimelinePane: View {
                 // or its source was removed — draws the stream instead.
                 if let followed = people?.followed, let said = shown.followed {
                     followedPage(page, said: said, in: followed)
+                } else {
+                    underneath
+                }
+            case .shared(let page):
+                // Every source it was asked of removed since draws the stream instead.
+                if let shared = people?.shared, drawn {
+                    sharedPage(page, in: shared)
                 } else {
                     underneath
                 }
@@ -550,7 +565,7 @@ struct TimelinePane: View {
         // is drawn; over the stream drawn in its stead the swipe goes back, as it did.
         // So is a list of people's (F10), where it is drawn.
         // And what a search found at a source, and the hashtags followed.
-        case .thread, .people, .found, .followedTags: drawn ? .tabbed : .opened
+        case .thread, .people, .found, .followedTags, .shared: drawn ? .tabbed : .opened
         case .link: .link
         case nil: .timeline
         }
@@ -564,7 +579,7 @@ struct TimelinePane: View {
     static func headDrawn(over standing: ShellStep?, drawn: Bool = true) -> Bool {
         switch standing {
         case .person, .tag: false
-        case .thread, .people, .found, .followedTags: !drawn
+        case .thread, .people, .found, .followedTags, .shared: !drawn
         case .link, nil: true
         }
     }
@@ -610,6 +625,8 @@ struct TimelinePane: View {
         case .followedTags(let page):
             let said = people?.followed.said(of: page, in: session)
             return Drawn(followed: said, drawn: said != nil)
+        case .shared(let page):
+            return Drawn(drawn: people?.shared.canAskAgain(page, in: session) ?? false)
         case .person, .tag, .link, nil:
             return Drawn(drawn: true)
         }
@@ -898,6 +915,46 @@ struct TimelinePane: View {
         .task(id: followed.opening(page, in: session)) { await followed.opened(page, in: session) }
     }
 
+    /// The posts sharing a rising link (#379): the whole height of the pane, in the frame every
+    /// opened page stands in, with no tabs, handed what this device holds of what its sources
+    /// listed. Its bar's mark asks them again from the top where `r` would — and is Stop while
+    /// they are asked — and its other mark opens the link's own page.
+    private func sharedPage(_ page: SharedLink, in shared: ShellSharedLinks) -> some View {
+        let said = shared.said(of: page, in: session)
+        return SharedLinkPane(
+            said: said,
+            reload: SharedLinkPane.reloadName(of: said, canReload: ways.canReload),
+            slide: session.slide("shared"),
+            acts: OpenedPageActs(
+                onBack: onBack,
+                onReload: ways.onReload,
+                // Pulled down, the sources are asked from the top as `r` asks them.
+                onPull: { await shared.again(page, in: session) },
+                onStop: onStop(.shared(page))
+            ),
+            onOpenPage: { onOpenSharedPage(page) },
+            onReadOn: { Task { await shared.readOn(page, pressed: true, in: session) } },
+            onReachFoot: { Task { await shared.readOn(page, pressed: false, in: session) } },
+            rows: PersonPageRows(
+                catalogues: session.emoji,
+                posts: session.posts,
+                acting: acting,
+                playback: playback,
+                onPlayRow: onPlayRow,
+                onViewRow: onViewRow,
+                onTurnRow: onTurnRow,
+                onOpenThread: onOpenThread
+            ),
+            onOpenPerson: onOpenPerson,
+            selectedID: $selectedID,
+            decks: $decks,
+            jumpToTop: jumpToTop
+        )
+        .id(page.id)
+        // **The ask is the page opening**, once a link a run: each source's newest stretch.
+        .task(id: page.id) { await shared.opened(page, in: session) }
+    }
+
     /// A hashtag's page (F10): the whole height of the pane, in the frame every opened page
     /// stands in, handed which tabs it has, which is in front and what its head says — all of
     /// them worked out where its sources are asked, and nothing here looks at which kind of
@@ -978,6 +1035,7 @@ struct TimelinePane: View {
         case .people(let list): "people:" + list.id
         case .found(let at, let which): "found:" + at.id + "\u{1e}" + which.rawValue
         case .followedTags(let page): "followed:" + page.id
+        case .shared(let page): "shared:" + page.id
         case .link, nil: nil
         }
     }
@@ -1024,6 +1082,13 @@ struct TimelinePane: View {
         // of what is rising there, of that source and nobody else. A tab never in front has
         // asked nothing.
         .task(id: rising.opening(which, in: session)) { await rising.opened(which, in: session) }
+        // And on Links, each source's document not yet had this run — again where one was let
+        // go: whether it lists the posts sharing a link is its own word there (#379), and a
+        // link's row opens them only where it says so.
+        .task(id: which == .links ? people?.shared.unheard(said.answers.map(\.source)) : nil) {
+            guard which == .links, let shared = people?.shared else { return }
+            await shared.hear(said.answers.map(\.source), in: session)
+        }
     }
 
     /// The stream, under the line that says which of its sources is not being read (#371) — over

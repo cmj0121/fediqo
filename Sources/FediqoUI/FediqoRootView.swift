@@ -825,7 +825,8 @@ public struct FediqoRootView: View {
         case .people: walk.openedPeople != nil
         // The pages of the hashtags a search found and of those followed (#318, #319).
         case .rising: walk.openedFoundTags != nil || walk.openedFollowedTags != nil
-        case .tag: walk.openedTag != nil
+        // A hashtag's page, and the posts sharing a rising link (#379): pages of post rows.
+        case .tag: walk.openedTag != nil || walk.openedShared != nil
         case .thread: walk.openedThread != nil
         case .link: walk.openedLink != nil
         case .search: search.isOpen
@@ -1245,6 +1246,9 @@ public struct FediqoRootView: View {
         // Nor has the page of what a search found, or the list of the hashtags the reader follows.
         case .found, .followedTags:
             return []
+        // The posts sharing a rising link, as the page draws them (#379).
+        case .shared(let page):
+            return people.shared.items(of: page, in: session)
         case .thread(let opened):
             guard let item = session.held(opened) else { return streamItems() }
             return session.conversations.conversation(around: item).inOrder
@@ -1382,7 +1386,7 @@ public struct FediqoRootView: View {
         // A page read out of a post is somebody else's page, and its top is its own business.
         case .link:
             return false
-        case .person, .tag, .people, .found, .followedTags, .thread, nil:
+        case .person, .tag, .people, .found, .followedTags, .shared, .thread, nil:
             guard let first = rows?.first else { return false }
             selected = first
         }
@@ -1643,7 +1647,7 @@ public struct FediqoRootView: View {
         // link (#320).
         if let which = risingInFront {
             guard let listed = people.rising.row(id, of: which, in: session) else { return false }
-            return openRisingRow(listed.row, lit: listed.id)
+            return openRising(listed)
         }
         // Over a search's posts, and on the page of the hashtags it found, the row the lamp is
         // on may be what a source found (#319): Return opens it.
@@ -1768,6 +1772,8 @@ public struct FediqoRootView: View {
     /// Whether the hashtag's page in front has a source to ask: one of the timeline in front's
     /// that keeps tags. Nothing is worked out with no such page.
     private var tagAsked: Bool {
+        // The posts sharing a rising link (#379), on the same layer: a source of it still here.
+        if let page = walk.openedShared { return people.shared.canAskAgain(page, in: session) }
         guard walk.openedTag != nil else { return false }
         return !session.reload.tagReach(of: session.currentTimeline, in: session).asked.isEmpty
     }
@@ -1833,6 +1839,11 @@ public struct FediqoRootView: View {
         // On the list of the hashtags followed `r` asks its source for it again, from the top (#318).
         if DummyCommand.outermost(of: open) == .rising, let page = walk.openedFollowedTags {
             Task { await people.followed.again(page, in: session) }
+            return true
+        }
+        // On the posts sharing a rising link `r` asks its sources again from the top (#379).
+        if DummyCommand.outermost(of: open) == .tag, let page = walk.openedShared {
+            Task { await people.shared.again(page, in: session) }
             return true
         }
         // On a hashtag's page `r` asks its sources again, of the timeline in front (decision 11).
@@ -2375,6 +2386,25 @@ public struct FediqoRootView: View {
         }
         selectedItemID = ShellRising.lamp(after: opened, of: id, before: before)
         return opened
+    }
+
+    /// A row of a tab of Trends that lists what is rising, opened: a link some source that named
+    /// it says it lists the posts of opens those posts, one more step of the walk with its row
+    /// lit (#379); every other row opens as `openRisingRow` opens it — a link where no source
+    /// says so, its page, as it always did.
+    private func openRising(_ listed: RisingListed) -> Bool {
+        guard let page = people.shared.page(opening: listed, in: session) else {
+            return openRisingRow(listed.row, lit: listed.id)
+        }
+        guard Self.canWalk(place: place, open: openLayers) else { return false }
+        let before = selectedItemID
+        selectedItemID = listed.id
+        guard walk.walk(to: .shared(page), from: listed.id) else {
+            selectedItemID = before
+            return false
+        }
+        selectedItemID = nil
+        return true
     }
 
     /// The way to the hashtags the reader follows, pressed on their own page (#318): the list,
@@ -3028,7 +3058,8 @@ public struct FediqoRootView: View {
                 people: people,
                 onOpenListed: { _ = openListed($0) },
                 onOpenRisingRow: { _ = openRisingRow($0) },
-                onOpenRising: { _ = openRisingRow($0.row, lit: $0.id) },
+                onOpenRising: { _ = openRising($0) },
+                onOpenSharedPage: { _ = linkReader.open($0.link.link.url, from: $0.sources.first) },
                 onOpenFound: { _ = openFound($0) },
                 onTurnFound: foundTurned,
                 onFollowed: { _ = followedPressed($0) },

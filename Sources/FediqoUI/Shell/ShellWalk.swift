@@ -46,6 +46,10 @@ enum ShellStep: Hashable, Sendable {
     /// page there. A hashtag's row opens that hashtag's page, and leaving it gives the row
     /// back: both are the walk's own.
     case followedTags(FollowedTags)
+    /// The posts a source says share a link rising on it (#379), opened from the link's row on
+    /// Trends where a source that named it says it lists them. A row opens its conversation,
+    /// and leaving it gives the row back: both are the walk's own.
+    case shared(SharedLink)
 }
 
 /// Whose the Tab key is with a step in front (F10): the page's own, asked of the walk before
@@ -75,6 +79,8 @@ extension ShellStep {
         case .tag: .tag
         case .people, .found(_, .people): .people
         case .found(_, .tags), .followedTags: .rising
+        // A page of post rows opened from a row, as a hashtag's is.
+        case .shared: .tag
         case .thread: .thread
         case .link: .link
         }
@@ -88,6 +94,7 @@ extension ShellStep {
         case .thread: .sole(.thread)
         case .people: .sole(.people)
         case .followedTags: .sole(.rising)
+        case .shared: .sole(.tag)
         case .tag(let tag): .tag(tag)
         case .found(let at, let which): .found(at, which)
         case .link: nil
@@ -111,6 +118,7 @@ extension ShellStep {
         case .people: if case .people = other { true } else { false }
         case .found: if case .found = other { true } else { false }
         case .followedTags: if case .followedTags = other { true } else { false }
+        case .shared: if case .shared = other { true } else { false }
         }
     }
 }
@@ -170,6 +178,12 @@ struct ShellWalk: Hashable, Sendable {
         case .found(let at, .people): at.people
         default: nil
         }
+    }
+
+    /// The posts sharing a rising link in front, where they are (#379).
+    var openedShared: SharedLink? {
+        guard case .shared(let page) = standing else { return nil }
+        return page
     }
 
     /// The page read out of a post that is in front, where one is (#169).
