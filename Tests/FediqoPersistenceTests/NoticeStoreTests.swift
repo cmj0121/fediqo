@@ -83,7 +83,8 @@ struct NoticeStoreTests {
                     handle: "@cy@elsewhere.example", name: "Cy :wave:", avatarURL: URL(string: "https://cdn.example/cy.png"),
                     emojis: [CustomEmoji(shortcode: "wave", url: URL(string: "https://cdn.example/wave.gif")!)]
                 ),
-                NoticePerson(handle: "@di@one.example", name: "Di"),
+                // Who they are at their source and what they say of themselves (#375), kept with them.
+                NoticePerson(handle: "@di@one.example", name: "Di", accountID: "42", words: "Writes about tea."),
             ],
             count: 7, post: Self.post("9", "the person's own post"), at: Self.origin.addingTimeInterval(600),
             newestID: "44", oldestID: "31"
@@ -104,6 +105,7 @@ struct NoticeStoreTests {
         let back = try #require(opened.notices.first)
         #expect(back.notices.map(\.id) == lines.map(\.id), "in the source's order, whatever order the rows lie in")
         #expect(back.notices[0].people.map(\.lineName) == ["Cy :wave:", "Di"])
+        #expect(back.notices[0].people.map(\.accountID) == [nil, "42"] && back.notices[0].people[1].words == "Writes about tea.")
         #expect(back.notices[1].post?.spoiler == "about lunch" && back.notices[1].post?.sensitive == true, "covered still")
         #expect(back.notices[1].post?.audience == .mentioned)
         #expect(back.notices[3].kind == .unknown("something.new"))

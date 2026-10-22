@@ -290,6 +290,7 @@ enum ItemActs {
         case .notSignedIn: return L10n.t("item.act.no.signIn", language: language)
         case .turnedAway: return L10n.t("item.act.no.turnedAway", language: language)
         case .unnameable: return L10n.t("item.act.no.unnameable", language: language)
+        case .tooOld: return L10n.t("item.act.no.tooOld", language: language)
         }
     }
 
@@ -305,6 +306,7 @@ enum ItemActs {
         switch refusal {
         case .protocolCannot: .never
         case .unnameable: .never
+        case .tooOld: .notNow
         case .turnedAway: .notNow
         case .notSignedIn: .notNow
         }

@@ -262,7 +262,7 @@ struct MastodonNoticesTests {
         let (notices, _, _) = try reading([
             Self.gathered: .json(Self.strangeGathered), Self.single: .json(Self.strangeSingle),
         ])
-        let ada = NoticePerson(handle: "@ada@mastodon.localhost", name: "Ada")
+        let ada = NoticePerson(handle: "@ada@mastodon.localhost", name: "Ada", accountID: "7")
         let lines = try await notices.page(source: Self.source, gathered: true)
         #expect(lines.notices.map(\.kind) == [.unknown("emoji_reaction"), .server("moderation_warning"), .follow])
         #expect(lines.notices.map(\.people) == [[ada], [], [ada]], "somebody the side list does not hold is absent, not a failure")
@@ -274,7 +274,7 @@ struct MastodonNoticesTests {
         let ones = try await notices.page(source: Self.source, gathered: false)
         #expect(ones.notices.map(\.kind) == [.unknown("emoji_reaction"), .server("moderation_warning"), .follow])
         #expect(ones.notices.map(\.handle) == [.one(id: "5"), .one(id: "4"), .one(id: "1")], "an id sent as a number is an id")
-        #expect(ones.notices.map(\.people) == [[ada], [], [NoticePerson(handle: "@ada@elsewhere.example", name: "ada")]])
+        #expect(ones.notices.map(\.people) == [[ada], [], [NoticePerson(handle: "@ada@elsewhere.example", name: "ada", accountID: "7")]])
         #expect(ones.before == "1")
     }
 
@@ -337,7 +337,7 @@ struct MastodonNoticesTests {
         """
         let (notices, _, _) = try reading([Self.gathered: .json(body)])
         let page = try await notices.page(source: Self.source)
-        let ada = NoticePerson(handle: "@ada@mastodon.localhost", name: "Ada")
+        let ada = NoticePerson(handle: "@ada@mastodon.localhost", name: "Ada", accountID: "7")
         #expect(page.notices.map(\.handle) == [.gathered(key: "favourite-30-1"), .gathered(key: "favourite-30-2")])
         #expect(page.notices.map(\.people) == [[ada], []])
         #expect(page.notices.map(\.count) == [1, 2])

@@ -445,6 +445,15 @@ final class ShellPersonPages {
         return me
     }
 
+    /// The reader's own followers at `source`, as a list to open (#375) — or nothing where the
+    /// source has not said who the reader is there.
+    static func ownFollowers(at source: Source, in session: ShellSession) -> PeopleList? {
+        guard let me = own(at: source.host, in: session), let handle = me.handle,
+              let id = session.mastodon.token(host: source.host)?.accountID
+        else { return nil }
+        return PeopleList(.followers, of: Person(source: source, accountID: id, handle: handle, name: ""))
+    }
+
     /// Who an ask of `host` is made as now.
     static func askedAs(at host: String, in session: ShellSession) -> AskedAs {
         session.mastodon.signedInHosts.contains(host) ? .reader(session.mastodon.handles[host]) : .nobody

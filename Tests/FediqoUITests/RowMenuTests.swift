@@ -119,6 +119,7 @@ struct RowMenuTests {
         let reason: DimReason = switch refusal {
         case .protocolCannot: .never
         case .unnameable: .never
+        case .tooOld: .notNow
         case .turnedAway: .notNow
         case .notSignedIn: .notNow
         }

@@ -201,6 +201,9 @@ public enum PostActRefusal: Sendable, Hashable, CaseIterable {
     /// This device cannot name the post on its own server, so there is nothing to point an act
     /// at — a row kept before its server id was, and every forum post.
     case unnameable
+    /// The post is older than this device keeps, so nothing done to it could be held here: a
+    /// notice's post the store will not take (#375).
+    case tooOld
 }
 
 /// What may be done to one post, and why not where nothing may.

@@ -52,6 +52,10 @@ struct NoticeRow: View {
     var menu: Menu?
     /// Where a hosted row reports what it laid out and what it says. See `NoticeRowProbe`.
     var probe: NoticeRowProbe?
+    /// Whether the line draws the words of the post it is about. Not where the post's own row,
+    /// or the post short, is drawn under it (#375, `NoticeCard`): the line is then only what
+    /// happened.
+    var excerpts = true
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.shellLayout) private var shellLayout
@@ -94,7 +98,7 @@ struct NoticeRow: View {
     var body: some View {
         // Each worked out once a draw: what the row draws is what it says.
         let who = NoticeWords.who(notice), what = NoticeWords.what(notice)
-        let excerpt = NoticeWords.excerpt(notice)
+        let excerpt = excerpts ? NoticeWords.excerpt(notice) : nil
         let spoken = spoken(who: who, what: what, excerpt: excerpt)
         let _ = (probe?.spoken = spoken, probe?.glyphSays = what, heard?(spoken))
         VStack(alignment: .leading, spacing: ShellSpace.snug) {

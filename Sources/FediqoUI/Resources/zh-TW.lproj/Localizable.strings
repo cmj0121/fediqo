@@ -444,6 +444,7 @@
 "item.act.no.signIn" = "登入後才能在這裡動作";
 "item.act.no.turnedAway" = "這個來源拒絕了寫入";
 "item.act.no.unnameable" = "這則貼文在它的來源上沒有名字";
+"item.act.no.tooOld" = "這則貼文比這台裝置保留的還舊";
 "item.act.unfavourite" = "取消收藏";
 "item.act.withdraw" = "收回你寫的貼文";
 "card.nowhere" = "不是這個 App 會開啟的連結";
@@ -1652,6 +1653,10 @@
 "notices.server.admin.sign_up" = "有人在這個來源註冊了";
 "notices.server.admin.report" = "這個來源收到一則檢舉";
 "notices.who.others" = "%2$@ 和另外 %1$d 人";
+"notices.faces.pair" = "%1$@ 和 %2$@";
+"notices.post.unheld" = "這則貼文沒辦法留在這裡，所以什麼都沒做。";
+"notices.faces.list" = "%1$@、%2$@";
+"notices.faces.others" = "和另外 %d 人";
 "notices.spoken.act" = "%1$@%2$@";
 "notices.spoken.post" = "%1$@：%2$@";
 "notices.spoken" = "%1$@。來自 %2$@，%3$@。";

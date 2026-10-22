@@ -271,12 +271,29 @@ public struct NoticePerson: Hashable, Sendable {
     /// they enter: what every sentence and every row says of them.
     public let lineName: String
     public let lineHandle: String
+    /// The id their source knows them by, where it said: what answering their request, or
+    /// removing them as a follower, names them by (#375). Nothing on a line held before it was
+    /// kept.
+    public let accountID: String?
+    /// The start of what they say of themselves, out of its markup and cut to `wordsLength`:
+    /// enough for the first line a row of them draws (#375). Nothing where they wrote none, or
+    /// the line was held before it was kept.
+    public let words: String?
 
-    public init(handle: String, name: String, avatarURL: URL? = nil, emojis: [CustomEmoji] = []) {
+    /// How much of what they say of themselves a line keeps: more than one line of a row shows.
+    public static let wordsLength = 300
+
+    public init(
+        handle: String, name: String, avatarURL: URL? = nil, emojis: [CustomEmoji] = [],
+        accountID: String? = nil, words: String? = nil
+    ) {
         self.handle = handle
         self.name = name
         self.avatarURL = avatarURL
         self.emojis = emojis
+        self.accountID = accountID
+        let kept = words.map { String($0.unicodeScalars.prefix(Self.wordsLength).map(Character.init)) }
+        self.words = kept?.isEmpty == false ? kept : nil
         lineName = LineText.oneLine(name)
         lineHandle = LineText.oneLine(handle)
     }

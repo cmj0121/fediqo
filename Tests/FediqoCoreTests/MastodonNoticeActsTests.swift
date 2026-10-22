@@ -344,7 +344,7 @@ struct MastodonNoticeActsTests {
         #expect(request.id == "mastodon.localhost\u{1e}request\u{1e}\(Self.request)")
         #expect(request.person == NoticePerson(
             handle: "@fediqo_third@mastodon.localhost", name: "fediqo_third",
-            avatarURL: URL(string: "https://mastodon.localhost/avatars/original/missing.png")
+            avatarURL: URL(string: "https://mastodon.localhost/avatars/original/missing.png"), accountID: "117402374895127898"
         ))
         #expect(request.count == 1)
         #expect(request.at == MastodonJSON.date(from: "2026-10-08T00:09:15.260Z"))

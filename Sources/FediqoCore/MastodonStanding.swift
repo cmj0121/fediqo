@@ -123,12 +123,26 @@ public struct MastodonStanding: Sendable {
     /// Naming nobody asks nothing, and naming more than `most` is refused before anything is
     /// asked. `unreadable` where the body is no list.
     public func standings(to accountIDs: [String]) async throws -> [String: PersonStanding] {
+        try await standingsAsking(to: accountIDs).stands
+    }
+
+    /// `standings(to:)`, and who of them asks to follow the reader (#375) — what a request to
+    /// follow on the notices page offers accepting by — in the same one ask.
+    public func standingsAsking(to accountIDs: [String]) async throws -> (stands: [String: PersonStanding], asking: Set<String>) {
         var asked: [String] = []
         for id in accountIDs where ListSubscription.isPathSegment(id) && !asked.contains(id) { asked.append(id) }
-        guard !asked.isEmpty else { return [:] }
+        guard !asked.isEmpty else { return ([:], []) }
         guard asked.count <= Self.most else { throw MastodonRequestError.invalidURL }
         let body = try await door.get(path: Self.path, query: asked.map { URLQueryItem(name: "id%5B%5D", value: $0) })
-        return try Self.standings(to: asked, in: body)
+        return (try Self.standings(to: asked, in: body), Self.asking(among: asked, in: body))
+    }
+
+    /// Who of `accountIDs` the answer to `relationships` says asks to follow the reader. An entry
+    /// that does not say is nobody asking.
+    static func asking(among accountIDs: [String], in body: Data) -> Set<String> {
+        let wire = (try? MastodonJSON.decoder.decode([StatusDTO.Lenient<Said>].self, from: body)) ?? []
+        let asked = Set(accountIDs)
+        return Set(wire.compactMap(\.value).filter { $0.requestedBy?.value == true && asked.contains($0.id) }.map(\.id))
     }
 
     /// The standings to `accountIDs` in the answer to `relationships`: each entry that is
@@ -270,6 +284,8 @@ public struct MastodonStanding: Sendable {
         let endorsed: StatusDTO.Lenient<Bool>?
         let mutingNotifications: StatusDTO.Lenient<Bool>?
         let domainBlocking: StatusDTO.Lenient<Bool>?
+        /// Whether they ask to follow the reader: no part of a standing, read for a request's row.
+        let requestedBy: StatusDTO.Lenient<Bool>?
 
         /// The standing, where the source said every part of it. What is taken from them is
         /// no such part: a source that leaves it out has said the rest.
