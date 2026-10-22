@@ -717,8 +717,14 @@ struct TimelinePane: View {
         // **And what they feature, once the source has said who they are** (B7): their
         // hashtags, and whether they feature anybody — two asks more of the page opening.
         .task(id: people?.featuredOpening(of: person, in: session)) { await people?.featuredOpened(person, in: session) }
+        // **And what only staff see of them**, where the reader answers for their server (#382).
+        .task(id: people?.tending.people.staffOpening(of: people?.said(of: person, in: session)?.person, in: session)) {
+            await people?.tending.people.staffOpened(of: people?.said(of: person, in: session)?.person, in: session)
+        }
         // What their own server said is held only while this page is in front (#310).
         .onDisappear { people?.home.letGo(of: person) }
+        // And what only staff see of them (#382).
+        .onDisappear { people?.tending.people.forgetStaff(of: people?.said(of: person, in: session)?.person) }
     }
 
     /// What the parts of somebody's page press.
@@ -763,6 +769,12 @@ struct TimelinePane: View {
             onListReadOn: {
                 guard let people, let list = people.list(people.front(of: person, in: session), of: person, in: session) else { return }
                 Task { await people.lists.readOn(list, in: session) }
+            },
+            onStaffAct: { staff in
+                guard let shown = staff.account.person else { return }
+                people?.tending.people.openAct(
+                    on: staff.account.id, handle: shown.handle, local: staff.account.local, at: staff.host, in: session
+                )
             }
         )
     }
@@ -938,24 +950,50 @@ struct TimelinePane: View {
     /// in, with a tab for each task the standing allows. Its bar's mark asks again where `r`
     /// would, and is Stop while the server is asked.
     private func tendingPage(_ page: Tending, in tending: ShellTending) -> some View {
-        TendingPane(
+        let people = tending.people
+        let askWords = { _ = session.askFor([.tending], host: page.host) }
+        return TendingPane(
             page: page,
             tabs: ShellTending.tabs(at: page.host, in: session),
-            said: tending.said(of: page, in: session),
+            reports: page.tab == .reports ? tending.said(of: page, in: session) : nil,
+            people: page.tab == .people ? people.said(of: page, in: session) : nil,
+            counts: tending.counts(of: page, in: session),
+            acts: ShellTending.acts(at: page.host, in: session),
             reload: TendingPane.reloadName(page.host, canReload: ways.canReload),
             slide: session.slide("tending"),
-            acts: OpenedPageActs(
+            frame: OpenedPageActs(
                 onBack: onBack,
                 onTab: onTurnTending,
                 onReload: ways.onReload,
                 onPull: { await tending.again(page, in: session) },
                 onStop: onStop(.tending(page))
             ),
-            onAct: { act, report in Task { await tending.act(act, on: report.id, of: page, in: session) } },
-            onAskWords: { _ = session.askFor([.tending], host: page.host) },
-            onOpenPage: { report in
-                if let url = ShellTending.page(of: report, host: page.host) { onOpenServerPage(url, page.host) }
-            },
+            onReport: TendingReportActs(
+                onAct: { act, report in Task { await tending.act(act, on: report.id, of: page, in: session) } },
+                onAskWords: askWords,
+                onOpenPage: { report in
+                    if let url = ShellTending.page(of: report, host: page.host) { onOpenServerPage(url, page.host) }
+                },
+                onActOnAccount: ShellTendingPeople.actsOn(at: page.host, in: session) ? { report in
+                    guard let target = report.target else { return }
+                    people.openAct(
+                        on: target.accountID, handle: target.handle, local: target.livesHere, at: page.host, report: report.id,
+                        in: session
+                    )
+                } : nil
+            ),
+            onPeople: TendingPeopleActs(
+                onFind: { filter in Task { await people.find(filter, on: page, in: session) } },
+                onLetIn: { account in Task { await people.letIn(account.id, of: page, in: session) } },
+                onTurnAway: { account in Task { await people.turnAway(account.id, of: page, in: session) } },
+                onUndo: { act, account in Task { await people.undo(act, on: account.id, of: page, in: session) } },
+                onActOn: { account in
+                    people.openAct(
+                        on: account.id, handle: account.person?.handle ?? account.id, local: account.local, at: page.host, in: session
+                    )
+                },
+                onAskWords: askWords
+            ),
             onOpenPerson: onOpenPerson,
             onReadOn: { Task { await tending.readOn(page, pressed: true, in: session) } },
             onReachFoot: { Task { await tending.readOn(page, pressed: false, in: session) } },
@@ -965,8 +1003,10 @@ struct TimelinePane: View {
             jumpToTop: jumpToTop
         )
         .id(page.host)
-        // **The ask is the page opening**, once a run; and again where who is signed in changes.
+        // **The ask is the tab coming in front**, once a run; and again where who is signed in changes.
         .task(id: tending.opening(page, in: session)) { await tending.opened(page, in: session) }
+        // **And the head's figures, as the page opens**: the open reports and those waiting, once.
+        .task(id: tending.opening(Tending(host: page.host, tab: .reports), in: session)) { await tending.headOpened(page, in: session) }
     }
 
     /// The posts sharing a rising link (#379): the whole height of the pane, in the frame every

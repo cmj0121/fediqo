@@ -14,6 +14,8 @@ actor PeopleServer: HTTPClient, HTTPSender {
     private(set) var asked: [String] = []
     private(set) var hosts: Set<String> = []
     private(set) var bearers: Set<String> = []
+    /// The method and the body of each ask that sent one, in order.
+    private(set) var sent: [(method: String, body: String)] = []
 
     init(_ routes: [String: Answer]) {
         self.routes = routes
@@ -29,6 +31,7 @@ actor PeopleServer: HTTPClient, HTTPSender {
         asked.append(ask)
         hosts.insert(url.host ?? "")
         if let bearer = request.value(forHTTPHeaderField: "Authorization") { bearers.insert(bearer) }
+        if let body = request.httpBody { sent.append((request.httpMethod ?? "", String(decoding: body, as: UTF8.self))) }
         switch routes[ask] {
         case .json(let body, let link, let status):
             let response = HTTPURLResponse(

@@ -635,6 +635,42 @@ reported = [
   report
 end
 
+# What the checks of the server's accounts need (#382): sign-ups that wait to be let in — the
+# server asks for approval — each with what they wrote; one a check lets in and one it turns
+# away, which the server deletes; and somebody a check warns, limits, marks sensitive, freezes
+# and suspends, and takes each back from. Nobody another check reads, and none named as the
+# seed's people are. **Put back every run**: whoever was let in waits again, whoever was turned
+# away is made again, and the one acted on is held in nothing.
+Setting.registrations_mode = "approved" unless Setting.registrations_mode == "approved"
+asking_to_join = lambda do |username, words|
+  found = Account.find_local(username)
+  unless found
+    secret = SecureRandom.hex(16)
+    made = User.new(
+      email: "#{username}@example.com", password: secret, password_confirmation: secret, confirmed_at: Time.now.utc,
+      approved: false
+    )
+    made.account = Account.new(username: username)
+    made.skip_confirmation_notification! if made.respond_to?(:skip_confirmation_notification!)
+    made.save!(validate: false)
+    found = made.account
+  end
+  found.user.update_columns(approved: false) if found.user.approved?
+  request = UserInviteRequest.find_or_initialize_by(user: found.user)
+  request.update!(text: words) unless request.persisted? && request.text == words
+  found
+end
+waiting_ones = {
+  "stays" => asking_to_join.call("asks_382", "I read the rules and would like to write here."),
+  "letIn" => asking_to_join.call("asks_382_in", "Let me in, please."),
+  "turnedAway" => asking_to_join.call("asks_382_away", "Buy cheap watches."),
+}
+acted_on = person.call("acted_382")
+acted_on.unsuspend! if acted_on.suspended?
+acted_on.unsilence! if acted_on.silenced?
+acted_on.unsensitize! if acted_on.sensitized?
+acted_on.user.enable! if acted_on.user.disabled?
+
 more = "/tmp/fediqo-mastodon-tokens.json"
 owner_only.call(more, JSON.generate(tokens.merge(
   # The sign-in page is asked by this id for a scope the registration does not include.
@@ -656,7 +692,9 @@ owner_only.call(more, JSON.generate(tokens.merge(
   "tending" => tending_sign_ins.merge(
     "adminPassword" => "LocalOnlyPass3", "adminEmail" => "admin@example.com",
     "app" => { "id" => tending_ask.uid, "secret" => tending_ask.secret, "scopes" => tending_ask.scopes.to_s },
-    "reports" => reported.map { |report| report.id.to_s }
+    "reports" => reported.map { |report| report.id.to_s },
+    "waiting" => waiting_ones.transform_values { |who| named.call(who) },
+    "actedOn" => named.call(acted_on)
   ),
   "people" => people_sign_ins.merge(
     "person" => named.call(shown), "locked" => named.call(locked), "hidden" => named.call(hidden).merge(people_sign_ins["hidden"]),

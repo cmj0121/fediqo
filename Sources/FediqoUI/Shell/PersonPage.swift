@@ -66,6 +66,8 @@ struct PersonPageActs {
     var onOpenListed: (Person) -> Void = { _ in }
     var onListAgain: () -> Void = {}
     var onListReadOn: () -> Void = {}
+    /// The sheet of an act on them, from About's staff block (#382).
+    var onStaffAct: (TendingStaffSaid) -> Void = { _ in }
 }
 
 /// What the post rows of somebody's page are drawn with: the thread pane's own fittings,
@@ -196,7 +198,7 @@ struct PersonPage: View {
                 PersonAbout(
                     said: about, lit: selectedID, jumpToTop: jumpToTop, onHome: acts.onHome, onFollowed: acts.onFollowed,
                     onAskFollows: acts.onAskFollows, onAct: acts.onAct, onRequests: acts.onRequests, onKeeping: acts.onKeeping,
-                    onFeatured: acts.onFeatured,
+                    onFeatured: acts.onFeatured, onStaffAct: acts.onStaffAct,
                     lead: lead
                 )
             }

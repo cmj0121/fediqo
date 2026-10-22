@@ -38,6 +38,8 @@ typealias ReportAct = MastodonAdminReports.Act
 /// add their own tab and flag here.
 enum TendingTab: String, ShellTab, Sendable, CaseIterable {
     case reports
+    /// Who asks to join, and the server's accounts (#382).
+    case people
 
     var id: String { rawValue }
     var titleKey: String { "tend.tab.\(rawValue)" }
@@ -45,6 +47,7 @@ enum TendingTab: String, ShellTab, Sendable, CaseIterable {
     var symbol: String {
         switch self {
         case .reports: "exclamationmark.bubble"
+        case .people: "person.badge.clock"
         }
     }
 
@@ -52,6 +55,7 @@ enum TendingTab: String, ShellTab, Sendable, CaseIterable {
     var flag: MastodonStaff {
         switch self {
         case .reports: .manageReports
+        case .people: .manageUsers
         }
     }
 
@@ -152,8 +156,12 @@ final class ShellTending {
     /// Another way to a server's reports, where a test reaches it by one. Nothing in the app.
     @ObservationIgnored var reaching: ((MastodonAuthorized) -> MastodonAdminReports)?
 
+    /// The People tab's own state (#382), apart from the reports'.
+    let people: ShellTendingPeople
+
     init(errands: PageErrands) {
         self.errands = errands
+        people = ShellTendingPeople(errands: errands)
     }
 
     // MARK: - Who may
@@ -210,7 +218,7 @@ final class ShellTending {
     /// there has become another — so a page in front whose reader changes is asked afresh.
     func opening(_ page: Tending, in session: ShellSession) -> ShellPersonPages.Opening {
         ShellPersonPages.Opening(
-            id: page.host, askedAs: ShellPersonPages.askedAs(at: page.host, in: session),
+            id: page.host + "\u{1e}" + page.tab.rawValue, askedAs: ShellPersonPages.askedAs(at: page.host, in: session),
             under: ShellPersonPages.signIns(at: page.host, in: session)
         )
     }
@@ -241,7 +249,39 @@ final class ShellTending {
 
     /// The rows `j` and `k` walk, top to bottom.
     func walked(_ page: Tending, in session: ShellSession) -> [String] {
-        (standing(page.host, in: session)?.rows ?? []).map { TendingReportsSaid.rowID($0.id) }
+        switch page.tab {
+        case .reports: (standing(page.host, in: session)?.rows ?? []).map { TendingReportsSaid.rowID($0.id) }
+        case .people: people.walked(page, in: session)
+        }
+    }
+
+    /// The head's figures (#382): for each tab the standing allows, how many it holds as far as
+    /// it has been read — the open reports, and those waiting to be let in. Nothing for a tab not
+    /// yet asked.
+    func counts(of page: Tending, in session: ShellSession) -> [TendingCount] {
+        Self.tabs(at: page.host, in: session).compactMap { tab in
+            let said: (count: Int, more: Bool)? = switch tab {
+            case .reports: openReports(at: page.host, in: session)
+            case .people: people.waiting(at: page.host, in: session)
+            }
+            return said.map { TendingCount(tab: tab, count: $0.count, more: $0.more) }
+        }
+    }
+
+    /// What the head's figures are asked from, as the page opens, whichever tab is in front: the
+    /// reports' first stretch, and one stretch of those waiting.
+    func headOpened(_ page: Tending, in session: ShellSession) async {
+        async let reports: Void = reportsOpened(page, in: session)
+        async let waiting: Void = people.countWaiting(page, in: session)
+        _ = await (reports, waiting)
+    }
+
+    /// How many reports stand open at `host`, as far as the Reports tab has read — and whether
+    /// open ones remain unread. Nothing before it has answered.
+    func openReports(at host: String, in session: ShellSession) -> (count: Int, more: Bool)? {
+        guard let reports = standing(host, in: session), reports.answered else { return nil }
+        let more = if case .open(let after) = reports.cursor { after != nil } else { false }
+        return (reports.rows.filter { !$0.closed }.count, more)
     }
 
     /// The report a row id names, where the page holds it.
@@ -254,6 +294,7 @@ final class ShellTending {
     }
 
     func ask(of page: Tending, language: DummyLanguage? = nil) -> PageAsking {
+        if page.tab == .people { return people.ask(of: page, language: language) }
         guard let reports = pages[page.host] else { return PageAsking() }
         return PageAsking(
             asking: reports.asking
@@ -267,6 +308,7 @@ final class ShellTending {
 
     @discardableResult
     func stop(_ page: Tending) -> Bool {
+        if page.tab == .people { return people.stop(page) }
         let host = page.host
         guard let reports = pages[host], reports.asking || reports.readingOn else { return false }
         asks[host]?.cancel()
@@ -284,6 +326,16 @@ final class ShellTending {
     /// The page opening: its reports asked from the top, once a run; opened again it is drawn
     /// from what was held, and an ask on the wire is waited on.
     func opened(_ page: Tending, in session: ShellSession) async {
+        switch page.tab {
+        case .reports: await reportsOpened(page, in: session)
+        case .people: await people.opened(page, in: session)
+        }
+    }
+
+    /// The Reports tab asked from the top, once a run — wherever the page stands: its count is
+    /// the head's on every tab.
+    func reportsOpened(_ page: Tending, in session: ShellSession) async {
+        guard Self.tabs(at: page.host, in: session).contains(.reports) else { return }
         if let reports = standing(page.host, in: session) {
             if reports.asking || reports.readingOn {
                 await asks[page.host]?.value
@@ -296,6 +348,7 @@ final class ShellTending {
 
     /// `r`, the mark and a pull: asked from the top again. A press while it is asked asks nothing.
     func again(_ page: Tending, in session: ShellSession) async {
+        if page.tab == .people { return await people.again(page, in: session) }
         if pages[page.host]?.asking == true { return }
         await begin(page, fromTop: true, in: session)?.value
     }
@@ -303,6 +356,7 @@ final class ShellTending {
     /// The foot pressed — `pressed` — or reached: the next stretch; pressed, again the one that
     /// did not come or was stopped. Reached, only after a stretch that came.
     func readOn(_ page: Tending, pressed: Bool, in session: ShellSession) async {
+        if page.tab == .people { return await people.readOn(page, pressed: pressed, in: session) }
         guard let reports = standing(page.host, in: session), pressed ? reports.readsOn : reports.reachesOn else { return }
         pages[page.host]?.held = false
         await begin(page, fromTop: false, in: session)?.value
@@ -414,7 +468,7 @@ final class ShellTending {
     /// rows: once the page has answered, the report itself is asked for where the page does not
     /// hold it, and stands at the top. Where the server gives it nobody, that is said.
     func bringIn(_ id: String, of page: Tending, in session: ShellSession) async {
-        await opened(page, in: session)
+        await reportsOpened(page, in: session)
         let host = page.host
         guard let reports = standing(host, in: session), reports.answered, !reports.rows.contains(where: { $0.id == id }),
               let through = door(at: host, in: session)
@@ -466,5 +520,6 @@ final class ShellTending {
         asks[host] = nil
         pages[host] = nil
         halted.remove(host)
+        people.letGo(at: host)
     }
 }

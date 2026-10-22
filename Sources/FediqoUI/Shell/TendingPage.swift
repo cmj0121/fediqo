@@ -3,35 +3,36 @@ import SwiftUI
 
 /// Tending a server the reader answers for (#380), opened: a page of its own (F10), drawn in the
 /// frame every opened page stands in (`OpenedPage`), with a tab for each task the reader's
-/// standing there allows — Reports, for now (#381).
+/// standing there allows — Reports (#381) and People (#382).
 ///
 ///     ‹ Back                                                   ↻   Esc or q
 ///     ─────────────────────────────────────────────────────────────────────
-///     Tending m.example
+///     Tending m.example                      [! 2]  [person.badge.clock 3]
 ///     What m.example keeps for those who answer for it, as far as …
 ///     ─────────────────────────────────────────────────────────────────────
-///     Open · Against the rules · 2 hours ago                          …
-///     About @person — Reported by @other
-///     the words, the rules
-///     the posts it names, each a post's row
+///     (Reports)  (People)                          where the standing allows both
 ///     ─────────────────────────────────────────────────────────────────────
-///     the foot, which reads on
+///     the tab in front: its rows, and the foot that reads on
 ///
-/// **It is handed everything it draws** and asks nothing: the asking and the acts are
-/// `ShellTending`'s, and it is drawn only where the standing allows (`ShellTending.drawn`).
+/// **Its head's figures are icons that open their tab**: the open reports, and those waiting to
+/// be let in, each as far as it has been read. **It is handed everything it draws** and asks
+/// nothing: the asking and the acts are `ShellTending`'s, and it is drawn only where the standing
+/// allows (`ShellTending.drawn`).
 struct TendingPane: View {
     let page: Tending
     let tabs: [TendingTab]
-    let said: TendingReportsSaid
+    /// What the tab in front is handed: one of the two, by the tab.
+    var reports: TendingReportsSaid?
+    var people: TendingPeopleSaid?
+    /// The head's figures, each opening its tab.
+    var counts: [TendingCount] = []
+    /// Whether the sign-in holds tending's word that changes: said in the head where it does not.
+    var acts = true
     var reload: String?
     var slide = PageSlide()
-    var acts = OpenedPageActs<TendingTab>()
-    /// An act on a report, from its `…`.
-    var onAct: (ReportAct, AdminReport) -> Void
-    /// Tending's lock pressed, where the sign-in may not act: the words that act, asked for alone.
-    var onAskWords: () -> Void = {}
-    /// The report's own page on the server: a note, an act on the account.
-    var onOpenPage: (AdminReport) -> Void
+    var frame = OpenedPageActs<TendingTab>()
+    var onReport = TendingReportActs()
+    var onPeople = TendingPeopleActs()
     var onOpenPerson: (DummyPerson) -> Void
     var onReadOn: () -> Void
     var onReachFoot: () -> Void
@@ -44,20 +45,34 @@ struct TendingPane: View {
 
     var body: some View {
         OpenedPage(
-            tabs: tabs, front: page.tab, slide: slide, reload: reload, acts: acts,
+            tabs: tabs, front: page.tab, slide: slide, reload: reload, acts: frame,
             head: {
-                TendingHead(host: page.host, acts: said.acts)
+                TendingHead(host: page.host, acts: acts, counts: counts, onTab: frame.onTab)
                 ShellRule()
             },
-            inFront: { lead in
-                TendingReportsList(
-                    said: said, onAct: onAct, onAskWords: onAskWords, onOpenPage: onOpenPage, onOpenPerson: onOpenPerson, onReadOn: onReadOn,
-                    onReachFoot: onReachFoot, catalogues: catalogues, posts: posts, selectedID: $selectedID, asked: $asked,
-                    jumpToTop: jumpToTop
-                ) { lead }
-            }
+            inFront: { lead in front(lead: lead) }
         )
         .modifier(ShellMoreAsks(asked: $asked))
+    }
+
+    @ViewBuilder
+    private func front<Lead: View>(lead: Lead) -> some View {
+        switch page.tab {
+        case .reports:
+            if let reports {
+                TendingReportsList(
+                    said: reports, acts: onReport, onOpenPerson: onOpenPerson, onReadOn: onReadOn, onReachFoot: onReachFoot,
+                    catalogues: catalogues, posts: posts, selectedID: $selectedID, asked: $asked, jumpToTop: jumpToTop
+                ) { lead }
+            }
+        case .people:
+            if let people {
+                TendingPeopleList(
+                    said: people, acts: onPeople, onOpenPerson: onOpenPerson, onReadOn: onReadOn, onReachFoot: onReachFoot,
+                    selectedID: $selectedID, asked: $asked, jumpToTop: jumpToTop
+                ) { lead }
+            }
+        }
     }
 
     /// What the bar's mark is called, where `r` may ask.
@@ -66,11 +81,45 @@ struct TendingPane: View {
     }
 }
 
-/// The head of tending a server: whose it is, what the page is, and — where the sign-in holds
-/// only the word that reads — that nothing here can be acted on. One heading to a listener.
+/// What a report's `…` presses, each answered by the page's owner.
+struct TendingReportActs {
+    var onAct: (ReportAct, AdminReport) -> Void = { _, _ in }
+    /// Tending's lock pressed, where the sign-in may not act: the words that act, asked alone.
+    var onAskWords: () -> Void = {}
+    /// The report's own page on the server: a note.
+    var onOpenPage: (AdminReport) -> Void = { _ in }
+    /// The sheet of an act on the account the report names (#382), where the reader may act.
+    var onActOnAccount: ((AdminReport) -> Void)?
+}
+
+/// One of the head's figures: how many a tab holds, as far as it has been read, opening it.
+struct TendingCount: Equatable, Identifiable {
+    let tab: TendingTab
+    let count: Int
+    /// Whether the server named more than were read.
+    let more: Bool
+
+    var id: TendingTab { tab }
+
+    /// The figure drawn: the count, and "+" where more were named.
+    func figure(language: DummyLanguage? = nil) -> String {
+        L10n.grouped(count, language: language) + (more ? "+" : "")
+    }
+
+    /// What a listener is read: the figure in words, and what it counts.
+    func spoken(language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t("tend.count.\(tab.rawValue)", language: language), figure(language: language))
+    }
+}
+
+/// The head of tending a server: whose it is, what the page is, its figures — each a press that
+/// opens its tab — and, where the sign-in holds only the word that reads, that nothing here can
+/// be acted on.
 struct TendingHead: View {
     let host: String
     let acts: Bool
+    var counts: [TendingCount] = []
+    var onTab: (TendingTab) -> Void = { _ in }
     @Environment(\.colorScheme) private var colorScheme
 
     static func spoken(_ host: String, acts: Bool, language: DummyLanguage? = nil) -> String {
@@ -83,10 +132,25 @@ struct TendingHead: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            Text(String(format: L10n.t("tend.title"), host))
-                .shellFont(.name)
-                .foregroundStyle(ShellChrome.ink(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+                Text(String(format: L10n.t("tend.title"), host))
+                    .shellFont(.name)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityAddTraits(.isHeader)
+                ForEach(counts) { count in
+                    Button { onTab(count.tab) } label: {
+                        Label(count.figure(), systemImage: count.tab.symbol)
+                            .shellFont(.meta)
+                            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    }
+                    .buttonStyle(.plain)
+                    .fixedSize()
+                    .accessibilityLabel(count.spoken())
+                    .help(count.spoken())
+                }
+            }
             Text(String(format: L10n.t("tend.line"), host))
                 .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
@@ -101,9 +165,6 @@ struct TendingHead: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.step)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Self.spoken(host, acts: acts))
-        .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -111,9 +172,7 @@ struct TendingHead: View {
 /// where there are none, and the foot that reads on.
 struct TendingReportsList<Lead: View>: View {
     let said: TendingReportsSaid
-    var onAct: (ReportAct, AdminReport) -> Void
-    var onAskWords: () -> Void
-    var onOpenPage: (AdminReport) -> Void
+    let acts: TendingReportActs
     var onOpenPerson: (DummyPerson) -> Void
     var onReadOn: () -> Void
     var onReachFoot: () -> Void
@@ -183,7 +242,8 @@ struct TendingReportsList<Lead: View>: View {
                 more: {
                     ReportRowView.more(
                         report, host: said.host, acts: said.acts, acting: said.acting.contains(report.id), lock: said.lock,
-                        onAct: onAct, onAskWords: onAskWords, onOpenPage: onOpenPage
+                        onAct: acts.onAct, onAskWords: acts.onAskWords, onOpenPage: acts.onOpenPage,
+                        onActOnAccount: acts.onActOnAccount
                     )
                 },
                 asks: $asked
@@ -260,9 +320,19 @@ struct ReportRowView: View {
     static func more(
         _ report: AdminReport, host: String, acts: Bool, acting: Bool, lock: PartWords.Place? = nil,
         onAct: @escaping (ReportAct, AdminReport) -> Void, onAskWords: @escaping () -> Void = {},
-        onOpenPage: @escaping (AdminReport) -> Void, language: DummyLanguage? = nil
+        onOpenPage: @escaping (AdminReport) -> Void, onActOnAccount: ((AdminReport) -> Void)? = nil,
+        language: DummyLanguage? = nil
     ) -> ShellMore {
         let page = ShellMoreItem.plain("safari", String(format: L10n.t("tend.act.page", language: language), host)) { onOpenPage(report) }
+        // The account it names acted on from the report itself (#382), where the reader may.
+        let account = onActOnAccount.flatMap { onActOnAccount in
+            report.target.map { target in
+                ShellMoreItem.plain(
+                    "person.crop.circle.badge.exclamationmark",
+                    String(format: L10n.t("tend.act.account", language: language), LineText.oneLine(target.handle))
+                ) { onActOnAccount(report) }
+            }
+        }
         if !acts, let lock, lock.asks {
             let line = String(format: L10n.t(lock.key, language: language), host)
             return ShellMore(items: [.plain(ShellMark(SourceRow.permissionSymbol, line, look: .live), act: onAskWords), page])
@@ -278,6 +348,7 @@ struct ReportRowView: View {
         }
         var items = [report.takenBy == nil ? item(.take, "person.badge.plus") : item(.handBack, "person.badge.minus")]
         items.append(report.closed ? item(.reopen, "arrow.uturn.backward.circle") : item(.close, "checkmark.circle"))
+        if let account { items.append(account) }
         items.append(page)
         return ShellMore(items: items)
     }
