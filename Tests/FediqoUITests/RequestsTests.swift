@@ -125,7 +125,7 @@ struct RequestsTests {
         var pressed: [PersonAct] = []
         let menu = try #require(PeoplePane.menu(for: said, of: said.people[0], asks: .constant(nil)) { pressed.append($0) })
         let more = menu.more()
-        #expect(more.items.map(\.name) == ["Refuse"].map { _ in PersonActing.name(.refuseRequest) } && more.head == ["Person 3", "@p3@m.example"])
+        #expect(more.items.map(\.name) == ["Refuse"].map { _ in PersonActing.name(.refuseRequest) } && more.whys.isEmpty)
         let question = ShellQuestion.about(.refuseRequest, "@p3@m.example", at: Self.host, language: en)
         #expect(question.title == "Refuse the request of @p3@m.example to follow you at m.example?")
         #expect(question.line == "They will not follow you. They can ask again." && question.choices.map(\.label) == ["Refuse"] && question.choices.map(\.role) == [.destructive])
@@ -431,9 +431,11 @@ struct RequestsTests {
         let both = PersonActing(
             source: Self.host, named: "@ada", reading: .said(PersonStanding(accountID: "42", following: true, followedBy: true)), changes: true
         )
-        #expect(both.more == [.unfollow, .removeFollower] && !both.asksBefore(.unfollow))
-        let menu = both.menu(head: [], act: { _ in })
+        // Changed (#385): unfollowing somebody anyone may follow now asks too, so both are red.
+        #expect(both.more == [.unfollow, .removeFollower] && both.asksBefore(.unfollow))
+        let menu = both.menu(act: { _ in })
         #expect(menu.items.map(\.name) == [PersonActing.name(.unfollow), PersonActing.name(.removeFollower)])
+        #expect(menu.dangers.count == 2)
         // Not where the source did not say they follow the reader, nor to a sign-in that may not change it.
         let not = PersonActing(source: Self.host, named: "@ada", reading: .said(PersonStanding(accountID: "42", following: true)), changes: true)
         let seeing = PersonActing(source: Self.host, named: "@ada", reading: .said(PersonStanding(accountID: "42", followedBy: true)), changes: false)

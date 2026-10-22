@@ -386,6 +386,7 @@ struct UsagePane: View {
                 })
             }
             .padding(.vertical, ShellSpace.tight)
+            .shellMoreHeld()
         } header: {
             ShellSectionHead(title: "prefs.held.total", line: "usage.drop.line", help: "prefs.drop.footer")
         }

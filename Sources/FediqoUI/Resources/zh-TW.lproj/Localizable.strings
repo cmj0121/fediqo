@@ -1635,6 +1635,7 @@
 "mark.more" = "更多";
 "mark.more.one" = "更多：%@";
 "mark.more.said" = "它有話要說";
+"mark.more.danger" = "這會拿走一些東西，會先問你。";
 "notices.what.answer" = "回覆了你";
 "notices.what.mention" = "提到了你";
 "notices.what.reblog" = "轉發了你的貼文";
@@ -2148,6 +2149,7 @@
 "person.act.withdraw.failed" = "無法在 %2$@ 撤回對 %1$@ 的跟隨請求。";
 "person.unfollow.ask.title" = "在 %2$@ 取消跟隨 %1$@？";
 "person.unfollow.ask.line" = "要跟隨他們得先經過同意。之後想再跟隨，就得重新請求。";
+"person.unfollow.ask.line.open" = "他們在那裡的貼文不會再送到你這裡。之後按一下就能再跟隨。";
 "shortcut.follow" = "跟隨眼前這一頁的人，或這一頁的主題標籤——在你自己的頁面上，則是修改你的個人檔案";
 "person.tab.about" = "關於";
 "person.tab.following" = "跟隨中";

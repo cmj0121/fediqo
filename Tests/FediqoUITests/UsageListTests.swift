@@ -192,21 +192,22 @@ struct UsageListTests {
             L10n.t("prefs.cache.clear", language: language), L10n.t("prefs.password.forget", language: language),
         ])
         #expect(more.ordinary.isEmpty && more.dangers.count == 2 && !more.divides)
-        #expect(more.head.isEmpty)
+        #expect(more.whys.isEmpty)
         #expect(more.items.map(\.answers) == [true, true])
         #expect(more.label(language: language) == L10n.t("mark.more", language: language))
     }
 
-    @Test("On a forum that could hold a password and holds none, the head says none is saved",
+    @Test("On a forum that could hold a password and holds none, the menu keeps that none is saved",
           arguments: [DummyLanguage.english, .taiwanese])
     func forgetSaysNoneIsSaved(_ language: DummyLanguage) {
         let more = UsageSourceDetail.more(Self.forum, in: makeSession(), language: language)
-        #expect(more.head == [L10n.t("prefs.password.none", language: language)])
-        #expect(more.head.first != "prefs.password.none")
+        #expect(more.whys == [L10n.t("prefs.password.none", language: language)])
+        #expect(more.whys.first != "prefs.password.none")
         let forget = more.items[1]
         #expect(forget.look == .dim(.notNow) && !forget.answers)
-        // The head has said why, in its own words; the item is its name alone.
-        #expect(forget.title(language: language) == L10n.t("prefs.password.forget", language: language))
+        // Changed (#385): no head says why, so the item says it after its name, in the menu's own words.
+        #expect(forget.title(language: language) == ShellMark.said(L10n.t("prefs.password.forget", language: language), L10n.t("prefs.password.none", language: language), language: language))
+        #expect(!forget.title(language: language).contains(L10n.t("mark.dim.notNow", language: language)))
         #expect(!forget.title(language: language).contains(L10n.t("mark.dim.never", language: language)))
         var put: [ShellMoreAsk] = []
         forget.press { put.append($0) }
@@ -217,7 +218,7 @@ struct UsageListTests {
     @Test("Forget password is dim on a kind that saves none, and then neither asks nor acts")
     func forgetIsDimWhereNoneIsHeld() {
         let session = makeSession()
-        #expect(UsageSourceDetail.more(Self.mastodon, in: session, language: .english).head.isEmpty)
+        #expect(UsageSourceDetail.more(Self.mastodon, in: session, language: .english).whys.isEmpty)
         let forget = UsageSourceDetail.more(Self.mastodon, in: session, language: .english).items[1]
         #expect(forget.look == .dim(.never))
         #expect(!forget.answers)

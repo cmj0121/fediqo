@@ -874,7 +874,7 @@ struct PersonSaidTests {
         func row(_ host: String) throws -> SourceRow { try #require(session.rows.first { $0.id == host }) }
         func names(_ row: SourceRow, _ presses: SourceRow.Presses) -> [String] {
             SourceRow.more(
-                row, actsLive: true, said: [], clearAsks: { ShellQuestion.clear(host: row.source.host, detailKey: "account.clear.detail") },
+                row, actsLive: true, clearAsks: { ShellQuestion.clear(host: row.source.host, detailKey: "account.clear.detail") },
                 removeAsks: { ShellQuestion.remove(host: row.source.host, boards: 0) }, presses: presses
             ).items.map(\.name)
         }

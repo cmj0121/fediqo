@@ -120,22 +120,27 @@ struct MuteBlockTests {
         let pages = await opened(Self.ada, in: session)
         let ada = try #require(pages.stands(to: Self.ada, in: session))
         #expect(ada.keeping == [.mute, .block] && ada.server == nil && ada.blocksLock == nil)
-        let menu = ada.menu(head: ["Ada"]) { _ in }
-        #expect(Array(menu.items.map(\.name).suffix(3)) == ["Mute…", "Block…", "Report…"] && menu.head.first == "Ada")
-        #expect(menu.items.suffix(3).prefix(2).allSatisfy { $0.look == .live && !$0.isDanger }, "each asks on its own sheet")
+        let menu = ada.menu { _ in }
+        #expect(Array(menu.items.map(\.name).suffix(3)) == ["Mute…", "Block…", "Report…"])
+        // Inverted (#385): each was plain, its sheet the question; each is now red, and still asks there.
+        #expect(menu.items.suffix(3).prefix(2).allSatisfy { $0.look == .live && $0.isDanger && $0.asksOnSheet && $0.question == nil })
+        #expect(menu.dangers.map(\.name).contains("Mute…") && menu.dangers.map(\.name).contains("Block…"), "last, under the divider")
+        #expect(!menu.ordinary.contains { ["Mute…", "Block…"].contains($0.name) })
 
         let farPages = await opened(Self.far, in: session)
         let far = try #require(farPages.stands(to: Self.far, in: session))
         #expect(far.keeping == [.unmute, .unblock, .unblockServer] && far.server == "far.example")
         #expect(far.marks(language: .english).map(\.words).suffix(3) == ["Muted", "Blocked", "Their server blocked"])
-        #expect(Array(far.menu(head: []) { _ in }.items.map(\.name).suffix(4).prefix(3)) == ["Unmute", "Unblock", "Unblock far.example"])
+        let undo = far.menu { _ in }
+        #expect(Array(undo.items.map(\.name).suffix(4).prefix(3)) == ["Unmute", "Unblock", "Unblock far.example"])
+        #expect(undo.items.suffix(4).prefix(3).allSatisfy { !$0.isDanger }, "taking a mute or a block back is not red")
         #expect(PersonActing.name(.blockServer, server: "far.example", language: .english) == "Block all of far.example…")
 
         let unsaid = PersonActing(source: Self.host, named: "@ada", reading: .asking, changes: true)
         #expect(unsaid.keeping.isEmpty && !PersonHeadActs.draws(unsaid), "nothing before the source has said")
     }
 
-    @Test("Signed in for less than muting and blocking need, each is in the `…` dim with the lock, its sentence once at the menu's head; its press only asks for the part, naming it, and nothing is sent — and a sign-in that sees and may not change is told so in its own words")
+    @Test("Signed in for less than muting and blocking need, each is in the `…` dim with the lock, its sentence kept once with the menu; its press only asks for the part, naming it, and nothing is sent — and a sign-in that sees and may not change is told so in its own words")
     func signedInForLess() async throws {
         let (session, server, _) = await session([Self.stands: Self.said(Self.standing())])
         try await signIn(session, holding: Self.follows)
@@ -143,9 +148,9 @@ struct MuteBlockTests {
         let acting = try #require(pages.stands(to: Self.ada, in: session))
         let lock = try #require(acting.blocksLock)
         #expect(lock.asks && acting.asksForPart(.mute) && acting.asksForPart(.block) && !acting.asksForPart(.unfollow))
-        let menu = acting.menu(head: ["Ada"]) { _ in }
+        let menu = acting.menu { _ in }
         let unasked = L10n.t("part.blocks.unasked")
-        #expect(Array(menu.head.prefix(2)) == ["Ada", unasked] && menu.head.filter { $0 == unasked }.count == 1, "said once for the two")
+        #expect(menu.whys.first == unasked && menu.whys.filter { $0 == unasked }.count == 1, "said once for the two")
         #expect(menu.items.suffix(3).prefix(2).allSatisfy { $0.look == .dim(.askAgain) && $0.symbol == SourceRow.permissionSymbol && $0.answers })
 
         await pages.act(.mute, on: Self.ada, in: session)

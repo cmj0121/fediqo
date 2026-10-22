@@ -105,7 +105,7 @@ struct ChangePostTests {
         let item = try row(session)
         var acting = session.acting(on: item)
         acting.change = ItemActing.Change(lock: nil) {}
-        let menu = ItemActs.more(on: item, acting: acting, here: nil, leave: {})
+        let menu = ItemActs.more(on: item, acting: acting, leave: {})
         let names = menu.items.map(\.name)
         let change = try #require(names.firstIndex(of: "Change it…"))
         #expect(names.firstIndex(of: item.outwardName).map { $0 < change } == true)
@@ -125,8 +125,9 @@ struct ChangePostTests {
         var acting = ItemActing()
         acting.change = ItemActing.Change(lock: lock) {}
         let own = ItemActs.ownItems(on: item, acting: acting)
-        #expect(own.items.count == 1 && own.items[0].look == .dim(.askAgain) && own.items[0].symbol == SourceRow.permissionSymbol)
-        #expect(own.head == [lock.line() ?? String(format: L10n.t(lock.place.key), Self.host)] && !own.head[0].isEmpty)
+        #expect(own.count == 1 && own[0].look == .dim(.askAgain) && own[0].symbol == SourceRow.permissionSymbol)
+        let line = lock.line() ?? String(format: L10n.t(lock.place.key), Self.host)
+        #expect(ShellMore(items: own).whys == [line] && !line.isEmpty)
     }
 
     // MARK: - The sheet, and Save

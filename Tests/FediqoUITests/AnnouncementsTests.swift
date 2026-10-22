@@ -382,7 +382,7 @@ struct AnnouncementsTests {
         )
         let item = try #require(more.items.first)
         #expect(!item.isDanger && item.look == .dim(.askAgain) && item.answers)
-        #expect(more.head.contains(String(format: L10n.t(lock.key, language: .english), Self.host)))
+        #expect(more.whys.contains(String(format: L10n.t(lock.key, language: .english), Self.host)))
         item.press { _ in }
         #expect(asked.count == 1)
         await announcements.dismiss("2", at: Self.host, in: session)

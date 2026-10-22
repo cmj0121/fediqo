@@ -111,14 +111,16 @@ struct BookmarkPlaceTests {
 
     // MARK: - A post's mark and its menu
 
-    @Test("A post's bookmark mark is drawn dim in its own glyph for every standing but held, and says the standing's line after its reason — on the mark and at the head of the menu; never asked says its reason alone, as it did", arguments: Filed.allCases)
+    @Test("A post's bookmark mark is drawn dim in its own glyph for every standing but held, and says the standing's line after its reason; never asked says its reason alone, as it did — and the menu does not repeat it", arguments: Filed.allCases)
     func thePostsMark(_ filed: Filed) async throws {
         let (session, server, _) = try await shell(filed)
         let item = await post(in: session)
         let acting = handed(item, in: session)
         let mark = try bookmark(item, acting)
-        let head = ItemActs.more(on: item, acting: acting, here: nil, language: .english).head
+        let menu = ItemActs.more(on: item, acting: acting, language: .english)
         #expect(mark.mark.symbol == "bookmark", "the mark itself changed with the standing")
+        // Inverted (#385): the menu held the bookmark and its reason; the mark is the bar's alone.
+        #expect(!menu.items.contains { $0.name == "Bookmark" || $0.name == "Remove bookmark" })
         let lines = [Self.refusedLine, Self.noneLine, Self.askingLine]
         switch filed {
         case .held:
@@ -130,18 +132,15 @@ struct BookmarkPlaceTests {
             // Kept: the reason alone, said once, and the press asks.
             #expect(mark.mark.look == .dim(.askAgain))
             #expect(mark.label == "Bookmark. This sign-in must be asked again first")
-            #expect(head.contains("Bookmark. This sign-in must be asked again first"))
-            for line in lines { #expect(!head.contains(line)) }
+            for line in lines { #expect(!mark.label.contains(line)) }
         case .refused:
             // Changed: it was drawn and said as never asked. It still asks, and now says why.
             #expect(mark.mark.look == .dim(.askAgain))
             #expect(mark.label == "Bookmark. This sign-in must be asked again first: \(Self.refusedLine)")
-            #expect(head.contains(Self.refusedLine))
         case .hasNone:
             // Changed: the dim mark said only that the source has none; now in the place's words too.
             #expect(mark.mark.look == .dim(.never))
             #expect(mark.label == "Bookmark. This source has none: \(Self.noneLine)")
-            #expect(head.contains(Self.noneLine))
         }
         // The other marks are as they were, whatever the bookmark's standing.
         let favourite = try #require(ItemActs.marks(on: item, acting: acting, language: .english).first { $0.kind == .act(.favourite) })
@@ -153,14 +152,6 @@ struct BookmarkPlaceTests {
         let asks: Bool = filed == .unasked || filed == .refused
         #expect(raised == asks, "the press and the line disagree")
         #expect(await server.paths.isEmpty, "a press on the mark asked the source something")
-        // The menu's item does what the mark does.
-        session.partAsks.putDown()
-        let chosen = try #require(ItemActs.more(on: item, acting: acting, here: nil, language: .english).items.first { $0.name == "Bookmark" })
-        let answers: Bool = filed == .held || raised
-        #expect(chosen.answers == answers)
-        chosen.press { _ in }
-        let again: Bool = session.bookmarkAsk == host
-        #expect(again == raised)
     }
 
     @Test("A bookmark the source turned away this run, a sign-in that only reads, no sign-in, and a forum's post draw no lock and say what they said")
@@ -257,7 +248,8 @@ struct BookmarkPlaceTests {
         let row = try #require(session.rows.first { $0.source.host == forum })
         #expect(row.owed == .nothing)
         #expect(SourceRow.permission(row, actsLive: true, lock: session.mastodon.bookmarkPlace(host: forum)) == nil)
-        #expect(SourceRow.head(row, said: [], holds: session.mastodon.holds(host: forum), lock: session.mastodon.bookmarkPlace(host: forum)).isEmpty)
+        #expect(session.mastodon.holds(host: forum) == nil)
+        #expect(SourceRow.permissionLine(row, lock: session.mastodon.bookmarkPlace(host: forum)) == nil)
     }
 
     // MARK: - The source row's permission control
@@ -273,7 +265,7 @@ struct BookmarkPlaceTests {
             // Kept: nothing is owed, and no control is drawn.
             #expect(row.owed == .nothing)
             #expect(mark == nil)
-            #expect(SourceRow.head(row, said: [], lock: lock, language: .english).isEmpty)
+            #expect(SourceRow.permissionLine(row, lock: lock, language: .english) == nil)
         case .unasked:
             // Kept, word for word.
             #expect(mark?.name == Self.unaskedLine)
@@ -283,7 +275,7 @@ struct BookmarkPlaceTests {
             // Changed: it said it had never been asked.
             #expect(mark?.name == Self.refusedLine)
             #expect(mark?.look == .live)
-            #expect(SourceRow.head(row, said: [], lock: lock, language: .english) == [Self.refusedLine])
+            #expect(SourceRow.permissionLine(row, lock: lock, language: .english) == Self.refusedLine)
         }
         if let mark {
             #expect(mark.symbol == SourceRow.permissionSymbol && mark.symbol == "person.badge.key")
@@ -348,12 +340,9 @@ struct BookmarkPlaceTests {
         // Changed: the mark said it must be asked again, and its press only answered with a toast.
         #expect(mark.mark.look == .dim(.notNow))
         #expect(mark.label == "Bookmark. Not right now: \(Self.askingLine)")
-        #expect(ItemActs.more(on: item, acting: during, here: nil, language: .english).head.contains(Self.askingLine))
         ItemActs.press(mark, acting: during)
         #expect(session.partAsks.open == nil)
         #expect(session.toast == nil)
-        let chosen = try #require(ItemActs.more(on: item, acting: during, here: nil, language: .english).items.first { $0.name == "Bookmark" })
-        #expect(!chosen.answers, "the menu offered a press its line says cannot be made")
         let row = try control(session)
         #expect(row?.name == Self.askingLine)
         #expect(row?.look == .dim(.notNow))

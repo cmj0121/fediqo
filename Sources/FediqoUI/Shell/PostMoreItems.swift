@@ -7,11 +7,13 @@ import SwiftUI
 // menu and a hold on the row read one value.
 
 extension ShellMoreItem {
-    /// An item whose act the sign-in lacks the part for: dim with the lock's glyph, under the
-    /// menu's head that says why, its press only asking — where asking is what changes it.
-    static func locked(name: String, lock: ItemActing.Lock, press: @escaping () -> Void) -> ShellMoreItem {
+    /// An item whose act the sign-in lacks the part for: dim with the lock's glyph, saying the
+    /// lock's line after its name, its press only asking — where asking is what changes it.
+    static func locked(
+        name: String, lock: ItemActing.Lock, language: DummyLanguage? = nil, press: @escaping () -> Void
+    ) -> ShellMoreItem {
         let dim = ShellMark(SourceRow.permissionSymbol, name, look: .dim(.askAgain))
-        return ShellMoreItem.plain(dim, ask: lock.place.asks ? press : nil, act: {}).underHead
+        return ShellMoreItem.plain(dim, ask: lock.place.asks ? press : nil, act: {}).because(lock.headLine(language: language))
     }
 }
 
@@ -42,10 +44,11 @@ extension ItemActs {
                 let name = L10n.t(post.translated ? "item.act.translate.original" : "item.act.translate", language: language)
                 let mark = ShellMark(translateSymbol, name, look: asking ? .dim(.notNow) : .live, on: post.translated)
                 items.append(.plain(mark, act: translate.press))
-            } else if post.translateSignedOut != nil {
-                // Dim, as not right now: the head says why — nobody is signed in there.
+            } else if let host = post.translateSignedOut {
+                // Dim: nobody is signed in there, said in its own words.
                 let mark = ShellMark(translateSymbol, L10n.t("item.act.translate", language: language), look: .dim(.notNow))
-                items.append(ShellMoreItem.plain(mark, act: {}).underHead)
+                let why = String(format: L10n.t("item.act.translate.signIn", language: language), host)
+                items.append(ShellMoreItem.plain(mark, act: {}).because(why))
             }
             if let boosted = post.boostedBy {
                 items.append(.plain(boostedBySymbol, L10n.t("item.act.boostedBy", language: language), act: boosted.press))
@@ -68,18 +71,11 @@ extension ItemActs {
         _ turn: ItemActing.PostMore.Turn, symbol: String, names: (on: String, off: String), language: DummyLanguage?
     ) -> ShellMoreItem {
         let name = L10n.t(turn.on ? names.off : names.on, language: language)
-        if let lock = turn.lock { return .locked(name: name, lock: lock, press: turn.press) }
+        if let lock = turn.lock { return .locked(name: name, lock: lock, language: language, press: turn.press) }
         let mark = ShellMark(symbol, name, look: turn.out ? .dim(.notNow) : .live, on: turn.on)
         return .plain(mark, act: turn.press)
     }
 
-    /// The locks' own lines, for the head of the menu: what a finger is told of how the sign-in
-    /// stands to a pin or a quiet, once each.
-    static func postLocks(_ post: ItemActing.PostMore?, language: DummyLanguage? = nil) -> [String] {
-        let locks = [post?.pin?.lock, post?.quiet?.lock].compactMap { $0?.headLine(language: language) }
-        let signIn = post?.translateSignedOut.map { String(format: L10n.t("item.act.translate.signIn", language: language), $0) }
-        return locks + [signIn].compactMap { $0 }
-    }
 }
 
 /// The translation of a post, beside its words (#334): the words in the reader's language, the

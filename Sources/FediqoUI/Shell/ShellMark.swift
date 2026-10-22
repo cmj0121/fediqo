@@ -25,8 +25,8 @@ enum MarkLook: Equatable {
 }
 
 /// Why a mark is dim. One look for three different facts would be one silence, so the reason goes
-/// wherever the look cannot be seen or is not enough: the pointer's help, VoiceOver, and the head
-/// of the row's `…` menu.
+/// wherever the look cannot be seen or is not enough: the pointer's help, VoiceOver, and the title
+/// of a dim item in a `…` menu.
 ///
 /// `never` and not `none`, which an optional reason would read as its own nothing.
 enum DimReason: Equatable, CaseIterable {
@@ -153,12 +153,21 @@ struct ShellMark: Equatable {
     }
 
     /// A press, sent where the look says it goes: to `act` for a live mark, to `ask` for one that
-    /// must be asked again, and nowhere otherwise.
-    static func pressed(_ look: MarkLook, act: () -> Void, ask: (() -> Void)?) {
+    /// must be asked again. **Whether the press is answered by saying why instead** (#385): a dim
+    /// mark that does nothing — or one to be asked again where nothing can ask — shows its reason
+    /// beside it, which is what a finger, with no pointer to rest, is told.
+    @discardableResult
+    static func pressed(_ look: MarkLook, act: () -> Void, ask: (() -> Void)?) -> Bool {
         switch press(look) {
-        case .acts: act()
-        case .asks: ask?()
-        case .nothing: break
+        case .acts:
+            act()
+            return false
+        case .asks:
+            guard let ask else { return true }
+            ask()
+            return false
+        case .nothing:
+            return true
         }
     }
 
@@ -183,6 +192,8 @@ struct ShellMarkButton: View {
     let ask: (() -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
+    /// Whether the press of a dim mark that does nothing is showing why (#385).
+    @State private var saying = false
 
     /// `act` is the press of a live mark; `ask` puts the question a dim mark asks first, and is
     /// never called for any other look.
@@ -196,7 +207,7 @@ struct ShellMarkButton: View {
     var body: some View {
         let glyph = ink ?? ShellMark.ink(mark.look, on: mark.on, colorScheme)
         Button {
-            ShellMark.pressed(mark.look, act: act, ask: ask)
+            saying = ShellMark.pressed(mark.look, act: act, ask: ask)
         } label: {
             HStack(spacing: ShellSpace.tight) {
                 Image(systemName: mark.drawn)
@@ -222,6 +233,7 @@ struct ShellMarkButton: View {
         .accessibilityValue(mark.count.map { L10n.compact($0) } ?? "")
         // Said as selected where the mark is switched on — dim or not, since on is its state.
         .accessibilityAddTraits(mark.on ? .isSelected : [])
+        .modifier(ShellReasonLine(shown: $saying, words: mark.spoken))
     }
 }
 
@@ -247,6 +259,10 @@ struct ShellMoreAsk {
 /// without its question**: `danger` takes it, nothing else makes an item red, and choosing one
 /// hands back the question rather than acting — so an act that takes something away is offered in
 /// one place and always asks first.
+///
+/// **Or opens it** (#385): an act whose question is a sheet of its own — a mute, a block, a
+/// report, each asking what it asks there and sending nothing before that sheet's yes — is red
+/// with `danger(_:_:look:sheet:)`, and choosing it opens that sheet and does nothing more.
 struct ShellMoreItem {
     let symbol: String
     let name: String
@@ -268,6 +284,9 @@ struct ShellMoreItem {
         /// A destructive item's question that has to be counted first; nothing where the count
         /// finds nothing to ask about.
         case counted(@MainActor () async -> ShellConfirmation?)
+        /// A destructive item whose question is a sheet of its own: the press opens it, and only
+        /// that sheet's yes sends anything.
+        case sheet
     }
 
     private init(
@@ -326,6 +345,16 @@ struct ShellMoreItem {
         Self(symbol: symbol, name: name, look: look, asking: .counted(counts), act: act)
     }
 
+    /// An item that takes something away **and asks on a sheet of its own** (#385): a mute, a
+    /// block, a whole server's block, a report. `opens` puts that sheet up and is all a press
+    /// does; the sheet is the question, and sends nothing before its own yes. Red, and last under
+    /// the divider, as every item that takes something away is.
+    static func danger(
+        _ symbol: String, _ name: String, look: MarkLook = .live, sheet opens: @escaping () -> Void
+    ) -> Self {
+        Self(symbol: symbol, name: name, look: look, asking: .sheet, act: opens)
+    }
+
     /// The symbol as drawn — a mark's rule, so the menu and the row draw one glyph for one state.
     var drawn: String { ShellMark.drawn(symbol, on: on) }
 
@@ -359,21 +388,39 @@ struct ShellMoreItem {
         return ShellMoreAsk(question: question, act: act)
     }
 
-    /// What the item reads: its name, and its reason after it where it is dim. A menu draws no
-    /// colour of ours, so the words carry the look.
+    /// What the item reads: its name, and its reason after it where it is dim — the menu's own
+    /// sentence where it gave one (`because`), the shared word of its look otherwise. A menu draws
+    /// no colour of ours, so the words carry the look.
     func title(language: DummyLanguage? = nil) -> String {
-        headed ? name : ShellMark.spoken(name: name, look: look, language: language)
+        if case .dim = look, let why { return ShellMark.said(name, why, language: language) }
+        return ShellMark.spoken(name: name, look: look, language: language)
     }
 
-    /// Whether the menu's head already says why this item is dim (`ShellMore.reasons`), so its
-    /// title is its name alone and the reason is said once.
-    private(set) var headed = false
+    /// Why the item is dim in the menu's own words, where the three shared ones would not say it —
+    /// a read-only sign-in, nothing on these days, no password saved. Said only while it is dim.
+    private(set) var why: String?
 
-    /// The same item in a menu whose head names it under its reason.
-    var underHead: Self {
+    /// The same item, dim for `why` in the menu's own words. Nothing, and it is as it was.
+    func because(_ why: String?) -> Self {
         var item = self
-        item.headed = true
+        item.why = why
         return item
+    }
+
+    /// What a pointer resting on the item and a listener landing on it are told beyond its name,
+    /// live or dim: what choosing it leaves as it is.
+    private(set) var hint: String?
+
+    /// The same item, telling `hint` to a pointer and to VoiceOver.
+    func hinted(_ hint: String?) -> Self {
+        var item = self
+        item.hint = hint
+        return item
+    }
+
+    /// Whether its question is a sheet the press opens (`danger(_:_:look:sheet:)`).
+    var asksOnSheet: Bool {
+        if case .sheet = asking { true } else { false }
     }
 
     /// Whether choosing it does anything. A menu's own way of drawing an item that does not is
@@ -389,8 +436,8 @@ struct ShellMoreItem {
     /// The item was chosen — the one way anything it holds is reached. An ordinary one acts; a
     /// destructive one only hands `put` its question, **at the press** where the question is
     /// there to build, and once it is counted where it is not (the count's task is handed back
-    /// for whoever waits on it); a dim one asks again where that is its reason, and otherwise
-    /// does nothing.
+    /// for whoever waits on it), or opens the sheet that is its question; a dim one asks again
+    /// where that is its reason, and otherwise does nothing.
     @MainActor
     @discardableResult
     func press(put: @escaping @MainActor (ShellMoreAsk) -> Void) -> Task<Void, Never>? {
@@ -400,6 +447,7 @@ struct ShellMoreItem {
             case .none: act()
             case .now(let question): put(asks(question()))
             case .counted: return Task { if let ask = await counted() { put(ask) } }
+            case .sheet: act()
             }
         case .asks: ask?()
         case .nothing: break
@@ -411,48 +459,19 @@ struct ShellMoreItem {
 /// What a row's `…` holds, as a value — so the menu under `…` and the one under a long press are
 /// made from the same thing and cannot differ.
 ///
-/// **One order whatever order it was built in**: the head lines — what the row has to say, and
-/// each dim mark's reason, the only place a finger reads it — then the ordinary items, a divider,
-/// and the destructive ones last.
+/// **Acts, and nothing about what it belongs to** (#385): no line heads it — who wrote a post,
+/// when, who may read it, where it came from are the row's to say. **One order whatever order it
+/// was built in**: the ordinary items, a divider, and the destructive ones last.
 struct ShellMore {
-    let head: [String]
     let items: [ShellMoreItem]
 
-    init(head: [String] = [], items: [ShellMoreItem]) {
-        self.head = head
-        self.items = items
-    }
-
     /// A menu ending in an item that may be dim for a reason the three shared ones do not say:
-    /// `reason`, in the menu's own words, stands at the head and the item under it says its name
-    /// alone. Nothing to say, and the menu is its items.
+    /// `reason`, in the menu's own words, is what the item says after its name (`because`).
+    /// Nothing to say, and the menu is its items.
     static func ending(
         in item: ShellMoreItem, dimFor reason: String?, after items: [ShellMoreItem] = []
     ) -> Self {
-        guard let reason else { return Self(items: items + [item]) }
-        return Self(head: [reason], items: items + [item.underHead])
-    }
-
-    /// Why each dim mark of a row is dim — the only place a finger reads it, since a phone has no
-    /// hover. One line a reason, in the order the marks first give them, **each naming the marks it is
-    /// about**: "<name>, <name>. <reason>", the shape `ShellMark.spoken` gives one mark — so a
-    /// line read on its own says what is dim as well as why, and six marks dim for one reason
-    /// still say it once.
-    static func reasons(of marks: [ShellMark], language: DummyLanguage? = nil) -> [String] {
-        var seen: [(reason: DimReason, names: [String])] = []
-        for mark in marks {
-            guard case .dim(let reason) = mark.look else { continue }
-            if let at = seen.firstIndex(where: { $0.reason == reason }) {
-                seen[at].names.append(mark.name)
-            } else {
-                seen.append((reason, [mark.name]))
-            }
-        }
-        guard !seen.isEmpty else { return [] }
-        let between = L10n.t("mark.dim.names", language: language)
-        return seen.map {
-            ShellMark.said($0.names.joined(separator: between), L10n.t($0.reason.key, language: language), language: language)
-        }
+        Self(items: items + [item.because(reason)])
     }
 
     static let symbol = "ellipsis"
@@ -487,8 +506,10 @@ struct ShellMore {
     }
 }
 
-/// Whether the head of a row's `…` has something the reader has not been shown. `…` is one glyph
-/// whatever this is: it is said in colour and in the menu's name.
+/// Whether a row has something to say that it does not draw — a source's standing sentences, which
+/// a listener hears with the row. `…` is one glyph whatever this is: it is said in colour and in
+/// the menu's name. **The menu no longer holds those sentences** (#385: no `…` has a head): a
+/// source's are read whole on its detail.
 enum ShellMoreSaying: Equatable {
     /// Nothing to read beyond what the menu always holds.
     case nothing
@@ -520,11 +541,6 @@ struct ShellMoreItems: View {
         let more = build()
         let ordinary = more.ordinary
         let dangers = more.dangers
-        if !more.head.isEmpty {
-            Section {
-                ForEach(Array(more.head.enumerated()), id: \.offset) { _, line in Text(line) }
-            }
-        }
         rows(ordinary)
         if !ordinary.isEmpty, !dangers.isEmpty { Divider() }
         rows(dangers)
@@ -538,6 +554,8 @@ struct ShellMoreItems: View {
                 Label(item.title(), systemImage: item.drawn)
             }
             .disabled(!item.answers)
+            .help(item.hint ?? "")
+            .accessibilityHint(Text(item.hint ?? ""))
         }
     }
 }
@@ -557,12 +575,14 @@ struct ShellMoreAsks: ViewModifier {
 /// `…`: the last control of a row, always the same glyph, opening the row's menu. Named by what
 /// it holds (`ShellMore.label`) to the pointer and to VoiceOver alike.
 ///
-/// **Colour is the only signal, as on a mark**: quiet, and the alarm where the row's menu has
-/// something at its head that went wrong (`ShellMoreSaying.warns`). It is not a mark — it offers
+/// **Colour is the only signal, as on a mark**: quiet, and the alarm where the row has something
+/// to say that went wrong (`ShellMoreSaying.warns`). It is not a mark — it offers
 /// nothing itself — so the alarm here says there is something to read and never that the press
 /// takes something away.
 ///
-/// **The menu is built when it is opened** (`ShellMoreItems`), so a list of rows that is drawn
+/// **It opens the panel** (#385, `ShellMorePanel`): beside it on a wide page, from the bottom on a
+/// narrow one — and the same panel where a long press on the row around it asks for it
+/// (`shellMoreHeld`). **The panel is built when it is opened**, so a list of rows that is drawn
 /// again builds no menu nobody opened.
 struct ShellMoreButton: View {
     let label: String
@@ -573,7 +593,10 @@ struct ShellMoreButton: View {
     let asks: Binding<ShellMoreAsk?>?
 
     @State private var asked: ShellMoreAsk?
+    /// Whether the panel is open, where no row around it holds the switch.
+    @State private var open = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.shellMoreHeld) private var held
 
     /// A menu already in hand, named by what it holds.
     init(_ more: ShellMore, saying: ShellMoreSaying = .nothing, asks: Binding<ShellMoreAsk?>? = nil) {
@@ -605,17 +628,17 @@ struct ShellMoreButton: View {
     }
 
     private var menu: some View {
-        Menu {
-            ShellMoreItems(asked: asks ?? $asked, build: more)
+        let shown = held ?? $open
+        return Button {
+            shown.wrappedValue = true
         } label: {
             Image(systemName: ShellMore.symbol)
                 .foregroundStyle(Self.ink(saying, colorScheme))
                 .modifier(ShellGlyphBox())
         }
-        .menuStyle(.button)
         .buttonStyle(.plain)
-        .menuIndicator(.hidden)
         .help(label)
         .accessibilityLabel(label)
+        .modifier(ShellMorePresenter(shown: shown, asked: asks ?? $asked, label: label, build: more))
     }
 }

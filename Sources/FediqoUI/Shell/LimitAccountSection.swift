@@ -54,6 +54,7 @@ struct LimitAccountSection: View {
             })
         }
         .padding(.vertical, ShellSpace.tight)
+        .shellMoreHeld()
     }
 
     /// The list's `…`: the one item that clears the account, under the eraser every clear wears.
