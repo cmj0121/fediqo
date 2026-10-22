@@ -1956,12 +1956,22 @@ extension View {
 ///
 /// **Neither puts the question of the item that takes the post back.** The row holds no
 /// presenter: what was chosen is handed to the pane's one asker (`shellRowAsk`, `RowAsks`).
+///
+/// **A long press opens the panel `…` opens** (#385, `shellMoreHeld`). On a Mac the pointer's
+/// other button keeps the system's menu of the same items, which is how a Mac says "secondary
+/// press"; holding the row opens the panel there too.
 struct RowMenu: ViewModifier {
     let item: DummyItem
     let acting: ItemActing
 
     func body(content: Content) -> some View {
-        content.contextMenu { RowMoreItems(item: item, acting: acting) }
+        #if os(macOS)
+        content
+            .contextMenu { RowMoreItems(item: item, acting: acting) }
+            .shellMoreHeld()
+        #else
+        content.shellMoreHeld()
+        #endif
     }
 }
 
@@ -1976,18 +1986,19 @@ struct RowMoreItems: View {
     @Environment(\.shellRowAsk) private var rowAsk
 
     var body: some View {
-        ShellMoreItems(more: more, asked: asked)
+        ShellMoreItems(more: Self.build(item, acting, openURL: openURL), asked: Self.asked(rowAsk))
     }
 
     /// A destructive item that is chosen goes to the pane's asker and is not kept here. Where
     /// no pane is asking — a preview, a fixture — nothing is put, and nothing is taken away.
-    private var asked: Binding<ShellMoreAsk?> {
+    static func asked(_ rowAsk: RowAsk?) -> Binding<ShellMoreAsk?> {
         Binding(get: { nil }, set: { if let ask = $0 { rowAsk?.put(ask) } })
     }
 
+    /// The row's menu — the one value its `…`, its long press and a Mac's other button open.
     /// The one door out, checked as `WayOut` checks it; nothing where there is no address to
     /// hand the system browser, and then the menu has no such item.
-    private var more: ShellMore {
+    static func build(_ item: DummyItem, _ acting: ItemActing, openURL: OpenURLAction) -> ShellMore {
         let url = WayOut.checked(item.outwardURL)
         return ItemActs.more(on: item, acting: acting, leave: url.map { url in { openURL(url) } })
     }
@@ -2050,6 +2061,12 @@ private struct RowMarkControl: View {
     let touch: CGFloat
     let probe: RowBandProbe?
 
+    @Environment(\.openURL) private var openURL
+    @Environment(\.shellRowAsk) private var rowAsk
+    @Environment(\.shellMoreHeld) private var held
+    /// Whether `…`'s panel is open, where no row around it holds the switch.
+    @State private var open = false
+
     var body: some View {
         control
             .buttonStyle(.plain)
@@ -2064,13 +2081,16 @@ private struct RowMarkControl: View {
     @ViewBuilder
     private var control: some View {
         if mark.kind == .more {
-            Menu {
-                RowMoreItems(item: item, acting: acting)
+            let shown = held ?? $open
+            Button {
+                shown.wrappedValue = true
             } label: {
                 face
             }
-            .menuStyle(.button)
-            .menuIndicator(.hidden)
+            .modifier(ShellMorePresenter(
+                shown: shown, asked: RowMoreItems.asked(rowAsk), label: mark.label,
+                build: { RowMoreItems.build(item, acting, openURL: openURL) }
+            ))
         } else {
             Button {
                 ItemActs.press(mark, acting: acting)

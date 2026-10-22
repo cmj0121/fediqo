@@ -202,6 +202,7 @@ struct WaitingSheet: View {
         .padding(ShellSpace.pad)
         .contentShape(Rectangle())
         .onTapGesture { if said.locked == nil, !busy { onChange(post) } }
+        .shellMoreHeld()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(LaterWords.spoken(post))
         .accessibilityAction { if said.locked == nil, !busy { onChange(post) } }

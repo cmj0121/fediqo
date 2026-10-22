@@ -288,6 +288,7 @@ private struct AnnouncementView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if !dismissed { more }
             }
+            .shellMoreHeld()
             AnnouncementReactions(shown: shown, said: said, acts: acts)
             if let missed = shown.missed {
                 Text(AnnouncementsSaid.missed(missed, said.source))

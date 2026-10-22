@@ -578,7 +578,9 @@ struct ShellMoreAsks: ViewModifier {
 /// nothing itself — so the alarm here says there is something to read and never that the press
 /// takes something away.
 ///
-/// **The menu is built when it is opened** (`ShellMoreItems`), so a list of rows that is drawn
+/// **It opens the panel** (#385, `ShellMorePanel`): beside it on a wide page, from the bottom on a
+/// narrow one — and the same panel where a long press on the row around it asks for it
+/// (`shellMoreHeld`). **The panel is built when it is opened**, so a list of rows that is drawn
 /// again builds no menu nobody opened.
 struct ShellMoreButton: View {
     let label: String
@@ -589,7 +591,10 @@ struct ShellMoreButton: View {
     let asks: Binding<ShellMoreAsk?>?
 
     @State private var asked: ShellMoreAsk?
+    /// Whether the panel is open, where no row around it holds the switch.
+    @State private var open = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.shellMoreHeld) private var held
 
     /// A menu already in hand, named by what it holds.
     init(_ more: ShellMore, saying: ShellMoreSaying = .nothing, asks: Binding<ShellMoreAsk?>? = nil) {
@@ -621,17 +626,17 @@ struct ShellMoreButton: View {
     }
 
     private var menu: some View {
-        Menu {
-            ShellMoreItems(asked: asks ?? $asked, build: more)
+        let shown = held ?? $open
+        return Button {
+            shown.wrappedValue = true
         } label: {
             Image(systemName: ShellMore.symbol)
                 .foregroundStyle(Self.ink(saying, colorScheme))
                 .modifier(ShellGlyphBox())
         }
-        .menuStyle(.button)
         .buttonStyle(.plain)
-        .menuIndicator(.hidden)
         .help(label)
         .accessibilityLabel(label)
+        .modifier(ShellMorePresenter(shown: shown, asked: asks ?? $asked, label: label, build: more))
     }
 }

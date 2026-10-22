@@ -226,6 +226,7 @@ struct TagFeatureRow: View {
                 locked
             } else {
                 WordsThenPress(words: words, press: press)
+                    .shellMoreHeld()
             }
             ForEach([line.missedWords(), line.refusedWords()].compactMap { $0 }, id: \.self) { said in
                 Text(said)

@@ -158,6 +158,7 @@ struct PersonHead: View {
         .coordinateSpace(.named(PersonHeadProbe.space))
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.step)
+        .shellMoreHeld()
     }
 
     // MARK: - The three arrangements

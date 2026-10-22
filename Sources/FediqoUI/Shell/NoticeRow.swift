@@ -128,7 +128,7 @@ struct NoticeRow: View {
             personAction
             if let menu { NoticeMenuActions(more: menu.more, asks: menu.asks) }
         }
-        .modifier(NoticeRowMenu(menu: menu))
+        .modifier(NoticeRowMenu(menu: menu, dotless: shellLayout == .narrow, label: Self.moreLabel()))
     }
 
     /// Where the reader is: a post row's own lamp.
@@ -342,16 +342,27 @@ final class NoticeRowProbe {
     var glyphSays: String?
 }
 
-/// The row's menu under a long press, and the pointer's other button: the one its `…` opens
-/// (`RowMenu`'s rule for a post's row), where the row has one. A modifier of its own, so no
+/// The row's panel under a long press, and on a Mac the pointer's other button: the one its `…`
+/// opens (`RowMenu`'s rule for a post's row), where the row has one. A modifier of its own, so no
 /// row's chain carries the presenter's closure.
+///
+/// `dotless`: the row draws no `…` (a notice's line where the page is narrow), so the long press
+/// opens the panel from the row itself.
 struct NoticeRowMenu: ViewModifier {
     let menu: NoticeRow.Menu?
+    var dotless = false
+    var label = ShellMore.label()
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if let menu {
-            content.contextMenu { ShellMoreItems(asked: menu.asks, build: menu.more) }
+            #if os(macOS)
+            content
+                .contextMenu { ShellMoreItems(asked: menu.asks, build: menu.more) }
+                .modifier(ShellMoreHold(presenting: dotless ? (label, menu.more, menu.asks) : nil))
+            #else
+            content.modifier(ShellMoreHold(presenting: dotless ? (label, menu.more, menu.asks) : nil))
+            #endif
         } else {
             content
         }

@@ -330,24 +330,24 @@ struct RowMenuTests {
         #expect(failed.answers && failed.drawn == "exclamationmark.triangle")
     }
 
-    /// **That the `…` and the long press are one menu is by construction**, and a menu built
+    /// **That the `…` and the long press are one panel is by construction**, and a menu built
     /// twice from one function says nothing about it. What can go wrong is a second way in, so
-    /// what is held here is the shape of the source: both entries hold a `RowMoreItems`, that
-    /// view is the row's one caller of `ItemActs.more`, and the row puts no question itself.
-    @Test("The row's three dots and a long press both go through the one view that builds the menu, and the pane alone puts its question")
+    /// what is held here is the shape of the source: the dots open the one panel from
+    /// `RowMoreItems.build`, the row's one caller of `ItemActs.more`; a long press throws the switch
+    /// the dots' panel is shown by (`shellMoreHeld`); a Mac's other button lists the same value;
+    /// and the row puts no question itself.
+    @Test("The row's three dots and a long press both open the one panel, built in one place, and the pane alone puts its question")
     func bothEntriesAreOneView() throws {
         func source(_ name: String) throws -> String { try ShellSource.shell(name) }
         func count(_ needle: String, in text: String) -> Int { text.components(separatedBy: needle).count - 1 }
         let row = try source("DummyItemRow")
         #expect(count("ItemActs.more(", in: row) == 1, "the menu is built in one place")
-        #expect(count("RowMoreItems(item: item, acting: acting)", in: row) == 2, "the long press and the dots")
-        #expect(row.contains("content.contextMenu { RowMoreItems(item: item, acting: acting) }"))
-        #expect(
-            row.filter { !$0.isWhitespace }.contains("Menu{RowMoreItems(item:item,acting:acting)}label:"),
-            "the dots' menu holds that view and nothing else"
-        )
-        #expect(count("ShellMoreItems(", in: row) == 1 && count(".contextMenu", in: row.replacingOccurrences(of: "content.contextMenu { RowMoreItems", with: "")) == 1,
-                "the only other context menu is the plain way out, which a post's row does not use")
+        #expect(count("build(item, acting, openURL: openURL)", in: row) == 2, "the dots' panel and a Mac's other button")
+        #expect(count("ShellMorePresenter(", in: row) == 1 && row.contains("let shown = held ?? $open"), "the dots open the panel, on the row's switch")
+        #expect(count(".shellMoreHeld()", in: row) == 2, "the long press throws that switch, on a Mac and on a phone")
+        #expect(!row.replacingOccurrences(of: "contextMenu {", with: "").contains("Menu {"), "no system menu stands for the dots")
+        #expect(count("ShellMoreItems(", in: row) == 1 && count(".contextMenu", in: row) == 2,
+                "a Mac's other button, and the plain way out, which a post's row does not use")
         #expect(!row.contains("ShellMoreAsks(") && !row.contains(".shellConfirm("), "a row carries no presenter")
         let pane = try source("TimelinePane")
         #expect(count(".modifier(RowAsks(session: session))", in: pane) == 1, "one asker for the pane")

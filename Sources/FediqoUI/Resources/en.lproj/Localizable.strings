@@ -1679,6 +1679,7 @@
 "mark.more" = "More";
 "mark.more.one" = "More: %@";
 "mark.more.said" = "It has something to say";
+"mark.more.danger" = "It takes something away, and asks first.";
 "notices.what.answer" = "answered you";
 "notices.what.mention" = "mentioned you";
 "notices.what.reblog" = "boosted your post";

@@ -451,6 +451,7 @@ struct PersonAbout<Lead: View>: View {
         }
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.hair)
+        .shellMoreHeld()
         .modifier(AboutBlockLit(lit: FeaturedSaid.lamp(of: tag.tag) == lit))
         .padding(.horizontal, -ShellSpace.pad)
         .id(FeaturedSaid.lamp(of: tag.tag))

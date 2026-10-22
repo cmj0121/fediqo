@@ -1635,6 +1635,7 @@
 "mark.more" = "更多";
 "mark.more.one" = "更多：%@";
 "mark.more.said" = "它有話要說";
+"mark.more.danger" = "這會拿走一些東西，會先問你。";
 "notices.what.answer" = "回覆了你";
 "notices.what.mention" = "提到了你";
 "notices.what.reblog" = "轉發了你的貼文";

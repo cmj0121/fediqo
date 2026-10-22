@@ -161,6 +161,7 @@ struct QuotesSheet: View {
                 .lineLimit(1)
         }
         .padding(ShellSpace.pad)
+        .shellMoreHeld()
         .accessibilityElement(children: .combine)
         .accessibilityLabel(QuoteWords.spoken(quoting))
     }

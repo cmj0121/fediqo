@@ -63,6 +63,7 @@ struct SpanSection: View {
                     }
                 ))
             }
+            .shellMoreHeld()
             if let went { ShellReadingLine(Self.wentLine(went, offDevice: !Self.unwritten(in: session))) }
         } header: {
             ShellSectionHead(title: "prefs.span", line: "usage.span.line", help: "prefs.span.footer")

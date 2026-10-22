@@ -853,6 +853,7 @@ struct SourceRowView: View {
         // area is the row and not only its words.
         .background { if let wash = pressed.wash { wash } }
         .onHover { hovering = $0 }
+        .shellMoreHeld()
     }
 
     /// The row's one line, with the permission control as it is handed in.

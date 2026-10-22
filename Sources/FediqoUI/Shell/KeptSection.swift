@@ -82,6 +82,7 @@ struct KeptSection: View {
                 stop: { Task { went = await session.stopKeeping(host: ask.host) } }
             ))
         }
+        .shellMoreHeld()
     }
 
     /// A row's `…`: the one item that stops keeping what the row counts.
