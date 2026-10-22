@@ -1665,9 +1665,12 @@ public struct FediqoRootView: View {
         }
         // Over a search's posts, and on the page of the hashtags it found, the row the lamp is
         // on may be what a source found (#319): Return opens it.
-        // On a server tended the row the lamp is on is a report (#381): it opens nothing — its
-        // acts are its `…`, and the person it is about is the press under it.
-        if keyed.openedTending != nil { return false }
+        // On a server tended the row the lamp is on is a report (#381), which opens nothing — its
+        // acts are its `…` — or an account (#382), which opens that person as any person's row does.
+        if let page = keyed.openedTending {
+            guard page.tab == .people, let person = people.tending.people.account(id, of: page, in: session)?.person else { return false }
+            return openPerson(DummyPerson(person))
+        }
         if let page = keyed.openedFoundTags {
             guard let row = people.found.row(id, of: page, in: session) else { return false }
             return openFound(row)
@@ -1989,6 +1992,13 @@ public struct FediqoRootView: View {
             }
             // The report it names, where the page does not hold it, is asked for and stands at the top.
             if let id = notice.report { Task { await people.tending.bringIn(id, of: page, in: session) } }
+            // The one who signed up, found among those waiting by their name, and lit (#382).
+            if page.tab == .people, let who = notice.people.first {
+                Task {
+                    let lit = await people.tending.people.lightSignUp(who, on: page, in: session)
+                    if let lit, walk.openedTending == page { selectedItemID = lit }
+                }
+            }
             return true
         }
         switch NoticeWords.opens(notice) {
@@ -2006,10 +2016,16 @@ public struct FediqoRootView: View {
     /// its source allows reports and the sign-in holds what reads them. Nothing otherwise, and
     /// the line opens what it always did.
     static func tendingOpened(by notice: Notice, in session: ShellSession) -> Tending? {
-        guard notice.kind == .server("admin.report"), ShellTending.tabs(at: notice.source.host, in: session).contains(.reports),
+        // A new report opens the reports (#381); a new sign-up, those waiting (#382).
+        let tab: TendingTab? = switch notice.kind {
+        case .server("admin.report"): .reports
+        case .server("admin.sign_up"): .people
+        default: nil
+        }
+        guard let tab, ShellTending.tabs(at: notice.source.host, in: session).contains(tab),
               case .open(var page) = ShellTending.entry(at: notice.source.host, in: session)
         else { return nil }
-        page.tab = .reports
+        page.tab = tab
         return page
     }
 
@@ -2598,6 +2614,10 @@ public struct FediqoRootView: View {
         // The page read out of a post goes with its step, and the page under it — never torn
         // down — is simply in front again (#169).
         if case .link = left.step { linkReader.close() }
+        // What a server tended holds goes with its last page (#380): asked afresh when it is opened again.
+        if case .server(let page) = left.step, !walk.steps.contains(where: { if case .server(let other) = $0 { other.host == page.host } else { false } }) {
+            people.tending.letGo(at: page.host)
+        }
         // A tag's ask goes with its page (#124).
         if case .tag = left.step { session.reload.endTag() }
         // What a list of the hashtags followed was told goes with its step (#318).
@@ -3237,6 +3257,7 @@ private struct PersonPresenters: ViewModifier {
             .modifier(StandingSheetPresenter(people: people, session: session))
             .modifier(BlockedServersPresenter(servers: people.servers, session: session))
             .modifier(ReportSheetPresenter(people: people, session: session))
+            .modifier(AccountActSheetPresenter(people: people.tending.people, session: session))
     }
 }
 

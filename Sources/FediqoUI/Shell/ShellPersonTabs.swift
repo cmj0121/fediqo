@@ -463,6 +463,8 @@ extension ShellPersonPages {
         if home == nil { about.featured = featured(of: who, in: session) }
         about.keeping = keepingEntries(of: who, in: session)
         if home == nil { about.waiting = session.waitingEntry(of: who) }
+        // What only staff see of them, where the reader answers for their server (#382).
+        if home == nil { about.staff = tending.people.staffSaid(of: said.person, in: session) }
         return about
     }
 

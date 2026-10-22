@@ -82,7 +82,7 @@ struct TendingTests {
     @Test("Tending is offered by the role the server's own check names, and by nothing else: a Moderator holding its words is offered the page on Reports; holding none of them, the part's lock, whose press asks for them alone; everybody's role, or no role, is offered nothing — whatever the sign-in holds — and no trace is drawn")
     func offeredByTheRole() async throws {
         let (session, _, _) = try await session([:])
-        #expect(ShellTending.tabs(at: Self.host, in: session) == [.reports])
+        #expect(ShellTending.tabs(at: Self.host, in: session) == [.reports, .people], "a Moderator manages reports and users")
         #expect(ShellTending.entry(at: Self.host, in: session) == .open(Self.page))
         #expect(ShellTending.acts(at: Self.host, in: session) && ShellTending.drawn(Self.page, in: session))
         let item = try #require(SourceRow.tendItem(.open(Self.page), host: Self.host, actsLive: true, press: {}, language: .english))
@@ -104,7 +104,7 @@ struct TendingTests {
             #expect(!ShellTending.drawn(Self.page, in: plain))
             #expect(SourceRow.tendItem(nil, host: Self.host, actsLive: true, press: {}) == nil)
         }
-        #expect(TendingTab.allowed(by: MastodonStaff(rawValue: 1)) == [.reports], "the administrator is allowed every tab")
+        #expect(TendingTab.allowed(by: MastodonStaff(rawValue: 1)) == [.reports, .people], "the administrator is allowed every tab")
     }
 
     @Test("Holding only tending's word that reads, the page lists and offers no act: every act is dim, and pressed sends nothing")
@@ -121,7 +121,7 @@ struct TendingTests {
             said.reports[0], host: Self.host, acts: said.acts, acting: false, lock: lock, onAct: { _, _ in },
             onOpenPage: { _ in }, language: .english
         )
-        #expect(more.items.map(\.name) == ["This sign-in was not asked to act for the server. Update permission", "Note or act on m.example's page"])
+        #expect(more.items.map(\.name) == ["This sign-in was not asked to act for the server. Update permission", "Write a note on m.example's page"])
         #expect(more.items.allSatisfy { $0.look == .live })
         // Where the words may not be asked for, the acts are dim for good.
         let never = ReportRowView.more(said.reports[0], host: Self.host, acts: false, acting: false, onAct: { _, _ in }, onOpenPage: { _ in })
@@ -201,7 +201,7 @@ struct TendingTests {
             ReportRowView.more(try! #require(row()), host: Self.host, acts: true, acting: false, onAct: { _, _ in }, onOpenPage: { _ in }, language: .english)
                 .items.map(\.name)
         }
-        #expect(names() == ["Take it on", "Close", "Note or act on m.example's page"])
+        #expect(names() == ["Take it on", "Close", "Write a note on m.example's page"])
         await pages.tending.act(.take, on: "1", of: Self.page, in: session)
         #expect(row()?.takenBy == "@me@m.example" && names().first == "Hand it back")
         await pages.tending.act(.handBack, on: "1", of: Self.page, in: session)
@@ -417,11 +417,13 @@ struct TendingTests {
         #expect(TimelinePane.askInFront(step, rising: nil, of: pages, in: session) == .tending(Self.page))
         #expect(TimelinePane.drawn(step, of: pages, in: session).drawn && !TimelinePane.headDrawn(over: step))
         #expect(TimelinePane.openedID(step) == "server:m.example\u{1e}reports")
-        // Tab with one tab is taken and turns nothing; covered, it is not the page's.
+        // Tab turns round the tabs the standing allows, in place; covered, it is not the page's.
         var lamp: String? = "x"
-        #expect(pages.tending.rotate(&walk, by: 1, covered: false, lamp: &lamp, in: session) && walk.openedTending == Self.page && lamp == "x")
         #expect(!pages.tending.rotate(&walk, by: 1, covered: true, lamp: &lamp, in: session))
-        #expect(!pages.tending.turn(&walk, to: .reports, lamp: &lamp, in: session))
+        #expect(pages.tending.rotate(&walk, by: 1, covered: false, lamp: &lamp, in: session) && walk.openedTending?.tab == .people && lamp == nil)
+        #expect(walk.depth == 1, "a tab is no step")
+        #expect(pages.tending.rotate(&walk, by: 1, covered: false, lamp: &lamp, in: session) && walk.openedTending == Self.page)
+        #expect(!pages.tending.turn(&walk, to: .reports, lamp: &lamp, in: session), "already on it")
         session.sources = []
         #expect(!TimelinePane.drawn(step, of: pages, in: session).drawn)
     }

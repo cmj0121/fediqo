@@ -16,7 +16,7 @@ struct PersonAboutSaid: Equatable {
     /// One block of the tab, top to bottom: what the lamp stops on.
     enum Block: String, CaseIterable {
         case view, sentences, picture, words, fields, featuredTags, featuredPeople, figures, none, stands, boosts, notices, home,
-             requests, muted, blocked, servers, waiting, you
+             requests, muted, blocked, servers, waiting, you, staff
     }
 
     /// The host of the source that says, and whose copies the pictures are.
@@ -47,6 +47,8 @@ struct PersonAboutSaid: Equatable {
     var keeping: [KeepingEntry] = []
     /// The way to the posts waiting to be sent at this source, on the reader's own page (#333).
     var waiting: WaitingEntry?
+    /// What only those who answer for the server see of them (#382): nothing without the standing.
+    var staff: TendingStaffSaid?
     /// What they feature on their profile (#315, #318), or nothing where it is not asked.
     var featured: FeaturedSaid?
 
@@ -118,6 +120,7 @@ struct PersonAboutSaid: Equatable {
             case .servers: keeping.contains { $0.which == .servers }
             case .waiting: waiting != nil
             case .you: followed != nil
+            case .staff: staff != nil
             }
         }
     }
@@ -195,6 +198,8 @@ struct PersonAbout<Lead: View>: View {
     var onKeeping: (KeepingEntry) -> Void = { _ in }
     /// A hashtag they feature, or the way to the people they feature (#315, #318).
     var onFeatured: (FeaturedPress) -> Void = { _ in }
+    /// The sheet of an act on them, from the staff block (#382).
+    var onStaffAct: (TendingStaffSaid) -> Void = { _ in }
     /// What stands over the blocks and scrolls away with them: the page's head, at a text
     /// size where it would fill the page.
     @ViewBuilder var lead: Lead
@@ -259,6 +264,27 @@ struct PersonAbout<Lead: View>: View {
         case .servers: keeping(.servers)
         case .waiting: waitingLine
         case .you: you
+        case .staff: staffBlock
+        }
+    }
+
+    /// What only staff see of them (#382): signed up when, their mail and where they signed in
+    /// from, the states the server holds them in, what they wrote asking to join — and the way
+    /// to an act on them, where the reader may act.
+    @ViewBuilder
+    private var staffBlock: some View {
+        if let staff = said.staff {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                ForEach(TendingStaffSaid.lines(staff), id: \.self) { line in
+                    marked("shield.lefthalf.filled", line, ink: ShellChrome.inkDim(colorScheme))
+                }
+                if staff.acts {
+                    Button { onStaffAct(staff) } label: {
+                        marked("person.crop.circle.badge.exclamationmark", L10n.t("tend.staff.act"), ink: ShellChrome.ink(colorScheme))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 
