@@ -936,4 +936,17 @@ enum ShellQuestion {
             choices: [], cancel: L10n.t("store.newer.ok", language: language)
         )
     }
+
+    /// Letting a kind of sender's notices go at `host` (#376): the source throws them away, so it
+    /// is asked first. `whose` and `yes` are the words the choice is drawn with.
+    static func letGo(_ whose: String, at host: String, yes label: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "trash",
+            title: String(format: L10n.t("notices.policy.drop.ask.title", language: language), whose, host),
+            line: String(format: L10n.t("notices.policy.drop.ask.line", language: language), host),
+            help: nil,
+            choices: [.init(yes, label, role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
 }
