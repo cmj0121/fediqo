@@ -2229,6 +2229,17 @@
 "person.act.withdraw.failed" = "Could not withdraw your request to follow %1$@ at %2$@.";
 "person.unfollow.ask.title" = "Unfollow %1$@ at %2$@?";
 "person.unfollow.ask.line" = "They ask before anyone may follow them. To follow them again, you would have to ask again.";
+"person.note.title" = "Your note";
+"person.note.none" = "No note yet. Only you read what you write here.";
+"person.note.write" = "Write a note";
+"person.note.change" = "Change the note";
+"person.note.keep" = "Keep";
+"person.note.spoken" = "Your note: %@";
+"person.note.refused" = "%1$@ would not keep the note: %2$@";
+"person.note.refused.unsaid" = "%@ would not keep the note. It is as it was there.";
+"person.note.missed" = "The note did not reach %@. It is as it was there.";
+"person.familiar" = "Followed by %d people you follow";
+"person.familiar.one" = "Followed by %d person you follow";
 "person.unfollow.ask.line.open" = "Their posts stop coming to you from there. You can follow them again with one press.";
 "shortcut.follow" = "Follow whoever's page, or the hashtag whose page, is in front — or, on your own page, change your profile";
 "person.tab.about" = "About";

@@ -15,8 +15,8 @@ import SwiftUI
 struct PersonAboutSaid: Equatable {
     /// One block of the tab, top to bottom: what the lamp stops on.
     enum Block: String, CaseIterable {
-        case view, sentences, picture, words, fields, featuredTags, featuredPeople, figures, none, stands, boosts, notices, home,
-             requests, muted, blocked, servers, waiting, you, staff
+        case view, sentences, picture, words, fields, featuredTags, featuredPeople, figures, none, stands, boosts, notices,
+             familiar, note, home, requests, muted, blocked, servers, waiting, you, staff
     }
 
     /// The host of the source that says, and whose copies the pictures are.
@@ -113,6 +113,8 @@ struct PersonAboutSaid: Equatable {
             case .stands: standsDrawn
             case .boosts: taken(.boosts) != nil
             case .notices: taken(.notices) != nil
+            case .familiar: standing?.familiar.isEmpty == false
+            case .note: standing?.notes == true
             case .home: home != nil
             case .requests: requests != nil
             case .muted: keeping.contains { $0.which == .muted }
@@ -200,6 +202,11 @@ struct PersonAbout<Lead: View>: View {
     var onFeatured: (FeaturedPress) -> Void = { _ in }
     /// The sheet of an act on them, from the staff block (#382).
     var onStaffAct: (TendingStaffSaid) -> Void = { _ in }
+    /// The reader's note written (#377) — empty clears it — or, with nothing, the account part
+    /// asked for where the sign-in lacks it.
+    var onNote: (String?) -> Void = { _ in }
+    /// A face of somebody in common pressed: their page.
+    var onOpenPerson: (Person) -> Void = { _ in }
     /// What stands over the blocks and scrolls away with them: the page's head, at a text
     /// size where it would fill the page.
     @ViewBuilder var lead: Lead
@@ -212,6 +219,9 @@ struct PersonAbout<Lead: View>: View {
     @ShellMetric(relativeTo: .caption2) private var glyphColumn: CGFloat = 20
 
     private static var top: String { "about.top" }
+
+    /// The note being written, while it is: nothing while it is read.
+    @State private var writing: String?
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -257,6 +267,8 @@ struct PersonAbout<Lead: View>: View {
         case .stands: stands
         case .boosts: narrowRow(.boosts)
         case .notices: narrowRow(.notices)
+        case .familiar: familiar
+        case .note: note
         case .home: home
         case .requests: requests
         case .muted: keeping(.muted)
@@ -483,6 +495,92 @@ struct PersonAbout<Lead: View>: View {
         .id(FeaturedSaid.lamp(of: tag.tag))
     }
 
+
+    /// Who of the people the reader follows also follow them (#377): their faces, each a press that
+    /// opens that person, under the words that say what the faces are.
+    @ViewBuilder
+    private var familiar: some View {
+        if let standing = said.standing, !standing.familiar.isEmpty {
+            let words = PersonNoteWords.familiar(standing.familiar.count)
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                marked(PersonNoteWords.familiarSymbol, words, ink: ShellChrome.ink(colorScheme))
+                // Every one of them, wrapped as the tab is wide: the head's figure opens this.
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: bandHeight / 3), spacing: ShellSpace.tight)],
+                          alignment: .leading, spacing: ShellSpace.tight) {
+                    ForEach(standing.familiar, id: \.accountID) { person in
+                        Button { onOpenPerson(person) } label: { face(person) }
+                            .buttonStyle(.plain)
+                            .help(PersonNoteWords.open(person))
+                            .accessibilityLabel(PersonNoteWords.open(person))
+                    }
+                }
+            }
+        }
+    }
+
+    private func face(_ person: Person) -> some View {
+        Group {
+            if let url = person.avatarURL {
+                RemoteImage(
+                    url: url, tier: .deck, host: said.source, standing: .avatar, alt: nil, speaks: false,
+                    radius: DummyItemRow.Box.plate
+                )
+            } else {
+                ShellVacant(standing: .avatar, radius: DummyItemRow.Box.plate)
+            }
+        }
+        .frame(width: bandHeight / 3, height: bandHeight / 3)
+    }
+
+    /// The reader's own note on them (#377): what it says, and the press that writes it — or,
+    /// while it is written, the words and the presses that keep or drop them. Without the account
+    /// part it is the lock, its press asking for the part.
+    @ViewBuilder
+    private var note: some View {
+        if let standing = said.standing {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                if let writing {
+                    // Said by the field itself: the heading is not read a second time.
+                    marked("note.text", PersonNoteWords.title(), ink: ShellChrome.ink(colorScheme))
+                        .accessibilityHidden(true)
+                    TextField(PersonNoteWords.title(), text: Binding(get: { writing }, set: { self.writing = $0 }), axis: .vertical)
+                        .shellFont(.body)
+                        .lineLimit(2 ... 6)
+                        .shellField(.alone)
+                        .accessibilityLabel(PersonNoteWords.title())
+                    HStack(spacing: ShellSpace.step) {
+                        ShellLinkButton(PersonNoteWords.keep()) {
+                            onNote(writing)
+                            self.writing = nil
+                        }
+                        .fixedSize()
+                        ShellLinkButton(L10n.t("board.choose.cancel")) { self.writing = nil }
+                            .fixedSize()
+                    }
+                } else {
+                    let words = standing.note ?? PersonNoteWords.none()
+                    // Said by the note's own label: the heading is not read a second time.
+                    marked("note.text", PersonNoteWords.title(), ink: ShellChrome.ink(colorScheme))
+                        .accessibilityHidden(true)
+                    Text(words)
+                        .shellFont(.body)
+                        .foregroundStyle(standing.note == nil || standing.noteSending
+                            ? ShellChrome.inkDim(colorScheme) : ShellChrome.ink(colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .accessibilityLabel(PersonNoteWords.spoken(standing.note))
+                    if standing.noteMissed { quiet(PersonNoteWords.missed(said.source)) }
+                    if let sentence = standing.noteRefused { quiet(PersonNoteWords.refused(sentence, at: said.source)) }
+                    if let lock = standing.accountLock {
+                        locked(PersonNoteWords.locked(lock, at: said.source), asks: lock.asks, press: { onNote(nil) })
+                    } else {
+                        ShellLinkButton(PersonNoteWords.write(standing.note)) { self.writing = standing.note ?? "" }
+                            .fixedSize()
+                    }
+                }
+            }
+        }
+    }
 
     /// The way to the people they feature: words, and the mark that says it leads on.
     @ViewBuilder

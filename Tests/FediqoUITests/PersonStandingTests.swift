@@ -1130,7 +1130,8 @@ struct PersonStandingTests {
         await pages.opened(Self.ada, in: shell)
         #expect(!pages.pressAbout("about.notices", of: Self.ada, in: shell), "nothing until the source has said how the reader stands")
         await pages.standsOpened(to: Self.ada, in: shell)
-        #expect(pages.walkedIDs(of: Self.ada, in: shell).suffix(2) == ["about.boosts", "about.notices"])
+        // The reader's note (#377) stands after them, where the page reads how the reader stands.
+        #expect(pages.walkedIDs(of: Self.ada, in: shell).suffix(3) == ["about.boosts", "about.notices", "about.note"])
         await wire.hold(Self.follow)
         let wireFollowGuard = watching("the ask of \(Self.follow), held at its server") { await wire.release(Self.follow) }
         defer { wireFollowGuard.cancel() }

@@ -717,10 +717,9 @@ struct TimelinePane: View {
         // **And what they feature, once the source has said who they are** (B7): their
         // hashtags, and whether they feature anybody — two asks more of the page opening.
         .task(id: people?.featuredOpening(of: person, in: session)) { await people?.featuredOpened(person, in: session) }
-        // **And what only staff see of them**, where the reader answers for their server (#382).
-        .task(id: people?.tending.people.staffOpening(of: people?.said(of: person, in: session)?.person, in: session)) {
-            await people?.tending.people.staffOpened(of: people?.said(of: person, in: session)?.person, in: session)
-        }
+        // **And what only staff see of them** (#382), **and who is known in common** (#377): two
+        // asks of the page's own, in one modifier so the page's chain does not grow.
+        .modifier(PersonPageAsks(person: person, people: people, session: session))
         // What their own server said is held only while this page is in front (#310).
         .onDisappear { people?.home.letGo(of: person) }
         // And what only staff see of them (#382).
@@ -760,6 +759,15 @@ struct TimelinePane: View {
                 Task { await people.lists.press(act, on: listed, of: list, in: session) }
             },
             onAct: { act in Task { await people?.act(act, on: person, in: session) } },
+            onNote: { words in
+                // Nothing written: the lock's press, which only asks for the account part.
+                guard let words else {
+                    _ = session.askFor([PersonAct.feature.needs], host: person.host)
+                    return
+                }
+                guard let people else { return }
+                Task { await people.acts.writeNote(words, of: person, said: people.said(of: person, in: session), in: session) }
+            },
             onAskFollows: { session.askFor([PersonAct.follow.needs], host: person.host) },
             onChange: { people?.changeOwn(person, in: session) },
             onReadOn: { Task { await people?.readOn(person, in: session) } },
@@ -2125,5 +2133,27 @@ struct RowAsks: ViewModifier {
 
     private var asked: Binding<ShellMoreAsk?> {
         Binding(get: { session.rowAsk }, set: { session.putRowAsk($0) })
+    }
+}
+
+/// What somebody's page asks beside its own reads, each once its time comes: what only staff see
+/// of them, where the reader answers for their server (#382), and who of the people the reader
+/// follows also follow them, once the source has said how the reader stands — and again each
+/// time it is read again (#377). **A modifier of its own**, so the page's chain of modifiers does
+/// not grow by one a feature.
+struct PersonPageAsks: ViewModifier {
+    let person: DummyPerson
+    let people: ShellPersonPages?
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content
+            .task(id: people?.tending.people.staffOpening(of: people?.said(of: person, in: session)?.person, in: session)) {
+                await people?.tending.people.staffOpened(of: people?.said(of: person, in: session)?.person, in: session)
+            }
+            .task(id: people.flatMap { $0.acts.familiarOpening(person, said: $0.said(of: person, in: session), in: session) }) {
+                guard let people else { return }
+                await people.acts.familiarOpened(person, said: people.said(of: person, in: session), in: session)
+            }
     }
 }

@@ -104,10 +104,54 @@ public struct MastodonStanding: Sendable {
     /// nothing where it answered with no entry for them: an id nobody has there, or an account
     /// it suspended.
     public func standing(to accountID: String) async throws -> PersonStanding? {
+        try await standingNoted(to: accountID).standing
+    }
+
+    /// `standing(to:)`, and the reader's own note on them (#377) — which the source keeps on how
+    /// the reader stands to them — in the same one ask. The note is nothing where the source said
+    /// none, or sent it empty.
+    public func standingNoted(to accountID: String) async throws -> (standing: PersonStanding?, note: String?) {
         guard ListSubscription.isPathSegment(accountID) else { throw MastodonRequestError.invalidURL }
         // `id[]`, spelled as the wire carries it: a query's name goes out as it is written here.
         let body = try await door.get(path: Self.path, query: [URLQueryItem(name: "id%5B%5D", value: accountID)])
-        return try Self.standing(to: accountID, in: body)
+        let standing = try Self.standing(to: accountID, in: body)
+        let wire = (try? MastodonJSON.decoder.decode([StatusDTO.Lenient<Said>].self, from: body)) ?? []
+        let note = wire.compactMap(\.value).first { $0.id == accountID }.flatMap(\.noteSaid)
+        return (standing, note)
+    }
+
+    /// Writes the reader's own note on them (#377), which only the reader reads and the source
+    /// keeps — empty clears it — and hands back how the reader stands and the note **as the source
+    /// now says them**. Needs the account part (`write:accounts`): without it, `AccountPartError`
+    /// says so; a note the source will not keep — one too long — is `.refused` in its own words.
+    public func note(_ words: String, on accountID: String) async throws -> (standing: PersonStanding, note: String?) {
+        guard ListSubscription.isPathSegment(accountID) else { throw MastodonRequestError.invalidURL }
+        let body = try await AccountPartError.act(
+            door, path: "/api/v1/accounts/\(accountID)/note", method: "POST", form: [("comment", words)]
+        )
+        let standing = try Self.answered(about: accountID, body)
+        let note = (try? MastodonJSON.decoder.decode(Said.self, from: body))?.noteSaid
+        return (standing, note)
+    }
+
+    static let familiarPath = "/api/v1/accounts/familiar_followers"
+
+    /// Which of the people the reader follows also follow the account `accountID` names (#377),
+    /// as the source says them: nobody where it names nobody in common. Needs the follows part.
+    public func familiarFollowers(of accountID: String, at source: Source) async throws -> [Person] {
+        guard ListSubscription.isPathSegment(accountID) else { throw MastodonRequestError.invalidURL }
+        let body = try await door.get(path: Self.familiarPath, query: [URLQueryItem(name: "id%5B%5D", value: accountID)])
+        guard let wire = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<Familiar>].self, from: body) else {
+            throw MastodonStandingError.unreadable
+        }
+        let entry = wire.compactMap(\.value).first { $0.id == accountID }
+        return (entry?.accounts ?? []).compactMap { $0.value?.asPerson(source: source) }
+    }
+
+    /// One entry of `familiar_followers`: whom it is about, and who in common.
+    private struct Familiar: Decodable, Sendable {
+        let id: String
+        let accounts: [StatusDTO.Lenient<AccountDTO>]?
     }
 
     /// How many people one ask names at most: as many as the longest stretch of a list
@@ -286,6 +330,14 @@ public struct MastodonStanding: Sendable {
         let domainBlocking: StatusDTO.Lenient<Bool>?
         /// Whether they ask to follow the reader: no part of a standing, read for a request's row.
         let requestedBy: StatusDTO.Lenient<Bool>?
+        /// The reader's own note on them (#377): no part of a standing either.
+        let note: StatusDTO.Lenient<String>?
+
+        /// The note, where it says anything.
+        var noteSaid: String? {
+            guard let words = note?.value, !words.isEmpty else { return nil }
+            return words
+        }
 
         /// The standing, where the source said every part of it. What is taken from them is
         /// no such part: a source that leaves it out has said the rest.
