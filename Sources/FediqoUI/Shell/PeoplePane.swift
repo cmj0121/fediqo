@@ -321,15 +321,15 @@ struct PeopleSaid: Equatable {
     static let dismissSymbol = "person.crop.circle.badge.minus"
 
     /// What the `…` of the row of `person` holds on the people a source suggests (#315), or
-    /// nothing on any other list. **Where the sign-in holds the account part**: at its head who
-    /// they are, and Don't suggest, asked about first — its yes is `act`. **Where it does not**:
-    /// the part's own sentence at the head, and Don't suggest dim with the lock, whose press is
-    /// `act` too where the part may be asked for — which then only asks.
+    /// nothing on any other list. **Where the sign-in holds the account part**: Don't suggest,
+    /// asked about first — its yes is `act`. **Where it does not**: Don't suggest dim with the
+    /// lock, the part's own sentence kept with the menu, whose press is `act` too where the part
+    /// may be asked for — which then only asks.
     @MainActor
     func more(of person: Person, act: @escaping () -> Void, language: DummyLanguage? = nil) -> ShellMore? {
         switch dismissing {
         case .offered?:
-            return ShellMore(head: [person.lineName, person.lineHandle], items: [
+            return ShellMore(items: [
                 .danger(
                     Self.dismissSymbol, Self.dismissName(language: language),
                     asks: ShellQuestion.dontSuggest(person.lineHandle, at: source, language: language), act: act
@@ -427,7 +427,7 @@ struct PeoplePane: View {
         if said.takesOff {
             let name = PersonActing.name(.unfeature)
             guard let lock = said.accountLock else {
-                let more = ShellMore(head: [person.lineName, person.lineHandle], items: [
+                let more = ShellMore(items: [
                     .plain(PersonActing.symbol(.unfeature), name) { act(.unfeature) },
                 ])
                 return NoticeRow.Menu(more: { more }, asks: asks)
@@ -442,7 +442,7 @@ struct PeoplePane: View {
         let dangerous = said.dangerous
         guard !dangerous.isEmpty else { return nil }
 
-        let more = ShellMore(head: [person.lineName, person.lineHandle], items: dangerous.map { offered in
+        let more = ShellMore(items: dangerous.map { offered in
             .danger(
                 PersonActing.symbol(offered), PersonActing.name(offered),
                 asks: ShellQuestion.about(offered, person.lineHandle, at: said.source)

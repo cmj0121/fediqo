@@ -66,14 +66,14 @@ struct ItemActing {
             place.kind == .unasked ? nil : String(format: L10n.t(place.key, language: language), host)
         }
 
-        /// What the head of a menu says of the lock: its line, or the place's own words where it
-        /// was never asked.
+        /// What a menu keeps of the lock for the press that says why its item is dim: its line,
+        /// or the place's own words where it was never asked.
         func headLine(language: DummyLanguage? = nil) -> String {
             line(language: language) ?? String(format: L10n.t(place.key, language: language), host)
         }
     }
     /// Taking the post back (#109), which is never a mark: the question it asks and what its yes
-    /// does, for the one destructive item of the row's `…`. Nothing where the list cannot act,
+    /// does, for a destructive item of the row's `…`. Nothing where the list cannot act,
     /// or the post does not offer it.
     var withdraw: Withdraw?
     /// A vote in the post's poll for the choices given, each by its place (#331). Nothing
@@ -278,8 +278,8 @@ enum ItemActs {
         )
     }
 
-    /// Why a post offers none of #54's acts, as a sentence: what the head of the row's `…` says,
-    /// and what each dim mark tells a pointer and VoiceOver after its reason.
+    /// Why a post offers none of #54's acts, as a sentence: what each dim mark tells a pointer and
+    /// VoiceOver after its reason.
     ///
     /// **Four reasons, four sentences, and nothing folded.** The reader is being told what to do
     /// about it, and "sign in again" and "this forum cannot be written to from here" are different
@@ -334,7 +334,7 @@ struct RowMark: Identifiable, Equatable {
     let kind: Kind
     let mark: ShellMark
     /// The mark's name, and for a dim one its reason and the sentence that says which — what a
-    /// pointer and VoiceOver are given, and for quoting its line at the head of the menu.
+    /// pointer and VoiceOver are given.
     let label: String
 
     var id: Kind { kind }
@@ -393,13 +393,12 @@ extension ItemActs {
         return (acting.perform == nil ? .dim(.notNow) : .live, nil)
     }
 
-    /// The marks under a post, in the order they are drawn — **the one list the row's line of
-    /// marks and its menu are both made from** (#306), so neither can offer what the other
-    /// does not.
+    /// The marks under a post, in the order they are drawn. **The row's menu repeats none of
+    /// them** (#385, `more`).
     ///
     /// **The same seven on every post, whatever its source** (`line`). A mark the post does not
-    /// offer is drawn dim in its own glyph (`look`), and says why to the pointer, to VoiceOver
-    /// and in the head of `…`; nothing is left out and no sentence stands in for the marks.
+    /// offer is drawn dim in its own glyph (`look`), and says why to the pointer and to VoiceOver;
+    /// nothing is left out and no sentence stands in for the marks.
     static func marks(on item: DummyItem, acting: ItemActing, language: DummyLanguage? = nil) -> [RowMark] {
         // **Read once a call, and a row is a call each time it is drawn**: why the post offers
         // nothing, the two shapes a sentence is joined in, and each reason's word as it is met.
@@ -467,21 +466,18 @@ extension ItemActs {
     /// What the row's `…` holds, and what a long press on the row offers — **one value for the
     /// two** (#306), so they cannot differ.
     ///
-    /// The head is what the post is (`head`, ending with why it offers no act where it offers
-    /// none), then each dim mark named under its reason (`ShellMore.reasons`), the only place a
-    /// finger reads it — quoting under its own sentence. **Each reason is said once**: the six
-    /// marks follow by name alone, the dim ones disabled, since the head has said why. Then the
-    /// way out to the post's own page where there is one (`leave`); and, under the divider,
-    /// taking the post back — **offered here and nowhere else, only on the reader's own post**,
-    /// and only as `danger`, so the menu puts its question and nothing goes before a yes.
+    /// **Only what the row's line of marks does not offer** (#385): answering, boosting, quoting,
+    /// favouriting, bookmarking and keeping are the row's own marks, and a menu that repeated them
+    /// would be the line again. **And no line about the post**: who wrote it, when, who may read it
+    /// and where it came from are the row's to say. What is left: the way out to the post's own
+    /// page where there is one (`leave`), what anybody may read of it, the own post's items, and —
+    /// under the divider, red — reporting it, on the report's own sheet, and taking it back,
+    /// **offered here and nowhere else, only on the reader's own post**, and only as `danger`, so
+    /// the menu puts its question and nothing goes before a yes.
     static func more(
-        on item: DummyItem, acting: ItemActing, here: Set<String>?, leave: (() -> Void)? = nil,
-        language: DummyLanguage? = nil
+        on item: DummyItem, acting: ItemActing, leave: (() -> Void)? = nil, language: DummyLanguage? = nil
     ) -> ShellMore {
-        let marks = marks(on: item, acting: acting, language: language).filter { $0.kind != .more }
-        var items = marks.map { mark in
-            ShellMoreItem.plain(mark.mark, ask: asks(mark, acting: acting), act: { press(mark, acting: acting) }).underHead
-        }
+        var items: [ShellMoreItem] = []
         if let leave {
             items.append(.plain("arrow.up.forward.app", item.outwardName, act: leave))
         }
@@ -490,15 +486,15 @@ extension ItemActs {
         let own = ownItems(on: item, acting: acting, language: language)
         items += own.items
         items += postItems(acting.post, group: .own, language: language)
-        // Reporting it (#339): to those who answer for its source, asked on a sheet first.
+        // Reporting it (#339): to those who answer for its source, asked on its sheet first.
         var reportLock: String?
         if let report = acting.report {
             let name = L10n.t("item.act.report", language: language)
             if let lock = report.lock {
                 reportLock = lock.headLine(language: language)
-                items.append(.locked(name: name, lock: lock, press: report.press))
+                items.append(.locked(name: name, lock: lock, language: language, press: report.press))
             } else {
-                items.append(.plain(PersonActing.reportSymbol, name, act: report.press))
+                items.append(.danger(PersonActing.reportSymbol, name, sheet: report.press))
             }
         }
         // **Not offered on a post already leaving**: its row is on no list to have a menu
@@ -513,18 +509,8 @@ extension ItemActs {
                 asks: withdraw.asks(), act: withdraw.yes
             ))
         }
-        var shared: [ShellMark] = []
-        var quoted: [String] = []
-        for mark in marks {
-            if mark.kind == .quote { quoted.append(mark.label) } else { shared.append(mark.mark) }
-        }
-        // A lock's own line, after its mark's reason: what a finger is told of how the
-        // sign-in stands, where a pointer and VoiceOver hear it on the mark.
-        let locked = PostAct.allCases.compactMap { acting.locks[$0]?.line(language: language) }
-        let head = head(for: item, here: here, refused: acting.acts.refused, language: language)
-            + ShellMore.reasons(of: shared, language: language) + locked + quoted + own.head + [reportLock].compactMap { $0 }
-            + postLocks(acting.post, language: language)
-        return ShellMore(head: head, items: items)
+        let reasons = own.reasons + [reportLock].compactMap { $0 } + postLocks(acting.post, language: language)
+        return ShellMore(items: items, reasons: reasons)
     }
 
     /// The question a dim mark puts, on the row and in the menu alike, where there is one to
@@ -541,44 +527,5 @@ extension ItemActs {
     /// the ones that pass it on, and the bookmark — on every row now — opens the group.
     static func gap(before mark: RowMark) -> CGFloat? {
         mark.isBookmark ? ShellSpace.room : nil
-    }
-
-    /// How many heads have been built: a count a test reads, to hold that a row drawn and
-    /// never pressed builds none.
-    #if DEBUG
-    nonisolated(unsafe) static var headsBuilt = 0
-    #endif
-
-    /// What heads the row's menu (#306): what a pointer resting on the row's parts is told, for
-    /// a reader with no pointer to rest — **in the words those parts already say**. Who
-    /// reblogged it and when; exactly when it was published; who may read it; that it was
-    /// changed, is gone at its source, or that its source has left; and the source.
-    ///
-    /// **Who wrote it first, by name and whole handle** — a narrow row draws the handle only
-    /// where it has room (#302), and this is where a finger finds it. **And last, why no act is
-    /// offered where none is** (`refused`): the sentence the row used to say under its marks,
-    /// which the dim marks now say instead.
-    static func head(
-        for item: DummyItem, here: Set<String>?, refused: PostActRefusal? = nil, language: DummyLanguage? = nil
-    ) -> [String] {
-        #if DEBUG
-        headsBuilt += 1
-        #endif
-        var lines: [String] = [DummyItemRow.spokenNames(item)]
-        if let reblog = DummyItemRow.spokenReblog(item, language: language) {
-            lines.append(reblog)
-        } else if let arrived = DummyItemRow.reblogLine(item, language: language) {
-            lines.append(arrived)
-        }
-        lines.append(DummyItemRow.exact(DummyItemRow.headerTime(item)))
-        if let audience = item.audience { lines.append(DummyItemRow.spokenAudience(audience)) }
-        if let editedAt = item.editedAt {
-            lines.append(DummyItemRow.changedDetail(editedAt, earlier: item.earlier.count, language: language))
-        }
-        if item.postGone { lines.append(L10n.t("item.gone.detail", language: language)) }
-        if DummyItemRow.sourceLeft(item, here: here) { lines.append(L10n.t("item.left.detail", language: language)) }
-        lines.append(DummyItemRow.spokenSource(item, language: language))
-        if let refused { lines.append(refusalLine(refused, language: language)) }
-        return lines
     }
 }

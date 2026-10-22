@@ -392,9 +392,16 @@ struct PersonStandingTests {
         let followed = try #require(acts.acting(of: Self.ada, said: page, in: session))
         #expect(followed.reading == .said(PersonStanding(accountID: "42", following: true, showsBoosts: true, notifies: false, featured: false)) && followed.doing == nil)
         #expect(followed.press == nil && followed.more == [.feature, .unfollow] && followed.missed == nil)
-        #expect(!followed.asksBefore(.unfollow), "somebody anyone may follow is unfollowed in one press")
-        let menu = followed.menu(head: ["Ada"], act: { _ in })
-        #expect(Array(menu.head.prefix(2)) == ["Ada", L10n.t("part.account.unasked")] && Array(menu.items.map(\.name).prefix(2)) == [PersonActing.name(.feature), PersonActing.name(.unfollow)] && menu.dangers.isEmpty)
+        // Inverted (#385): somebody anyone may follow was unfollowed in one press from `…`; it is
+        // now red and asked about every time, saying they can be followed again in one press.
+        #expect(followed.asksBefore(.unfollow))
+        let menu = followed.menu(act: { _ in })
+        #expect(menu.reasons.first == L10n.t("part.account.unasked") && Array(menu.items.map(\.name).prefix(2)) == [PersonActing.name(.feature), PersonActing.name(.unfollow)])
+        #expect(menu.dangers.first?.name == PersonActing.name(.unfollow))
+        let open = try #require(menu.dangers.first?.question)
+        #expect(open == ShellQuestion.unfollow("@ada@m.example", at: Self.host, asksFirst: false))
+        #expect(ShellQuestion.unfollow("@ada", at: Self.host, asksFirst: false, language: .english).line
+            == "Their posts stop coming to you from there. You can follow them again with one press.")
         #expect(PersonActing.name(.unfollow, language: .english) == "Unfollow")
 
         await acts.press(.unfollow, on: Self.ada, said: page, in: session)
@@ -442,7 +449,7 @@ struct PersonStandingTests {
         )
         #expect(following.more == [.unfollow] && following.asksBefore(.unfollow))
         var chosen: [PersonAct] = []
-        let item = try #require(following.menu(head: [], act: { chosen.append($0) }).dangers.first)
+        let item = try #require(following.menu(act: { chosen.append($0) }).dangers.first)
         let question = try #require(item.question)
         #expect(question == ShellQuestion.unfollow("@ada@m.example", at: Self.host))
         let english = ShellQuestion.unfollow("@ada@m.example", at: Self.host, language: .english)

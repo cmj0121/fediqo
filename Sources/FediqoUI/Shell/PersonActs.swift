@@ -288,16 +288,18 @@ struct PersonActing: Equatable {
         return act.isMuteOrBlock ? blocksLock : nil
     }
 
-    /// Whether `act` is asked about before it is sent: unfollowing somebody who must agree to
-    /// be followed, since following them again means asking again.
+    /// Whether `act` is asked about on a question of the menu's before it is sent (#385):
+    /// unfollowing anybody, and removing a follower.
     func asksBefore(_ act: PersonAct) -> Bool {
-        (act == .unfollow && asksFirst) || act == .removeFollower
+        act == .unfollow || act == .removeFollower
     }
 
     /// The question `act` is asked about first with.
     @MainActor
     func question(before act: PersonAct) -> ShellConfirmation {
-        act == .removeFollower ? ShellQuestion.about(act, named, at: source) : ShellQuestion.unfollow(named, at: source)
+        act == .removeFollower
+            ? ShellQuestion.about(act, named, at: source)
+            : ShellQuestion.unfollow(named, at: source, asksFirst: asksFirst)
     }
 
     // MARK: - Words
@@ -381,14 +383,14 @@ struct PersonActing: Equatable {
         return String(format: L10n.t("profile.refused.said", language: language), source, refused)
     }
 
-    /// The account part's lock, in its own sentence: what the `…` says at its head over a
-    /// featuring it cannot make.
+    /// The account part's lock, in its own sentence: why featuring is dim where it cannot be
+    /// made.
     func accountLockWords(language: DummyLanguage? = nil) -> String? {
         accountLock.map { String(format: L10n.t($0.key, language: language), source) }
     }
 
-    /// The words of the lock a press on `act` would only ask through (`lock(of:)`), as the `…`
-    /// says it at its head.
+    /// The words of the lock a press on `act` would only ask through (`lock(of:)`): why its item
+    /// in the `…` is dim, kept with the menu (`ShellMore.reasons`).
     func lockWords(of act: PersonAct, language: DummyLanguage? = nil) -> String? {
         lock(of: act).map { String(format: L10n.t($0.key, language: language), source) }
     }
@@ -505,24 +507,34 @@ struct PersonActing: Equatable {
         }
     }
 
-    /// The page's `…`: at its head who they are and whose view the page is, and under it what
-    /// `more` offers. Unfollowing somebody who must agree is asked about first. **Featuring,
-    /// where the sign-in lacks the account part, is dim with the lock**, the part's sentence
-    /// at the head, and its press is `act`'s too — which only asks (`asksForPart`).
+    /// The page's `…`: what `more` offers, and nothing about who they are — the page says that
+    /// (#385). **What takes something away is red and asks first**: unfollowing — every time,
+    /// not only somebody who must agree — and removing a follower ask a question; muting,
+    /// blocking, blocking a whole server and reporting each open the sheet that is their question
+    /// (`ShellMoreItem.danger(_:_:look:sheet:)`). **Featuring, where the sign-in lacks the account
+    /// part, is dim with the lock**, the part's sentence kept with the menu, and its press is
+    /// `act`'s too — which only asks (`asksForPart`).
     @MainActor
-    func menu(head: [String], act: @escaping (PersonAct) -> Void) -> ShellMore {
-        var said = head
+    func menu(act: @escaping (PersonAct) -> Void) -> ShellMore {
+        var reasons: [String] = []
         let items: [ShellMoreItem] = (more + keeping + reporting).map { offered in
             let symbol = Self.symbol(offered), name = Self.name(offered, server: server)
             if let lock = lock(of: offered) {
-                if let words = lockWords(of: offered), !said.contains(words) { said.append(words) }
+                if let words = lockWords(of: offered), !reasons.contains(words) { reasons.append(words) }
                 let dim = ShellMark(SourceRow.permissionSymbol, name, look: .dim(.askAgain))
-                return ShellMoreItem.plain(dim, ask: lock.asks ? { act(offered) } : nil, act: {}).underHead
+                return ShellMoreItem.plain(dim, ask: lock.asks ? { act(offered) } : nil, act: {}).because(lockWords(of: offered))
             }
+            if Self.asksOnSheet(offered) { return .danger(symbol, name, sheet: { act(offered) }) }
             guard asksBefore(offered) else { return .plain(symbol, name) { act(offered) } }
             return .danger(symbol, name, asks: question(before: offered)) { act(offered) }
         }
-        return ShellMore(head: said, items: items)
+        return ShellMore(items: items, reasons: reasons)
+    }
+
+    /// The acts whose question is a sheet of their own: muting and blocking's (`asksOnASheet`), and
+    /// a report, asked what it says on `ReportSheet`. Each is red in the page's `…`.
+    static func asksOnSheet(_ act: PersonAct) -> Bool {
+        asksOnASheet(act) || act == .report
     }
 }
 
@@ -556,8 +568,6 @@ struct StandingChoice: Equatable, Sendable {
 /// sign-in must be asked first — and the menu, where it has anything to offer.
 struct PersonHeadActs: View {
     let acting: PersonActing
-    /// What stands at the head of the `…`: who they are, and whose view the page is.
-    var head: [String] = []
     var onAct: (PersonAct) -> Void
     var onAsk: () -> Void
     @Environment(\.colorScheme) private var colorScheme
@@ -590,7 +600,7 @@ struct PersonHeadActs: View {
                 EmptyView()
             }
             if !acting.more.isEmpty || !acting.keeping.isEmpty || !acting.reporting.isEmpty {
-                ShellMoreButton(label: ShellMore.label()) { acting.menu(head: head, act: onAct) }
+                ShellMoreButton(label: ShellMore.label()) { acting.menu(act: onAct) }
                     .fixedSize()
             }
         }

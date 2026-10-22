@@ -222,30 +222,6 @@ struct MarkTests {
         #expect(danger.isDanger && danger.symbol == "trash" && danger.name == "Remove" && !danger.answers)
     }
 
-    @Test("The menu's head says what the row says, then each dim mark's reason once",
-          arguments: [DummyLanguage.english, .taiwanese])
-    func theHeadCarriesTheReasons(_ language: DummyLanguage) {
-        func why(_ reason: DimReason) -> String { L10n.t(reason.key, language: language) }
-        let marks = [
-            ShellMark("arrowshape.turn.up.left", "Answer", look: .dim(.askAgain)),
-            ShellMark("arrow.2.squarepath", "Boost", look: .dim(.askAgain)),
-            ShellMark("quote.bubble", "Quote", look: .live),
-            ShellMark("star", "Favourite", look: .dim(.notNow), on: true),
-            ShellMark("bookmark", "Bookmark", look: .dim(.askAgain)),
-            ShellMark("archivebox", "Keep", look: .live, on: true),
-        ]
-        // Each line names the marks it is about, and a reason shared by three is said once.
-        let english = language == .english
-        let asked = english ? "Answer, Boost, Bookmark. \(why(.askAgain))" : "Answer、Boost、Bookmark。\(why(.askAgain))"
-        let later = english ? "Favourite. \(why(.notNow))" : "Favourite。\(why(.notNow))"
-        #expect(ShellMore.reasons(of: marks, language: language) == [asked, later])
-        // One mark alone reads as the mark itself is spoken: its name, then its reason.
-        #expect(later == ShellMark.spoken(name: "Favourite", look: .dim(.notNow), language: language))
-        #expect(ShellMore.reasons(of: marks.filter { ShellMark.press($0.look) == .acts }, language: language).isEmpty)
-        #expect(ShellMore.reasons(of: [], language: language).isEmpty)
-
-    }
-
     @Test("An ordinary item acts at once and asks nothing")
     func plainActs() {
         var done = 0
@@ -293,9 +269,8 @@ struct MarkTests {
         #expect(live.title(language: language) == "Boards")
         #expect(dim.title(language: language) == ShellMark.said("Boards", L10n.t("mark.dim.never", language: language), language: language))
         #expect(dim.title(language: .english) == "Boards. This source has none")
-        // Under a head that names it with its reason, it says its name alone and is as dim.
-        #expect(dim.underHead.title(language: language) == "Boards" && !dim.underHead.answers)
-        #expect(live.underHead.title(language: language) == "Boards" && live.underHead.answers)
+        // No menu has a head to say it for it (#385), so a dim item always says its reason.
+        #expect(!dim.answers && live.answers)
     }
 
     @Test("The menu is ordinary items, then a divider, then the destructive ones, however it was built")
@@ -305,11 +280,11 @@ struct MarkTests {
         let boards = ShellMoreItem.plain("checklist", "Boards") {}
         let lists = ShellMoreItem.plain("list.bullet", "Lists") {}
 
-        let more = ShellMore(head: ["Reading…"], items: [clear, boards, remove, lists])
+        let more = ShellMore(items: [clear, boards, remove, lists], reasons: ["Reading…"])
         #expect(more.ordinary.map(\.name) == ["Boards", "Lists"])
         #expect(more.dangers.map(\.name) == ["Clear", "Remove"])
         #expect(more.divides)
-        #expect(more.head == ["Reading…"])
+        #expect(more.reasons == ["Reading…"])
 
         #expect(!ShellMore(items: [clear]).divides)
         #expect(!ShellMore(items: [boards, lists]).divides)

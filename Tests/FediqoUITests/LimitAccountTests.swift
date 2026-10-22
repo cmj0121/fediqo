@@ -215,12 +215,13 @@ struct LimitAccountTests {
         put.first?.answered(ShellQuestion.yes)
         #expect(cleared == 1)
 
-        #expect(more.head.isEmpty)
+        #expect(more.reasons.isEmpty)
         // With no line the reason is the truth — no limit has acted — and not "not right now".
         for language in [DummyLanguage.english, .taiwanese] {
             let empty = LimitAccountSection.more(lines: 0, language: language) {}
-            #expect(empty.head == [L10n.t("prefs.limits.none", language: language)])
-            #expect(empty.items[0].title(language: language) == L10n.t("prefs.limits.clear", language: language))
+            #expect(empty.reasons == [L10n.t("prefs.limits.none", language: language)])
+            #expect(empty.items[0].title(language: language) == ShellMark.said(L10n.t("prefs.limits.clear", language: language), L10n.t("prefs.limits.none", language: language), language: language))
+            #expect(!empty.items[0].title(language: language).contains(L10n.t("mark.dim.notNow", language: language)))
         }
         let none = LimitAccountSection.more(lines: 0, language: .english) { cleared += 1 }.items[0]
         #expect(none.look == .dim(.notNow) && !none.answers)

@@ -10,10 +10,10 @@ import AppKit
 /// #306: pressing and holding a post offers what can be done to it — and so does its `…`.
 ///
 /// Every post draws the same seven marks (`ItemActs.marks`), dim where the post does not offer
-/// one, and the menu under `…` and under a long press is one value made from them
-/// (`ItemActs.more`). Both are asked directly, for each kind of post; and each row is hosted and
-/// its drawn marks read back, so the menu is checked against what is really on the row and not
-/// against the list it was made from.
+/// one, and the menu under `…` and under a long press is one value (`ItemActs.more`) that
+/// **repeats none of them** (#385). Both are asked directly, for each kind of post; and each row
+/// is hosted and its drawn marks read back, so the menu is checked against what is really on the
+/// row and not against the list it was made from.
 @Suite("Pressing and holding a post offers what can be done to it", .serialized)
 @MainActor
 struct RowMenuTests {
@@ -64,10 +64,10 @@ struct RowMenuTests {
     }
 
     private func more(_ item: DummyItem, _ acting: ItemActing, leave: (() -> Void)? = nil) -> ShellMore {
-        ItemActs.more(on: item, acting: acting, here: [Self.host], leave: leave, language: .english)
+        ItemActs.more(on: item, acting: acting, leave: leave, language: .english)
     }
 
-    /// What the menu's ordinary items read, in its order.
+    /// What the menu's ordinary items read, in its order: none of the row's marks (#385).
     private func titles(_ item: DummyItem, _ acting: ItemActing) -> [String] {
         more(item, acting).ordinary.map { $0.title(language: .english) }
     }
@@ -103,11 +103,12 @@ struct RowMenuTests {
         #expect(seen == ProtocolKind.allCases.count * grants.count * 2 * BookmarkStanding.allCases.count * 4 * 2)
     }
 
-    @Test("Signed in to write, every act's mark is live and quoting alone is dim; the menu names all six in the marks' order and takes nothing away")
+    // Inverted (#385): the menu named all six marks; it now repeats none of them.
+    @Test("Signed in to write, every act's mark is live and quoting alone is dim; the menu repeats none of the marks and takes nothing away")
     func signedInToWrite() {
         let item = DummyItem(Self.note())
         #expect(looks(item, Self.writes) == [.live, .live, .dim(.notNow), .live, .live, .live, .live])
-        #expect(titles(item, Self.writes) == ["Answer", "Boost", "Quote", "Favourite", "Bookmark", "Keep"])
+        #expect(titles(item, Self.writes).isEmpty)
         #expect(more(item, Self.writes).dangers.isEmpty, "taking back is for the reader's own")
     }
 
@@ -202,11 +203,14 @@ struct RowMenuTests {
     @Test("An act already done says the way to undo it, in the words its mark says")
     func whatIsDoneSaysItsUndoing() {
         let item = DummyItem(Self.note(favourited: true, boosted: true, bookmarked: true, kept: true))
-        #expect(titles(item, Self.writes) == ["Answer", "Take the boost back", "Quote", "Take the favourite back", "Take the bookmark off", "Stop keeping"])
-        #expect(more(item, Self.writes).ordinary.map(\.on) == [false, true, false, true, true, true])
+        let drawn = marks(item, Self.writes).dropLast()
+        #expect(drawn.map(\.mark.name) == ["Answer", "Take the boost back", "Quote", "Take the favourite back", "Take the bookmark off", "Stop keeping"])
+        #expect(drawn.map(\.mark.on) == [false, true, false, true, true, true])
+        // Undoing a boost, a favourite or a bookmark is one press of its mark, never a red item (#385).
+        #expect(more(item, Self.writes).items.isEmpty)
     }
 
-    @Test("A sign-in made before bookmarks were asked for draws the bookmark dim in its own glyph, as to be asked again, and a press on it or on its item puts the question and bookmarks nothing")
+    @Test("A sign-in made before bookmarks were asked for draws the bookmark dim in its own glyph, as to be asked again, and a press on it puts the question and bookmarks nothing")
     func theBookmarkAsked() {
         let item = DummyItem(Self.note())
         var performed: [PostAct] = [], asked: [PostAct] = []
@@ -218,13 +222,12 @@ struct RowMenuTests {
         #expect(bookmark.mark.drawn == "bookmark", "the glyph it would have live, and no other")
         #expect(bookmark.label == "Bookmark. This sign-in must be asked again first")
         ItemActs.press(bookmark, acting: asking)
-        let entry = more(item, asking).ordinary[4]
-        #expect(entry.answers)
-        entry.press { _ in }
-        #expect(asked == [.bookmark, .bookmark] && performed.isEmpty)
+        #expect(asked == [.bookmark] && performed.isEmpty)
         // A list that cannot ask: the mark is as dim, and its press goes nowhere.
         let silent = ItemActing(acts: asking.acts)
-        #expect(marks(item, silent)[4].mark.look == .dim(.askAgain) && !more(item, silent).ordinary[4].answers)
+        #expect(marks(item, silent)[4].mark.look == .dim(.askAgain))
+        ItemActs.press(marks(item, silent)[4], acting: silent)
+        #expect(asked == [.bookmark])
     }
 
     @Test("On a reblog's row the acts go to the post and say whose it is; keeping is the reblog's and says so")
@@ -236,7 +239,7 @@ struct RowMenuTests {
             refs: [Reference(kind: .reblogs, id: "9", statusID: "9")]
         )
         let item = DummyItem(reblog, reblogging: post)
-        let said = titles(item, Self.writes)
+        let said = marks(item, Self.writes).dropLast().map(\.mark.name)
         #expect(said.first == "Answer — the post by Ada")
         #expect(said.last == "Keep this reblog")
         #expect(marks(item, Self.writes).map(\.kind) == ItemActs.line)
@@ -247,7 +250,7 @@ struct RowMenuTests {
         let forum = Source(host: "forum.example", kind: .discuz)
         let item = DummyItem(Self.note(source: forum, audience: nil, title: "A topic"))
         #expect(looks(item, Self.forum) == [.dim(.never), .dim(.never), .dim(.notNow), .dim(.never), .dim(.never), .live, .live])
-        #expect(more(item, Self.forum).ordinary.map(\.answers) == [false, false, false, false, false, true])
+        #expect(more(item, Self.forum).items.isEmpty, "the marks are the bar's alone")
     }
 
     @Test("The marks that keep a post stand apart from the ones that pass it on: the bookmark opens the group on every row, offered or not")
@@ -261,50 +264,36 @@ struct RowMenuTests {
 
     // MARK: - The menu
 
-    @Test("The menu is the head, then every mark by name in the marks' order, then the way out, and under the divider taking back — in that order however it was built")
+    // Inverted (#385): the menu was the head, then every mark by name; it is now what the marks
+    // do not offer — the way out, and under the divider taking back — and no line heads it.
+    @Test("The menu is the way out, and under the divider taking back — no mark of the row, no line about the post, in that order however it was built")
     func theMenusContentsAndOrder() {
         let item = DummyItem(Self.note())
         let menu = more(item, Self.own, leave: {})
-        let six = marks(item, Self.own).filter { $0.kind != .more }.map(\.mark)
-        let row = ItemActs.head(for: item, here: [Self.host], language: .english)
-        #expect(menu.head == row + ["Quote. Quoting cannot be done here yet"], "the row's own lines, then why quoting is dim, once")
-        #expect(menu.ordinary.map(\.name) == ["Answer", "Boost", "Quote", "Favourite", "Bookmark", "Keep", item.outwardName])
-        #expect(menu.ordinary.map(\.drawn) == six.map(\.drawn) + ["arrow.up.forward.app"])
+        #expect(menu.reasons.isEmpty)
+        #expect(menu.ordinary.map(\.name) == [item.outwardName])
+        #expect(menu.ordinary.map(\.drawn) == ["arrow.up.forward.app"])
         #expect(menu.dangers.map(\.name) == ["Take back what you wrote"] && menu.divides)
         #expect(menu.items.last?.isDanger == true, "what takes away is last")
         #expect(!menu.items.contains { $0.symbol == ShellMore.symbol }, "`…` is not an item of itself")
-        #expect(more(item, Self.own).ordinary.count == 6, "no way out where there is no address")
+        #expect(more(item, Self.own).ordinary.isEmpty, "no way out where there is no address")
     }
 
-    @Test("Where no act is offered the menu's head says why in the row's old sentence, then names the dim marks under their reason — each reason once, and a dim item's title is its name alone")
+    // Inverted (#385): where no act was offered the menu's head said why and named the dim marks;
+    // the marks say it now, to the pointer and to VoiceOver, and the menu holds none of them.
+    @Test("Where no act is offered the menu holds nothing of the row's marks and no line of why: each dim mark says its reason and the row's old sentence after it")
     func theMenuSaysWhyNot() {
         let item = DummyItem(Self.note())
-        #expect(more(item, Self.signedOut).head.suffix(3) == [
-            "sign in to act here", "Answer, Boost, Favourite, Bookmark. Not right now", "Quote. Quoting cannot be done here yet",
-        ])
-        #expect(more(item, Self.forum).head.suffix(3) == [
-            "read only here", "Answer, Boost, Favourite, Bookmark. This source has none", "Quote. Quoting cannot be done here yet",
-        ])
-        #expect(more(item, Self.turnedAway).head.suffix(3) == [
-            "this source turned a write away", "Answer, Boost, Favourite, Bookmark. Not right now", "Quote. Quoting cannot be done here yet",
-        ])
-        let asking = more(item, Self.acting([.answer, .boost, .favourite], asking: [.bookmark]))
-        #expect(asking.head.suffix(2) == ["Bookmark. This sign-in must be asked again first", "Quote. Quoting cannot be done here yet"])
-        for acting in [Self.signedOut, Self.forum, Self.turnedAway, Self.writes, ItemActing()] {
+        for (acting, refusal) in [(Self.signedOut, PostActRefusal.notSignedIn), (Self.forum, .protocolCannot), (Self.turnedAway, .turnedAway)] {
             for language in [DummyLanguage.english, .taiwanese] {
-                let menu = ItemActs.more(on: item, acting: acting, here: [Self.host], language: language)
-                #expect(Set(menu.head).count == menu.head.count, "a line is said twice: \(menu.head)")
-                #expect(menu.head.allSatisfy { !$0.contains("item.act") && !$0.contains("mark.dim") && !$0.contains("%") }, "\(menu.head)")
-                let names = ItemActs.marks(on: item, acting: acting, language: language).dropLast().map(\.mark.name)
-                #expect(menu.ordinary.map { $0.title(language: language) } == names, "a dim item says its name; the head says why")
-                for reason in DimReason.allCases {
-                    let said = L10n.t(reason.key, language: language)
-                    #expect(menu.head.filter { $0.hasSuffix(said) }.count <= 1, "\(said) is said more than once")
-                }
+                let menu = ItemActs.more(on: item, acting: acting, language: language)
+                #expect(menu.items.isEmpty && menu.reasons.isEmpty, "\(refusal): \(menu.items.map(\.name))")
+                let answer = ItemActs.marks(on: item, acting: acting, language: language)[0]
+                #expect(answer.label.contains(ItemActs.refusalLine(refusal, language: language)), "\(answer.label)")
             }
         }
-        let zh = ItemActs.more(on: item, acting: Self.turnedAway, here: [Self.host], language: .taiwanese).head
-        #expect(zh.suffix(3) == ["這個來源拒絕了寫入", "回應、轉發、收藏、加書籤。現在不行", "引用。這裡還不能引用"])
+        let asking = ItemActs.marks(on: item, acting: Self.acting([.answer, .boost, .favourite], asking: [.bookmark]), language: .english)
+        #expect(asking.first { $0.isBookmark }?.label == "Bookmark. This sign-in must be asked again first")
     }
 
     @Test("Taking a post back is offered only as the menu's destructive item, only on the reader's own post, and only its question's yes takes it back")
@@ -351,10 +340,10 @@ struct RowMenuTests {
         func count(_ needle: String, in text: String) -> Int { text.components(separatedBy: needle).count - 1 }
         let row = try source("DummyItemRow")
         #expect(count("ItemActs.more(", in: row) == 1, "the menu is built in one place")
-        #expect(count("RowMoreItems(item: item, acting: acting, here: here)", in: row) == 2, "the long press and the dots")
-        #expect(row.contains("content.contextMenu { RowMoreItems(item: item, acting: acting, here: here) }"))
+        #expect(count("RowMoreItems(item: item, acting: acting)", in: row) == 2, "the long press and the dots")
+        #expect(row.contains("content.contextMenu { RowMoreItems(item: item, acting: acting) }"))
         #expect(
-            row.filter { !$0.isWhitespace }.contains("Menu{RowMoreItems(item:item,acting:acting,here:here)}label:"),
+            row.filter { !$0.isWhitespace }.contains("Menu{RowMoreItems(item:item,acting:acting)}label:"),
             "the dots' menu holds that view and nothing else"
         )
         #expect(count("ShellMoreItems(", in: row) == 1 && count(".contextMenu", in: row.replacingOccurrences(of: "content.contextMenu { RowMoreItems", with: "")) == 1,
@@ -367,7 +356,9 @@ struct RowMenuTests {
         }
     }
 
-    @Test("With nowhere for keeping to go its mark and its item are dim and take the press; a press in the menu does what the mark does")
+    // Changed (#385): the menu's items did what the marks do; the menu holds none of them now,
+    // and the marks alone are pressed.
+    @Test("With nowhere for keeping to go its mark is dim and takes the press; each mark does what it says, and the menu offers none of them")
     func aPressInTheMenu() {
         var performed: [PostAct] = [], asked: [PostAct] = [], kept = 0
         var acting = ItemActing(acts: PostActs(offered: [.answer, .favourite], asking: [.bookmark]))
@@ -375,73 +366,47 @@ struct RowMenuTests {
         acting.ask = { asked.append($0) }
         let item = DummyItem(Self.note())
         #expect(marks(item, acting)[5].mark.look == .dim(.notNow))
-        #expect(more(item, acting).ordinary.map(\.answers) == [true, false, false, true, true, false])
         acting.keep = { kept += 1 }
-        for entry in more(item, acting).ordinary { entry.press { _ in } }
-        #expect(performed == [.answer, .favourite])
-        #expect(asked == [.bookmark])
-        #expect(kept == 1)
+        #expect(more(item, acting).items.isEmpty)
         for mark in marks(item, acting) { ItemActs.press(mark, acting: acting) }
-        #expect(performed == [.answer, .favourite, .answer, .favourite] && asked == [.bookmark, .bookmark] && kept == 2)
+        #expect(performed == [.answer, .favourite] && asked == [.bookmark] && kept == 1)
     }
 
-    // MARK: - The head
+    // MARK: - No line about the post
 
-    @Test("The head of a plain post says exactly when it was published, who may read it and where it came from — the words its parts tell a resting pointer")
-    func theHeadOfAPlainPost() {
-        let item = DummyItem(Self.note())
-        #expect(ItemActs.head(for: item, here: [Self.host]) == [
-            "Ada, @ada@m.example", DummyItemRow.exact(Self.posted), DummyItemRow.spokenAudience(.everyone), Self.host,
-        ])
-    }
-
-    @Test("A changed post says so and when; one gone at its source says so; one whose source has left says so; each in its tooltip's own words")
-    func theHeadSaysWhatHappened() throws {
-        let changed = DummyItem(Self.note(edited: true))
-        let edited = try #require(changed.editedAt)
-        #expect(ItemActs.head(for: changed, here: [Self.host]).contains(DummyItemRow.changedDetail(edited, earlier: 0)))
-        let gone = DummyItem(Self.note(gone: true))
-        #expect(ItemActs.head(for: gone, here: [Self.host]).contains(L10n.t("item.gone.detail")))
-        #expect(!ItemActs.head(for: DummyItem(Self.note()), here: [Self.host]).contains(L10n.t("item.gone.detail")))
-        let left = ItemActs.head(for: DummyItem(Self.note()), here: [])
-        #expect(left.contains(L10n.t("item.left.detail")))
-        #expect(!ItemActs.head(for: DummyItem(Self.note()), here: nil).contains(L10n.t("item.left.detail")), "nobody said which sources are here")
-    }
-
-    @Test("A reblog's head begins with who reblogged it and exactly when; a post with nobody it may be read by named says nothing of that")
-    func theHeadOfAReblog() throws {
+    // Inverted (#385): the menu was headed by who wrote the post, exactly when, who may read it,
+    // that it was changed, gone or its source left, where it came from and why no act is offered.
+    // The row says each of these; the menu says none.
+    @Test("No line about the post heads its menu, whatever the post: plain, changed, gone, from a source that left, a reblog, a forum's")
+    func noLineAboutThePost() {
         let post = Self.note("9")
         let reblog = Note(
             id: "900", source: Self.source, author: "Bob", handle: "@bob@\(Self.host)", body: "",
             postedAt: Self.posted.addingTimeInterval(600), categories: [.home], statusID: "900",
             refs: [Reference(kind: .reblogs, id: "9", statusID: "9")]
         )
-        let item = DummyItem(reblog, reblogging: post)
-        let head = ItemActs.head(for: item, here: [Self.host])
-        #expect(head.first == DummyItemRow.spokenNames(item), "who wrote the post, by name and whole handle")
-        #expect(head[1] == DummyItemRow.spokenReblog(item))
-        #expect(head.contains(DummyItemRow.exact(DummyItemRow.headerTime(item))), "and the post's own time after it")
-        let forum = DummyItem(Self.note(source: Source(host: "forum.example", kind: .discuz), audience: nil))
-        #expect(ItemActs.head(for: forum, here: ["forum.example"]).count == 3, "who, the time and the source")
+        let items = [
+            DummyItem(Self.note()), DummyItem(Self.note(edited: true)), DummyItem(Self.note(gone: true)),
+            DummyItem(reblog, reblogging: post), DummyItem(Self.note(source: Source(host: "forum.example", kind: .discuz), audience: nil)),
+        ]
+        for item in items {
+            for acting in [Self.writes, Self.own, Self.signedOut, Self.forum] {
+                let menu = ItemActs.more(on: item, acting: acting, leave: {}, language: .english)
+                let said = menu.items.map(\.name) + menu.reasons
+                for line in [DummyItemRow.spokenNames(item), DummyItemRow.exact(DummyItemRow.headerTime(item)),
+                             DummyItemRow.spokenAudience(.everyone), L10n.t("item.gone.detail"), L10n.t("item.left.detail"),
+                             DummyItemRow.spokenSource(item), ItemActs.refusalLine(.notSignedIn)] {
+                    #expect(!said.contains(line), "\(line) is in the menu")
+                }
+            }
+        }
     }
 
-    @Test("Where no act is offered the head ends with why, in the sentence the row used to say under itself; where acts are offered it says nothing of the kind")
-    func theHeadSaysWhyNot() {
+    @Test("The menu's items are in the language asked for")
+    func theMenuInBothLanguages() {
         let item = DummyItem(Self.note())
-        #expect(ItemActs.head(for: item, here: [Self.host], refused: .notSignedIn).last == ItemActs.refusalLine(.notSignedIn))
-        #expect(ItemActs.head(for: item, here: [Self.host], refused: .turnedAway).last == ItemActs.refusalLine(.turnedAway))
-        #expect(ItemActs.head(for: item, here: [Self.host], refused: nil).last == Self.host)
-        #expect(ItemActs.head(for: item, here: [Self.host], refused: .notSignedIn, language: .taiwanese).last == ItemActs.refusalLine(.notSignedIn, language: .taiwanese))
-    }
-
-    @Test("The head and the items are in the language asked for")
-    func theHeadInBothLanguages() {
-        let item = DummyItem(Self.note(gone: true))
-        let zh = ItemActs.head(for: item, here: [Self.host], language: .taiwanese)
-        #expect(zh.contains(L10n.t("item.gone.detail", language: .taiwanese)))
-        let menu = ItemActs.more(on: item, acting: Self.writes, here: [Self.host], language: .taiwanese)
-        #expect(menu.ordinary.first?.title(language: .taiwanese) == L10n.t("item.act.answer", language: .taiwanese))
-        #expect(menu.head.last == "引用。\(ItemActs.quoteLine(language: .taiwanese))")
+        let menu = ItemActs.more(on: item, acting: Self.own, language: .taiwanese)
+        #expect(menu.dangers.first?.title(language: .taiwanese) == ItemActs.spoken(.withdraw, done: false, standing: nil, language: .taiwanese))
     }
 
     #if os(macOS)
@@ -463,7 +428,8 @@ struct RowMenuTests {
         return probe
     }
 
-    @Test("For every kind of post, the row draws all seven marks under their names and the menu offers the six that are not the menu itself")
+    // Inverted (#385): the menu offered the six marks that are not itself; it now offers none.
+    @Test("For every kind of post, the row draws all seven marks under their names and the menu offers none of them")
     func theMenuIsTheRowsMarks() {
         let forum = Source(host: "forum.example", kind: .discuz)
         let reblog = Note(
@@ -489,8 +455,8 @@ struct RowMenuTests {
             let onTheRow = Set(drawn(item, acting).keys)
             let listed = ItemActs.marks(on: item, acting: acting).map(\.mark.name)
             #expect(onTheRow.count == 7 && onTheRow == Set(listed), "\(name): the row draws \(onTheRow.sorted())")
-            let offered = Set(ItemActs.more(on: item, acting: acting, here: nil).ordinary.map(\.name))
-            #expect(onTheRow.subtracting([dots]) == offered, "\(name): the row draws \(onTheRow.sorted()), the menu offers \(offered.sorted())")
+            let offered = Set(ItemActs.more(on: item, acting: acting).items.map(\.name))
+            #expect(onTheRow.subtracting([dots]).isDisjoint(with: offered), "\(name): the row draws \(onTheRow.sorted()), the menu offers \(offered.sorted())")
         }
     }
 
@@ -531,17 +497,6 @@ struct RowMenuTests {
                 }
             }
         }
-    }
-
-    @Test("A row drawn and never pressed builds no head: what the menu says is worked out when a menu is raised")
-    func noHeadUntilAMenu() {
-        let before = ItemActs.headsBuilt
-        for index in 0 ..< 6 {
-            _ = drawn(DummyItem(Self.note("\(index)")), Self.writes)
-        }
-        #expect(ItemActs.headsBuilt == before, "\(ItemActs.headsBuilt - before) heads were built for six rows nobody pressed")
-        _ = ItemActs.head(for: DummyItem(Self.note()), here: nil)
-        #expect(ItemActs.headsBuilt == before + 1, "the count does count")
     }
     #endif
 }

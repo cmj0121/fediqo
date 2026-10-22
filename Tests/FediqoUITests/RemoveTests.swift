@@ -363,7 +363,7 @@ struct RemoveTests {
         let pane = AccountPane(session: session)
         let row = session.rows[0]
         let remove = SourceRow.more(
-            row, actsLive: true, said: [],
+            row, actsLive: true,
             clearAsks: { session.clearQuestion(host: row.source.host) }, removeAsks: { session.removeQuestion(host: row.source.host, postsStay: false) },
             presses: pane.presses(row)
         ).dangers[1]

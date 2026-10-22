@@ -191,7 +191,7 @@ struct FollowedTagsSaid: Equatable {
 
     /// The menu of `row`: its one item — the one About's row holds, Unfollow red and asked
     /// about first — or, where the sign-in's standing is said and cannot be asked about, that
-    /// sentence at its head. `act` is handed what the item offered when the menu was built,
+    /// act as a dim item with the lock, saying that sentence, which does nothing. `act` is handed what the item offered when the menu was built,
     /// so a press only ever does that.
     @MainActor
     func more(for row: FollowedTagRow, act: @escaping (Bool) -> Void, ask: @escaping () -> Void) -> ShellMore? {
@@ -201,7 +201,11 @@ struct FollowedTagsSaid: Equatable {
         case .act(let to):
             return ShellMore(items: [TagFollowLine.item(to: to, tag: row.tag, at: row.host) { act(to) }])
         case .locked(let place):
-            guard place.asks else { return ShellMore(head: [name], items: []) }
+            guard place.asks else {
+                let act = L10n.t(row.standing == .unfollowed ? "tag.follow.follow" : "tag.follow.unfollow")
+                let dim = ShellMark(SourceRow.permissionSymbol, act, look: .dim(.notNow))
+                return ShellMore(items: [ShellMoreItem.plain(dim, act: {}).because(name)], reasons: [name])
+            }
             return ShellMore(items: [.plain(SourceRow.permissionSymbol, name, act: ask)])
         }
     }

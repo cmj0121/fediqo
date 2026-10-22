@@ -106,15 +106,15 @@ struct ReportTests {
 
         var acting = session.acting(on: theirs)
         acting.report = ItemActing.Report(lock: offer.lock) {}
-        let menu = ItemActs.more(on: theirs, acting: acting, here: nil, language: .english)
+        let menu = ItemActs.more(on: theirs, acting: acting, language: .english)
         #expect(menu.items.last?.name == "Report post…" && menu.items.last?.look == .live)
 
         try await signIn(session, holding: Self.follows)
         let locked = try #require(session.reportOffer(on: theirs)?.lock)
         acting.report = ItemActing.Report(lock: locked) {}
-        let dim = ItemActs.more(on: theirs, acting: acting, here: nil, language: .english)
+        let dim = ItemActs.more(on: theirs, acting: acting, language: .english)
         #expect(dim.items.last?.look == .dim(.askAgain) && dim.items.last?.answers == true)
-        #expect(dim.head.contains(L10n.t("part.reports.unasked", language: .english)))
+        #expect(dim.reasons.contains(L10n.t("part.reports.unasked", language: .english)))
 
         let pages = ShellPersonPages()
         await pages.reports.start(Self.ada, post: theirs.statusID, people: pages, in: session)
@@ -130,7 +130,7 @@ struct ReportTests {
         await pages.standsOpened(to: Self.ada, in: session)
         let acting = try #require(pages.stands(to: Self.ada, in: session))
         #expect(acting.reporting == [.report] && acting.reportsLock == nil)
-        #expect(acting.menu(head: []) { _ in }.items.last?.name == "Report…")
+        #expect(acting.menu { _ in }.items.last?.name == "Report…")
         await pages.act(.report, on: Self.ada, in: session)
         #expect(pages.reports.open?.who == Self.ada && pages.reports.open?.post == nil)
         #expect(await sent(server).isEmpty)

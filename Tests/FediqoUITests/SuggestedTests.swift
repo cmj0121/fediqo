@@ -377,7 +377,7 @@ struct SuggestedTests {
         #expect(said.dismissing == .offered)
         let three = try #require(said.people.first)
         let more = try #require(said.more(of: three, act: {}, language: .english))
-        #expect(more.head == [three.lineName, three.lineHandle])
+        #expect(more.reasons.isEmpty)
         let item = try #require(more.items.first)
         #expect(more.items.count == 1 && item.isDanger && item.name == "Don't suggest" && item.answers)
         let question = try #require(item.question)
@@ -453,7 +453,7 @@ struct SuggestedTests {
         let three = try #require(said.people.first)
         var acted = 0
         let more = try #require(said.more(of: three, act: { acted += 1 }, language: .english))
-        #expect(more.head == ["This sign-in was not asked to change your profile. Update permission"])
+        #expect(more.reasons == ["This sign-in was not asked to change your profile. Update permission"])
         let item = try #require(more.items.first)
         #expect(item.look == .dim(.askAgain) && item.symbol == SourceRow.permissionSymbol && !item.isDanger && item.answers)
         item.press { _ in }

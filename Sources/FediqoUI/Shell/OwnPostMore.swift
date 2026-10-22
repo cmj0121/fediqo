@@ -17,18 +17,18 @@ extension ItemActing {
 }
 
 extension ItemActs {
-    /// The own post's items of `…`, and what the menu's head says of them: a lock's words where
-    /// the sign-in lacks what one needs — the report item's shape.
+    /// The own post's items of `…`, and why those that are dim are dim: a lock's words where the
+    /// sign-in lacks what one needs — the report item's shape — kept for the press that says it.
     static func ownItems(
         on item: DummyItem, acting: ItemActing, language: DummyLanguage? = nil
-    ) -> (items: [ShellMoreItem], head: [String]) {
+    ) -> (items: [ShellMoreItem], reasons: [String]) {
         var items: [ShellMoreItem] = []
-        var head: [String] = []
+        var reasons: [String] = []
         if let change = acting.change {
             let name = L10n.t("item.act.change", language: language)
             if let lock = change.lock {
-                head.append(lock.headLine(language: language))
-                items.append(.locked(name: name, lock: lock, press: change.press))
+                reasons.append(lock.headLine(language: language))
+                items.append(.locked(name: name, lock: lock, language: language, press: change.press))
             } else {
                 items.append(.plain("pencil", name, act: change.press))
             }
@@ -36,9 +36,9 @@ extension ItemActs {
         if let quotes = acting.ownQuotes {
             let own = quoteItems(quotes, language: language)
             items += own.items
-            head += own.head
+            reasons += own.reasons
         }
-        return (items, head)
+        return (items, reasons)
     }
 
     /// Who may quote the post — three ticked lines, the one it is set to ticked, shown at once
@@ -46,11 +46,11 @@ extension ItemActs {
     /// names may read is fixed at nobody (asked of 4.6.6), its other two dim with why.
     static func quoteItems(
         _ quotes: ItemActing.OwnQuotes, language: DummyLanguage? = nil
-    ) -> (items: [ShellMoreItem], head: [String]) {
-        var head = [L10n.t("item.act.quotePolicy.line", language: language)]
-        if quotes.fixed { head.append(L10n.t("compose.quotePolicy.private", language: language)) }
+    ) -> (items: [ShellMoreItem], reasons: [String]) {
+        var reasons: [String] = []
+        if quotes.fixed { reasons.append(L10n.t("compose.quotePolicy.private", language: language)) }
         if let lock = quotes.lock {
-            head.append(lock.headLine(language: language))
+            reasons.append(lock.headLine(language: language))
         }
         var items: [ShellMoreItem] = QuotePolicy.allCases.map { policy in
             let name = String(
@@ -60,11 +60,15 @@ extension ItemActs {
             let look: MarkLook = quotes.lock != nil ? .dim(.askAgain) : (quotes.fixed && policy != .nobody ? .dim(.never) : .live)
             let mark = ShellMark(chosen ? "checkmark.circle" : "circle", name, look: look, on: chosen)
             let ask: (() -> Void)? = quotes.lock?.place.asks == true ? { quotes.choose(policy) } : nil
+            let why = quotes.lock.map { $0.headLine(language: language) }
+                ?? (quotes.fixed ? L10n.t("compose.quotePolicy.private", language: language) : nil)
             return ShellMoreItem.plain(mark, ask: ask) { if !chosen { quotes.choose(policy) } }
+                .because(why)
+                .hinted(L10n.t("item.act.quotePolicy.line", language: language))
         }
         if let count = quotes.count, let open = quotes.openQuotes {
             items.append(.plain("quote.bubble", String(format: L10n.t("item.act.quotes", language: language), count), act: open))
         }
-        return (items, head)
+        return (items, reasons)
     }
 }

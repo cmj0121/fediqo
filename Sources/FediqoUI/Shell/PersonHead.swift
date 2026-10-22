@@ -74,9 +74,6 @@ struct PersonHeadSaid: Equatable {
         ([name, handle, whoseSpoken ?? through].compactMap { $0 } + marks.map(\.words))
             .filter { !$0.isEmpty }.joined(separator: L10n.t("people.row.between", language: language))
     }
-
-    /// What stands at the head of the page's `…`: who they are, and whose view the page is.
-    var menuHead: [String] { [name, handle, whoseSpoken ?? through].compactMap { $0 } }
 }
 
 /// Where a hosted head laid its parts out, in the head's own space.
@@ -472,7 +469,7 @@ struct PersonHead: View {
             OwnChangeAct(entry: change, onChange: onChange)
                 .modifier(HeadProbed(.acts, probe: probe))
         } else if let acting, PersonHeadActs.draws(acting) {
-            PersonHeadActs(acting: acting, head: head.menuHead, onAct: onAct, onAsk: onAskFollows)
+            PersonHeadActs(acting: acting, onAct: onAct, onAsk: onAskFollows)
                 .modifier(HeadProbed(.acts, probe: probe))
         }
     }

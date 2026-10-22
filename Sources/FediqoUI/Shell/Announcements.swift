@@ -135,17 +135,16 @@ extension AnnouncementsSaid {
         )
     }
 
-    /// The `…` of one announcement: its head the `when` sentence — and, where the sign-in does
-    /// not hold the account part, why Dismiss is dim — and Dismiss, asked first.
+    /// The `…` of one announcement: Dismiss, asked first — or, where the sign-in does not hold
+    /// the account part, dim, why kept with the menu. The `when` sentence is the card's own.
     @MainActor
     static func more(
         _ shown: Shown, source: String, lock: PartWords.Place?, onDismiss: @escaping () -> Void,
         onAsk: @escaping () -> Void, language: DummyLanguage? = nil
     ) -> ShellMore {
-        let head = [when(shown.announcement, language: language)].filter { !$0.isEmpty }
         let name = L10n.t("announce.dismiss", language: language)
         guard let lock else {
-            return ShellMore(head: head, items: [
+            return ShellMore(items: [
                 .danger(
                     AnnouncementsSection.dismissSymbol, name, asks: dismissQuestion(source, language: language),
                     act: onDismiss
@@ -154,7 +153,7 @@ extension AnnouncementsSaid {
         }
         let mark = ShellMark(AnnouncementsSection.dismissSymbol, name, look: .dim(lock.asks ? .askAgain : .notNow))
         let reason = String(format: L10n.t(lock.key, language: language), source)
-        return ShellMore(head: head + [reason], items: [ShellMoreItem.plain(mark, ask: lock.asks ? onAsk : nil, act: {}).underHead])
+        return ShellMore(items: [ShellMoreItem.plain(mark, ask: lock.asks ? onAsk : nil, act: {}).because(reason)], reasons: [reason])
     }
 }
 

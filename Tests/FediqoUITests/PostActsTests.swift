@@ -99,9 +99,9 @@ struct PostActsTests {
         #expect(unsigned.translateSignedOut == Self.host)
         var acting = ItemActing()
         acting.post = unsigned
-        let menu = ItemActs.more(on: theirs, acting: acting, here: nil, language: .english)
+        let menu = ItemActs.more(on: theirs, acting: acting, language: .english)
         #expect(menu.items.first { $0.name == "Translate" }?.look == .dim(.notNow))
-        #expect(menu.head.contains(String(format: L10n.t("item.act.translate.signIn", language: .english), Self.host)))
+        #expect(menu.reasons.contains(String(format: L10n.t("item.act.translate.signIn", language: .english), Self.host)))
 
         // A sign-in that only reads: Translate is offered, which needs reading alone; Pin and
         // Quiet are drawn with their locks.
@@ -128,7 +128,7 @@ struct PostActsTests {
         var acting = session.acting(on: mine)
         acting.post = session.postOffer(on: mine, people: pages, openPeople: { opened.append($0) })
         acting.report = ItemActing.Report(lock: nil) {}
-        let names = ItemActs.more(on: mine, acting: acting, here: nil, leave: {}, language: .english).items.map(\.name)
+        let names = ItemActs.more(on: mine, acting: acting, leave: {}, language: .english).items.map(\.name)
         let order = ["Translate", "Boosted by…", "Favourited by…", "Pin to your page", "Quiet this conversation", "Report post…"]
         let places = order.compactMap { names.firstIndex(of: $0) }
         #expect(places.count == order.count && places == places.sorted(), "\(names)")
@@ -144,11 +144,11 @@ struct PostActsTests {
         let locked = try #require(session.postOffer(on: mine, people: pages, openPeople: { _ in }))
         #expect(locked.pin?.lock != nil && locked.quiet?.lock != nil)
         acting.post = locked
-        let menu = ItemActs.more(on: mine, acting: acting, here: nil, language: .english)
+        let menu = ItemActs.more(on: mine, acting: acting, language: .english)
         let pin = try #require(menu.items.first { $0.name == "Pin to your page" })
         #expect(pin.look == .dim(.askAgain) && pin.symbol == SourceRow.permissionSymbol)
-        #expect(menu.head.contains(L10n.t("part.account.unasked", language: .english)))
-        #expect(menu.head.contains(L10n.t("part.blocks.unasked", language: .english)))
+        #expect(menu.reasons.contains(L10n.t("part.account.unasked", language: .english)))
+        #expect(menu.reasons.contains(L10n.t("part.blocks.unasked", language: .english)))
         locked.pin?.press()
         #expect(session.partAsks.open?.ticked == [.account], "the press only asks")
     }

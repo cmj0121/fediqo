@@ -264,7 +264,7 @@ struct DummyItemRow: View {
             .onTapGesture { onSelect?() }
             // Pressed and held — or the pointer's other button — the row offers what its `…`
             // does, under what its parts tell a resting pointer (#306).
-            .modifier(RowMenu(item: item, acting: acting, here: sourcesHere))
+            .modifier(RowMenu(item: item, acting: acting))
             .accessibilityElement(children: .contain)
             .task(id: Asked(item: item, settled: catalogueSettled)) { await resolve() }
     }
@@ -1623,12 +1623,12 @@ struct DummyItemRow: View {
     /// **A mark and its count never touch the next mark** (#302): the gaps close no further
     /// than `Box.markGap`, and past that each mark gives up its room and then its count.
     private var actions: some View {
-        // **Made from the one list the row's menu is made from** (#306, `ItemActs.marks`).
+        // **The row's own marks, which its menu does not repeat** (#385, `ItemActs.marks`).
         let marks = ItemActs.marks(on: item, acting: acting)
         return MarksLine(spacing: ShellSpace.snug, least: Box.markGap) {
             ForEach(marks) { mark in
                 RowMarkControl(
-                    mark: mark, item: item, acting: acting, here: sourcesHere,
+                    mark: mark, item: item, acting: acting,
                     glyph: glyph, countWidth: countBox, touch: touch, probe: probe
                 )
                 .modifier(Probed(\.marks, mark.mark.name, probe: probe))
@@ -1942,8 +1942,9 @@ extension View {
     }
 }
 
-/// The row's menu under a long press (#306): what the post is, then what can be done to it, the
-/// way out to its own page, and taking it back where it is the reader's own.
+/// The row's menu under a long press (#306): what can be done to the post that its marks do not
+/// offer (#385) — the way out to its own page, what anybody may read of it, the own post's items,
+/// and reporting it and taking it back where those are offered.
 ///
 /// **The one menu the row's `…` opens** (`RowMoreItems`, `ItemActs.more`), so a finger that
 /// holds the row and one that presses `…` are offered the same things in the same order. On a Mac
@@ -1958,20 +1959,18 @@ extension View {
 struct RowMenu: ViewModifier {
     let item: DummyItem
     let acting: ItemActing
-    let here: Set<String>?
 
     func body(content: Content) -> some View {
-        content.contextMenu { RowMoreItems(item: item, acting: acting, here: here) }
+        content.contextMenu { RowMoreItems(item: item, acting: acting) }
     }
 }
 
 /// What the row's menu holds, **worked out when the menu is drawn and not when the row is**: a
 /// view of its own, whose body nothing asks for until a menu is raised, so a row scrolled past
-/// builds neither the head nor a second list of its marks.
+/// builds none of it.
 struct RowMoreItems: View {
     let item: DummyItem
     let acting: ItemActing
-    let here: Set<String>?
 
     @Environment(\.openURL) private var openURL
     @Environment(\.shellRowAsk) private var rowAsk
@@ -1990,7 +1989,7 @@ struct RowMoreItems: View {
     /// hand the system browser, and then the menu has no such item.
     private var more: ShellMore {
         let url = WayOut.checked(item.outwardURL)
-        return ItemActs.more(on: item, acting: acting, here: here, leave: url.map { url in { openURL(url) } })
+        return ItemActs.more(on: item, acting: acting, leave: url.map { url in { openURL(url) } })
     }
 }
 
@@ -2044,7 +2043,6 @@ private struct RowMarkControl: View {
     let mark: RowMark
     let item: DummyItem
     let acting: ItemActing
-    let here: Set<String>?
     let glyph: CGFloat
     let countWidth: CGFloat
     /// The smallest a press is allowed to be. The glyph stays the size it is drawn;
@@ -2067,7 +2065,7 @@ private struct RowMarkControl: View {
     private var control: some View {
         if mark.kind == .more {
             Menu {
-                RowMoreItems(item: item, acting: acting, here: here)
+                RowMoreItems(item: item, acting: acting)
             } label: {
                 face
             }

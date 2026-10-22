@@ -210,7 +210,7 @@ struct PartHoldsTests {
 
     // MARK: - Where it is drawn
 
-    @Test("The row says it at the head of its menu — after what is standing and before what must be asked again — and to a listener as one sentence after the row's own; it is no warning, and the row draws no sentence of it")
+    @Test("The row's menu does not say it (#385) — the source's page does — a listener hears it as one sentence after the row's own; it is no warning, and the row draws no sentence of it")
     func theRowSaysIt() async throws {
         let (session, _, _) = try await shell(holding: Self.acts)
         let holds = try #require(session.mastodon.holds(host: host, language: .english))
@@ -219,21 +219,19 @@ struct PartHoldsTests {
         let row = try #require(session.rows.first { $0.source.host == host })
         // Made before bookmarks were asked for: the row owes the question, and says so last.
         #expect(row.owed == .asking)
-        let permission = try #require(SourceRow.permissionLine(row, language: .english))
-        #expect(SourceRow.head(row, said: ["waiting"], holds: holds, language: .english) == ["waiting", holds, permission])
-        #expect(SourceRow.head(row, said: [], language: .english) == [permission])
+        #expect(SourceRow.permissionLine(row, language: .english) != nil)
         #expect(SourceRow.heard(row: "the row", said: ["waiting"], holds: holds) == "the row waiting \(holds)")
         #expect(SourceRow.heard(row: "the row", said: []) == "the row")
         let drawn = view(row, holds: session.mastodon.holds(host: host))
-        let head = drawn.more.head
-        #expect(head.first == session.mastodon.holds(host: host))
-        #expect(view(row, holds: nil).more.head == Array(head.dropFirst()))
+        // Inverted (#385): the menu was headed by what the sign-in holds; it holds acts alone.
+        #expect(drawn.more.reasons.isEmpty)
+        #expect(drawn.more.items.map(\.name) == view(row, holds: nil).more.items.map(\.name))
         // What a sign-in holds is not something that went wrong: `…` stays as it was.
         #expect(drawn.saying == .nothing)
         #expect(drawn.said.isEmpty)
         let refused = view(row, refusal: (host: host, key: "account.bookmarks.failed"), holds: holds)
         #expect(refused.saying == .warns)
-        #expect(Array(refused.more.head.prefix(2)) == [refused.said[0], holds])
+        #expect(refused.more.reasons.isEmpty)
     }
 
     @Test("A listener hears the listing in place of the row's one word for reading or writing — a sign-in that only reads may hold a part that acts, and one word would say otherwise; the word stays where there is no listing, and where a write was refused")
@@ -274,7 +272,7 @@ struct PartHoldsTests {
         #expect(session.mastodon.holds(host: forum) == nil)
         #expect(sheet.standingLines(forum).isEmpty)
         let board = try #require(session.rows.first { $0.source.host == forum })
-        #expect(view(board, holds: session.mastodon.holds(host: forum)).more.head == view(board, holds: nil).more.head)
+        #expect(view(board, holds: session.mastodon.holds(host: forum)).more.items.map(\.name) == view(board, holds: nil).more.items.map(\.name))
         let (out, _, _) = try await shell(holding: nil)
         #expect(out.mastodon.holds(host: host) == nil)
         #expect(JoinSheet(session: out).standingLines(host).isEmpty)

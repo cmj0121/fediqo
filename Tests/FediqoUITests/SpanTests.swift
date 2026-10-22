@@ -159,7 +159,7 @@ struct SpanTests {
         #expect(SpanSection.countLine(0, atLeast: true, language: language) == nil)
         let ask = SpanAsk(from: from, to: to, host: nil, atLeast: true)
         let more = SpanSection.more(ask, figure: 0, count: { _ in (posts: 12, kept: 0) }, none: {}, go: {}, language: language)
-        #expect(more.head.isEmpty && more.items[0].look == .live)
+        #expect(more.reasons.isEmpty && more.items[0].look == .live)
         // The question names the count asked at the press, exactly (C14).
         let title = await more.items[0].counted()?.question.title
         #expect(title == L10n.count("prefs.span.ask", 12, language: language))
