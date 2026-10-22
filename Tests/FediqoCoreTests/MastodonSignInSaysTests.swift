@@ -322,6 +322,57 @@ struct MastodonSignInSaysTests {
         }
     }
 
+    // MARK: - Tending (#380)
+
+    /// What the seed made for the checks of tending, or a failure saying to seed again.
+    private static func tending() throws -> [String: Any] {
+        let data = try Data(contentsOf: LocalServers.repoRoot.appending(path: "servers/.run/mastodon-tokens.json"))
+        let all = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        return try #require(all["tending"] as? [String: Any], "servers/.run/mastodon-tokens.json was seeded before tending was: run `make servers` again")
+    }
+
+    @Test("Tending's two words are on the host's own list; a registration made before them cannot carry a page asking for them — this app opens none — and the server, asked for such a page all the same, shows a page of its own and sends nothing back")
+    func aRegistrationMadeBeforeTending() async throws {
+        try await LocalServers.requireHealthy()
+        let listed = try #require(await signer().listedWords())
+        #expect(listed.isSuperset(of: MastodonPart.tending.words))
+        let old = try #require(try LocalServers.seeded().signIn)
+        let asking = MastodonParts.page(held: nil, ticked: [.reading, .tending])
+        #expect(MastodonRegistration.page(asking, on: old.scopes) == nil, "no page is opened on it")
+        let pages = Pages(host: Self.host, browser: try LocalHTTP.browser())
+        try await pages.signIn()
+        var page = try #require(URLComponents(string: "https://\(Self.host)/oauth/authorize"))
+        page.queryItems = [
+            URLQueryItem(name: "client_id", value: old.id), URLQueryItem(name: "redirect_uri", value: MastodonOAuth.redirect),
+            URLQueryItem(name: "response_type", value: "code"), URLQueryItem(name: "scope", value: asking),
+        ]
+        let opened = try await pages.open(try #require(page.url))
+        #expect(opened.status == 400 && opened.header("Location") == nil, "a page of its own: \(opened.status)")
+    }
+
+    @Test("This app's registration as it is made now, signed through on the server's own page by the seed's Admin for reading and tending, gives a token holding both of tending's words, with which the reports are read")
+    func theAdminSignsInForTending() async throws {
+        try await LocalServers.requireHealthy()
+        let tending = try Self.tending()
+        let app = try #require(tending["app"] as? [String: String])
+        let registered = MastodonApp(
+            host: Self.host, clientID: try #require(app["id"]), clientSecret: try #require(app["secret"]), scopes: app["scopes"]
+        )
+        let asking = MastodonParts.page(held: nil, ticked: [.reading, .tending])
+        let oauth = try signer()
+        let person = (try #require(tending["adminEmail"] as? String), try #require(tending["adminPassword"] as? String))
+        let pages = Pages(host: Self.host, browser: try LocalHTTP.browser(), as: person)
+        try await revokingWhatItMade(oauth) { made in
+            try await pages.signIn()
+            let signed = try await oauth.signIn(as: registered, asking: asking, through: pages)
+            let token = made.keep(signed.token)
+            #expect(signed.failed == nil && pages.shown == [asking])
+            #expect(MastodonParts.holds(.tending, in: token.scopes) && token.scopes == asking)
+            #expect(try await held(token) == Self.words(asking))
+            #expect(try await ask(token.accessToken, "/api/v1/admin/reports").status == 200)
+        }
+    }
+
     // MARK: - 5. The source's own account of a token, and of whose it is
 
     @Test("The source's own account of a token is given to any token that lives, whatever its words: the words it was made with as a list in that order — the whole of read never spelt out — beside a number of the server's own for the person, which is not the account's id; a token that is none, and no token, are answered 401")
@@ -717,13 +768,19 @@ struct MastodonSignInSaysTests {
         let host: String
         let browser: LocalBrowser
         private let answer: Press
+        /// Whom the door is signed in as: the writer, unless a check names somebody else.
+        private let person: (email: String, password: String)
         private(set) var shown: [String] = []
         private(set) var callbacks: [URL] = []
 
-        init(host: String, browser: LocalBrowser, answer: Press = .authorize) {
+        init(
+            host: String, browser: LocalBrowser, answer: Press = .authorize,
+            as person: (email: String, password: String) = ("writer@example.com", "LocalOnlyPass1")
+        ) {
             self.host = host
             self.browser = browser
             self.answer = answer
+            self.person = person
         }
 
         func signIn() async throws {
@@ -731,7 +788,7 @@ struct MastodonSignInSaysTests {
             let page = try await browser.send(URLRequest(url: door))
             let form = try #require(Self.forms(in: page.0).first { $0.contains { $0.0 == "user[email]" } }, "the door's form")
             let signedIn = try await browser.send(Self.post(door, form.filter { !$0.0.hasPrefix("user[") } + [
-                ("user[email]", "writer@example.com"), ("user[password]", "LocalOnlyPass1"),
+                ("user[email]", person.email), ("user[password]", person.password),
             ]))
             try #require(signedIn.1.statusCode == 302, "signed in: \(signedIn.1.statusCode)")
         }

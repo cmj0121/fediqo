@@ -1113,6 +1113,9 @@ public final class MemoryMastodonTokens: MastodonTokenStore, @unchecked Sendable
         case reading, adding, changing
         /// Reading a host's journal, and writing it — as a new item or over the one there.
         case readingLeft, leaving
+        /// The one look at who is filed, attributes only (`grants`, `parts`), as a locked
+        /// device's Keychain refuses it.
+        case looking
     }
 
     /// Its own lock is for the dictionary alone; the store's one lock is `writing`, outside it.
@@ -1128,6 +1131,11 @@ public final class MemoryMastodonTokens: MastodonTokenStore, @unchecked Sendable
 
         func refuse(_ call: Call, times: Int, after: Int) {
             lock.withLock { refusals[call] = (after, times) }
+        }
+
+        /// The look at who is filed, refused where it is made to be.
+        func look() throws {
+            try lock.withLock { try pass(.looking) }
         }
 
         /// As a locked device's Keychain refuses.
@@ -1302,11 +1310,13 @@ public final class MemoryMastodonTokens: MastodonTokenStore, @unchecked Sendable
     }
 
     public func grants() throws -> [String: MastodonGrant] {
-        items.all.mapValues(\.grant)
+        try items.look()
+        return items.all.mapValues(\.grant)
     }
 
     public func parts() throws -> [String: MastodonHeld] {
-        items.all.mapValues(\.held)
+        try items.look()
+        return items.all.mapValues(\.held)
     }
 
     public func app(host: String) throws -> MastodonApp? {

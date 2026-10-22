@@ -324,6 +324,7 @@ private struct GatheredDTO: Decodable, Sendable {
         let latestPageNotificationAt: StatusDTO.LenientMoment?
         let sampleAccountIds: StatusDTO.Lenient<[StatusDTO.Lenient<WireNumber>]>?
         let statusId: StatusDTO.Lenient<WireNumber>?
+        let report: StatusDTO.Lenient<ReportIDDTO>?
     }
 
     /// What makes a notice of one of this answer's lines, with the side lists joined once.
@@ -345,7 +346,8 @@ private struct GatheredDTO: Decodable, Sendable {
                 source: source, handle: .gathered(key: line.groupKey), kind: Notice.Kind(type: line.type),
                 people: (line.sampleAccountIds?.value ?? []).compactMap { ($0.value?.text).flatMap { people[$0] } },
                 count: max(1, line.notificationsCount?.value?.count ?? 1),
-                post: post, at: at, newestID: newest, oldestID: line.pageMinId?.value?.text ?? newest
+                post: post, at: at, newestID: newest, oldestID: line.pageMinId?.value?.text ?? newest,
+                report: line.report?.value?.named
             )
         }
     }
@@ -359,6 +361,7 @@ private struct SingleDTO: Decodable, Sendable {
     let createdAt: StatusDTO.LenientMoment?
     let account: StatusDTO.Lenient<PersonDTO>?
     let status: StatusDTO.Lenient<StatusDTO>?
+    let report: StatusDTO.Lenient<ReportIDDTO>?
 
     /// A line of one: one person, a count of one, named by its own id. Placed as a gathered
     /// line is: at its own moment, at its post's where it has none, and nothing where it has
@@ -369,7 +372,15 @@ private struct SingleDTO: Decodable, Sendable {
         return Notice(
             source: source, handle: .one(id: id.text), kind: Notice.Kind(type: type),
             people: (account?.value).map { [$0.asPerson(host: source.host)] } ?? [],
-            post: post, at: at, newestID: id.text, oldestID: id.text
+            post: post, at: at, newestID: id.text, oldestID: id.text, report: report?.value?.named
         )
     }
+}
+
+/// The report a notice of a new report carries (#381), as far as which one it is.
+private struct ReportIDDTO: Decodable, Sendable {
+    let id: WireNumber
+
+    /// Its id, where it can stand in a path.
+    var named: String? { ListSubscription.isPathSegment(id.text) ? id.text : nil }
 }

@@ -90,6 +90,10 @@ public struct Notice: Hashable, Sendable, Identifiable {
     public let at: Date
     /// The newest notice id it stands for.
     public let newestID: String
+    /// The report a notice of a new report is about (#381), by the id its server gives it —
+    /// what opens it among the reports of the server tended. Held for the run: a notice read
+    /// back from this device's store names none, and opens the reports at their top.
+    public let report: String?
     /// The oldest notice id it stands for **on the pages read so far**: a gathered line the
     /// source cut at a page edge reaches further down once the next page is folded in.
     public let oldestID: String
@@ -100,8 +104,9 @@ public struct Notice: Hashable, Sendable, Identifiable {
 
     public init(
         source: Source, handle: Handle, kind: Kind, people: [NoticePerson], count: Int = 1, post: Note? = nil,
-        at: Date, newestID: String, oldestID: String
+        at: Date, newestID: String, oldestID: String, report: String? = nil
     ) {
+        self.report = report
         self.source = source
         self.handle = handle
         self.kind = kind
@@ -122,7 +127,7 @@ public struct Notice: Hashable, Sendable, Identifiable {
     public func carrying(_ post: Note?) -> Notice {
         Notice(
             source: source, handle: handle, kind: kind, people: people, count: count, post: post, at: at,
-            newestID: newestID, oldestID: oldestID
+            newestID: newestID, oldestID: oldestID, report: report
         )
     }
 
@@ -143,7 +148,8 @@ public struct Notice: Hashable, Sendable, Identifiable {
             people: people + older.people.filter { seen.insert($0.handle).inserted },
             count: max(count, older.count), post: post ?? older.post, at: max(at, older.at),
             newestID: StatusID.later(older.newestID, than: newestID) ? older.newestID : newestID,
-            oldestID: StatusID.later(oldestID, than: older.oldestID) ? older.oldestID : oldestID
+            oldestID: StatusID.later(oldestID, than: older.oldestID) ? older.oldestID : oldestID,
+            report: report ?? older.report
         )
     }
 }

@@ -86,7 +86,7 @@ struct MastodonOwnAccountTests {
         }
         #expect(MastodonParts.page(held: nil, ticked: [.follows, .account]) == "\(f) \(a)")
         #expect(MastodonParts.page(held: "\(r) \(a)", ticked: [.reading, .search], readOnly: true) == "\(r) \(s)")
-        #expect(MastodonParts.everything == "\(r) \(s) \(w) \(b) \(n) \(d) \(f) \(a) write:media read:bookmarks read:favourites read:mutes write:mutes read:blocks write:blocks write:reports")
+        #expect(MastodonParts.everything == "\(r) \(s) \(w) \(b) \(n) \(d) \(f) \(a) write:media read:bookmarks read:favourites read:mutes write:mutes read:blocks write:blocks write:reports admin:read admin:write")
     }
 
     @Test("Today's four sign-in choices ask exactly the strings they asked, byte for byte, and none of them asks for the account part")
@@ -122,7 +122,7 @@ struct MastodonOwnAccountTests {
     func theRegistrationWidens() {
         let (r, s, w, b, n, d, f, a) = (Self.r, Self.s, Self.w, Self.b, Self.n, Self.d, Self.f, Self.a)
         let before = "\(r) \(s) \(w) \(b) \(n) \(d) \(f)"
-        #expect(MastodonRegistration.superset() == "\(before) \(a) write:media read:bookmarks read:favourites read:mutes write:mutes read:blocks write:blocks write:reports")
+        #expect(MastodonRegistration.superset() == "\(before) \(a) write:media read:bookmarks read:favourites read:mutes write:mutes read:blocks write:blocks write:reports admin:read admin:write")
         #expect(MastodonRegistration.superset(listed: Set(before.split(separator: " ").map(String.init))) == before)
         let asked = "\(r) \(s) \(a)"
         #expect(!MastodonRegistration.holds(asked, on: before))

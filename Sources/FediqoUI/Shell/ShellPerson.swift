@@ -277,6 +277,9 @@ final class ShellPersonPages {
     /// The posts that share a rising link (#379): pages asked the same way, numbered on the
     /// same count, and let go with the same reader.
     let shared: ShellSharedLinks
+    /// The servers the reader answers for, tended (#380): asked on the same count, and let go
+    /// with the same reader.
+    let tending: ShellTending
     /// What the person set at a source for the posts they write there, for that source's own
     /// page (#321): asked the same way, numbered on the same count, and let go with the same
     /// reader.
@@ -332,6 +335,8 @@ final class ShellPersonPages {
         self.rising = rising
         let shared = ShellSharedLinks(errands: count, hosts: hosts)
         self.shared = shared
+        let tending = ShellTending(errands: count)
+        self.tending = tending
         let you = ShellYouThere(errands: count, readers: looks)
         self.you = you
         let announcements = ShellAnnouncements(errands: count, readers: looks, hosts: hosts)
@@ -368,6 +373,7 @@ final class ShellPersonPages {
         looks.whenChanged { [weak more] host in more?.letGo(at: host) }
         looks.whenChanged { [weak rising] host in rising?.letGo(at: host) }
         looks.whenChanged { [weak shared] host in shared?.letGo(at: host) }
+        looks.whenChanged { [weak tending] host in tending?.letGo(at: host) }
         looks.whenChanged { [weak you] host in you?.letGo(at: host) }
         looks.whenChanged { [weak announcements] host in announcements?.letGo(at: host) }
         looks.whenChanged { [weak tags] host in tags?.letGo(at: host) }

@@ -69,6 +69,7 @@ extension SourceWork.Purpose {
         case .personHome: "house"
         case .followedTags: "number"
         case .announcements: "megaphone"
+        case .tending: "exclamationmark.bubble"
         }
     }
 }

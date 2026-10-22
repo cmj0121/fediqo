@@ -15,6 +15,8 @@ struct AccountPane: View {
     /// is drawn in the timeline place, and leaving it comes back here. Nothing where this page
     /// is drawn with nobody to answer, and then no row offers it.
     var onOwnPage: ((DummyPerson) -> Void)?
+    /// Opens the page of tending a server the reader answers for (#380), answered by the root.
+    var onTend: ((Tending) -> Void)?
     /// What each source announces to the reader there (#321), as last asked by the pages the
     /// root holds: what lights a row's mark. Nothing where this page is drawn with none. **Read,
     /// never asked**: this page contacts nobody on appearing.
@@ -627,6 +629,7 @@ struct AccountPane: View {
                         lock: session.mastodon.bookmarkPlace(host: row.source.host),
                         marksReads: !session.readableMarks(host: row.source.host).isEmpty,
                         marksPlace: session.marksLock(host: row.source.host),
+                        tending: onTend == nil ? nil : ShellTending.entry(at: row.source.host, in: session),
                         announced: announced?.mark(at: row.source.host, in: session),
                         clearAsks: { session.clearQuestion(host: row.source.host) },
                         removeAsks: { session.removeQuestion(host: row.source.host, postsStay: postsStay()) },
@@ -664,8 +667,19 @@ struct AccountPane: View {
             clear: { Task { await clear(row) } },
             remove: { Task { await remove(row, keepingPosts: postsStay()) } },
             open: { openSource(row) },
-            ownPage: ownPage(row)
+            ownPage: ownPage(row),
+            tend: { tend(row) }
         )
+    }
+
+    /// A row's "Tend" item (#380): the page of tending its server, or — where the sign-in lacks
+    /// tending's words — the question that asks for them, alone. Nothing without the standing.
+    func tend(_ row: SourceRow) {
+        switch ShellTending.entry(at: row.source.host, in: session) {
+        case .open(let page): onTend?(page)
+        case .lock(let place): if place.asks { _ = session.askFor([.tending], host: row.source.host) }
+        case nil: break
+        }
     }
 
     /// What a row's "Your page there" does, or nothing where the reader has no page to open at
