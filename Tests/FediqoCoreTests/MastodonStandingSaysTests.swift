@@ -243,6 +243,78 @@ struct MastodonStandingSaysTests {
         }
     }
 
+    @Test("Which languages of somebody followed reach Home is said again with a follow (#378): the codes chosen are the answer and the next read; none is every language, sent as the word with nothing in it, which the server keeps as an empty list; a code it does not know, or one in capitals, is refused in its own words and changes nothing; a follow with no word leaves the choice; a sign-in that only sees is refused; and the server says the languages it knows")
+    func followedInLanguages() async throws {
+        try await LocalServers.requireHealthy()
+        let seeded = try seeded()
+        let id = seeded.followable
+        try await restoring(seeded, unfollowed: [id]) {
+            let follows = try reader(seeded.following)
+            #expect(try await follows.follow(id).languages == nil, "a follow begins in every language")
+            #expect(try await follows.narrow(id, languages: ["en", "ja"]).languages == ["en", "ja"])
+            #expect(try await follows.standing(to: id)?.languages == ["en", "ja"])
+            #expect(try await follows.follow(id).languages == ["en", "ja"], "a follow with no word leaves the choice")
+            // In the server's own words, in the language this device asks in.
+            let refusal = await #expect(throws: AccountPartError.self) { _ = try await follows.narrow(id, languages: ["zz"]) }
+            if case .refused(let sentence) = refusal { #expect(sentence.contains("Languages")) } else { Issue.record("not refused: \(String(describing: refusal))") }
+            await #expect(throws: AccountPartError.self) { _ = try await follows.narrow(id, languages: ["EN"]) }
+            #expect(try await follows.standing(to: id)?.languages == ["en", "ja"], "a refusal changed nothing")
+            await #expect(throws: MastodonAuthError.http(403)) { _ = try await reader(seeded.seeing).narrow(id, languages: ["de"]) }
+            let every = try await follows.narrow(id, languages: [])
+            #expect(every.following && every.languages == nil)
+            let raw = try await ask(Self.stands(id), as: seeded.following)
+            #expect(raw.list.first?["languages"] as? [String] == [], "kept as an empty list: every language")
+            let known = try await follows.languages()
+            #expect(known.contains(FollowLanguage(code: "en", name: "English")) && known.count > 100)
+        }
+    }
+
+    /// **Only with the worker** (`FEDIQO_SERVERS_WORKER=1 make servers`): Home is filled by it.
+    @Test("After choosing, a post of somebody followed in another language does not reach the reader's Home on the server; one in a language chosen does", .enabled(if: LocalServers.workerRequested))
+    func homeTakesOnlyWhatIsChosen() async throws {
+        try await LocalServers.requireHealthy()
+        let seeded = try seeded()
+        let fan = try #require(seeded.people.ownFan, "servers/.run/mastodon-tokens.json was seeded before this was: run `make servers` again")
+        let id = fan.id
+        let before = try await ask(Self.stands(id), as: seeded.writer).list.first
+        let wasFollowing = before?["following"] as? Bool == true
+        var posted: [String] = []
+        func post(_ words: String, in language: String) async throws -> String {
+            let form = "status=\(words.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? words)&language=\(language)&visibility=public"
+            let said = try await ask("/api/v1/statuses", as: fan.token, "POST", form: form)
+            let postID = try #require(said.object["id"] as? String, "posting as the seed's fan: \(said.status)")
+            posted.append(postID)
+            return postID
+        }
+        let thrown: (any Error)?
+        do {
+            let follows = try reader(seeded.following)
+            _ = try await follows.follow(id)
+            #expect(try await follows.narrow(id, languages: ["en"]).languages == ["en"])
+            let mark = UUID().uuidString.prefix(8)
+            let other = try await post("fediqo 378 \(mark) ja", in: "ja")
+            let chosen = try await post("fediqo 378 \(mark) en", in: "en")
+            // Home is filled by the server's own workers: the post chosen is waited for, and the
+            // one posted before it is then looked for beside it.
+            var home: [String] = []
+            for _ in 0 ..< 30 where !home.contains(chosen) {
+                try await Task.sleep(for: .seconds(1))
+                home = try await ask("/api/v1/timelines/home?limit=40", as: seeded.following).list.compactMap { $0["id"] as? String }
+            }
+            #expect(home.contains(chosen), "the post in a language chosen reaches Home")
+            #expect(!home.contains(other), "the post in another language does not")
+            thrown = nil
+        } catch {
+            thrown = error
+        }
+        for postID in posted { _ = try? await ask("/api/v1/statuses/\(postID)", as: fan.token, "DELETE") }
+        let restored = wasFollowing
+            ? try await ask(Self.account(id, "follow"), as: seeded.writer, "POST", form: "languages=")
+            : try await ask(Self.account(id, "unfollow"), as: seeded.writer, "POST")
+        if let thrown { throw thrown }
+        #expect(restored.status == 200, "left changed on the server: \(id)")
+    }
+
     @Test("Requests to follow somebody are listed to them and answered by them: accepted, the whole standing says the asker follows; refused, that they do not; either again, of a request taken back, or of somebody who never asked, is refused as not found and changes nothing. A follower is removed and the standing says so; again, and of somebody who already left, it changes nothing; of somebody who has only asked, the request stays. A sign-in that only sees is listed its own and refused every change")
     func requestsAreAnswered() async throws {
         try await LocalServers.requireHealthy()

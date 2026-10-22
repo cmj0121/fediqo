@@ -56,6 +56,8 @@ struct PersonPageActs {
     var onAct: (PersonAct) -> Void = { _ in }
     /// The reader's note on them written (#377), or — with nothing — the account part asked for.
     var onNote: (String?) -> Void = { _ in }
+    /// The languages of their posts that reach Home, chosen on About (#378).
+    var onLanguages: ([String]) -> Void = { _ in }
     /// The press on the lock of a sign-in that was not asked for following.
     var onAskFollows: () -> Void = {}
     /// Change, on the reader's own page.
@@ -201,7 +203,7 @@ struct PersonPage: View {
                     said: about, lit: selectedID, jumpToTop: jumpToTop, onHome: acts.onHome, onFollowed: acts.onFollowed,
                     onAskFollows: acts.onAskFollows, onAct: acts.onAct, onRequests: acts.onRequests, onKeeping: acts.onKeeping,
                     onFeatured: acts.onFeatured, onStaffAct: acts.onStaffAct, onNote: acts.onNote,
-                    onOpenPerson: acts.onOpenListed,
+                    onOpenPerson: acts.onOpenListed, onLanguages: acts.onLanguages,
                     lead: lead
                 )
             }

@@ -15,7 +15,7 @@ import SwiftUI
 struct PersonAboutSaid: Equatable {
     /// One block of the tab, top to bottom: what the lamp stops on.
     enum Block: String, CaseIterable {
-        case view, sentences, picture, words, fields, featuredTags, featuredPeople, figures, none, stands, boosts, notices,
+        case view, sentences, picture, words, fields, featuredTags, featuredPeople, figures, none, stands, boosts, notices, languages,
              familiar, note, home, requests, muted, blocked, servers, waiting, you, staff
     }
 
@@ -113,6 +113,7 @@ struct PersonAboutSaid: Equatable {
             case .stands: standsDrawn
             case .boosts: taken(.boosts) != nil
             case .notices: taken(.notices) != nil
+            case .languages: standing?.languages != nil
             case .familiar: standing?.familiar.isEmpty == false
             case .note: standing?.notes == true
             case .home: home != nil
@@ -207,6 +208,8 @@ struct PersonAbout<Lead: View>: View {
     var onNote: (String?) -> Void = { _ in }
     /// A face of somebody in common pressed: their page.
     var onOpenPerson: (Person) -> Void = { _ in }
+    /// The languages of their posts that reach Home, chosen (#378): none, every language.
+    var onLanguages: ([String]) -> Void = { _ in }
     /// What stands over the blocks and scrolls away with them: the page's head, at a text
     /// size where it would fill the page.
     @ViewBuilder var lead: Lead
@@ -222,6 +225,9 @@ struct PersonAbout<Lead: View>: View {
 
     /// The note being written, while it is: nothing while it is read.
     @State private var writing: String?
+    /// The languages being chosen, while they are (#378), and what is typed to find one.
+    @State private var choosing: Set<String>?
+    @State private var finding = ""
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -267,6 +273,7 @@ struct PersonAbout<Lead: View>: View {
         case .stands: stands
         case .boosts: narrowRow(.boosts)
         case .notices: narrowRow(.notices)
+        case .languages: languages
         case .familiar: familiar
         case .note: note
         case .home: home
@@ -530,6 +537,81 @@ struct PersonAbout<Lead: View>: View {
             }
         }
         .frame(width: bandHeight / 3, height: bandHeight / 3)
+    }
+
+    /// Which languages of their posts reach Home (#378): a row like what else is taken from them,
+    /// whose press opens the choosing here — every language, or each language to take or leave,
+    /// found by typing — kept or dropped. While a choice is on its way the row is words.
+    @ViewBuilder
+    private var languages: some View {
+        if let standing = said.standing, let row = standing.languages {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                if let choosing, standing.narrowsTakePress {
+                    marked(PersonLanguagesWords.symbol, PersonLanguagesWords.title(), ink: ShellChrome.ink(colorScheme))
+                        .accessibilityHidden(true)
+                    languageRow(PersonLanguagesWords.all(), chosen: choosing.isEmpty) { self.choosing = [] }
+                    TextField(PersonLanguagesWords.find(), text: $finding)
+                        .shellFont(.body)
+                        .shellField(.alone)
+                        .accessibilityLabel(PersonLanguagesWords.find())
+                    let choices = PersonLanguagesWords.choices(row.offered, chosen: choosing, find: finding)
+                    LazyVStack(alignment: .leading, spacing: ShellSpace.tight) {
+                        ForEach(choices) { choice in
+                            let on = choosing.contains(choice.code)
+                            languageRow(choice.name, chosen: on) {
+                                if on { self.choosing?.remove(choice.code) } else { self.choosing?.insert(choice.code) }
+                            }
+                        }
+                    }
+                    HStack(spacing: ShellSpace.step) {
+                        ShellLinkButton(PersonLanguagesWords.keep()) {
+                            // In the order they are named, so what is sent and read back read alike.
+                            let chosen = choices.map(\.code).filter(choosing.contains)
+                                + choosing.subtracting(choices.map(\.code)).sorted()
+                            self.choosing = nil
+                            if Set(chosen) != Set(row.codes) { onLanguages(chosen) }
+                        }
+                        .fixedSize()
+                        ShellLinkButton(L10n.t("board.choose.cancel")) { self.choosing = nil }
+                            .fixedSize()
+                    }
+                } else {
+                    let label = marked(PersonLanguagesWords.symbol, row.words(), ink: ShellChrome.ink(colorScheme))
+                    if standing.narrowsTakePress {
+                        Button {
+                            finding = ""
+                            choosing = Set(row.codes)
+                        } label: { label.contentShape(Rectangle()) }
+                            .buttonStyle(.plain)
+                            .help(ShellIconButton.hover(name: row.words(), help: PersonLanguagesWords.hint(said.source)))
+                            .accessibilityLabel(PersonLanguagesWords.title())
+                            .accessibilityValue(row.state())
+                            .accessibilityHint(PersonLanguagesWords.hint(said.source))
+                    } else {
+                        label
+                    }
+                }
+            }
+        }
+    }
+
+    /// One language to take or leave while choosing: a checkmark where it is taken, said in words.
+    private func languageRow(_ name: String, chosen: Bool, press: @escaping () -> Void) -> some View {
+        Button(action: press) {
+            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+                Image(systemName: chosen ? "checkmark.circle.fill" : "circle")
+                    .frame(width: glyphColumn.rounded(.up), alignment: .leading)
+                    .accessibilityHidden(true)
+                Text(name).fixedSize(horizontal: false, vertical: true)
+            }
+            .shellFont(.meta)
+            .foregroundStyle(chosen ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(name)
+        .accessibilityValue(PersonLanguagesWords.chosen(chosen))
+        .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 
     /// The reader's own note on them (#377): what it says, and the press that writes it — or,

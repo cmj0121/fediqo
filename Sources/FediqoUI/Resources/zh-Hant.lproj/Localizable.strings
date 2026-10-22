@@ -2211,6 +2211,14 @@
 "person.narrow.notices.off" = "關";
 "person.narrow.said" = "%1$@：%2$@";
 "person.narrow.hint" = "按一下就在 %@ 更改";
+"person.act.languages" = "他們的語言";
+"person.act.languages.failed" = "無法在 %2$@ 更改 %1$@ 哪些語言的貼文進到首頁。";
+"person.languages.all" = "所有語言";
+"person.languages.find" = "找語言";
+"person.languages.keep" = "保留";
+"person.languages.hint" = "選擇在 %@ 他們哪些語言的貼文進到首頁";
+"person.languages.chosen" = "已選";
+"person.languages.unchosen" = "未選";
 "person.act.accept" = "接受";
 "person.act.accept.spoken" = "在 %2$@ 讓 %1$@ 跟隨你";
 "person.act.refuse" = "拒絕";

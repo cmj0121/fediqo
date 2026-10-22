@@ -2268,6 +2268,14 @@
 "person.narrow.notices.off" = "Off";
 "person.narrow.said" = "%1$@: %2$@";
 "person.narrow.hint" = "Press to change it at %@";
+"person.act.languages" = "Their languages";
+"person.act.languages.failed" = "Could not change which languages of %1$@ reach Home at %2$@.";
+"person.languages.all" = "Every language";
+"person.languages.find" = "Find a language";
+"person.languages.keep" = "Keep";
+"person.languages.hint" = "Choose which languages of their posts reach Home at %@";
+"person.languages.chosen" = "Chosen";
+"person.languages.unchosen" = "Not chosen";
 "person.act.accept" = "Accept";
 "person.act.accept.spoken" = "Let %1$@ follow you at %2$@";
 "person.act.refuse" = "Refuse";
