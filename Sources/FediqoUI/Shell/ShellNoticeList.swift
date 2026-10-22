@@ -177,6 +177,94 @@ final class ShellNoticeList {
 
     /// Each source's notices, by its folded host.
     private(set) var reaches: [String: Reach] = [:]
+
+    /// How the reader stands to the people the lines name as followers and as asking to follow
+    /// (#375), by `personKey`: what their rows draw as marks. Read for the lines drawn, in one
+    /// ask a stretch (`stand`), and never filed.
+    private(set) var stands: [String: PersonStanding] = [:]
+    /// Who of them the source said asks to follow the reader, by `personKey`: the only rows
+    /// accepting is offered on. Taken off at the press's yes.
+    private(set) var askingToFollow: Set<String> = []
+    /// Who the source has answered about this run, by `personKey`, so a line drawn again asks
+    /// nothing. **Marked only once an answer landed**: an ask stopped or failed is asked again.
+    @ObservationIgnored private var stood: Set<String> = []
+    /// Who an ask is out for now, by `personKey`: not asked about twice at once.
+    @ObservationIgnored private var standing: Set<String> = []
+    /// The notice posts a press is holding now (#375): a second press meanwhile is not sent.
+    @ObservationIgnored private var holding: Set<NoteKey> = []
+
+    /// A press on a notice's post that must hold it first begins: whether it may — not while
+    /// another press is holding the same post.
+    func beginHolding(_ key: NoteKey) -> Bool {
+        holding.insert(key).inserted
+    }
+
+    func endHolding(_ key: NoteKey) {
+        holding.remove(key)
+    }
+    /// Requests answered this run, by `personKey`: an ask about them already on its way when the
+    /// answer landed says they still ask, and is not believed.
+    @ObservationIgnored private var answeredKeys: Set<String> = []
+
+    /// The posts of lines the store would not take when an act on one asked it to: older than the
+    /// person keeps. Their rows offer no act, and say why.
+    private(set) var notHeld: Set<NoteKey> = []
+
+    func wouldNotHold(_ key: NoteKey) {
+        notHeld.insert(key)
+    }
+
+    /// The key a person a line names is held under here: their source and their id there.
+    static func personKey(host: String, accountID: String) -> String {
+        host.lowercased() + "\u{1e}" + accountID
+    }
+
+    /// The people `notices` name as followers or as asking to follow, of whom nothing is held yet:
+    /// asked about, a host at a time, in one ask a stretch (`MastodonStanding.most`). **An ask
+    /// that fails, or is stopped — the lines drawn changed — takes nothing away and is asked again
+    /// the next time**; nothing is said of it.
+    func stand(for notices: [Notice], in session: ShellSession) async {
+        var byHost: [String: [String]] = [:]
+        for notice in notices where notice.kind == .follow || notice.kind == .followRequest {
+            for person in notice.people {
+                guard let id = person.accountID else { continue }
+                let key = Self.personKey(host: notice.source.host, accountID: id)
+                guard !stood.contains(key), standing.insert(key).inserted else { continue }
+                byHost[notice.source.host.lowercased(), default: []].append(id)
+            }
+        }
+        for (host, ids) in byHost {
+            let keys = ids.map { Self.personKey(host: host, accountID: $0) }
+            // Whatever is not answered below is out no longer, and asked again next time.
+            defer { standing.subtract(keys) }
+            guard let door = session.mastodon.authorized(host: host, within: deadline, for: .people) else { continue }
+            let through = session.reach.standing(door)
+            var left = ids[...]
+            while !left.isEmpty {
+                let asked = Array(left.prefix(MastodonStanding.most))
+                left = left.dropFirst(asked.count)
+                guard let said = try? await through.standingsAsking(to: asked), !Task.isCancelled else { break }
+                for id in asked {
+                    let key = Self.personKey(host: host, accountID: id)
+                    stood.insert(key)
+                    stands[key] = said.stands[id]
+                    if said.asking.contains(id), !answeredKeys.contains(key) {
+                        askingToFollow.insert(key)
+                    } else {
+                        askingToFollow.remove(key)
+                    }
+                }
+            }
+        }
+    }
+
+    /// A request to follow answered here, accepted or declined: nobody asks any more, and how the
+    /// reader stands to them is what the source said in its answer, where it said.
+    func answered(_ key: String, now: PersonStanding?) {
+        answeredKeys.insert(key)
+        askingToFollow.remove(key)
+        if let now { stands[key] = now }
+    }
     /// What the page draws: every source's notices at or after `floor`, newest first, less
     /// the lines an act the person said yes to is taking away (`ShellNoticeActs.hidden`) —
     /// each still held in `reaches`, and drawn again where it was if its source says no. Left as
@@ -464,6 +552,13 @@ final class ShellNoticeList {
         struck[host] = nil
         emptied[host] = nil
         acts.forget(host: host)
+        // How the reader there stood to anybody was the reader's: a new reader is asked afresh.
+        let mine = { (key: String) in key.hasPrefix(host + "\u{1e}") }
+        stands = stands.filter { !mine($0.key) }
+        askingToFollow = askingToFollow.filter { !mine($0) }
+        stood = stood.filter { !mine($0) }
+        answeredKeys = answeredKeys.filter { !mine($0) }
+        notHeld = notHeld.filter { $0.host.lowercased() != host }
         guard reaches[host] != nil else { return }
         reaches[host] = nil
         rebuild()

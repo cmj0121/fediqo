@@ -943,7 +943,14 @@ public struct FediqoRootView: View {
     /// `Escape`, and drawn by nobody.
     private var viewedItem: DummyItem? {
         guard let viewing else { return nil }
-        return currentListItems.first { $0.id == viewing }
+        return currentListItems.first { $0.id == viewing } ?? noticeItem(viewing)
+    }
+
+    /// A post a notice's line draws as its row (#375), where the notices are in front: its pictures
+    /// open the viewer as a timeline row's do.
+    private func noticeItem(_ id: String) -> DummyItem? {
+        guard place == .notices else { return nil }
+        return session.noticeList.lines.lazy.compactMap(\.post).map { NoticeCard.item($0, in: session) }.first { $0.id == id }
     }
 
     /// Starts what is on top, or stops it if it is what is already playing.
@@ -2012,6 +2019,13 @@ public struct FediqoRootView: View {
         return setOutFromNotices(to: .person(person), for: notice, lighting: nil)
     }
 
+    /// Who boosted or favourited a post a line is about (#375): that list, a step of the timeline
+    /// place's walk, as from the post's own row.
+    private func openNoticePeople(_ list: PeopleList, of notice: Notice) -> Bool {
+        guard Self.noticesInFront(place: place, open: openLayers) else { return false }
+        return setOutFromNotices(to: .people(list), for: notice, lighting: nil)
+    }
+
     /// The post is held first, as a thread's posts are, and the conversation opens from what is
     /// held. One the store would not take — older than the person keeps — is said on its line.
     private func openNoticePost(_ post: Note, of notice: Notice) async {
@@ -3058,6 +3072,9 @@ public struct FediqoRootView: View {
                 onReload: { _ = readNotices() },
                 onOpen: { _ = openNotice($0) },
                 onOpenPerson: { person, notice in _ = openNoticePerson(person, of: notice) },
+                onOpenPeople: { list, notice in _ = openNoticePeople(list, of: notice) },
+                people: people,
+                media: NoticeMedia(decks: $decks, playback: playback, play: playRow, view: viewRow, turn: turnRow),
                 tooOld: noticeTooOld,
                 jumpToTop: noticeJump
             )

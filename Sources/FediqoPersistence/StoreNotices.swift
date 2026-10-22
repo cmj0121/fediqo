@@ -36,11 +36,16 @@ private struct PersonRow: Codable {
     var name: String
     var avatarURL: URL?
     var emojis: [Emoji]?
+    /// Kept from #375 on; a line held before reads without them.
+    var accountID: String?
+    var words: String?
 
     init(_ person: NoticePerson) {
         handle = person.handle
         name = person.name
         avatarURL = person.avatarURL
+        accountID = person.accountID
+        words = person.words
         emojis = person.emojis.isEmpty ? nil : person.emojis.map {
             Emoji(shortcode: $0.shortcode, url: $0.url, staticURL: $0.staticURL)
         }
@@ -49,7 +54,8 @@ private struct PersonRow: Codable {
     var person: NoticePerson {
         NoticePerson(
             handle: handle, name: name, avatarURL: avatarURL,
-            emojis: (emojis ?? []).map { CustomEmoji(shortcode: $0.shortcode, url: $0.url, staticURL: $0.staticURL) }
+            emojis: (emojis ?? []).map { CustomEmoji(shortcode: $0.shortcode, url: $0.url, staticURL: $0.staticURL) },
+            accountID: accountID, words: words
         )
     }
 }

@@ -278,19 +278,28 @@ private struct WireNumber: Decodable, Sendable {
 private struct PersonDTO: Decodable, Sendable {
     let id: WireNumber
     let account: StatusDTO.Account
+    /// What they say of themselves, as markup: read apart, so one that is not text is that one
+    /// thing not known and never the person.
+    let note: StatusDTO.Lenient<String>?
 
-    private enum CodingKeys: String, CodingKey { case id }
+    private enum CodingKeys: String, CodingKey { case id, note }
 
     init(from decoder: any Decoder) throws {
-        id = try decoder.container(keyedBy: CodingKeys.self).decode(WireNumber.self, forKey: .id)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(WireNumber.self, forKey: .id)
+        note = try? container.decodeIfPresent(StatusDTO.Lenient<String>.self, forKey: .note)
         account = try StatusDTO.Account(from: decoder)
     }
 
     func asPerson(host: String) -> NoticePerson {
-        NoticePerson(
+        // Cut before the markup is taken off, as a person's own page cuts it, so a stranger's
+        // long note costs no more than the line kept of it.
+        let words = HTMLText.plain(AccountDTO.cut(note?.value ?? "", to: NoticePerson.wordsLength * 4))
+        return NoticePerson(
             handle: StatusDTO.handle(account.acct, host: host), name: account.name,
             avatarURL: Host.fetchableURL(account.avatar),
-            emojis: CustomEmoji.folded((account.emojis ?? []).compactMap(\.asEmoji))
+            emojis: CustomEmoji.folded((account.emojis ?? []).compactMap(\.asEmoji)),
+            accountID: id.text, words: words
         )
     }
 }

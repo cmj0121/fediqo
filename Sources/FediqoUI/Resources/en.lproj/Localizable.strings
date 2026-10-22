@@ -446,6 +446,7 @@
 "item.act.no.signIn" = "sign in to act here";
 "item.act.no.turnedAway" = "this source turned a write away";
 "item.act.no.unnameable" = "this post cannot be named on its server";
+"item.act.no.tooOld" = "this post is older than this device keeps";
 "item.act.unfavourite" = "Take the favourite back";
 "item.act.withdraw" = "Take back what you wrote";
 "card.nowhere" = "not a link this app opens";
@@ -1696,6 +1697,11 @@
 "notices.server.admin.sign_up" = "Somebody signed up on this server";
 "notices.server.admin.report" = "A report was filed on this server";
 "notices.who.others" = "%2$@ and %1$d others";
+"notices.faces.pair" = "%1$@ and %2$@";
+"notices.post.unheld" = "This post could not be held here, so nothing was done to it.";
+"notices.faces.list" = "%1$@, %2$@";
+"notices.faces.others" = "and %d others";
+"notices.faces.others.one" = "and %d other";
 "notices.who.others.one" = "%2$@ and %1$d other";
 "notices.spoken.act" = "%1$@ %2$@";
 "notices.spoken.post" = "%1$@: %2$@";

@@ -302,7 +302,7 @@ struct BookmarkPlaceTests {
         let now = PartWords.Place(kind: .asking, key: "part.ask.asking")
         #expect(SourceRow.permissionLine(asking, lock: now, language: .english) == Self.askingLine)
         #expect(try Self.source("AccountPane.swift").contains("lock: session.mastodon.bookmarkPlace(host: row.source.host),"))
-        #expect(try Self.source("TimelinePane.swift").contains("acting.locks = session.locks(on: item, acts: acting.acts)"))
+        #expect(try Self.source("RowActing.swift").contains("acting.locks = session.locks(on: item, acts: acting.acts)"))
     }
 
     // MARK: - While the source is being asked
