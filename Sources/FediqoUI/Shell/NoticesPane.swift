@@ -34,6 +34,12 @@ struct NoticesPane: View {
     /// A press that opens a line, answered by the root.
     var onOpen: (Notice) -> Void
     var onOpenPerson: (DummyPerson, Notice) -> Void
+    /// Who boosted or favourited a post a line is about, opened from its faces (#375).
+    var onOpenPeople: (PeopleList, Notice) -> Void = { _, _ in }
+    /// Somebody's page and their acts, which a line of a person draws and acts through (#375).
+    var people: ShellPersonPages?
+    /// What a post's row on a line opens its pictures and plays its films through (#375).
+    var media: NoticeMedia?
     /// The line whose post could not be opened, being older than this device keeps.
     var tooOld: String?
     var jumpToTop: Int = 0
@@ -186,6 +192,8 @@ struct NoticesPane: View {
             await acts.readPage(in: session)
         }
         .modifier(ShellMoreAsks(asked: asked))
+        // A post's row on a line (#375) puts its question through the page's one asker too.
+        .environment(\.shellRowAsk, RowAsk(put: { session.noticeList.acts.asked = $0 }))
         // The read's wait, miss and stop at the foot of the page, as the timeline's (DESIGN-reload).
         .modifier(ReloadToast(toast: TimelineToast.asked(list.ask(), note: nil)))
     }
@@ -349,6 +357,13 @@ struct NoticesPane: View {
         ForEach(holders, id: \.self) { host in
             if let held = acts.shownHeld(host: host) {
                 NoticeHeldLine(host: host, held: held, open: acts.opened.contains(host)) { toggleHeld(host) }
+                ShellRule()
+            }
+        }
+        // Whose notices each source holds back, and how (#376): a line a source that has said.
+        ForEach(ShellNoticeList.asked(in: session).map { $0.host.lowercased() }, id: \.self) { host in
+            if NoticePolicyWords.stands(host, in: session) != .unknown {
+                NoticePolicyLine(host: host, session: session)
                 ShellRule()
             }
         }
@@ -537,6 +552,9 @@ struct NoticesPane: View {
                 }
                 .scrollTargetLayout()
             }
+            // How the reader stands to the people the lines name as followers and as asking (#375):
+            // asked once a person, for the lines drawn, in one ask a stretch.
+            .task(id: shown.map(\.id)) { await list.stand(for: shown, in: session) }
             .scrollIndicators(.never)
             // Pulled down from its top, the page reads again as its reload mark reads it.
             .modifier(PullsToReload(offered: { canReload }, reload: {}, settled: { await acts.readPage(in: session) }))
@@ -549,18 +567,24 @@ struct NoticesPane: View {
         }
     }
 
-    /// Under a finger the row is lit by its own share of the reading mark (#303).
+    /// Under a finger the row is lit by its own share of the reading mark (#303). Drawn as what it
+    /// is about (#375, `NoticeCard`).
     private func row(_ notice: Notice) -> some View {
         ReadRow(lamp: mark.lamp(for: notice.id), touch: touch, selected: notice.id == selectedID) { lit in
-            NoticeRow(
+            NoticeCard(
                 notice: notice,
+                session: session,
+                people: people,
                 selected: lit,
                 tooOld: notice.id == tooOld,
                 onPress: { press(notice) },
                 onOpen: NoticeWords.opens(notice) == .nothing ? nil : { onOpen(notice) },
                 onOpenPerson: { onOpenPerson($0, notice) },
+                onOpenPeople: { onOpenPeople($0, notice) },
                 heard: heard(notice.id),
-                menu: NoticeRow.Menu(more: { NoticeActs.more(notice, in: session) }, asks: asked)
+                menu: NoticeRow.Menu(more: { NoticeActs.more(notice, in: session) }, asks: asked),
+                asked: asked,
+                media: media
             )
         }
         .modifier(NoticesProbed(.row(notice.id), probe: probe))

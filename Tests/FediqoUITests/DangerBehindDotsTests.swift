@@ -117,7 +117,7 @@ struct DangerBehindDotsTests {
             ask, figure: 2, count: { _ in (posts: 5, kept: 1) }, none: { none += 1 }, go: { went += 1 },
             language: language
         )
-        #expect(more.head.isEmpty)
+        #expect(more.whys.isEmpty)
         let put = await counted(more, symbol: "trash", named: L10n.t("usage.span.now", language: language), language: language)
         #expect(put?.question == ShellQuestion.letGo(ask.counting(5, kept: 1), language: language))
         #expect(put?.question != ShellQuestion.letGo(ask.counting(2), language: language))
@@ -141,7 +141,7 @@ struct DangerBehindDotsTests {
         #expect(none == 1 && went == 0)
     }
 
-    @Test("With nothing on its days the span's item is dim, and the head says there is nothing — not \"not right now\"",
+    @Test("With nothing on its days the span's item is dim, and its reason kept with the menu says there is nothing — not \"not right now\"",
           arguments: [DummyLanguage.english, .taiwanese])
     func spanWithNothing(_ language: DummyLanguage) async {
         var counts = 0
@@ -151,10 +151,12 @@ struct DangerBehindDotsTests {
                 SpanAsk(from: day, to: day, host: nil), figure: figure,
                 count: { _ in counts += 1; return (posts: 9, kept: 0) }, none: {}, go: {}, language: language
             )
-            #expect(more.head == [L10n.t("usage.span.none", language: language)])
+            #expect(more.whys == [L10n.t("usage.span.none", language: language)])
             let item = more.items[0]
             #expect(item.look == .dim(.notNow) && !item.answers && more.dangers.count == 1)
-            #expect(item.title(language: language) == L10n.t("usage.span.now", language: language))
+            // Changed (#385): the head said why and the item its name alone; the item says it after its name now.
+            #expect(item.title(language: language) == ShellMark.said(L10n.t("usage.span.now", language: language), L10n.t("usage.span.none", language: language), language: language))
+            #expect(!item.title(language: language).contains(L10n.t("mark.dim.notNow", language: language)))
             #expect(chosen(more).isEmpty)
             #expect(await item.counted() == nil)
         }

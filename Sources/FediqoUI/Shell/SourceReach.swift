@@ -274,6 +274,17 @@ struct SourceReach {
         MastodonTag(http: wire(for: .timeline, name: name, within: limit), host: host)
     }
 
+    /// The posts that share a rising link (#379), as the reader, through `door`.
+    func linkPosts(_ door: MastodonAuthorized) -> MastodonLinkPosts {
+        MastodonLinkPosts(door: door)
+    }
+
+    /// The posts that share a rising link with no token, listed as a timeline's read is — what
+    /// they bring is held, as a hashtag's posts are — and ended within `limit`.
+    func unsignedLinkPosts(_ host: String, name: SourceWork.Name?, within limit: Duration) -> MastodonLinkPosts {
+        MastodonLinkPosts(http: wire(for: .timeline, name: name, within: limit), host: host)
+    }
+
     /// Whether the reader follows a hashtag, following one and stopping (#318): only ever as
     /// the reader, through the signed-in door.
     func tagFollows(_ door: MastodonAuthorized) -> MastodonTagFollows {

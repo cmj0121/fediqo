@@ -12,11 +12,16 @@ public struct MastodonWho: Equatable, Sendable {
     /// How many people ask to follow the account (#313), where the check said: **the source's
     /// figure at that check, and nothing where it said none** — never a count of anything here.
     public let asking: Int?
+    /// What the server's role lets the account do there (#380), as the check said: nothing
+    /// where it named no role, or one it could not read. **The standing tending is drawn by** —
+    /// never the words a sign-in holds.
+    public let staff: MastodonStaff?
 
-    public init(id: String?, handle: String?, asking: Int? = nil) {
+    public init(id: String?, handle: String?, asking: Int? = nil, staff: MastodonStaff? = nil) {
         self.id = id
         self.handle = handle
         self.asking = asking
+        self.staff = staff
     }
 
     /// What the check's answer says through a sign-in at `host`: nobody, where it is no
@@ -29,6 +34,22 @@ public struct MastodonWho: Equatable, Sendable {
             let id: String?
             let acct: String?
             let source: Mine?
+            let role: StatusDTO.Lenient<Role>?
+        }
+        /// The account's role, as far as its standing: the flags, a decimal string.
+        struct Role: Decodable {
+            let permissions: StatusDTO.Lenient<String>?
+            let number: StatusDTO.Lenient<UInt64>?
+
+            enum CodingKeys: String, CodingKey {
+                case permissions
+            }
+
+            init(from decoder: any Decoder) throws {
+                let keys = try decoder.container(keyedBy: CodingKeys.self)
+                permissions = try? keys.decode(StatusDTO.Lenient<String>.self, forKey: .permissions)
+                number = try? keys.decode(StatusDTO.Lenient<UInt64>.self, forKey: .permissions)
+            }
         }
         /// What the check says of the account to its owner alone.
         struct Mine: Decodable {
@@ -47,7 +68,9 @@ public struct MastodonWho: Equatable, Sendable {
         let id = me.id.flatMap { $0.isEmpty || $0.utf8.count > MastodonOAuth.clientBytes ? nil : $0 }
         // Said only of an account the check named, and never a figure below nothing.
         let asking = id == nil ? nil : me.source?.followRequestsCount.flatMap { $0 >= 0 ? $0 : nil }
-        return MastodonWho(id: id, handle: me.acct.flatMap { ownHandle($0, at: host) }, asking: asking)
+        // Said only of an account the check named.
+        let staff = id == nil ? nil : (me.role?.value).flatMap { MastodonStaff.said($0.permissions, number: $0.number) }
+        return MastodonWho(id: id, handle: me.acct.flatMap { ownHandle($0, at: host) }, asking: asking, staff: staff)
     }
 
     /// The handle of the account a sign-in at `host` signs in, from the name its check gave —

@@ -669,7 +669,7 @@ struct TagFollowTests {
         // what it does and where — red, and asking first which hashtag at which source.
         #expect(followed.press == nil && followed.pressWords(language: .english) == nil && followed.pressSpoken() == nil)
         let more = try #require(followed.more(act: {}))
-        #expect(more.items.map(\.name) == [L10n.t("tag.follow.unfollow")] && more.dangers.count == 1 && more.head.isEmpty)
+        #expect(more.items.map(\.name) == [L10n.t("tag.follow.unfollow")] && more.dangers.count == 1 && more.whys.isEmpty)
         let question = try #require(more.items.first?.question)
         #expect(question == ShellQuestion.unfollow(Self.swift, at: Self.host))
         #expect(question.chorded?.id == ShellQuestion.yes && question.chorded?.role == .destructive)

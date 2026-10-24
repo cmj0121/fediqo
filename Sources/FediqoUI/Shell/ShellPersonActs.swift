@@ -77,6 +77,26 @@ final class ShellPersonActs {
         var asking = false
         /// The number of the read whose answer this page awaits.
         var awaits = 0
+        /// The reader's own note on them, as the source last said it (#377).
+        var note: String?
+        /// A note written here and on its way, drawn at once until the source answers.
+        var noteSending: String?
+        /// Whether the last note written here did not arrive.
+        var noteMissed = false
+        /// What the source said where it would not keep the last note written here.
+        var noteRefused: String?
+        /// When the source last answered a note written here, in the run's order of reads: a read
+        /// sent before that names the note as it stood before, and its note is not taken.
+        var noteMoved: UInt64?
+        /// Whether a note is on its way: one at a time a page, the newest waiting behind it.
+        var noteOut = false
+        /// Which of the people the reader follows also follow them (#377), as last read.
+        var familiar: [Person] = []
+        /// How many times how the reader stands has been read and answered on this page: who is
+        /// in common is read again each time it is.
+        var reads = 0
+        /// Which of those reads who is in common was last asked with.
+        var familiarRead: Int?
     }
 
     /// Which page a `.task` is: who they are to the source, who asks, and whether their
@@ -112,6 +132,12 @@ final class ShellPersonActs {
     private var missed: [String: PersonAct] = [:]
     /// What the source said where it would not do that press, by the page's key.
     private var refused: [String: String] = [:]
+    /// The languages a choice out says (#378), by the page's key: drawn while it is out.
+    private var languagesOut: [String: [String]] = [:]
+    /// The languages each host said it knows (#378), by host: asked once a run, where a page
+    /// of somebody followed there is open, and kept for the run.
+    private var languagesKnown: [String: [FollowLanguage]] = [:]
+    @ObservationIgnored private var languagesAsked: Set<String> = []
     /// The read on the wire for each page.
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var order = PageOrder()
@@ -252,7 +278,9 @@ final class ShellPersonActs {
         guard Self.sees(at: host, in: session) else { return acting }
         if let out = presses.shown(key), pressed[key]?.under == ShellPersonPages.signIns(at: host, in: session) {
             acting.doing = out
+            if out == .chooseLanguages { acting.languagesSending = languagesOut[key] }
         }
+        acting.languagesOffered = languagesKnown[host.lowercased()] ?? PersonLanguagesWords.known
         guard let page = self.standing(key, of: person.accountID, at: host, in: session) else {
             acting.reading = .asking
             return acting
@@ -268,7 +296,142 @@ final class ShellPersonActs {
         }
         acting.missed = missed[key]
         acting.refused = refused[key]
+        acting.notes = true
+        acting.note = page.noteSending ?? page.note
+        acting.noteSending = page.noteSending != nil
+        acting.noteMissed = page.noteMissed
+        acting.noteRefused = page.noteRefused
+        acting.familiar = page.familiar
         return acting
+    }
+
+    /// Whether a read sent at `sent` set out before `moved`.
+    private static func before(_ sent: UInt64?, _ moved: UInt64?) -> Bool {
+        guard let sent, let moved else { return false }
+        return sent < moved
+    }
+
+    // MARK: - Who is known in common (#377)
+
+    /// Which page a `.task` asking who is in common is: the page as it stands for whoever would
+    /// ask now, and which read of how the reader stands it follows — so it is asked again each time
+    /// that is — or nothing before the source has said, and nothing is asked.
+    func familiarOpening(_ who: DummyPerson, said: PersonSaid?, in session: ShellSession) -> String? {
+        guard let person = said?.person, let source = Self.source(of: who, in: session), Self.sees(at: source.host, in: session),
+              let page = self.standing(who.id, of: person.accountID, at: source.host, in: session), page.said != nil
+        else { return nil }
+        return "\(page.number):\(page.reads)"
+    }
+
+    /// Asks which of the people the reader follows also follow them, once each read of how the
+    /// reader stands. **A failure takes nothing away and says nothing**, and is asked again with the
+    /// next read; an answer lands only on the page it was asked for, for the reader it was asked as.
+    func familiarOpened(_ who: DummyPerson, said: PersonSaid?, in session: ShellSession) async {
+        guard let person = said?.person, let source = Self.source(of: who, in: session),
+              let held = readers.look(at: source.host, in: session).held, Self.sees(at: source.host, in: session),
+              let page = self.standing(who.id, of: person.accountID, at: source.host, in: session),
+              page.said != nil, page.familiarRead != page.reads
+        else { return }
+        let key = who.id
+        pages[key]?.familiarRead = page.reads
+        let through = session.reach.standing(session.mastodon.authorized(token: held, within: deadline, for: .person))
+        guard let familiar = try? await through.familiarFollowers(of: person.accountID, at: source) else {
+            if self.standing(key, of: person.accountID, at: source.host, in: session)?.number == page.number,
+               pages[key]?.familiarRead == page.reads {
+                pages[key]?.familiarRead = nil
+            }
+            return
+        }
+        guard self.standing(key, of: person.accountID, at: source.host, in: session)?.number == page.number,
+              session.mastodon.token(host: source.host)?.accessToken == held.accessToken
+        else { return }
+        pages[key]?.familiar = familiar
+    }
+
+    // MARK: - Which languages reach Home (#378)
+
+    /// Which host a `.task` asking what languages it knows is: the page's, once the source has
+    /// said the reader follows them and only until that host has been asked this run — or nothing.
+    func languagesOpening(_ who: DummyPerson, said: PersonSaid?, in session: ShellSession) -> String? {
+        guard let acting = acting(of: who, said: said, in: session), acting.changes, acting.languages != nil,
+              !languagesAsked.contains(acting.source.lowercased())
+        else { return nil }
+        return acting.source.lowercased()
+    }
+
+    /// Asks the page's host once a run which languages it knows a post to be in, to choose among.
+    /// **A failure says nothing**: the languages this device knows stand in for them, and the
+    /// host is asked again by the next page opened there.
+    func languagesOpened(_ who: DummyPerson, said: PersonSaid?, in session: ShellSession) async {
+        guard let host = languagesOpening(who, said: said, in: session),
+              let held = readers.look(at: host, in: session).held
+        else { return }
+        languagesAsked.insert(host)
+        let through = session.reach.standing(session.mastodon.authorized(token: held, within: deadline, for: .person))
+        guard let known = try? await through.languages(), !known.isEmpty else {
+            languagesAsked.remove(host)
+            return
+        }
+        languagesKnown[host] = known
+    }
+
+    // MARK: - The reader's note (#377)
+
+    /// Writes the reader's own note on `who` — empty clears it — kept at the source, so another
+    /// device reads it too. **Drawn at once**, and the source's answer is what is then drawn,
+    /// **numbered as it lands** so a read sent before it does not put the old note back, and only
+    /// where this is still the latest note written on this page under the sign-in it was written
+    /// under. Needs the account part: without it the press only asks for it.
+    func writeNote(_ words: String, of who: DummyPerson, said: PersonSaid?, in session: ShellSession) async {
+        guard let person = said?.person, let source = Self.source(of: who, in: session) else { return }
+        let key = who.id, host = source.host
+        guard Self.features(at: host, in: session) else {
+            if session.mastodon.place(PersonAct.feature.needs, host: host)?.asks == true {
+                _ = session.askFor([PersonAct.feature.needs], host: host)
+            }
+            return
+        }
+        guard let held = readers.look(at: host, in: session).held, Self.sees(at: host, in: session),
+              let page = self.standing(key, of: person.accountID, at: host, in: session)
+        else { return }
+        let words = words.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The note as drawn now: words that change nothing are not sent.
+        guard words != (page.noteSending ?? page.note ?? "") else { return }
+        pages[key]?.noteSending = words
+        pages[key]?.noteMissed = false
+        pages[key]?.noteRefused = nil
+        // **One note at a time a page**: the one out sends this once its answer lands.
+        guard !page.noteOut else { return }
+        pages[key]?.noteOut = true
+        let through = session.reach.standing(session.mastodon.authorized(token: held, within: deadline, for: .write))
+        func stillThisPage() -> Bool {
+            self.standing(key, of: person.accountID, at: host, in: session)?.number == page.number
+                && session.mastodon.token(host: host)?.accessToken == held.accessToken
+        }
+        while let wanted = pages[key]?.noteSending {
+            let answer: (standing: PersonStanding, note: String?)
+            do {
+                answer = try await through.note(wanted, on: person.accountID)
+            } catch {
+                guard stillThisPage() else { return }
+                pages[key]?.noteOut = false
+                pages[key]?.noteSending = nil
+                if case .refused(let sentence) = error as? AccountPartError {
+                    pages[key]?.noteRefused = sentence
+                } else if !Cancellation.happened(error) {
+                    ShellPersonPages.concluded(error, at: source, askedAs: page.askedAs, in: session)
+                    pages[key]?.noteMissed = true
+                }
+                return
+            }
+            // Only on this very page, for the reader it was written as.
+            guard stillThisPage() else { return }
+            pages[key]?.note = answer.note
+            pages[key]?.noteMoved = ReadMoment.now().place
+            // Taken: off what is waiting, unless newer words were written meanwhile — then those go.
+            if pages[key]?.noteSending == wanted { pages[key]?.noteSending = nil }
+        }
+        pages[key]?.noteOut = false
     }
 
     /// What the page of `who` says in its toast of how the reader stands to them (DESIGN-reload):
@@ -388,13 +551,17 @@ final class ShellPersonActs {
         errand: Int, ticket: Int, in session: ShellSession
     ) async {
         defer { if pages[key]?.awaits == errand { asks[key] = nil } }
+        let sent = ReadMoment.now().place
         do {
-            let said = try await through.standing(to: accountID)
+            let (said, note) = try await through.standingNoted(to: accountID)
             guard stillTheirs(key, of: accountID, errand: errand, at: source, in: session) else { return }
             if let said { Self.heard(said, key: key, at: source.host, since: ticket, in: session) }
             pages[key]?.said = said
             pages[key]?.unsaid = said == nil
             pages[key]?.failed = false
+            // A note written here and answered after this read set out stands as written.
+            if !Self.before(sent, pages[key]?.noteMoved) { pages[key]?.note = note }
+            pages[key]?.reads += 1
         } catch {
             guard stillTheirs(key, of: accountID, errand: errand, at: source, in: session) else { return }
             if !Cancellation.happened(error) {
@@ -473,6 +640,7 @@ final class ShellPersonActs {
         missed[key] = nil
         refused[key] = nil
         pressed[key] = Pressed(host: source.host, under: page.under)
+        languagesOut[key] = act == .chooseLanguages ? choice?.languages ?? [] : nil
         let ticket = session.hides.ticket()
         let writing = session.mastodon.authorized(token: held, within: deadline, for: .write)
         let through = Doors(
@@ -571,7 +739,7 @@ final class ShellPersonActs {
         if Self.isOfAServer(act) {
             came.sourceDid = serverDone
             if case .said(let answer) = outcome { came.said = answer }
-        } else if case .said(let answer) = outcome, !turned, Self.did(act, answer) {
+        } else if case .said(let answer) = outcome, !turned, Self.did(act, answer, choice: through.choice) {
             came.sourceDid = true
             came.said = answer
         }
@@ -593,6 +761,7 @@ final class ShellPersonActs {
         // The press is answered, or did not arrive: either way it is out no longer.
         presses.settle(key)
         pressed[key] = nil
+        languagesOut[key] = nil
         let sameReader = session.mastodon.token(host: source.host)?.accessToken == held.accessToken
         guard sameReader, let page = self.standing(key, of: pressedOn.accountID, at: source.host, in: session),
               page.number == pressedOn.number
@@ -628,8 +797,8 @@ final class ShellPersonActs {
             pages[key]?.failed = false
             // The source's word stands either way; one that is not what was pressed is said as
             // not done — but not where nothing was sent: then nothing failed.
-            if !turned, !Self.did(act, answer) { missed[key] = act }
-            came.taken = !turned && Self.did(act, answer)
+            if !turned, !Self.did(act, answer, choice: through.choice) { missed[key] = act }
+            came.taken = !turned && Self.did(act, answer, choice: through.choice)
             return came
         case .unsaid:
             pages[key]?.said = nil
@@ -656,7 +825,7 @@ final class ShellPersonActs {
         // Taking somebody off the reader's profile is a row's too, on the people they feature (#315).
         // Muting and blocking taken back are a row's on the reader's lists of them (#314).
         case .acceptRequest, .refuseRequest, .removeFollower, .unfeature, .unmute, .unblock: true
-        case .follow, .unfollow, .withdraw, .showBoosts, .hideBoosts, .notify, .stopNotifying, .feature,
+        case .follow, .unfollow, .withdraw, .showBoosts, .hideBoosts, .notify, .stopNotifying, .chooseLanguages, .feature,
              .dismissSuggestion, .mute, .block, .blockServer, .unblockServer, .report: false
         }
     }
@@ -758,6 +927,8 @@ final class ShellPersonActs {
 
         case .showBoosts, .hideBoosts, .notify, .stopNotifying:
             offered.narrowsTakePress && offered.narrows().contains { $0.act == act }
+        // Which languages reach Home (#378): where About draws them, of somebody followed.
+        case .chooseLanguages: listed == nil && offered.narrowsTakePress && offered.languages != nil
         // Muting and blocking (#314): from the page's `…` where it lists them and the sign-in
         // holds what they need; taken back from a row of the reader's list of them too.
         case .mute, .block, .blockServer, .unblockServer:
@@ -777,7 +948,7 @@ final class ShellPersonActs {
         switch act {
         case .follow, .unfollow, .withdraw, .acceptRequest, .refuseRequest, .removeFollower, .feature, .unfeature,
              .dismissSuggestion, .mute, .unmute, .block, .unblock, .blockServer, .unblockServer, .report: false
-        case .showBoosts, .hideBoosts, .notify, .stopNotifying: true
+        case .showBoosts, .hideBoosts, .notify, .stopNotifying, .chooseLanguages: true
         }
     }
 
@@ -818,6 +989,7 @@ final class ShellPersonActs {
         case .hideBoosts: try await through.narrow(accountID, boosts: false)
         case .notify: try await through.narrow(accountID, notify: true)
         case .stopNotifying: try await through.narrow(accountID, notify: false)
+        case .chooseLanguages: try await through.narrow(accountID, languages: doors.choice.languages)
         case .acceptRequest: try await through.answer(accountID, accept: true)
         case .refuseRequest: try await through.answer(accountID, accept: false)
         case .removeFollower: try await through.removeFollower(accountID)
@@ -833,7 +1005,7 @@ final class ShellPersonActs {
     }
 
     /// Whether what the source answered is what `act` was pressed for.
-    private static func did(_ act: PersonAct, _ answer: PersonStanding) -> Bool {
+    private static func did(_ act: PersonAct, _ answer: PersonStanding, choice: StandingChoice) -> Bool {
         switch act {
         case .follow: answer.following || answer.requested
         case .unfollow: !answer.following
@@ -842,6 +1014,8 @@ final class ShellPersonActs {
         case .hideBoosts: answer.showsBoosts == false
         case .notify: answer.notifies == true
         case .stopNotifying: answer.notifies == false
+        // Still a follow, in what was chosen: none and every language are one.
+        case .chooseLanguages: answer.following && Set(answer.languages ?? []) == Set(choice.languages)
         case .acceptRequest: answer.followedBy
         case .refuseRequest, .removeFollower: !answer.followedBy
         case .feature: answer.featured == true
@@ -898,6 +1072,13 @@ extension ShellPersonPages {
         // What this device hid of them shows once the source has taken the mute or block back,
         // whatever became of the page meanwhile.
         if came.sourceDid, let person = said(of: who, in: session)?.person { Self.undone(act, of: person, in: session) }
+    }
+
+    /// The languages of the posts of `who` that reach Home, chosen on About (#378) — none, every
+    /// language: **a follow said again, so sent as a switch is**, under the one guard of a press
+    /// and only once a read says the reader still follows them.
+    func chooseLanguages(_ codes: [String], of who: DummyPerson, in session: ShellSession) async {
+        await acts.press(.chooseLanguages, on: who, said: said(of: who, in: session), choice: StandingChoice(languages: codes), in: session)
     }
 
     /// The sheet of a mute or a block put up (#314), over what the page offers now: only where

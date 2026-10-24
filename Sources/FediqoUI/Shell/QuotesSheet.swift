@@ -147,7 +147,7 @@ struct QuotesSheet: View {
                 }
                 Spacer(minLength: ShellSpace.step)
                 if !revoked, !revoking.contains(quoting.key.rowID) {
-                    ShellMoreButton(ShellMore(head: [QuoteWords.spoken(quoting)], items: [
+                    ShellMoreButton(ShellMore(items: [
                         .danger(
                             "hand.raised.slash", L10n.t("quotes.revoke"), asks: QuoteWords.revokeQuestion(quoting)
                         ) { onRevoke(quoting) },
@@ -161,6 +161,7 @@ struct QuotesSheet: View {
                 .lineLimit(1)
         }
         .padding(ShellSpace.pad)
+        .shellMoreHeld()
         .accessibilityElement(children: .combine)
         .accessibilityLabel(QuoteWords.spoken(quoting))
     }

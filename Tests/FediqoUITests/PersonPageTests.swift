@@ -314,7 +314,7 @@ struct PersonPageTests {
         )
         let line = PersonHomeLine(words: nil, press: .ask, pressWords: "Ask far.example")
         let every = about(PersonSaid(source: Self.host, reading: .said(full)), standing: stands, home: line, hidden: true)
-        #expect(every.blocks == [.view, .sentences, .picture, .words, .fields, .stands, .home])
+        #expect(every.blocks == [.view, .sentences, .picture, .words, .fields, .stands, .languages, .home])
         #expect(every.sentences.map(\.words) == [
             "Asks before anyone may follow", "An automated account.", "@ada@m.example hides who they follow and who follows them.",
         ])

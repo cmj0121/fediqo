@@ -264,7 +264,7 @@ struct DummyItemRow: View {
             .onTapGesture { onSelect?() }
             // Pressed and held — or the pointer's other button — the row offers what its `…`
             // does, under what its parts tell a resting pointer (#306).
-            .modifier(RowMenu(item: item, acting: acting, here: sourcesHere))
+            .modifier(RowMenu(item: item, acting: acting))
             .accessibilityElement(children: .contain)
             .task(id: Asked(item: item, settled: catalogueSettled)) { await resolve() }
     }
@@ -1491,7 +1491,8 @@ struct DummyItemRow: View {
                 // this function already agrees with it: `cover` draws only while it is true and
                 // `stitched` only while it is false.
                 EmojiText.words(
-                    item.body, emojis: written.body, host: host, covered: covered, mentions: item.mentions
+                    item.body, emojis: written.body, host: host, covered: covered, mentions: item.mentions,
+                    quiet: item.title != nil
                 )
                     .foregroundStyle(
                         item.title == nil ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme)
@@ -1622,12 +1623,12 @@ struct DummyItemRow: View {
     /// **A mark and its count never touch the next mark** (#302): the gaps close no further
     /// than `Box.markGap`, and past that each mark gives up its room and then its count.
     private var actions: some View {
-        // **Made from the one list the row's menu is made from** (#306, `ItemActs.marks`).
+        // **The row's own marks, which its menu does not repeat** (#385, `ItemActs.marks`).
         let marks = ItemActs.marks(on: item, acting: acting)
         return MarksLine(spacing: ShellSpace.snug, least: Box.markGap) {
             ForEach(marks) { mark in
                 RowMarkControl(
-                    mark: mark, item: item, acting: acting, here: sourcesHere,
+                    mark: mark, item: item, acting: acting,
                     glyph: glyph, countWidth: countBox, touch: touch, probe: probe
                 )
                 .modifier(Probed(\.marks, mark.mark.name, probe: probe))
@@ -1941,8 +1942,9 @@ extension View {
     }
 }
 
-/// The row's menu under a long press (#306): what the post is, then what can be done to it, the
-/// way out to its own page, and taking it back where it is the reader's own.
+/// The row's menu under a long press (#306): what can be done to the post that its marks do not
+/// offer (#385) — the way out to its own page, what anybody may read of it, the own post's items,
+/// and reporting it and taking it back where those are offered.
 ///
 /// **The one menu the row's `…` opens** (`RowMoreItems`, `ItemActs.more`), so a finger that
 /// holds the row and one that presses `…` are offered the same things in the same order. On a Mac
@@ -1954,42 +1956,51 @@ extension View {
 ///
 /// **Neither puts the question of the item that takes the post back.** The row holds no
 /// presenter: what was chosen is handed to the pane's one asker (`shellRowAsk`, `RowAsks`).
+///
+/// **A long press opens the panel `…` opens** (#385, `shellMoreHeld`). On a Mac the pointer's
+/// other button keeps the system's menu of the same items, which is how a Mac says "secondary
+/// press"; holding the row opens the panel there too.
 struct RowMenu: ViewModifier {
     let item: DummyItem
     let acting: ItemActing
-    let here: Set<String>?
 
     func body(content: Content) -> some View {
-        content.contextMenu { RowMoreItems(item: item, acting: acting, here: here) }
+        #if os(macOS)
+        content
+            .contextMenu { RowMoreItems(item: item, acting: acting) }
+            .shellMoreHeld()
+        #else
+        content.shellMoreHeld()
+        #endif
     }
 }
 
 /// What the row's menu holds, **worked out when the menu is drawn and not when the row is**: a
 /// view of its own, whose body nothing asks for until a menu is raised, so a row scrolled past
-/// builds neither the head nor a second list of its marks.
+/// builds none of it.
 struct RowMoreItems: View {
     let item: DummyItem
     let acting: ItemActing
-    let here: Set<String>?
 
     @Environment(\.openURL) private var openURL
     @Environment(\.shellRowAsk) private var rowAsk
 
     var body: some View {
-        ShellMoreItems(more: more, asked: asked)
+        ShellMoreItems(more: Self.build(item, acting, openURL: openURL), asked: Self.asked(rowAsk))
     }
 
     /// A destructive item that is chosen goes to the pane's asker and is not kept here. Where
     /// no pane is asking — a preview, a fixture — nothing is put, and nothing is taken away.
-    private var asked: Binding<ShellMoreAsk?> {
+    static func asked(_ rowAsk: RowAsk?) -> Binding<ShellMoreAsk?> {
         Binding(get: { nil }, set: { if let ask = $0 { rowAsk?.put(ask) } })
     }
 
+    /// The row's menu — the one value its `…`, its long press and a Mac's other button open.
     /// The one door out, checked as `WayOut` checks it; nothing where there is no address to
     /// hand the system browser, and then the menu has no such item.
-    private var more: ShellMore {
+    static func build(_ item: DummyItem, _ acting: ItemActing, openURL: OpenURLAction) -> ShellMore {
         let url = WayOut.checked(item.outwardURL)
-        return ItemActs.more(on: item, acting: acting, here: here, leave: url.map { url in { openURL(url) } })
+        return ItemActs.more(on: item, acting: acting, leave: url.map { url in { openURL(url) } })
     }
 }
 
@@ -2043,13 +2054,20 @@ private struct RowMarkControl: View {
     let mark: RowMark
     let item: DummyItem
     let acting: ItemActing
-    let here: Set<String>?
     let glyph: CGFloat
     let countWidth: CGFloat
     /// The smallest a press is allowed to be. The glyph stays the size it is drawn;
     /// what grows is the area a finger can land on.
     let touch: CGFloat
     let probe: RowBandProbe?
+
+    @Environment(\.openURL) private var openURL
+    @Environment(\.shellRowAsk) private var rowAsk
+    @Environment(\.shellMoreHeld) private var held
+    /// Whether `…`'s panel is open, where no row around it holds the switch.
+    @State private var open = false
+    /// Whether a press on this dim mark is showing why (#385): its label, beside it.
+    @State private var saying = false
 
     var body: some View {
         control
@@ -2065,19 +2083,25 @@ private struct RowMarkControl: View {
     @ViewBuilder
     private var control: some View {
         if mark.kind == .more {
-            Menu {
-                RowMoreItems(item: item, acting: acting, here: here)
+            let shown = held ?? $open
+            Button {
+                shown.wrappedValue = true
             } label: {
                 face
             }
-            .menuStyle(.button)
-            .menuIndicator(.hidden)
+            .modifier(ShellMorePresenter(
+                shown: shown, asked: RowMoreItems.asked(rowAsk), label: mark.label,
+                build: { RowMoreItems.build(item, acting, openURL: openURL) }
+            ))
         } else {
             Button {
-                ItemActs.press(mark, acting: acting)
+                saying = ItemActs.press(mark, acting: acting)
             } label: {
                 face
             }
+            // The label is the mark's name, its reason, and why the post offers no act — the row's
+            // old sentence — so a finger reads by a press what a pointer reads by resting.
+            .modifier(ShellReasonLine(shown: $saying, words: mark.label))
         }
     }
 

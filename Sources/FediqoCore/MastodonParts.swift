@@ -48,6 +48,13 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     /// `acting`**: telling a server's moderators is not writing as the reader, and a sign-in that
     /// only reads may be asked for it.
     case reports
+    /// Tending the server the reader answers for (#380): what was reported to it, who asks to
+    /// join, the servers and addresses it refuses, and what it lets rise. **The larger thing,
+    /// asked only from its own lock and alone** — never ridden on another question — and of use
+    /// only to an account the server gives standing (`MastodonStaff`): the words may be granted
+    /// to anyone, and the standing, not the words, is what draws anything (D9, D13). Coarse on
+    /// purpose: a server takes only its two broad words for some of it.
+    case tending
 
     /// The words a page asks for this part.
     public var words: [String] {
@@ -63,6 +70,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
         case .marks: ["read:bookmarks", "read:favourites"]
         case .blocks: ["read:mutes", "write:mutes", "read:blocks", "write:blocks"]
         case .reports: ["write:reports"]
+        case .tending: ["admin:read", "admin:write"]
         }
     }
 
@@ -71,7 +79,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var wordsBesideActing: [String] {
         switch self {
         case .notices: ["write:notifications"]
-        case .reading, .search, .acting, .bookmarks, .follows, .account, .media, .marks, .blocks, .reports: []
+        case .reading, .search, .acting, .bookmarks, .follows, .account, .media, .marks, .blocks, .reports, .tending: []
         }
     }
 
@@ -81,7 +89,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var rider: Bool {
         switch self {
         case .search, .bookmarks: true
-        case .reading, .acting, .notices, .follows, .account, .media, .marks, .blocks, .reports: false
+        case .reading, .acting, .notices, .follows, .account, .media, .marks, .blocks, .reports, .tending: false
         }
     }
 
@@ -90,7 +98,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var needsActing: Bool {
         switch self {
         case .bookmarks, .media: true
-        case .reading, .search, .acting, .notices, .follows, .account, .marks, .blocks, .reports: false
+        case .reading, .search, .acting, .notices, .follows, .account, .marks, .blocks, .reports, .tending: false
         }
     }
 }
@@ -309,6 +317,12 @@ public enum MastodonParts {
         part.words.allSatisfy(words(scopes).contains)
     }
 
+    /// Whether a scope string holds the half of `part` that sees (`seeing`) or that changes:
+    /// the part whole, or that half of it. What tending's page is drawn and acted by (#380).
+    public static func holds(_ half: MastodonHalf, of part: MastodonPart, in scopes: String?) -> Bool {
+        holds(part, in: scopes) || Self.half(of: part, in: scopes) == half
+    }
+
     /// Whether a scope string holds the act `part` is asked for beside acting, read as
     /// `holds(_:in:)` is. A part with no such act holds none.
     public static func holdsBesideActing(_ part: MastodonPart, in scopes: String?) -> Bool {
@@ -345,10 +359,10 @@ public enum MastodonParts {
     }
 
     /// Whether a word lets something be changed at the source, by the source's own spelling.
-    /// "Read only" drops by this prefix alone: a later part with an acting word outside it
-    /// must be marked in the table.
+    /// "Read only" drops by this prefix — and by tending's word that changes (#380), the one
+    /// acting word outside it.
     private static func acts(_ word: String) -> Bool {
-        word.hasPrefix("write:")
+        word.hasPrefix("write:") || word == "admin:write"
     }
 
     private static func words(_ scopes: String?) -> Set<String> {

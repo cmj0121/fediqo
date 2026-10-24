@@ -358,6 +358,7 @@ struct TagFollowRow: View {
                 locked
             } else {
                 WordsThenPress(words: words, press: press)
+                    .shellMoreHeld()
             }
             if let missed = line.missedWords() {
                 // A press that did not arrive, in full ink under the line it left as it was.

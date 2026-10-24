@@ -17,9 +17,17 @@ private actor NoticeHosts: HTTPSender {
 
     private var routes: [String: Outcome]
     private(set) var asked: [String] = []
+    /// Whatever else is asked, by "METHOD /path": a post's act, how the reader stands to somebody.
+    private var others: [String: String]
+    /// Which of `others` waits at a gate before it answers.
+    private var gates: [String: Gate]
+    /// What of `others` was asked, in order.
+    private(set) var acted: [String] = []
 
-    init(_ routes: [String: Outcome]) {
+    init(_ routes: [String: Outcome], others: [String: String] = [:], gates: [String: Gate] = [:]) {
         self.routes = routes
+        self.others = others
+        self.gates = gates
     }
 
     func set(_ key: String, _ outcome: Outcome) {
@@ -32,6 +40,15 @@ private actor NoticeHosts: HTTPSender {
         }
         func answer(_ body: String, _ status: Int = 200) -> (Data, HTTPURLResponse) {
             (Data(body.utf8), HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!)
+        }
+        let other = (request.httpMethod ?? "GET") + " " + parts.path
+        if let body = others[other] {
+            acted.append(other)
+            if let gate = gates[other] {
+                await gate.wait()
+                try Task.checkCancellation()
+            }
+            return answer(body)
         }
         guard parts.path == "/api/v1/notifications" else { return answer(#"{"error":"Not Found"}"#, 404) }
         let before = parts.queryItems?.first { $0.name == "max_id" }?.value
@@ -135,13 +152,14 @@ struct NoticesHostedTests {
     /// A session holding each of `hosts` as a Mastodon, signed in with `scopes` where it names any.
     private func shell(
         _ routes: [String: NoticeHosts.Outcome], signedIn hosts: [String: String?],
-        tokens: any MastodonTokenStore = MemoryMastodonTokens()
+        tokens: any MastodonTokenStore = MemoryMastodonTokens(), others: [String: String] = [:],
+        gates: [String: Gate] = [:]
     ) async throws -> (ShellSession, NoticeHosts) {
         for (host, scopes) in hosts {
             guard let scopes else { continue }
             try tokens.save(Self.token(host, scopes: scopes))
         }
-        let server = NoticeHosts(routes)
+        let server = NoticeHosts(routes, others: others, gates: gates)
         let store = ItemStore(sources: hosts.keys.sorted().map { Source(host: $0, kind: .mastodon) }, notes: [])
         let session = ShellSession(
             http: FixtureHTTP(), store: store, mastodon: MastodonSessions(tokens: tokens, sender: server)
@@ -259,6 +277,227 @@ struct NoticesHostedTests {
         probe.frames.compactMap { part, frame -> (String, CGFloat)? in
             if case .row(let id) = part { (id, frame.minY) } else { nil }
         }.sorted { $0.1 < $1.1 }.map(\.0)
+    }
+
+    // MARK: - What each line is about (#375)
+
+    @Test("Each kind is drawn beside the others as what it is about, each still saying its source and when; a post the store will not hold is still drawn, from the notice's own copy")
+    func eachKindAsWhatItIsAbout() async throws {
+        let (session, _) = try await shell([
+            Self.a: Self.page(
+                Self.one(6, "mention", minutes: 1, post: 41, words: "Hello there"),
+                Self.one(5, "favourite", by: "Bo", minutes: 2, post: 40),
+                Self.one(4, "follow", by: "Cy", minutes: 3),
+                Self.one(3, "follow_request", by: "Di", minutes: 4),
+                Self.one(2, "annual_report", by: "Ed", minutes: 5),
+                Self.one(1, "mention", minutes: 6, post: 39, written: "2019-03-01T00:00:00.000Z", words: "Long ago")
+            ),
+        ], signedIn: [Self.a: Self.reads])
+        _ = await session.store.setRetention(months: 3)
+        await session.noticeList.read(in: session)
+        let lines = session.noticeList.lines
+        #expect(lines.count == 6)
+        let shapes = lines.map { NoticeShape.of($0) }
+        guard case .post(let mention) = shapes[0], case .faces(let own?) = shapes[1], case .follower(let cy) = shapes[2],
+              case .request(let di) = shapes[3], case .post(let old) = shapes[5]
+        else {
+            Issue.record("the shapes are \(shapes)")
+            return
+        }
+        #expect(shapes[4] == .line)
+        #expect(mention.body == "Hello there" && own.body == "The post it is about")
+        #expect(cy.accountID == "4" && di.accountID == "3", "the person's id came with them")
+
+        // Too old to be held: still its row, drawn from the notice's own copy.
+        #expect(await session.landed(noticePost: old) == nil)
+        #expect(NoticeCard.item(old, in: session).id == DummyItem(old).id)
+
+        // The list is lazy: a card is drawn where it is on screen, and the ones there say their source.
+        let (_, page) = await hosted(session)
+        let drawn = lines.filter { page.frames[.row($0.id)] != nil }
+        #expect(drawn.count >= 3 && drawn.first?.id == lines.first?.id, "\(drawn.map(\.kind.type))")
+        for notice in drawn {
+            #expect(page.says[.row(notice.id)]?.contains("From a.example") == true, "\(notice.kind.type) does not say its source")
+        }
+    }
+
+    @Test("A post in a notice is the store's copy once it is held, so what is done to it on the timeline shows on the notice, and the reverse")
+    func theSameRowAsTheTimeline() async throws {
+        let (session, _) = try await shell([
+            Self.a: Self.page(Self.one(1, "mention", minutes: 1, post: 51, words: "Shared")),
+        ], signedIn: [Self.a: Self.reads])
+        await session.noticeList.read(in: session)
+        let line = try #require(session.noticeList.lines.first)
+        guard case .post(let post) = NoticeShape.of(line) else {
+            Issue.record("a mention is its post's row")
+            return
+        }
+        #expect(session.heldNote(key: post.key) == nil)
+        let row = try #require(await session.landed(noticePost: post))
+        let held = try #require(session.heldNote(row))
+        #expect(NoticeCard.item(post, in: session) == DummyItem(held), "the notice draws the store's copy, which the timeline draws")
+    }
+
+    /// One who writes, and is told of notices: what acting on a notice's post needs.
+    private static let writes = MastodonOAuth.scopes(writing: true, notices: true)
+
+    @Test("A boost of a notice's post the store does not hold yet holds it first, then boosts the row held — so it lands, and shows on the timeline")
+    func aBoostHoldsThePostFirst() async throws {
+        let reblogged = "{\"id\":\"61\",\"uri\":\"https://a.example/p/61\",\"created_at\":\"2026-10-08T00:00:00.000Z\","
+            + "\"content\":\"<p>Boost me</p>\",\"reblogged\":true,\"account\":{\"username\":\"me\",\"acct\":\"me\",\"display_name\":\"Me\"}}"
+        let (session, server) = try await shell(
+            [Self.a: Self.page(Self.one(1, "mention", minutes: 1, post: 61, words: "Boost me"))],
+            signedIn: [Self.a: Self.writes], others: ["POST /api/v1/statuses/61/reblog": reblogged]
+        )
+        await session.noticeList.read(in: session)
+        let line = try #require(session.noticeList.lines.first)
+        guard case .post(let post) = NoticeShape.of(line) else {
+            Issue.record("a mention is its post's row")
+            return
+        }
+        #expect(session.heldNote(key: post.key) == nil, "not held before the press")
+        let acting = NoticeCard.acting(post, in: session, making: RowActing(session: session, openThread: { _ in }))
+        #expect(acting.acts.offers(.boost))
+        acting.perform?(.boost)
+        await met("the post is held") { session.heldNote(key: post.key) != nil }
+        await met("the boost reached the source") { await server.acted == ["POST /api/v1/statuses/61/reblog"] }
+    }
+
+    @Test("A notice's post older than this device keeps offers no act, each mark dim saying why; a press on one says it")
+    func aPostTooOldOffersNoAct() async throws {
+        let (session, _) = try await shell([
+            Self.a: Self.page(Self.one(1, "mention", minutes: 1, post: 71, written: "2019-03-01T00:00:00.000Z", words: "Long ago")),
+        ], signedIn: [Self.a: Self.writes])
+        _ = await session.store.setRetention(months: 3)
+        await session.noticeList.read(in: session)
+        let line = try #require(session.noticeList.lines.first)
+        guard case .post(let post) = NoticeShape.of(line) else {
+            Issue.record("a mention is its post's row")
+            return
+        }
+        #expect(await session.landed(noticePost: post) == nil)
+        session.noticeList.wouldNotHold(post.key)
+        let acting = NoticeCard.acting(post, in: session, making: RowActing(session: session, openThread: { _ in }))
+        #expect(acting.acts.refused == .tooOld && acting.keep == nil)
+        let marks = ItemActs.marks(on: DummyItem(post), acting: acting, language: .english)
+        let boost = try #require(marks.first { $0.kind == .act(.boost) })
+        #expect(boost.mark.look == .dim(.notNow) && boost.label.contains(ItemActs.refusalLine(.tooOld, language: .english)))
+        #expect(ItemActs.press(boost, acting: acting), "the press says why")
+    }
+
+    @Test("A request to follow offers accepting only while the source says they still ask, and not once it is answered — whatever a read says after")
+    func acceptingOnlyWhileTheyAsk() async throws {
+        let asking = "[{\"id\":\"3\",\"following\":false,\"followed_by\":false,\"requested\":false,\"requested_by\":true,"
+            + "\"muting\":false,\"blocking\":false,\"blocked_by\":false}]"
+        let (session, server) = try await shell(
+            [Self.a: Self.page(Self.one(3, "follow_request", by: "Di", minutes: 1))],
+            signedIn: [Self.a: Self.writes], others: ["GET /api/v1/accounts/relationships": asking]
+        )
+        await session.noticeList.read(in: session)
+        let line = try #require(session.noticeList.lines.first)
+        let di = try #require(NoticeShape.person(of: line))
+        #expect(!NoticeCard.stillAsks(di, at: Self.a, in: session), "nothing is offered before the source said")
+        await session.noticeList.stand(for: [line], in: session)
+        #expect(await server.acted == ["GET /api/v1/accounts/relationships"])
+        #expect(NoticeCard.stillAsks(di, at: Self.a, in: session))
+        let key = ShellNoticeList.personKey(host: Self.a, accountID: "3")
+        #expect(session.noticeList.stands[key]?.followedBy == false)
+        session.noticeList.answered(key, now: PersonStanding(accountID: "3", followedBy: true))
+        #expect(!NoticeCard.stillAsks(di, at: Self.a, in: session), "answered: no longer offered")
+        #expect(session.noticeList.stands[key]?.followedBy == true)
+        // A line drawn again asks nothing more of somebody already asked about.
+        await session.noticeList.stand(for: [line], in: session)
+        #expect(await server.acted.count == 1)
+        #expect(!NoticeCard.stillAsks(di, at: Self.a, in: session))
+    }
+
+    @Test("An ask of how the reader stands that is stopped — the lines drawn changed — is asked again the next time, and accepting then shows")
+    func aStoppedStandingIsAskedAgain() async throws {
+        let relationships = "GET /api/v1/accounts/relationships"
+        let asking = "[{\"id\":\"3\",\"following\":false,\"followed_by\":false,\"requested\":false,\"requested_by\":true,"
+            + "\"muting\":false,\"blocking\":false,\"blocked_by\":false}]"
+        let gate = Gate()
+        let (session, server) = try await shell(
+            [Self.a: Self.page(Self.one(3, "follow_request", by: "Di", minutes: 1))],
+            signedIn: [Self.a: Self.writes], others: [relationships: asking], gates: [relationships: gate]
+        )
+        await session.noticeList.read(in: session)
+        let line = try #require(session.noticeList.lines.first)
+        let di = try #require(NoticeShape.person(of: line))
+        let first = Task { await session.noticeList.stand(for: [line], in: session) }
+        await met("the first ask is out", by: first) { await server.acted.count == 1 }
+        // While it is out, the same line drawn again asks nothing more.
+        await session.noticeList.stand(for: [line], in: session)
+        #expect(await server.acted.count == 1)
+        first.cancel()
+        await gate.open()
+        await first.value
+        #expect(!NoticeCard.stillAsks(di, at: Self.a, in: session), "a stopped ask took nothing in")
+        await session.noticeList.stand(for: [line], in: session)
+        #expect(await server.acted.count == 2, "asked again")
+        #expect(NoticeCard.stillAsks(di, at: Self.a, in: session))
+    }
+
+    @Test("Signing out lets go of how the reader stood to the people the lines name, and who asked")
+    func signingOutForgetsStandings() async throws {
+        let asking = "[{\"id\":\"3\",\"following\":false,\"followed_by\":false,\"requested\":false,\"requested_by\":true,"
+            + "\"muting\":false,\"blocking\":false,\"blocked_by\":false}]"
+        let (session, server) = try await shell(
+            [Self.a: Self.page(Self.one(3, "follow_request", by: "Di", minutes: 1))],
+            signedIn: [Self.a: Self.writes], others: ["GET /api/v1/accounts/relationships": asking]
+        )
+        await session.noticeList.read(in: session)
+        let line = try #require(session.noticeList.lines.first)
+        await session.noticeList.stand(for: [line], in: session)
+        let key = ShellNoticeList.personKey(host: Self.a, accountID: "3")
+        #expect(session.noticeList.stands[key] != nil && session.noticeList.askingToFollow.contains(key))
+        session.noticeList.forget(host: Self.a)
+        #expect(session.noticeList.stands[key] == nil && !session.noticeList.askingToFollow.contains(key))
+        await session.noticeList.stand(for: [line], in: session)
+        #expect(await server.acted.count == 2, "the reader there is asked about afresh")
+    }
+
+    @Test("And N others on a boost opens who boosted it; on a gathered line of follows, the reader's own followers once the source said who the reader is")
+    func othersOpenWhoTheyAre() async throws {
+        let (session, _) = try await shell([Self.a: Self.page(Self.one(5, "favourite", by: "Bo", minutes: 2, post: 30))], signedIn: [Self.a: Self.reads])
+        await session.noticeList.read(in: session)
+        let favourite = try #require(session.noticeList.lines.first)
+        let list = try #require(NoticeCard.others(of: favourite, about: favourite.post, in: session))
+        #expect(list.which == .favouritedBy && list.host == Self.a)
+        let follows = Notice(
+            source: favourite.source, handle: .gathered(key: "follow-1"), kind: .follow,
+            people: [NoticePerson(handle: "@bo@a.example", name: "Bo"), NoticePerson(handle: "@cy@a.example", name: "Cy")],
+            count: 5, at: favourite.at, newestID: "9", oldestID: "5"
+        )
+        #expect(NoticeShape.of(follows) == .faces(nil))
+        // Nobody known as the reader there yet: no list to open.
+        #expect(NoticeCard.others(of: follows, about: nil, in: session) == nil)
+    }
+
+    @Test("A long list of notices with posts and pictures draws only the cards on screen")
+    func aLongListStaysLazy() async throws {
+        // Each post carries four pictures, as a busy page of mentions does.
+        let many = (1 ... 150).map { id in
+            let pictures = (1 ... 4).map { n in
+                "{\"id\":\"m\(id)-\(n)\",\"type\":\"image\",\"url\":\"https://\(Self.a)/m/\(id)-\(n).png\","
+                    + "\"preview_url\":\"https://\(Self.a)/m/\(id)-\(n)-s.png\"}"
+            }.joined(separator: ",")
+            return "{\"id\":\"\(id)\",\"type\":\"mention\",\"created_at\":\"\(Self.ago(id))\","
+                + "\"account\":{\"id\":\"\(id)\",\"username\":\"ada\",\"acct\":\"ada\",\"display_name\":\"Ada\"},"
+                + "\"status\":{\"id\":\"\(1_000 + id)\",\"uri\":\"https://\(Self.a)/p/\(1_000 + id)\","
+                + "\"created_at\":\"\(Self.ago(id + 5))\",\"content\":\"<p>Post \(id)</p>\",\"media_attachments\":[\(pictures)],"
+                + "\"account\":{\"username\":\"me\",\"acct\":\"me\",\"display_name\":\"Me\"}}}"
+        }
+        let (session, _) = try await shell([Self.a: .body("[" + many.joined(separator: ",") + "]")], signedIn: [Self.a: Self.reads])
+        await session.noticeList.read(in: session)
+        #expect(session.noticeList.lines.count > 100)
+        #expect(session.noticeList.lines.allSatisfy { $0.post?.attachments.count == 4 }, "every post carries its pictures")
+        #if DEBUG
+        let before = NoticeCard.drawn
+        _ = await hosted(session)
+        let drawn = NoticeCard.drawn - before
+        #expect(drawn > 0 && drawn < 20, "\(drawn) cards were drawn for a page that shows a few")
+        #endif
     }
 
     // MARK: - The states
@@ -675,7 +914,8 @@ struct NoticesHostedTests {
 
         let (_, page) = await hosted(session)
         for notice in lines {
-            #expect(page.says[.row(notice.id)] == NoticeWords.spoken(notice), "the label the page's row set is not what the words say")
+            // Changed (#375): a line drawn over its post's row leaves the post's words to that row.
+            #expect(page.says[.row(notice.id)] == NoticeWords.spokenLine(notice), "the label the page's row set is not what the words say")
         }
 
         for notice in lines {
@@ -725,9 +965,9 @@ struct NoticesHostedTests {
         let (_, page) = await hosted(session)
         let said = lines.compactMap { page.says[.row($0.id)] }
         #expect(said.count == 3)
-        #expect(said[0].hasPrefix("Ada mentioned you: Author's warning: Spoilers for the finale. From a.example, "))
-        #expect(said[1].hasPrefix("Ada mentioned you: Covered. From a.example, "))
-        #expect(said[2].hasPrefix("Ada mentioned you: Said in the open. From a.example, "))
+        // Changed (#375): each line stands over its post's own row, which says the post — cover and
+        // all — so the line says only what happened.
+        #expect(said.allSatisfy { $0.hasPrefix("Ada mentioned you. From a.example, ") }, "\(said)")
         #expect(!page.says.values.contains { $0.contains("under the cover") }, "a covered post's words are said on the page")
 
         for (notice, shown) in zip(lines, ["Author's warning: Spoilers for the finale", "Covered", "Said in the open"]) {
@@ -1114,12 +1354,12 @@ struct NoticesHostedTests {
         // The page hands the line the word, and the label that row sets carries it.
         let root = Root()
         let (_, before) = await hosted(session, root: root)
-        #expect(before.says[.row(line.id)] == NoticeWords.spoken(line))
+        #expect(before.says[.row(line.id)] == NoticeWords.spokenLine(line))
         root.tooOld = line.id
         let (_, probe) = await hosted(session, root: root)
         #expect(probe.frames[.row(line.id)] != nil)
         let heard = try #require(probe.says[.row(line.id)])
-        #expect(heard.hasPrefix(NoticeWords.spoken(line)) && heard.hasSuffix(NoticeRow.tooOldWords()), "the page's row does not say the post is too old")
+        #expect(heard.hasPrefix(NoticeWords.spokenLine(line)) && heard.hasSuffix(NoticeRow.tooOldWords()), "the page's row does not say the post is too old")
 
         let said = NoticeRowProbe()
         let row = NSHostingView(rootView: NoticeRow(notice: line, tooOld: true, probe: said).frame(width: 600))

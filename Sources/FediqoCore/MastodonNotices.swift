@@ -144,18 +144,39 @@ public struct MastodonNotices: Sendable {
     /// is asked afresh, since what a source holds changes while it runs. Only a 404 says so: a
     /// refusal or a failure is thrown, and what was known stands.
     public func held(known: NoticeHolding = .unasked) async throws -> NoticeHolding {
-        if known == .absent { return .absent }
+        try await policy(known: known).holding
+    }
+
+    /// What this source holds back, and whose notices it holds back how (#376): `held`'s answer,
+    /// and beside it each choice the source said it has. **Only what it said**: a choice it named
+    /// in a word this build does not know, or did not name, is not offered — so a server that has
+    /// fewer is offered fewer, and one with no policy (`absent`) none.
+    public func policy(known: NoticeHolding = .unasked) async throws -> (holding: NoticeHolding, policy: NoticePolicy?) {
+        if known == .absent { return (.absent, nil) }
         let data: Data
         do {
             data = try await door.get(path: Self.policyPath)
         } catch MastodonAuthError.http(404) {
-            return .absent
+            return (.absent, nil)
         }
+        return try Self.read(data)
+    }
+
+    /// Sets how this source holds back the notices of `whose` to `way`, and hands back the policy
+    /// as it now stands — **the source's own answer**, never what was asked for. Needs the sign-in
+    /// to write notices (`write:notifications`): one that only reads is refused by the source, and
+    /// that refusal is thrown as it came.
+    public func choose(_ way: NoticePolicy.Way, for whose: NoticePolicy.Whose) async throws -> (holding: NoticeHolding, policy: NoticePolicy?) {
+        let data = try await door.patch(path: Self.policyPath, form: [(whose.rawValue, way.rawValue)])
+        return try Self.read(data)
+    }
+
+    private static func read(_ data: Data) throws -> (holding: NoticeHolding, policy: NoticePolicy?) {
         guard let policy = try? MastodonJSON.decoder.decode(PolicyDTO.self, from: data) else {
             throw MastodonNoticeError.unreadable
         }
         guard let held = policy.summary.asHeld else { throw MastodonNoticeError.unreadable }
-        return .holds(held)
+        return (.holds(held), policy.asPolicy)
     }
 
     /// The requests this source is holding: one for each person whose notices it kept out of
@@ -198,6 +219,24 @@ public struct MastodonNotices: Sendable {
 /// read; with neither readable the answer says nothing of what is held, which is not "nothing".
 private struct PolicyDTO: Decodable, Sendable {
     let summary: Summary
+    let forNotFollowing: StatusDTO.Lenient<String>?
+    let forNotFollowers: StatusDTO.Lenient<String>?
+    let forNewAccounts: StatusDTO.Lenient<String>?
+    let forPrivateMentions: StatusDTO.Lenient<String>?
+    let forLimitedAccounts: StatusDTO.Lenient<String>?
+
+    /// Each choice the source named in a word this build knows; nothing where it named none.
+    var asPolicy: NoticePolicy? {
+        let named: [(NoticePolicy.Whose, StatusDTO.Lenient<String>?)] = [
+            (.notFollowing, forNotFollowing), (.notFollowers, forNotFollowers), (.newAccounts, forNewAccounts),
+            (.privateMentions, forPrivateMentions), (.limitedAccounts, forLimitedAccounts),
+        ]
+        var ways: [NoticePolicy.Whose: NoticePolicy.Way] = [:]
+        for (whose, word) in named {
+            if let way = word?.value.flatMap(NoticePolicy.Way.init(rawValue:)) { ways[whose] = way }
+        }
+        return ways.isEmpty ? nil : NoticePolicy(ways: ways)
+    }
 
     struct Summary: Decodable, Sendable {
         let pendingRequestsCount: StatusDTO.Lenient<WireNumber>?
@@ -278,19 +317,28 @@ private struct WireNumber: Decodable, Sendable {
 private struct PersonDTO: Decodable, Sendable {
     let id: WireNumber
     let account: StatusDTO.Account
+    /// What they say of themselves, as markup: read apart, so one that is not text is that one
+    /// thing not known and never the person.
+    let note: StatusDTO.Lenient<String>?
 
-    private enum CodingKeys: String, CodingKey { case id }
+    private enum CodingKeys: String, CodingKey { case id, note }
 
     init(from decoder: any Decoder) throws {
-        id = try decoder.container(keyedBy: CodingKeys.self).decode(WireNumber.self, forKey: .id)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(WireNumber.self, forKey: .id)
+        note = try? container.decodeIfPresent(StatusDTO.Lenient<String>.self, forKey: .note)
         account = try StatusDTO.Account(from: decoder)
     }
 
     func asPerson(host: String) -> NoticePerson {
-        NoticePerson(
+        // Cut before the markup is taken off, as a person's own page cuts it, so a stranger's
+        // long note costs no more than the line kept of it.
+        let words = HTMLText.plain(AccountDTO.cut(note?.value ?? "", to: NoticePerson.wordsLength * 4))
+        return NoticePerson(
             handle: StatusDTO.handle(account.acct, host: host), name: account.name,
             avatarURL: Host.fetchableURL(account.avatar),
-            emojis: CustomEmoji.folded((account.emojis ?? []).compactMap(\.asEmoji))
+            emojis: CustomEmoji.folded((account.emojis ?? []).compactMap(\.asEmoji)),
+            accountID: id.text, words: words
         )
     }
 }
@@ -324,6 +372,7 @@ private struct GatheredDTO: Decodable, Sendable {
         let latestPageNotificationAt: StatusDTO.LenientMoment?
         let sampleAccountIds: StatusDTO.Lenient<[StatusDTO.Lenient<WireNumber>]>?
         let statusId: StatusDTO.Lenient<WireNumber>?
+        let report: StatusDTO.Lenient<ReportIDDTO>?
     }
 
     /// What makes a notice of one of this answer's lines, with the side lists joined once.
@@ -345,7 +394,8 @@ private struct GatheredDTO: Decodable, Sendable {
                 source: source, handle: .gathered(key: line.groupKey), kind: Notice.Kind(type: line.type),
                 people: (line.sampleAccountIds?.value ?? []).compactMap { ($0.value?.text).flatMap { people[$0] } },
                 count: max(1, line.notificationsCount?.value?.count ?? 1),
-                post: post, at: at, newestID: newest, oldestID: line.pageMinId?.value?.text ?? newest
+                post: post, at: at, newestID: newest, oldestID: line.pageMinId?.value?.text ?? newest,
+                report: line.report?.value?.named
             )
         }
     }
@@ -359,6 +409,7 @@ private struct SingleDTO: Decodable, Sendable {
     let createdAt: StatusDTO.LenientMoment?
     let account: StatusDTO.Lenient<PersonDTO>?
     let status: StatusDTO.Lenient<StatusDTO>?
+    let report: StatusDTO.Lenient<ReportIDDTO>?
 
     /// A line of one: one person, a count of one, named by its own id. Placed as a gathered
     /// line is: at its own moment, at its post's where it has none, and nothing where it has
@@ -369,7 +420,15 @@ private struct SingleDTO: Decodable, Sendable {
         return Notice(
             source: source, handle: .one(id: id.text), kind: Notice.Kind(type: type),
             people: (account?.value).map { [$0.asPerson(host: source.host)] } ?? [],
-            post: post, at: at, newestID: id.text, oldestID: id.text
+            post: post, at: at, newestID: id.text, oldestID: id.text, report: report?.value?.named
         )
     }
+}
+
+/// The report a notice of a new report carries (#381), as far as which one it is.
+private struct ReportIDDTO: Decodable, Sendable {
+    let id: WireNumber
+
+    /// Its id, where it can stand in a path.
+    var named: String? { ListSubscription.isPathSegment(id.text) ? id.text : nil }
 }

@@ -392,9 +392,16 @@ struct PersonStandingTests {
         let followed = try #require(acts.acting(of: Self.ada, said: page, in: session))
         #expect(followed.reading == .said(PersonStanding(accountID: "42", following: true, showsBoosts: true, notifies: false, featured: false)) && followed.doing == nil)
         #expect(followed.press == nil && followed.more == [.feature, .unfollow] && followed.missed == nil)
-        #expect(!followed.asksBefore(.unfollow), "somebody anyone may follow is unfollowed in one press")
-        let menu = followed.menu(head: ["Ada"], act: { _ in })
-        #expect(Array(menu.head.prefix(2)) == ["Ada", L10n.t("part.account.unasked")] && Array(menu.items.map(\.name).prefix(2)) == [PersonActing.name(.feature), PersonActing.name(.unfollow)] && menu.dangers.isEmpty)
+        // Inverted (#385): somebody anyone may follow was unfollowed in one press from `…`; it is
+        // now red and asked about every time, saying they can be followed again in one press.
+        #expect(followed.asksBefore(.unfollow))
+        let menu = followed.menu(act: { _ in })
+        #expect(menu.whys.first == L10n.t("part.account.unasked") && Array(menu.items.map(\.name).prefix(2)) == [PersonActing.name(.feature), PersonActing.name(.unfollow)])
+        #expect(menu.dangers.first?.name == PersonActing.name(.unfollow))
+        let open = try #require(menu.dangers.first?.question)
+        #expect(open == ShellQuestion.unfollow("@ada@m.example", at: Self.host, asksFirst: false))
+        #expect(ShellQuestion.unfollow("@ada", at: Self.host, asksFirst: false, language: .english).line
+            == "Their posts stop coming to you from there. You can follow them again with one press.")
         #expect(PersonActing.name(.unfollow, language: .english) == "Unfollow")
 
         await acts.press(.unfollow, on: Self.ada, said: page, in: session)
@@ -442,7 +449,7 @@ struct PersonStandingTests {
         )
         #expect(following.more == [.unfollow] && following.asksBefore(.unfollow))
         var chosen: [PersonAct] = []
-        let item = try #require(following.menu(head: [], act: { chosen.append($0) }).dangers.first)
+        let item = try #require(following.menu(act: { chosen.append($0) }).dangers.first)
         let question = try #require(item.question)
         #expect(question == ShellQuestion.unfollow("@ada@m.example", at: Self.host))
         let english = ShellQuestion.unfollow("@ada@m.example", at: Self.host, language: .english)
@@ -904,12 +911,13 @@ struct PersonStandingTests {
             PersonAboutSaid.made(of: page, home: nil, homeLine: nil, standing: standing, followed: nil, hidden: false)
         }
         let drawn = about(acting(Self.followed()))
-        #expect(drawn.blocks == [.view, .none, .stands, .boosts, .notices])
-        #expect(drawn.walked.suffix(3) == ["about.stands", "about.boosts", "about.notices"])
+        // Which languages reach Home (#378) stands after them, of somebody followed.
+        #expect(drawn.blocks == [.view, .none, .stands, .boosts, .notices, .languages])
+        #expect(drawn.walked.suffix(4) == ["about.stands", "about.boosts", "about.notices", "about.languages"])
         #expect(drawn.press(on: "about.boosts") == .act(.hideBoosts) && drawn.press(on: "about.notices") == .act(.notify))
         #expect(about(out).press(on: "about.boosts") == nil && about(out).blocks.contains(.boosts), "drawn, and takes no press")
         let plain = about(seeing)
-        #expect(plain.blocks == [.view, .none, .stands, .boosts, .notices], "drawn, and the lamp may stop on them")
+        #expect(plain.blocks == [.view, .none, .stands, .boosts, .notices, .languages], "drawn, and the lamp may stop on them")
         #expect(plain.press(on: "about.boosts") == nil && plain.press(on: "about.notices") == nil, "Return does nothing")
         #expect(plain.press(on: "about.stands") == .askFollows, "the lock line beside them asks for the rest")
         for none in [about(nil), about(acting(PersonStanding(accountID: "42")))] {
@@ -1123,7 +1131,8 @@ struct PersonStandingTests {
         await pages.opened(Self.ada, in: shell)
         #expect(!pages.pressAbout("about.notices", of: Self.ada, in: shell), "nothing until the source has said how the reader stands")
         await pages.standsOpened(to: Self.ada, in: shell)
-        #expect(pages.walkedIDs(of: Self.ada, in: shell).suffix(2) == ["about.boosts", "about.notices"])
+        // The reader's note (#377) stands after them, where the page reads how the reader stands.
+        #expect(pages.walkedIDs(of: Self.ada, in: shell).suffix(4) == ["about.boosts", "about.notices", "about.languages", "about.note"])
         await wire.hold(Self.follow)
         let wireFollowGuard = watching("the ask of \(Self.follow), held at its server") { await wire.release(Self.follow) }
         defer { wireFollowGuard.cancel() }

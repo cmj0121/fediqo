@@ -30,15 +30,19 @@ struct MentionPressTests {
 
     // MARK: - What is drawn
 
-    @Test("Somebody mentioned is drawn as a press: their letters as written, in the control's ink and underlined — told by more than colour")
+    @Test("Somebody mentioned is drawn as a press: their letters as written, in the words' ink and bold — told by more than colour")
     func drawnAsAPress() throws {
-        let ink = ShellChrome.selectInk(.light)
+        let ink = ShellChrome.ink(.light)
         let url = try #require(ShellMentions.url(for: Self.ada))
         var letters = AttributedString("@ada")
         letters.link = url
         letters.foregroundColor = ink
-        letters.underlineStyle = .single
-        #expect(EmojiText.drawn(Self.mentioned, ink: ink) == Text(letters))
+        let mark = PostPressMark(target: url, ink: ink, ruled: false)
+        #expect(EmojiText.drawn(Self.mentioned, ink: ink) == Text(letters).bold().customAttribute(mark))
+        // Weight is what tells a name from the words, and it carries no line until a pointer rests on it.
+        #expect(EmojiText.drawn(Self.mentioned, ink: ink) != Text(letters).customAttribute(mark))
+        #expect(EmojiText.drawn(Self.mentioned, ink: ink)
+            != Text(letters).bold().customAttribute(PostPressMark(target: url, ink: ink, ruled: true)))
 
         let cut = EmojiRun.prose(in: "hi @ada and @eve", emojis: [], mentions: [Self.ada])
         #expect(EmojiText.line(cut, [:], at: 0, baseline: -4, nameInk: ink)

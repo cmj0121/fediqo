@@ -80,6 +80,24 @@ struct PersonActing: Equatable {
     var reportable = false
     /// How the sign-in stands where it holds less than reporting needs, or nothing where it holds it.
     var reportsLock: PartWords.Place?
+    /// Whether the page offers the reader's own note on them (#377): where how the reader stands
+    /// to them is read here, which is where the source keeps it.
+    var notes = false
+    /// The note as drawn: the one on its way where one is, else the source's.
+    var note: String?
+    /// Whether a note written here is on its way.
+    var noteSending = false
+    /// Whether the last note written here did not arrive.
+    var noteMissed = false
+    /// What the source said where it would not keep the last note written here.
+    var noteRefused: String?
+    /// Which of the people the reader follows also follow them (#377): nobody where none.
+    var familiar: [Person] = []
+    /// The languages a choice on its way says (#378) — none, every language — while it is out.
+    var languagesSending: [String]?
+    /// The languages the reader chooses among (#378): the source's own where it said them, else
+    /// the ones this device knows by a two-letter code.
+    var languagesOffered: [FollowLanguage] = []
 
     /// How the reader stands to them as the page draws it: what the source last said, with the
     /// press on its way drawn over it. Nothing until the source has said.
@@ -96,6 +114,7 @@ struct PersonActing: Equatable {
         case .hideBoosts: standing.showsBoosts = false
         case .notify: standing.notifies = true
         case .stopNotifying: standing.notifies = false
+        case .chooseLanguages: standing.languages = languagesSending?.isEmpty == false ? languagesSending : nil
         case .acceptRequest: standing.followedBy = true
         case .refuseRequest, .removeFollower: standing.followedBy = false
         case .feature: standing.featured = true
@@ -174,6 +193,14 @@ struct PersonActing: Equatable {
             standing.showsBoosts.map { Narrow(which: .boosts, on: $0) },
             standing.notifies.map { Narrow(which: .notices, on: $0) },
         ].compactMap { $0 }
+    }
+
+    /// Which languages of their posts reach Home (#378), as About draws it: **only of somebody
+    /// the reader follows** — the source keeps it on the follow — as the source last said, with a
+    /// choice on its way drawn over it. Nothing means every language.
+    var languages: PersonLanguagesWords.Row? {
+        guard let standing = shown, standing.following else { return nil }
+        return PersonLanguagesWords.Row(codes: standing.languages ?? [], offered: languagesOffered)
     }
 
     /// Whether a press on one of them is taken now: only from a sign-in that may change who
@@ -288,16 +315,18 @@ struct PersonActing: Equatable {
         return act.isMuteOrBlock ? blocksLock : nil
     }
 
-    /// Whether `act` is asked about before it is sent: unfollowing somebody who must agree to
-    /// be followed, since following them again means asking again.
+    /// Whether `act` is asked about on a question of the menu's before it is sent (#385):
+    /// unfollowing anybody, and removing a follower.
     func asksBefore(_ act: PersonAct) -> Bool {
-        (act == .unfollow && asksFirst) || act == .removeFollower
+        act == .unfollow || act == .removeFollower
     }
 
     /// The question `act` is asked about first with.
     @MainActor
     func question(before act: PersonAct) -> ShellConfirmation {
-        act == .removeFollower ? ShellQuestion.about(act, named, at: source) : ShellQuestion.unfollow(named, at: source)
+        act == .removeFollower
+            ? ShellQuestion.about(act, named, at: source)
+            : ShellQuestion.unfollow(named, at: source, asksFirst: asksFirst)
     }
 
     // MARK: - Words
@@ -381,14 +410,14 @@ struct PersonActing: Equatable {
         return String(format: L10n.t("profile.refused.said", language: language), source, refused)
     }
 
-    /// The account part's lock, in its own sentence: what the `…` says at its head over a
-    /// featuring it cannot make.
+    /// The account part's lock, in its own sentence: why featuring is dim where it cannot be
+    /// made.
     func accountLockWords(language: DummyLanguage? = nil) -> String? {
         accountLock.map { String(format: L10n.t($0.key, language: language), source) }
     }
 
-    /// The words of the lock a press on `act` would only ask through (`lock(of:)`), as the `…`
-    /// says it at its head.
+    /// The words of the lock a press on `act` would only ask through (`lock(of:)`): why its item
+    /// in the `…` is dim, said after its name (`ShellMoreItem.because`).
     func lockWords(of act: PersonAct, language: DummyLanguage? = nil) -> String? {
         lock(of: act).map { String(format: L10n.t($0.key, language: language), source) }
     }
@@ -467,6 +496,7 @@ struct PersonActing: Equatable {
         case .withdraw: "arrow.uturn.backward"
         case .showBoosts, .hideBoosts: "arrow.2.squarepath"
         case .notify, .stopNotifying: "bell"
+        case .chooseLanguages: PersonLanguagesWords.symbol
         case .acceptRequest: "person.crop.circle.badge.checkmark"
         case .refuseRequest: "person.crop.circle.badge.xmark"
         case .removeFollower: "person.crop.circle.badge.minus"
@@ -489,6 +519,7 @@ struct PersonActing: Equatable {
         case .withdraw: "person.act.withdraw"
         case .showBoosts, .hideBoosts: "person.act.boosts"
         case .notify, .stopNotifying: "person.act.notify"
+        case .chooseLanguages: "person.act.languages"
         case .acceptRequest: "person.act.accept"
         case .refuseRequest: "person.act.refuse"
         case .removeFollower: "person.act.removeFollower"
@@ -505,24 +536,32 @@ struct PersonActing: Equatable {
         }
     }
 
-    /// The page's `…`: at its head who they are and whose view the page is, and under it what
-    /// `more` offers. Unfollowing somebody who must agree is asked about first. **Featuring,
-    /// where the sign-in lacks the account part, is dim with the lock**, the part's sentence
-    /// at the head, and its press is `act`'s too — which only asks (`asksForPart`).
+    /// The page's `…`: what `more` offers, and nothing about who they are — the page says that
+    /// (#385). **What takes something away is red and asks first**: unfollowing — every time,
+    /// not only somebody who must agree — and removing a follower ask a question; muting,
+    /// blocking, blocking a whole server and reporting each open the sheet that is their question
+    /// (`ShellMoreItem.danger(_:_:look:sheet:)`). **Featuring, where the sign-in lacks the account
+    /// part, is dim with the lock**, saying the part's sentence after its name, and its press is
+    /// `act`'s too — which only asks (`asksForPart`).
     @MainActor
-    func menu(head: [String], act: @escaping (PersonAct) -> Void) -> ShellMore {
-        var said = head
+    func menu(act: @escaping (PersonAct) -> Void) -> ShellMore {
         let items: [ShellMoreItem] = (more + keeping + reporting).map { offered in
             let symbol = Self.symbol(offered), name = Self.name(offered, server: server)
             if let lock = lock(of: offered) {
-                if let words = lockWords(of: offered), !said.contains(words) { said.append(words) }
                 let dim = ShellMark(SourceRow.permissionSymbol, name, look: .dim(.askAgain))
-                return ShellMoreItem.plain(dim, ask: lock.asks ? { act(offered) } : nil, act: {}).underHead
+                return ShellMoreItem.plain(dim, ask: lock.asks ? { act(offered) } : nil, act: {}).because(lockWords(of: offered))
             }
+            if Self.asksOnSheet(offered) { return .danger(symbol, name, sheet: { act(offered) }) }
             guard asksBefore(offered) else { return .plain(symbol, name) { act(offered) } }
             return .danger(symbol, name, asks: question(before: offered)) { act(offered) }
         }
-        return ShellMore(head: said, items: items)
+        return ShellMore(items: items)
+    }
+
+    /// The acts whose question is a sheet of their own: muting and blocking's (`asksOnASheet`), and
+    /// a report, asked what it says on `ReportSheet`. Each is red in the page's `…`.
+    static func asksOnSheet(_ act: PersonAct) -> Bool {
+        asksOnASheet(act) || act == .report
     }
 }
 
@@ -544,6 +583,8 @@ struct StandingChoice: Equatable, Sendable {
     var held: Held = .hide
     /// Whether a mute keeps their notices from the reader too.
     var notices = true
+    /// The languages chosen of somebody followed (#378): none, every language.
+    var languages: [String] = []
     /// How long a mute lasts, in seconds; nothing, for good.
     var seconds: Int?
 
@@ -556,8 +597,6 @@ struct StandingChoice: Equatable, Sendable {
 /// sign-in must be asked first — and the menu, where it has anything to offer.
 struct PersonHeadActs: View {
     let acting: PersonActing
-    /// What stands at the head of the `…`: who they are, and whose view the page is.
-    var head: [String] = []
     var onAct: (PersonAct) -> Void
     var onAsk: () -> Void
     @Environment(\.colorScheme) private var colorScheme
@@ -590,7 +629,7 @@ struct PersonHeadActs: View {
                 EmptyView()
             }
             if !acting.more.isEmpty || !acting.keeping.isEmpty || !acting.reporting.isEmpty {
-                ShellMoreButton(label: ShellMore.label()) { acting.menu(head: head, act: onAct) }
+                ShellMoreButton(label: ShellMore.label()) { acting.menu(act: onAct) }
                     .fixedSize()
             }
         }

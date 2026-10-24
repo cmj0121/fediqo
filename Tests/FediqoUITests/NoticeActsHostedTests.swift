@@ -262,12 +262,12 @@ struct NoticeActsHostedTests {
         let notice = try line("4", of: Self.a, in: session)
 
         let more = NoticeActs.more(notice, in: session, language: .english)
-        #expect(more.head.isEmpty)
+        #expect(more.whys.isEmpty)
         #expect(more.items.map(\.name) == ["Dismiss"])
         let dismiss = try #require(more.items.first)
         #expect(dismiss.isDanger && dismiss.answers && dismiss.symbol == NoticeActs.dismissSymbol)
         #expect(NoticeRow.moreLabel(language: .english) == "More: Dismiss")
-        #expect(NoticeActs.spoken(dismiss, of: more, language: .english) == "Dismiss")
+        #expect(dismiss.title(language: .english) == "Dismiss")
 
         let question = ShellQuestion.dismiss(notice, language: .english)
         #expect(question.title == "Dismiss this notice on a.example?")
@@ -345,17 +345,18 @@ struct NoticeActsHostedTests {
         #expect(acts.asked == nil, "a line whose sign-in only reads was asked about")
     }
 
-    @Test("Where the sign-in may not dismiss, the line's menu still names Dismiss, dim, and says why at its head and to a listener")
+    @Test("Where the sign-in may not dismiss, the line's menu still names Dismiss, dim, keeps why with the menu and says it to a listener")
     func aLineSaysWhyItCannotBeDismissed() async throws {
         let (session, server) = try await two()
         let reading = try line("8", of: Self.b, in: session)
 
         let more = NoticeActs.more(reading, in: session, language: .english)
-        #expect(more.head == ["The sign-in on b.example only reads, so it cannot act on notices."])
+        #expect(more.whys == ["The sign-in on b.example only reads, so it cannot act on notices."])
         let dismiss = try #require(more.items.first)
         #expect(more.items.count == 1 && dismiss.name == "Dismiss" && !dismiss.answers)
-        #expect(dismiss.title(language: .english) == "Dismiss", "the reason is said once, at the head")
-        #expect(NoticeActs.spoken(dismiss, of: more, language: .english)
+        #expect(dismiss.title(language: .english) == "Dismiss. The sign-in on b.example only reads, so it cannot act on notices.",
+                "the menu's own reason, after the name — never the shared word of its look")
+        #expect(dismiss.title(language: .english)
             == "Dismiss. The sign-in on b.example only reads, so it cannot act on notices.")
         var put = false
         dismiss.press { _ in put = true }
@@ -381,7 +382,7 @@ struct NoticeActsHostedTests {
 
         let more = try #require(NoticeActs.more(in: session, language: .english))
         #expect(more.items.map(\.name) == ["Dismiss all on a.example", "Dismiss all on b.example"])
-        #expect(more.head == ["The sign-in on b.example only reads, so it cannot act on notices."])
+        #expect(more.whys == ["The sign-in on b.example only reads, so it cannot act on notices."])
         #expect(more.items.map(\.answers) == [true, false] && more.items.allSatisfy(\.isDanger))
 
         let question = ShellQuestion.dismissAll(host: Self.a, language: .english)
@@ -530,9 +531,9 @@ struct NoticeActsHostedTests {
         let listed = try #require(acts.requests[Self.a])
 
         let more = NoticeActs.more(listed[0], in: session, language: .english)
-        #expect(more.head.isEmpty && more.items.map(\.name) == ["Let through", "Let go"])
+        #expect(more.whys.isEmpty && more.items.map(\.name) == ["Let through", "Let go"])
         #expect(more.items.allSatisfy(\.isDanger) && more.items.allSatisfy(\.answers), "an act went out on one press")
-        #expect(more.items.map { NoticeActs.spoken($0, of: more, language: .english) } == ["Let through", "Let go"])
+        #expect(more.items.map { $0.title(language: .english) } == ["Let through", "Let go"])
         let question = ShellQuestion.letGo(listed[1], language: .english)
         #expect(question.title == "Let go of @flo@a.example (Flo)'s notices held on a.example?")
         #expect(question.line == "They are dismissed there, unshown. This cannot be undone.")
@@ -595,8 +596,8 @@ struct NoticeActsHostedTests {
         #expect((page.frames[.request(eve.id)]?.height ?? 0) > 0)
         let more = NoticeActs.more(eve, in: session, language: .english)
         let why = "The sign-in on a.example only reads, so it cannot act on notices."
-        #expect(more.head == [why] && more.items.map(\.answers) == [false, false])
-        #expect(more.items.map { NoticeActs.spoken($0, of: more, language: .english) } == ["Let through. \(why)", "Let go. \(why)"])
+        #expect(more.whys == [why] && more.items.map(\.answers) == [false, false])
+        #expect(more.items.map { $0.title(language: .english) } == ["Let through. \(why)", "Let go. \(why)"])
         for item in more.items { item.press { acts.asked = $0 } }
         #expect(acts.asked == nil)
         #expect(await server.posts.isEmpty)

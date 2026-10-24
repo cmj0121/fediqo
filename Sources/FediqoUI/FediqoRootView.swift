@@ -822,10 +822,12 @@ public struct FediqoRootView: View {
         // (#122). That is what lets the order between them go unasked: `outermost` is handed at
         // most one of them, and `DummyCommand.canWalk` asks about the pair rather than either.
         case .person: walk.openedPerson != nil
-        case .people: walk.openedPeople != nil
+        // A list of people, and a server tended (#380): pages of rows opened from a source.
+        case .people: walk.openedPeople != nil || walk.openedTending != nil
         // The pages of the hashtags a search found and of those followed (#318, #319).
         case .rising: walk.openedFoundTags != nil || walk.openedFollowedTags != nil
-        case .tag: walk.openedTag != nil
+        // A hashtag's page, and the posts sharing a rising link (#379): pages of post rows.
+        case .tag: walk.openedTag != nil || walk.openedShared != nil
         case .thread: walk.openedThread != nil
         case .link: walk.openedLink != nil
         case .search: search.isOpen
@@ -941,7 +943,14 @@ public struct FediqoRootView: View {
     /// `Escape`, and drawn by nobody.
     private var viewedItem: DummyItem? {
         guard let viewing else { return nil }
-        return currentListItems.first { $0.id == viewing }
+        return currentListItems.first { $0.id == viewing } ?? noticeItem(viewing)
+    }
+
+    /// A post a notice's line draws as its row (#375), where the notices are in front: its pictures
+    /// open the viewer as a timeline row's do.
+    private func noticeItem(_ id: String) -> DummyItem? {
+        guard place == .notices else { return nil }
+        return session.noticeList.lines.lazy.compactMap(\.post).map { NoticeCard.item($0, in: session) }.first { $0.id == id }
     }
 
     /// Starts what is on top, or stops it if it is what is already playing.
@@ -1245,6 +1254,13 @@ public struct FediqoRootView: View {
         // Nor has the page of what a search found, or the list of the hashtags the reader follows.
         case .found, .followedTags:
             return []
+        // The posts sharing a rising link, as the page draws them (#379).
+        case .shared(let page):
+            return people.shared.items(of: page, in: session)
+        // A server tended has reports, walked by their rows (`currentListIDs`), and no post a
+        // mark of a post acts on (#381).
+        case .server:
+            return []
         case .thread(let opened):
             guard let item = session.held(opened) else { return streamItems() }
             return session.conversations.conversation(around: item).inOrder
@@ -1286,7 +1302,9 @@ public struct FediqoRootView: View {
         let person = walk.openedPerson.map { people.walkedIDs(of: $0, in: session) }
         // On a hashtag's About the rows are its blocks (F10).
         let tagAbout = walk.openedTag.flatMap { people.tags.walkedAbout(of: $0, in: session) }
-        let opened = listed ?? rising ?? foundTags ?? person ?? tagAbout
+        // On a server tended the rows are its reports (#381).
+        let tending = walk.openedTending.map { people.tending.walked($0, in: session) }
+        let opened = listed ?? rising ?? foundTags ?? person ?? tagAbout ?? tending
         // Over a search's posts stand the rows of what the sources found (#319).
         let posts = drawn ?? items.map(\.id)
         let ids = opened ?? (found.isEmpty ? posts : found + posts)
@@ -1382,7 +1400,7 @@ public struct FediqoRootView: View {
         // A page read out of a post is somebody else's page, and its top is its own business.
         case .link:
             return false
-        case .person, .tag, .people, .found, .followedTags, .thread, nil:
+        case .person, .tag, .people, .found, .followedTags, .shared, .server, .thread, nil:
             guard let first = rows?.first else { return false }
             selected = first
         }
@@ -1643,10 +1661,16 @@ public struct FediqoRootView: View {
         // link (#320).
         if let which = risingInFront {
             guard let listed = people.rising.row(id, of: which, in: session) else { return false }
-            return openRisingRow(listed.row, lit: listed.id)
+            return openRising(listed)
         }
         // Over a search's posts, and on the page of the hashtags it found, the row the lamp is
         // on may be what a source found (#319): Return opens it.
+        // On a server tended the row the lamp is on is a report (#381), which opens nothing — its
+        // acts are its `…` — or an account (#382), which opens that person as any person's row does.
+        if let page = keyed.openedTending {
+            guard page.tab == .people, let person = people.tending.people.account(id, of: page, in: session)?.person else { return false }
+            return openPerson(DummyPerson(person))
+        }
         if let page = keyed.openedFoundTags {
             guard let row = people.found.row(id, of: page, in: session) else { return false }
             return openFound(row)
@@ -1762,12 +1786,15 @@ public struct FediqoRootView: View {
     private var personAsked: Bool {
         if let list = walk.openedPeople { return people.lists.canAskAgain(list, in: session) }
         if let page = walk.openedFollowedTags { return people.followed.canAskAgain(page, in: session) }
+        if let page = walk.openedTending { return people.tending.canAskAgain(page, in: session) }
         return walk.openedPerson.map { people.canAskAgain($0, in: session) } ?? false
     }
 
     /// Whether the hashtag's page in front has a source to ask: one of the timeline in front's
     /// that keeps tags. Nothing is worked out with no such page.
     private var tagAsked: Bool {
+        // The posts sharing a rising link (#379), on the same layer: a source of it still here.
+        if let page = walk.openedShared { return people.shared.canAskAgain(page, in: session) }
         guard walk.openedTag != nil else { return false }
         return !session.reload.tagReach(of: session.currentTimeline, in: session).asked.isEmpty
     }
@@ -1825,6 +1852,11 @@ public struct FediqoRootView: View {
             Task { await people.again(person, in: session) }
             return true
         }
+        // On a server tended `r` asks it again, from the top (#381).
+        if DummyCommand.outermost(of: open) == .people, let page = walk.openedTending {
+            Task { await people.tending.again(page, in: session) }
+            return true
+        }
         // On a list of people `r` asks the source for it again, from the top (#311).
         if DummyCommand.outermost(of: open) == .people, let list = walk.openedPeople {
             Task { await people.lists.again(list, in: session) }
@@ -1833,6 +1865,11 @@ public struct FediqoRootView: View {
         // On the list of the hashtags followed `r` asks its source for it again, from the top (#318).
         if DummyCommand.outermost(of: open) == .rising, let page = walk.openedFollowedTags {
             Task { await people.followed.again(page, in: session) }
+            return true
+        }
+        // On the posts sharing a rising link `r` asks its sources again from the top (#379).
+        if DummyCommand.outermost(of: open) == .tag, let page = walk.openedShared {
+            Task { await people.shared.again(page, in: session) }
             return true
         }
         // On a hashtag's page `r` asks its sources again, of the timeline in front (decision 11).
@@ -1948,6 +1985,22 @@ public struct FediqoRootView: View {
     /// place's walk, come back from by leaving it. A line that is only words opens nothing.
     private func openNotice(_ notice: Notice) -> Bool {
         guard Self.noticesInFront(place: place, open: openLayers) else { return false }
+        // A new report opens the server's reports, on it, where the reader may tend them (#381).
+        if let page = Self.tendingOpened(by: notice, in: session) {
+            guard setOutFromNotices(to: .server(page), for: notice, lighting: notice.report.map(TendingReportsSaid.rowID)) else {
+                return false
+            }
+            // The report it names, where the page does not hold it, is asked for and stands at the top.
+            if let id = notice.report { Task { await people.tending.bringIn(id, of: page, in: session) } }
+            // The one who signed up, found among those waiting by their name, and lit (#382).
+            if page.tab == .people, let who = notice.people.first {
+                Task {
+                    let lit = await people.tending.people.lightSignUp(who, on: page, in: session)
+                    if let lit, walk.openedTending == page { selectedItemID = lit }
+                }
+            }
+            return true
+        }
         switch NoticeWords.opens(notice) {
         case .nothing:
             return false
@@ -1959,10 +2012,34 @@ public struct FediqoRootView: View {
         }
     }
 
+    /// The page of reports a notice of a new report opens (#381): where the reader's standing at
+    /// its source allows reports and the sign-in holds what reads them. Nothing otherwise, and
+    /// the line opens what it always did.
+    static func tendingOpened(by notice: Notice, in session: ShellSession) -> Tending? {
+        // A new report opens the reports (#381); a new sign-up, those waiting (#382).
+        let tab: TendingTab? = switch notice.kind {
+        case .server("admin.report"): .reports
+        case .server("admin.sign_up"): .people
+        default: nil
+        }
+        guard let tab, ShellTending.tabs(at: notice.source.host, in: session).contains(tab),
+              case .open(var page) = ShellTending.entry(at: notice.source.host, in: session)
+        else { return nil }
+        page.tab = tab
+        return page
+    }
+
     /// A face or a name on a line, pressed: that person, as a face on a post's row opens them.
     private func openNoticePerson(_ person: DummyPerson, of notice: Notice) -> Bool {
         guard Self.noticesInFront(place: place, open: openLayers) else { return false }
         return setOutFromNotices(to: .person(person), for: notice, lighting: nil)
+    }
+
+    /// Who boosted or favourited a post a line is about (#375): that list, a step of the timeline
+    /// place's walk, as from the post's own row.
+    private func openNoticePeople(_ list: PeopleList, of notice: Notice) -> Bool {
+        guard Self.noticesInFront(place: place, open: openLayers) else { return false }
+        return setOutFromNotices(to: .people(list), for: notice, lighting: nil)
     }
 
     /// The post is held first, as a thread's posts are, and the conversation opens from what is
@@ -2377,6 +2454,25 @@ public struct FediqoRootView: View {
         return opened
     }
 
+    /// A row of a tab of Trends that lists what is rising, opened: a link some source that named
+    /// it says it lists the posts of opens those posts, one more step of the walk with its row
+    /// lit (#379); every other row opens as `openRisingRow` opens it — a link where no source
+    /// says so, its page, as it always did.
+    private func openRising(_ listed: RisingListed) -> Bool {
+        guard let page = people.shared.page(opening: listed, in: session) else {
+            return openRisingRow(listed.row, lit: listed.id)
+        }
+        guard Self.canWalk(place: place, open: openLayers) else { return false }
+        let before = selectedItemID
+        selectedItemID = listed.id
+        guard walk.walk(to: .shared(page), from: listed.id) else {
+            selectedItemID = before
+            return false
+        }
+        selectedItemID = nil
+        return true
+    }
+
     /// The way to the hashtags the reader follows, pressed on their own page (#318): the list,
     /// one more step of the walk with its line lit — or, where the line is a lock, the question
     /// that asks the sign-in for who the reader follows, and no step.
@@ -2443,6 +2539,12 @@ public struct FediqoRootView: View {
     /// place it is a face pressed, and nothing more.
     private func openOwnPage(_ me: DummyPerson) {
         setOut(to: .person(me))
+    }
+
+    /// A source's "Tend" item (#380): the page of tending it, set out to as the reader's own page is.
+    private var tendOpener: ((Tending) -> Void)? {
+        guard availability.allows(.timeline) else { return nil }
+        return { page in setOut(to: .server(page)) }
     }
 
     /// "Its directory of people" on a source's page (#315): the directory, set out to as the
@@ -2512,6 +2614,10 @@ public struct FediqoRootView: View {
         // The page read out of a post goes with its step, and the page under it — never torn
         // down — is simply in front again (#169).
         if case .link = left.step { linkReader.close() }
+        // What a server tended holds goes with its last page (#380): asked afresh when it is opened again.
+        if case .server(let page) = left.step, !walk.steps.contains(where: { if case .server(let other) = $0 { other.host == page.host } else { false } }) {
+            people.tending.letGo(at: page.host)
+        }
         // A tag's ask goes with its page (#124).
         if case .tag = left.step { session.reload.endTag() }
         // What a list of the hashtags followed was told goes with its step (#318).
@@ -2767,6 +2873,10 @@ public struct FediqoRootView: View {
             return people.tags.rotate(
                 tag, by: step, covered: !Self.pageInFront(.tag, open: openLayers), lamp: &selectedItemID, in: session
             )
+        case .tending:
+            return people.tending.rotate(
+                &walk, by: step, covered: !Self.pageInFront(.people, open: openLayers), lamp: &selectedItemID, in: session
+            )
         case .found(let at, let which):
             let layer = ShellStep.found(at, which).layer
             return people.found.rotate(
@@ -2982,10 +3092,13 @@ public struct FediqoRootView: View {
                 onReload: { _ = readNotices() },
                 onOpen: { _ = openNotice($0) },
                 onOpenPerson: { person, notice in _ = openNoticePerson(person, of: notice) },
+                onOpenPeople: { list, notice in _ = openNoticePeople(list, of: notice) },
+                people: people,
+                media: NoticeMedia(decks: $decks, playback: playback, play: playRow, view: viewRow, turn: turnRow),
                 tooOld: noticeTooOld,
                 jumpToTop: noticeJump
             )
-        case .account: AccountPane(session: session, onOwnPage: ownPageOpener, announced: people.announcements)
+        case .account: AccountPane(session: session, onOwnPage: ownPageOpener, onTend: tendOpener, announced: people.announcements)
         case .usage: UsagePane()
         case .preferences: PreferencesPane()
         }
@@ -3028,7 +3141,10 @@ public struct FediqoRootView: View {
                 people: people,
                 onOpenListed: { _ = openListed($0) },
                 onOpenRisingRow: { _ = openRisingRow($0) },
-                onOpenRising: { _ = openRisingRow($0.row, lit: $0.id) },
+                onOpenRising: { _ = openRising($0) },
+                onOpenSharedPage: { _ = linkReader.open($0.link.link.url, from: $0.sources.first) },
+                onOpenServerPage: { url, host in _ = linkReader.open(url, from: host) },
+                onTurnTending: { tab in _ = people.tending.turn(&walk, to: tab, lamp: &selectedItemID, in: session) },
                 onOpenFound: { _ = openFound($0) },
                 onTurnFound: foundTurned,
                 onFollowed: { _ = followedPressed($0) },
@@ -3141,6 +3257,8 @@ private struct PersonPresenters: ViewModifier {
             .modifier(StandingSheetPresenter(people: people, session: session))
             .modifier(BlockedServersPresenter(servers: people.servers, session: session))
             .modifier(ReportSheetPresenter(people: people, session: session))
+            .modifier(AccountActSheetPresenter(people: people.tending.people, session: session))
+            .modifier(FederationAskSheetPresenter(servers: people.tending.servers, session: session))
     }
 }
 

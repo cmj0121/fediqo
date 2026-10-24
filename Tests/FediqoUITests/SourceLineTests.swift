@@ -148,22 +148,19 @@ struct SourceLineTests {
 
     // MARK: - What `…` holds
 
-    @Test("The menu's head is the waiting sentence, a refusal, the forum's notice, the permission reason and then why the key is dim; under it boards and lists, a divider, and clear and remove")
+    // Inverted (#385): the menu was headed by the waiting sentence, a refusal, the forum's notice,
+    // the permission reason and why the key is dim; no line heads it now — the source's detail
+    // reads the sentences whole, and the marks say their reasons.
+    @Test("The menu has no head: boards and lists, a divider, and clear and remove; what the row has to say is its colour on `…`, and the source's detail's")
     func whatTheMenuHolds() {
         let source = Source(host: "talk.example", kind: .discourse)
         let refusal = (host: "talk.example", key: "account.source.boards.unread")
         let drawn = Self.view(
             Self.row(source, owed: .asking), waiting: "Reading talk.example…", refusal: refusal, notice: "It did not sign in."
         )
-        #expect(drawn.more.head == [
-            "Reading talk.example…",
-            String(format: L10n.t("account.source.boards.unread"), "talk.example"),
-            "It did not sign in.",
-            String(format: L10n.t("account.source.permission"), "talk.example"),
-            // The reason names the mark it is about: a line read alone says what is dim.
-            "Open talk.example's own sign-in page. \(L10n.t("mark.dim.never"))",
-        ])
-        #expect(drawn.more.head.last == drawn.key.spoken)
+        #expect(drawn.more.whys.isEmpty)
+        #expect(!drawn.more.items.contains { drawn.said.contains($0.name) })
+        #expect(drawn.saying == .warns)
         #expect(drawn.more.ordinary.map(\.symbol) == ["checklist", "list.bullet"])
         #expect(drawn.more.dangers.map(\.symbol) == ["eraser", "trash"])
         #expect(drawn.more.divides)
@@ -171,9 +168,9 @@ struct SourceLineTests {
         #expect(drawn.more.ordinary.allSatisfy { $0.title().hasSuffix(L10n.t("mark.dim.never")) && !$0.answers })
         #expect(drawn.more.label() == L10n.t("mark.more"))
 
-        // At rest on a source with everything, the head is empty and every item answers.
+        // At rest on a source with everything, every item answers.
         let rest = Self.view(Self.row(Self.forum))
-        #expect(rest.more.head.isEmpty)
+        #expect(rest.more.whys.isEmpty)
         #expect(rest.more.items.map(\.name) == [
             "Change which boards you read on forum.example",
             "Choose which of your lists you read on forum.example",
@@ -324,11 +321,11 @@ struct SourceLineTests {
         }
     }
 
-    @Test("The permission glyph says its sentence in every language, at the head of the menu too, and a row that owes nothing draws none")
+    @Test("The permission glyph says its sentence in every language, and not in the menu (#385), and a row that owes nothing draws none")
     func whatPermissionSays() {
         let none = Self.row(Self.micro, signedIn: true)
         #expect(none.owed == .nothing && SourceRow.permissionLine(none) == nil)
-        #expect(Self.view(none).more.head.isEmpty)
+        #expect(Self.view(none).more.whys.isEmpty)
 
         for owed in [SourceRow.Owed.asking, .refused] {
             let row = Self.row(Self.micro, signedIn: true, owed: owed)
@@ -336,9 +333,8 @@ struct SourceLineTests {
                 let line = SourceRow.permissionLine(row, language: language)
                 #expect(line == String(format: L10n.t("account.source.permission", language: language), "micro.example"))
                 #expect(line?.contains("micro.example") == true && line?.contains("account.source") == false)
-                #expect(SourceRow.head(row, said: ["w"], language: language) == ["w", line!])
             }
-            #expect(Self.view(row).more.head == [SourceRow.permissionLine(row)!])
+            #expect(Self.view(row).more.whys.isEmpty)
         }
         #expect(L10n.t("account.source.permission", language: .taiwanese) != L10n.t("account.source.permission", language: .english))
     }
@@ -364,11 +360,10 @@ struct SourceLineTests {
         // And the row asks those rules with its own inputs.
         #expect(Self.view(row).permission == live && Self.view(row, actsLive: false).permission == held)
 
-        // Each dim mark's reason is in the head: held, the sign-in's mark is named there with the key.
+        // Inverted (#385): each dim mark's reason headed the menu; the marks say it, and the menu holds none.
         let busy = Self.view(row, actsLive: false)
-        #expect(Self.view(row).more.head == [live.name])
-        #expect(busy.more.head == [held.name] + ShellMore.reasons(of: [held, busy.key]))
-        #expect(busy.more.head.last == "\(held.name), \(busy.key.name). \(L10n.t("mark.dim.notNow"))")
+        #expect(Self.view(row).more.whys.isEmpty && busy.more.whys.isEmpty)
+        #expect(busy.key.spoken.hasSuffix(L10n.t("mark.dim.notNow")) && held.spoken.hasSuffix(L10n.t("mark.dim.notNow")))
     }
 
     @Test("The permission control is the sign-in's mark and one word together, the same word whatever is owed and in every language; without room it is the same mark with the word left off")

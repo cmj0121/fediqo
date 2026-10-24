@@ -10,7 +10,7 @@ import Foundation
 // all answer for themselves, and a floor would be wrong about each of them. **One exception,
 // decided (#330, D6)**: whether a host has quotes is its own word for which of Mastodon's APIs it
 // speaks, `api_versions.mastodon` — the document's own field for exactly that, not a guess made
-// from a version string.
+// from a version string. The posts of a rising link (#379) are read by the same word.
 //
 // **Per host, and for the run.** What a kind of source has is `SourceOffers`, said once for
 // every host of that kind; what *this* host has is here, kept in memory, written nowhere, and
@@ -80,6 +80,12 @@ public enum MastodonHostThing: String, Sendable, Hashable, CaseIterable {
     /// document's own word for its API** — `api_versions.mastodon` of 7 or more (D6), the version
     /// a Mastodon's quotes came in; less is absent, and a document that names none says nothing.
     case quotes
+    /// The posts a source says share a link rising on it (#379). **Said by the document's own
+    /// word for its API**, as quotes are: the address came with the first version a Mastodon's
+    /// document named (`linkPostsFrom`, 4.3), so any it names has it, and a document that names
+    /// none says nothing. Its address answers no not-found of its own for a link not rising, so
+    /// only a page of the host's own is the host lacking it.
+    case linkPosts
 }
 
 /// What is known of one thing at one host.
@@ -116,6 +122,8 @@ public struct MastodonHostSays: Sendable, Hashable {
 
     /// The API version quotes came in.
     public static let quotesFrom = 7
+    /// The API version the posts of a rising link came in: the first a Mastodon's document named.
+    public static let linkPostsFrom = 2
 
     /// The most a figure a host gives for itself is believed to be. A stranger's number: one
     /// past this is theirs to send and not ours to size anything by.
@@ -150,7 +158,7 @@ public struct MastodonHostSays: Sendable, Hashable {
         )
     }
 
-    /// What the document says of `thing`. Of all but three it says nothing.
+    /// What the document says of `thing`. Of all but four it says nothing.
     public func has(_ thing: MastodonHostThing) -> MastodonHostHas {
         switch thing {
         case .featuredTags:
@@ -162,6 +170,9 @@ public struct MastodonHostSays: Sendable, Hashable {
         case .quotes:
             guard let apiVersion else { return .unsaid }
             return apiVersion >= Self.quotesFrom ? .present : .absent
+        case .linkPosts:
+            guard let apiVersion else { return .unsaid }
+            return apiVersion >= Self.linkPostsFrom ? .present : .absent
         case .suggestions, .directory, .featuredPeople, .risingTags, .risingLinks, .announcements,
              .longerAccount, .knownServers, .activity, .pinnedPosts:
             return .unsaid

@@ -15,8 +15,8 @@ import SwiftUI
 struct PersonAboutSaid: Equatable {
     /// One block of the tab, top to bottom: what the lamp stops on.
     enum Block: String, CaseIterable {
-        case view, sentences, picture, words, fields, featuredTags, featuredPeople, figures, none, stands, boosts, notices, home,
-             requests, muted, blocked, servers, waiting, you
+        case view, sentences, picture, words, fields, featuredTags, featuredPeople, figures, none, stands, boosts, notices, languages,
+             familiar, note, home, requests, muted, blocked, servers, waiting, you, staff
     }
 
     /// The host of the source that says, and whose copies the pictures are.
@@ -47,6 +47,8 @@ struct PersonAboutSaid: Equatable {
     var keeping: [KeepingEntry] = []
     /// The way to the posts waiting to be sent at this source, on the reader's own page (#333).
     var waiting: WaitingEntry?
+    /// What only those who answer for the server see of them (#382): nothing without the standing.
+    var staff: TendingStaffSaid?
     /// What they feature on their profile (#315, #318), or nothing where it is not asked.
     var featured: FeaturedSaid?
 
@@ -111,6 +113,9 @@ struct PersonAboutSaid: Equatable {
             case .stands: standsDrawn
             case .boosts: taken(.boosts) != nil
             case .notices: taken(.notices) != nil
+            case .languages: standing?.languages != nil
+            case .familiar: standing?.familiar.isEmpty == false
+            case .note: standing?.notes == true
             case .home: home != nil
             case .requests: requests != nil
             case .muted: keeping.contains { $0.which == .muted }
@@ -118,6 +123,7 @@ struct PersonAboutSaid: Equatable {
             case .servers: keeping.contains { $0.which == .servers }
             case .waiting: waiting != nil
             case .you: followed != nil
+            case .staff: staff != nil
             }
         }
     }
@@ -195,6 +201,15 @@ struct PersonAbout<Lead: View>: View {
     var onKeeping: (KeepingEntry) -> Void = { _ in }
     /// A hashtag they feature, or the way to the people they feature (#315, #318).
     var onFeatured: (FeaturedPress) -> Void = { _ in }
+    /// The sheet of an act on them, from the staff block (#382).
+    var onStaffAct: (TendingStaffSaid) -> Void = { _ in }
+    /// The reader's note written (#377) — empty clears it — or, with nothing, the account part
+    /// asked for where the sign-in lacks it.
+    var onNote: (String?) -> Void = { _ in }
+    /// A face of somebody in common pressed: their page.
+    var onOpenPerson: (Person) -> Void = { _ in }
+    /// The languages of their posts that reach Home, chosen (#378): none, every language.
+    var onLanguages: ([String]) -> Void = { _ in }
     /// What stands over the blocks and scrolls away with them: the page's head, at a text
     /// size where it would fill the page.
     @ViewBuilder var lead: Lead
@@ -207,6 +222,12 @@ struct PersonAbout<Lead: View>: View {
     @ShellMetric(relativeTo: .caption2) private var glyphColumn: CGFloat = 20
 
     private static var top: String { "about.top" }
+
+    /// The note being written, while it is: nothing while it is read.
+    @State private var writing: String?
+    /// The languages being chosen, while they are (#378), and what is typed to find one.
+    @State private var choosing: Set<String>?
+    @State private var finding = ""
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -252,6 +273,9 @@ struct PersonAbout<Lead: View>: View {
         case .stands: stands
         case .boosts: narrowRow(.boosts)
         case .notices: narrowRow(.notices)
+        case .languages: languages
+        case .familiar: familiar
+        case .note: note
         case .home: home
         case .requests: requests
         case .muted: keeping(.muted)
@@ -259,6 +283,27 @@ struct PersonAbout<Lead: View>: View {
         case .servers: keeping(.servers)
         case .waiting: waitingLine
         case .you: you
+        case .staff: staffBlock
+        }
+    }
+
+    /// What only staff see of them (#382): signed up when, their mail and where they signed in
+    /// from, the states the server holds them in, what they wrote asking to join — and the way
+    /// to an act on them, where the reader may act.
+    @ViewBuilder
+    private var staffBlock: some View {
+        if let staff = said.staff {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                ForEach(TendingStaffSaid.lines(staff), id: \.self) { line in
+                    marked("shield.lefthalf.filled", line, ink: ShellChrome.inkDim(colorScheme))
+                }
+                if staff.acts {
+                    Button { onStaffAct(staff) } label: {
+                        marked("person.crop.circle.badge.exclamationmark", L10n.t("tend.staff.act"), ink: ShellChrome.ink(colorScheme))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 
@@ -451,11 +496,173 @@ struct PersonAbout<Lead: View>: View {
         }
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.hair)
+        .shellMoreHeld()
         .modifier(AboutBlockLit(lit: FeaturedSaid.lamp(of: tag.tag) == lit))
         .padding(.horizontal, -ShellSpace.pad)
         .id(FeaturedSaid.lamp(of: tag.tag))
     }
 
+
+    /// Who of the people the reader follows also follow them (#377): their faces, each a press that
+    /// opens that person, under the words that say what the faces are.
+    @ViewBuilder
+    private var familiar: some View {
+        if let standing = said.standing, !standing.familiar.isEmpty {
+            let words = PersonNoteWords.familiar(standing.familiar.count)
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                marked(PersonNoteWords.familiarSymbol, words, ink: ShellChrome.ink(colorScheme))
+                // Every one of them, wrapped as the tab is wide: the head's figure opens this.
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: bandHeight / 3), spacing: ShellSpace.tight)],
+                          alignment: .leading, spacing: ShellSpace.tight) {
+                    ForEach(standing.familiar, id: \.accountID) { person in
+                        Button { onOpenPerson(person) } label: { face(person) }
+                            .buttonStyle(.plain)
+                            .help(PersonNoteWords.open(person))
+                            .accessibilityLabel(PersonNoteWords.open(person))
+                    }
+                }
+            }
+        }
+    }
+
+    private func face(_ person: Person) -> some View {
+        Group {
+            if let url = person.avatarURL {
+                RemoteImage(
+                    url: url, tier: .deck, host: said.source, standing: .avatar, alt: nil, speaks: false,
+                    radius: DummyItemRow.Box.plate
+                )
+            } else {
+                ShellVacant(standing: .avatar, radius: DummyItemRow.Box.plate)
+            }
+        }
+        .frame(width: bandHeight / 3, height: bandHeight / 3)
+    }
+
+    /// Which languages of their posts reach Home (#378): a row like what else is taken from them,
+    /// whose press opens the choosing here — every language, or each language to take or leave,
+    /// found by typing — kept or dropped. While a choice is on its way the row is words.
+    @ViewBuilder
+    private var languages: some View {
+        if let standing = said.standing, let row = standing.languages {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                if let choosing, standing.narrowsTakePress {
+                    marked(PersonLanguagesWords.symbol, PersonLanguagesWords.title(), ink: ShellChrome.ink(colorScheme))
+                        .accessibilityHidden(true)
+                    languageRow(PersonLanguagesWords.all(), chosen: choosing.isEmpty) { self.choosing = [] }
+                    TextField(PersonLanguagesWords.find(), text: $finding)
+                        .shellFont(.body)
+                        .shellField(.alone)
+                        .accessibilityLabel(PersonLanguagesWords.find())
+                    let choices = PersonLanguagesWords.choices(row.offered, chosen: choosing, find: finding)
+                    LazyVStack(alignment: .leading, spacing: ShellSpace.tight) {
+                        ForEach(choices) { choice in
+                            let on = choosing.contains(choice.code)
+                            languageRow(choice.name, chosen: on) {
+                                if on { self.choosing?.remove(choice.code) } else { self.choosing?.insert(choice.code) }
+                            }
+                        }
+                    }
+                    HStack(spacing: ShellSpace.step) {
+                        ShellLinkButton(PersonLanguagesWords.keep()) {
+                            // In the order they are named, so what is sent and read back read alike.
+                            let chosen = choices.map(\.code).filter(choosing.contains)
+                                + choosing.subtracting(choices.map(\.code)).sorted()
+                            self.choosing = nil
+                            if Set(chosen) != Set(row.codes) { onLanguages(chosen) }
+                        }
+                        .fixedSize()
+                        ShellLinkButton(L10n.t("board.choose.cancel")) { self.choosing = nil }
+                            .fixedSize()
+                    }
+                } else {
+                    let label = marked(PersonLanguagesWords.symbol, row.words(), ink: ShellChrome.ink(colorScheme))
+                    if standing.narrowsTakePress {
+                        Button {
+                            finding = ""
+                            choosing = Set(row.codes)
+                        } label: { label.contentShape(Rectangle()) }
+                            .buttonStyle(.plain)
+                            .help(ShellIconButton.hover(name: row.words(), help: PersonLanguagesWords.hint(said.source)))
+                            .accessibilityLabel(PersonLanguagesWords.title())
+                            .accessibilityValue(row.state())
+                            .accessibilityHint(PersonLanguagesWords.hint(said.source))
+                    } else {
+                        label
+                    }
+                }
+            }
+        }
+    }
+
+    /// One language to take or leave while choosing: a checkmark where it is taken, said in words.
+    private func languageRow(_ name: String, chosen: Bool, press: @escaping () -> Void) -> some View {
+        Button(action: press) {
+            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+                Image(systemName: chosen ? "checkmark.circle.fill" : "circle")
+                    .frame(width: glyphColumn.rounded(.up), alignment: .leading)
+                    .accessibilityHidden(true)
+                Text(name).fixedSize(horizontal: false, vertical: true)
+            }
+            .shellFont(.meta)
+            .foregroundStyle(chosen ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(name)
+        .accessibilityValue(PersonLanguagesWords.chosen(chosen))
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+    }
+
+    /// The reader's own note on them (#377): what it says, and the press that writes it — or,
+    /// while it is written, the words and the presses that keep or drop them. Without the account
+    /// part it is the lock, its press asking for the part.
+    @ViewBuilder
+    private var note: some View {
+        if let standing = said.standing {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                if let writing {
+                    // Said by the field itself: the heading is not read a second time.
+                    marked("note.text", PersonNoteWords.title(), ink: ShellChrome.ink(colorScheme))
+                        .accessibilityHidden(true)
+                    TextField(PersonNoteWords.title(), text: Binding(get: { writing }, set: { self.writing = $0 }), axis: .vertical)
+                        .shellFont(.body)
+                        .lineLimit(2 ... 6)
+                        .shellField(.alone)
+                        .accessibilityLabel(PersonNoteWords.title())
+                    HStack(spacing: ShellSpace.step) {
+                        ShellLinkButton(PersonNoteWords.keep()) {
+                            onNote(writing)
+                            self.writing = nil
+                        }
+                        .fixedSize()
+                        ShellLinkButton(L10n.t("board.choose.cancel")) { self.writing = nil }
+                            .fixedSize()
+                    }
+                } else {
+                    let words = standing.note ?? PersonNoteWords.none()
+                    // Said by the note's own label: the heading is not read a second time.
+                    marked("note.text", PersonNoteWords.title(), ink: ShellChrome.ink(colorScheme))
+                        .accessibilityHidden(true)
+                    Text(words)
+                        .shellFont(.body)
+                        .foregroundStyle(standing.note == nil || standing.noteSending
+                            ? ShellChrome.inkDim(colorScheme) : ShellChrome.ink(colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .accessibilityLabel(PersonNoteWords.spoken(standing.note))
+                    if standing.noteMissed { quiet(PersonNoteWords.missed(said.source)) }
+                    if let sentence = standing.noteRefused { quiet(PersonNoteWords.refused(sentence, at: said.source)) }
+                    if let lock = standing.accountLock {
+                        locked(PersonNoteWords.locked(lock, at: said.source), asks: lock.asks, press: { onNote(nil) })
+                    } else {
+                        ShellLinkButton(PersonNoteWords.write(standing.note)) { self.writing = standing.note ?? "" }
+                            .fixedSize()
+                    }
+                }
+            }
+        }
+    }
 
     /// The way to the people they feature: words, and the mark that says it leads on.
     @ViewBuilder

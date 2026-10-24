@@ -90,6 +90,10 @@ public struct Notice: Hashable, Sendable, Identifiable {
     public let at: Date
     /// The newest notice id it stands for.
     public let newestID: String
+    /// The report a notice of a new report is about (#381), by the id its server gives it —
+    /// what opens it among the reports of the server tended. Held for the run: a notice read
+    /// back from this device's store names none, and opens the reports at their top.
+    public let report: String?
     /// The oldest notice id it stands for **on the pages read so far**: a gathered line the
     /// source cut at a page edge reaches further down once the next page is folded in.
     public let oldestID: String
@@ -100,8 +104,9 @@ public struct Notice: Hashable, Sendable, Identifiable {
 
     public init(
         source: Source, handle: Handle, kind: Kind, people: [NoticePerson], count: Int = 1, post: Note? = nil,
-        at: Date, newestID: String, oldestID: String
+        at: Date, newestID: String, oldestID: String, report: String? = nil
     ) {
+        self.report = report
         self.source = source
         self.handle = handle
         self.kind = kind
@@ -122,7 +127,7 @@ public struct Notice: Hashable, Sendable, Identifiable {
     public func carrying(_ post: Note?) -> Notice {
         Notice(
             source: source, handle: handle, kind: kind, people: people, count: count, post: post, at: at,
-            newestID: newestID, oldestID: oldestID
+            newestID: newestID, oldestID: oldestID, report: report
         )
     }
 
@@ -143,7 +148,8 @@ public struct Notice: Hashable, Sendable, Identifiable {
             people: people + older.people.filter { seen.insert($0.handle).inserted },
             count: max(count, older.count), post: post ?? older.post, at: max(at, older.at),
             newestID: StatusID.later(older.newestID, than: newestID) ? older.newestID : newestID,
-            oldestID: StatusID.later(oldestID, than: older.oldestID) ? older.oldestID : oldestID
+            oldestID: StatusID.later(oldestID, than: older.oldestID) ? older.oldestID : oldestID,
+            report: report ?? older.report
         )
     }
 }
@@ -271,12 +277,29 @@ public struct NoticePerson: Hashable, Sendable {
     /// they enter: what every sentence and every row says of them.
     public let lineName: String
     public let lineHandle: String
+    /// The id their source knows them by, where it said: what answering their request, or
+    /// removing them as a follower, names them by (#375). Nothing on a line held before it was
+    /// kept.
+    public let accountID: String?
+    /// The start of what they say of themselves, out of its markup and cut to `wordsLength`:
+    /// enough for the first line a row of them draws (#375). Nothing where they wrote none, or
+    /// the line was held before it was kept.
+    public let words: String?
 
-    public init(handle: String, name: String, avatarURL: URL? = nil, emojis: [CustomEmoji] = []) {
+    /// How much of what they say of themselves a line keeps: more than one line of a row shows.
+    public static let wordsLength = 300
+
+    public init(
+        handle: String, name: String, avatarURL: URL? = nil, emojis: [CustomEmoji] = [],
+        accountID: String? = nil, words: String? = nil
+    ) {
         self.handle = handle
         self.name = name
         self.avatarURL = avatarURL
         self.emojis = emojis
+        self.accountID = accountID
+        let kept = words.map { String($0.unicodeScalars.prefix(Self.wordsLength).map(Character.init)) }
+        self.words = kept?.isEmpty == false ? kept : nil
         lineName = LineText.oneLine(name)
         lineHandle = LineText.oneLine(handle)
     }
@@ -399,6 +422,44 @@ public enum NoticeHolding: Hashable, Sendable {
     public var held: NoticesHeld? {
         if case .holds(let held) = self, !held.isEmpty { held } else { nil }
     }
+}
+
+/// Whose notices a source holds back, and how (#376): for each kind of sender the source names,
+/// whether their notices are let in, held back, or let go.
+public struct NoticePolicy: Hashable, Sendable {
+    /// Whose notices, in the source's own words for them.
+    public enum Whose: String, CaseIterable, Sendable {
+        /// People the reader does not follow.
+        case notFollowing = "for_not_following"
+        /// People who do not follow the reader.
+        case notFollowers = "for_not_followers"
+        /// Accounts made lately.
+        case newAccounts = "for_new_accounts"
+        /// Words sent to the reader alone by somebody they do not follow.
+        case privateMentions = "for_private_mentions"
+        /// Accounts the server's moderators limited.
+        case limitedAccounts = "for_limited_accounts"
+    }
+
+    /// What becomes of them.
+    public enum Way: String, CaseIterable, Sendable {
+        /// Let in, as anybody's are.
+        case accept
+        /// Held back, to be let through or let go (#323).
+        case filter
+        /// Let go, and never shown.
+        case drop
+    }
+
+    /// The choices the source said it has, and how each stands.
+    public var ways: [Whose: Way]
+
+    public init(ways: [Whose: Way]) {
+        self.ways = ways
+    }
+
+    /// The choices the source has, in the order they are offered.
+    public var offered: [Whose] { Whose.allCases.filter { ways[$0] != nil } }
 }
 
 /// One person's notices a source is holding back, waiting to be let through or let go.

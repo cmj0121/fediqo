@@ -54,6 +54,10 @@ struct PersonPageActs {
     var onListAct: (PersonAct, Person) -> Void = { _, _ in }
     /// The head's Follow, or an item of the `…`.
     var onAct: (PersonAct) -> Void = { _ in }
+    /// The reader's note on them written (#377), or — with nothing — the account part asked for.
+    var onNote: (String?) -> Void = { _ in }
+    /// The languages of their posts that reach Home, chosen on About (#378).
+    var onLanguages: ([String]) -> Void = { _ in }
     /// The press on the lock of a sign-in that was not asked for following.
     var onAskFollows: () -> Void = {}
     /// Change, on the reader's own page.
@@ -66,6 +70,8 @@ struct PersonPageActs {
     var onOpenListed: (Person) -> Void = { _ in }
     var onListAgain: () -> Void = {}
     var onListReadOn: () -> Void = {}
+    /// The sheet of an act on them, from About's staff block (#382).
+    var onStaffAct: (TendingStaffSaid) -> Void = { _ in }
 }
 
 /// What the post rows of somebody's page are drawn with: the thread pane's own fittings,
@@ -196,7 +202,8 @@ struct PersonPage: View {
                 PersonAbout(
                     said: about, lit: selectedID, jumpToTop: jumpToTop, onHome: acts.onHome, onFollowed: acts.onFollowed,
                     onAskFollows: acts.onAskFollows, onAct: acts.onAct, onRequests: acts.onRequests, onKeeping: acts.onKeeping,
-                    onFeatured: acts.onFeatured,
+                    onFeatured: acts.onFeatured, onStaffAct: acts.onStaffAct, onNote: acts.onNote,
+                    onOpenPerson: acts.onOpenListed, onLanguages: acts.onLanguages,
                     lead: lead
                 )
             }

@@ -7,8 +7,8 @@ import SwiftUI
 /// sentence can be asked for without drawing a row.
 ///
 /// **An act is offered only where the sign-in may act.** Dismissing, letting through and
-/// letting go change the source, so a sign-in that only reads is shown the item dim, with the
-/// reason at the menu's head — the place a finger reads it.
+/// letting go change the source, so a sign-in that only reads is shown the item dim, saying
+/// why after its name (`ShellMoreItem.because`).
 @MainActor
 enum NoticeActs {
     static let dismissSymbol = "bell.slash"
@@ -32,7 +32,7 @@ enum NoticeActs {
     }
 
     private static func menu(_ items: [ShellMoreItem], why: String?) -> ShellMore {
-        why.map { ShellMore(head: [$0], items: items.map(\.underHead)) } ?? ShellMore(items: items)
+        ShellMore(items: items.map { $0.because(why) })
     }
 
     // MARK: - The menus
@@ -53,8 +53,8 @@ enum NoticeActs {
 
     /// The head's `…`: dismissing all, **one item a source** — one press, one source, one
     /// request and one answer, so the question names exactly what goes and nothing is ever
-    /// half done. A source whose sign-in may not dismiss is listed dim and named at the head
-    /// with why: it is left alone. Nothing where no sign-in may read notices.
+    /// half done. A source whose sign-in may not dismiss is listed dim, saying why: it is left
+    /// alone. Nothing where no sign-in may read notices.
     ///
     /// `among` is `NoticesPane.hosts(in:)` where the caller has it worked out already.
     static func more(
@@ -64,7 +64,6 @@ enum NoticeActs {
         let acts = session.noticeList.acts
         let hosts = (known ?? NoticesPane.hosts(in: session)).filter { $0.notices == .allowed }.map(\.host)
         guard !hosts.isEmpty else { return nil }
-        var head: [String] = []
         let items = hosts.map { host -> ShellMoreItem in
             let why = why(host: host, in: session, language: language)
             let item = ShellMoreItem.danger(
@@ -73,11 +72,9 @@ enum NoticeActs {
                 asks: ShellQuestion.dismissAll(host: host, language: language),
                 act: { Task { await acts.dismissAll(host: host, in: session) } }
             )
-            guard let why else { return item }
-            head.append(why)
-            return item.underHead
+            return item.because(why)
         }
-        return ShellMore(head: head, items: items)
+        return ShellMore(items: items)
     }
 
     /// A held-back request's `…`: Let through and Let go, **each asked first**. Letting through
@@ -109,12 +106,6 @@ enum NoticeActs {
         return true
     }
 
-    /// What a listener is offered of a menu, the row it belongs to being one element: each
-    /// item by its name, and one that does nothing here with the menu's reason after it.
-    static func spoken(_ item: ShellMoreItem, of more: ShellMore, language: DummyLanguage? = nil) -> String {
-        guard !item.answers, let why = more.head.first else { return item.title(language: language) }
-        return ShellMark.said(item.name, why, language: language)
-    }
 
     // MARK: - The sentences
 
@@ -291,7 +282,7 @@ struct NoticeMenuActions: View {
     var body: some View {
         let menu = more()
         ForEach(Array(menu.items.enumerated()), id: \.offset) { _, item in
-            Button(NoticeActs.spoken(item, of: menu)) { item.press { asks.wrappedValue = $0 } }
+            Button(item.title()) { item.press { asks.wrappedValue = $0 } }
         }
     }
 }

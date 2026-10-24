@@ -46,6 +46,14 @@ enum ShellStep: Hashable, Sendable {
     /// page there. A hashtag's row opens that hashtag's page, and leaving it gives the row
     /// back: both are the walk's own.
     case followedTags(FollowedTags)
+    /// The posts a source says share a link rising on it (#379), opened from the link's row on
+    /// Trends where a source that named it says it lists them. A row opens its conversation,
+    /// and leaving it gives the row back: both are the walk's own.
+    case shared(SharedLink)
+    /// A server the reader answers for, tended (#380): a page of its own opened from that
+    /// source's `…` — or from a notice of a new report — on the tab of a task the reader's
+    /// standing there allows. Its tab is the step's own value, turned in place.
+    case server(Tending)
 }
 
 /// Whose the Tab key is with a step in front (F10): the page's own, asked of the walk before
@@ -60,6 +68,9 @@ enum StepTabKey: Hashable, Sendable {
     /// their ring — the tab is the step's own value, turned in place — and taken, turning
     /// nothing, where it gave one.
     case found(FoundAt, FoundWhich)
+    /// A server tended (#380): a tab for each task the standing allows, round their ring — the
+    /// tab is the step's own value, turned in place — and taken, turning nothing, where it has one.
+    case tending(Tending)
     /// A page with no tabs (F10): the key is taken and does nothing — to change timeline the
     /// reader leaves first — while the page, drawn as `layer`, is what is in front.
     case sole(DummyLayer)
@@ -75,6 +86,10 @@ extension ShellStep {
         case .tag: .tag
         case .people, .found(_, .people): .people
         case .found(_, .tags), .followedTags: .rising
+        // A page of post rows opened from a row, as a hashtag's is.
+        case .shared: .tag
+        // A page of rows opened from a source, as a list of people is.
+        case .server: .people
         case .thread: .thread
         case .link: .link
         }
@@ -88,6 +103,8 @@ extension ShellStep {
         case .thread: .sole(.thread)
         case .people: .sole(.people)
         case .followedTags: .sole(.rising)
+        case .shared: .sole(.tag)
+        case .server(let page): .tending(page)
         case .tag(let tag): .tag(tag)
         case .found(let at, let which): .found(at, which)
         case .link: nil
@@ -111,6 +128,8 @@ extension ShellStep {
         case .people: if case .people = other { true } else { false }
         case .found: if case .found = other { true } else { false }
         case .followedTags: if case .followedTags = other { true } else { false }
+        case .shared: if case .shared = other { true } else { false }
+        case .server: if case .server = other { true } else { false }
         }
     }
 }
@@ -170,6 +189,18 @@ struct ShellWalk: Hashable, Sendable {
         case .found(let at, .people): at.people
         default: nil
         }
+    }
+
+    /// The posts sharing a rising link in front, where they are (#379).
+    var openedShared: SharedLink? {
+        guard case .shared(let page) = standing else { return nil }
+        return page
+    }
+
+    /// The server tended in front, where one is (#380).
+    var openedTending: Tending? {
+        guard case .server(let page) = standing else { return nil }
+        return page
     }
 
     /// The page read out of a post that is in front, where one is (#169).

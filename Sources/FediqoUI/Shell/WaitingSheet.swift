@@ -129,7 +129,7 @@ struct WaitingSheet: View {
         _ post: WaitingPost, host: String, change: @escaping (WaitingPost) -> Void, move: @escaping (WaitingPost) -> Void,
         withdraw: @escaping (WaitingPost) -> Void, language: DummyLanguage? = nil
     ) -> ShellMore {
-        ShellMore(head: [LaterWords.spoken(post, language: language)], items: [
+        ShellMore(items: [
             .plain("pencil", L10n.t("waiting.change", language: language)) { change(post) },
             .plain("clock.arrow.circlepath", L10n.t("waiting.move", language: language)) { move(post) },
             .danger(
@@ -202,6 +202,7 @@ struct WaitingSheet: View {
         .padding(ShellSpace.pad)
         .contentShape(Rectangle())
         .onTapGesture { if said.locked == nil, !busy { onChange(post) } }
+        .shellMoreHeld()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(LaterWords.spoken(post))
         .accessibilityAction { if said.locked == nil, !busy { onChange(post) } }

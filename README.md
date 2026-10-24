@@ -141,9 +141,16 @@ does not. So its checks are run by themselves (one waits the five minutes the se
 post wait at the least), and what it did stays until the servers are thrown away: a plain
 `make servers` on them refuses and says to run `make servers-down` first.
 
+Two things a Mastodon does behind the scenes need that worker too. A person followed in only the
+languages you chose reaches Home in those languages alone because the worker fills Home; and what
+a review lets rise on a server rises only once the worker ranks it again. Without the worker, Home
+there is not filled and nothing rises, whatever Fediqo sent. The Home check runs with the worker
+up; whether a hashtag, a link or a post let rise then rises is not checked here.
+
 ```text
 FEDIQO_SERVERS_WORKER=1 make servers
 FEDIQO_SERVERS_WORKER=1 swift test --filter MastodonWorkerSaysTests
+FEDIQO_SERVERS_WORKER=1 swift test --filter homeTakesOnlyWhatIsChosen
 make servers-down
 ```
 
@@ -411,6 +418,19 @@ presses is dim, under the mark signing in wears, and asks for it. Nobody is sign
 device or another; close the server's page, or say no on it, and the sign-in you had goes on as
 it was. A sign-in that only reads may be asked too.
 
+Your profile's part also covers the note you keep on somebody's page, and dismissing notices also
+covers choosing whose notices a source holds back. Where the sign-in lacks the part, each asks for
+it, as above.
+
+Tending a server is the larger thing, and is asked for on its own and only from one place: Tend
+on a source's row on Account, which is there only where your account's role on that server lets
+it tend — see Tending a server, below. The press asks first, and says that the server's page asks
+for what the sign-in already has and for tending the server, as far as your role there allows.
+Nothing else ever asks for it, and no other part brings it. Nobody is signed out; close the
+server's page, or say no on it, and the sign-in you had goes on as it was. A sign-in that only
+reads may be asked too, and then reads what the server keeps for those who answer for it without
+acting on any of it.
+
 What a sign-in asks its server for, in the server's own words:
 
 | Part       | Asked for                                            | When                                            |
@@ -423,6 +443,10 @@ What a sign-in asks its server for, in the server's own words:
 | who you follow | `read:follows`                                   | only after you press for following              |
 | following  | `write:follows`                                      | with who you follow, and only where the sign-in writes |
 | your profile | `write:accounts`                                   | only after you press for something it covers    |
+| tending    | `admin:read admin:write`                             | only on its own, from Tend, where your role allows |
+
+`write:notifications` covers choosing whose notices a source holds back as well as dismissing,
+and `write:accounts` covers your note on somebody as well as your profile.
 
 A server that refuses `read:search` or `write:bookmarks` is asked again without it.
 
@@ -447,7 +471,8 @@ and three dots, and a megaphone while it has announcements you have not seen. Th
 stands before the key, only at a source you are signed in to, and a press on it opens the
 source's page; it draws no number, and VoiceOver says how many. The megaphone aside, every
 source draws the same marks; one a source does not have, or cannot do right now, is grey and
-says why. Choosing boards and lists is behind the dots, and so are Clear and Remove. What may be
+says why. Choosing boards and lists is behind the dots, and so are Clear and Remove, and Tend
+where your role on that server lets you tend it. What may be
 done on that source — read, read and write, or read only where the protocol has no writing in
 Fediqo at all, which is every forum — is no longer written on the row, and VoiceOver still says
 it. It is the server's own answer: a server that grants less than Fediqo asked for is taken at
@@ -459,17 +484,37 @@ wherever a sign-in is asked for more; a plain lock means only what is locked —
 asks before anyone follows, a post for followers only. The sign-in's mark is red on a source
 that turned a write away, and stays until you sign in to it again.
 
-Whatever takes something away, signing out aside, is behind three dots on the row or the section
-it acts on, and asks first: Clear and Remove on a source's row, Clear and Forget password in a
-source's detail on Usage, Stop keeping, letting go by dates, dropping picture copies, removing a
-timeline or a host you added, taking back a post of your own, dismissing a notice or every
-notice of a source, dismissing an announcement, telling a source not to suggest somebody,
-refusing a request to follow you, removing a follower, and letting go of what a source holds
-back. Signing out is the key itself, and asks first too. One is not asked: removing a rule from
-a timeline being edited is behind the dots as well, but it is only a draft, and nothing is kept
-until Done. Taking somebody or a hashtag off your profile is behind the dots too, and is not
-asked either: Feature puts it back. Discarding a text that was not sent asks first as well, from
-its line at the foot of the page.
+Three dots open a small panel of their own: beside the dots on a wide page, rising from the
+bottom on a phone. Each act in it is a mark and its name, in one list, and the panel closes on a
+choice, on a press outside it, or on Esc; a keyboard walks its acts and Return chooses. Holding a
+row opens the same panel. It holds only what the row does not already show: on a post's row,
+answering, boosting, quoting, favouriting, bookmarking and keeping are on the row and not in the
+panel, and no panel opens with lines about what it belongs to — who wrote it, exactly when, who
+may read it — since the row says those. A mark that is dim, on a row or in a panel, says why
+beside it when pressed; one the sign-in must be asked again for still asks.
+
+Whatever takes something away, or cannot be undone at once, is drawn red, stands last in the
+panel under a divider, and asks first; nothing red acts before your yes, and nothing that is not
+red asks. On posts and people that is taking back a post of your own; muting somebody, blocking
+them, or blocking a whole server; reporting; unfollowing, every time and not only somebody who
+must agree; and removing a follower. Muting, blocking and reporting each open their own sheet,
+which is their question. Taking back a boost, a favourite or a bookmark is not red: one press
+undoes it.
+
+The rest of what takes something away, signing out aside, is red behind the dots of the row or
+the section it acts on, and asks first too: Clear and Remove on a source's row, Clear and Forget
+password in a source's detail on Usage, Stop keeping, letting go by dates, dropping picture
+copies, removing a timeline or a host you added, dismissing a notice or every notice of a
+source, dismissing an announcement, telling a source not to suggest somebody, refusing a request
+to follow you, letting through or letting go of what a source holds back, and choosing to let go
+of a kind of notice it would hold back. Tending a server adds turning away somebody who asks to
+join, suspending an account, and suspending a server or refusing an address with no access at
+all or a wide range of addresses; taking anything off the server's lists asks as well. Signing
+out is the key itself, and asks first too. One is not asked: removing a rule from a timeline
+being edited is behind the dots as well, but it is only a draft, and nothing is kept until Done.
+Taking somebody or a hashtag off your profile is behind the dots too, and is not asked either:
+Feature puts it back. Discarding a text that was not sent asks first as well, from its line at
+the foot of the page.
 
 The secret is kept in this device's Keychain. It is not in the
 store, it is not copied to iCloud, and it does not follow your Apple account to another
@@ -544,6 +589,11 @@ it was left on, and Tab and ⇧Tab turn its tabs. Timeline and Trends each keep 
 opened over them and where they were read, so going between them gives each back as it was;
 a link read in place is the one exception, and is closed when you go to the other.
 
+A rising link opens the posts that share it, where its source can say which: a page of its own
+headed by what the link says of itself, its posts newest first, read and read on as any timeline
+is. Open the page, on its bar, opens the link's own page. A source that cannot say which posts
+share a link names none there, and where no source can, the link opens its own page as it did.
+
 `l` is the press on Follow on the page in front, and it only ever follows; on your own page,
 where Follow would stand, it is the press on Change. On somebody's page
 it follows them, or asks to where they must agree. On a hashtag's page it follows the hashtag
@@ -607,6 +657,11 @@ it only where it also arrives on its own.
 A mention of somebody in a post's words opens their page too, where the source said the post
 mentions them; a name it did not list stays plain text.
 
+In a post's words a link reads light blue, with a faint underline in its own blue that turns solid
+under a pointer; a hashtag reads quiet grey, a little heavier than the words round it; and a name
+the post mentions reads bold, in the words' own ink. The teal that says where you are is not used
+in a post's words, and the light blue is used for nothing but those links.
+
 Somebody's page takes the whole place: nothing of the timelines stands over it. Its head
 says who they are and which source the page is read through, and carries three figures —
 their posts, who follows them, who they follow — each a mark and a number, as the source gave
@@ -654,9 +709,20 @@ your own row, or at a kind of source that does not offer following. Somebody who
 you is not said on a row. A row is not read again after you follow from somebody's page,
 until the list is.
 
+Somebody's About also says who you both know, and keeps your note on them, read through a
+Mastodon source you are signed in to. Where some of the people you follow also follow them, About
+has a line of their faces — "Followed by 3 people you follow" — each opening that person, and the
+head has a mark with how many, which opens About; where nobody is known in common, nothing is
+drawn. Your note is words only you read, kept at the source, so another of your devices and the
+server's own page show it too; Write a note, or Change the note, opens it in place, and Keep
+sends it. Cleared, the note is gone there as well. A note the source would not keep, or that did
+not reach it, says so under it and is as it was there. Where the sign-in was not given your
+profile, the note is under the mark signing in wears and asks for it.
+
 Follow is on that page, and `l` presses it. Somebody who must agree is asked, and shows as
-asked. Unfollowing, and withdrawing a request, are behind the page's three dots; unfollowing
-somebody who must agree asks first, since following them again means asking again. Follow is
+asked. Unfollowing, and withdrawing a request, are behind the page's three dots; unfollowing asks
+first, every time — for somebody who must agree it says following them again means asking
+again. Follow is
 not offered where they have blocked you, where you block them, or where they have moved,
 since the source refuses it. Each is drawn at the press and the source asked after, as a mark
 on a post is: a read already on its way does not undo it, and a press that did not arrive
@@ -674,6 +740,14 @@ arrive puts the switch back to what the source last said and says so. A switch i
 follow nobody asked for. A source changes these by being asked to follow again, so how you
 stand is read once more before anything is sent: still followed, it is sent; otherwise
 nothing is, and the page turns to what the source says.
+
+Which languages of their posts reach your Home is chosen the same way. Their languages, on About,
+reads back what was chosen, and a press opens the choosing there: Every language, or each
+language to take or leave, found by typing, then Keep. Choosing none is every language, as the
+source takes it. From then a post of theirs in another language does not reach Home at that
+source, nor here. It is offered once you follow them, and a choice that did not arrive puts the
+row back to what the source last said and says so. A timeline's own rules on language stay
+Fediqo's, and are not this.
 
 Requests to follow you are answered on your own page at a source, which Account opens. Its
 About has a line for who asks to follow you, with the figure the source last gave, and a press
@@ -769,6 +843,8 @@ what it counts to a pointer and to VoiceOver. What a kind of source does not hav
 | a list of people opened alone   | none                                                  |
 | what a search found at a source | People · Hashtags, the one pressed in front           |
 | the hashtags you follow         | none                                                  |
+| the posts that share a link     | none                                                  |
+| a server you tend               | Reports · People · Servers · Server, as your role allows |
 
 A hashtag's head counts the posts under it that this device has read lately — at least so
 many, marked + — and marks each source that says you follow it; About says how it stands at
@@ -875,15 +951,33 @@ not yet asked for notices is named with one press that asks, under the same mark
 row on Account draws where its sign-in must be asked again — see Signing in to Mastodon,
 above.
 
-Every such source's notices are one list, newest first. Each line says what happened, who did
-it, the post it is about where there is one, when, and its source. Where the source gathers
-many of one kind about one post, that is one line naming one person and how many others;
-Fediqo gathers nothing of its own. A kind this version does not know is kept and said to be
-unknown.
+Every such source's notices are one list, newest first, each saying its source and when. A
+notice reads as what it is about, drawn as it is everywhere else:
 
-A post its author covered is covered on a notice's line too, and on what a source holds back:
-the line shows the author's warning, or that the post is covered, and never the words
-beneath. Opening it leads to the conversation, where it is covered as it is anywhere.
+| Notice                                          | Reads as                                                   |
+| ----------------------------------------------- | ---------------------------------------------------------- |
+| an answer, a mention, a quote, a post told of   | a quiet line of what happened, over that post's own row    |
+| a boost or a favourite of your post             | faces — "A, B and 3 others" — over your post, short, quieter |
+| a poll that ended, a post you boosted changed   | a line of what happened, over the post's row               |
+| a new follower                                  | that person's row, with how you stand as marks             |
+| a request to follow you                         | that person's row, with accepting and declining on it      |
+| anything else                                   | one line of words                                          |
+
+A post told of is a new post by somebody whose posts you asked to be told of.
+
+A post in a notice is the same row it is on a timeline: it is answered, boosted, favourited and
+bookmarked from the notice itself, and what is done to it on one shows on the other at once.
+Pressing a face opens that person, and "and 3 others" opens who they are. What can be done to a
+follower is in their row's three dots, as on their page; declining a request asks first. What
+has nothing behind it — the server's word, a relationship the server cut, a year looked back on —
+stays one line, and a new sign-up or report on a server you tend opens that server's page, on its
+tab — see Tending a server, below. Where the source gathers many of one kind about one post, that
+is one notice; Fediqo gathers nothing of its own. A kind this version does not know is kept and
+said to be unknown.
+
+A post its author covered is covered in a notice too, and on what a source holds back: it shows
+the author's warning, or that the post is covered, and never the words beneath, until you lift
+the cover as you would anywhere.
 
 | Key      | What it does on Notices                          |
 | -------- | ------------------------------------------------ |
@@ -919,7 +1013,7 @@ on this device.
 A notice opens what it is about. One about a post opens that post in its conversation, in the
 timeline, and leaving it comes back to the line it was opened from. One about a person — a
 follow, a request to follow — opens what Fediqo shows of that person. A post older than this
-device keeps says so on its line.
+device keeps says so on its row, and nothing pressed on it is done.
 
 Dismissing is done at the source. A notice is dismissed from the three dots on its line, or
 with `d`; every notice of one source at once from the three dots at the head of the page, a
@@ -939,17 +1033,66 @@ notices through, at the source, and Fediqo cannot take that back; what was let t
 to be on its way until that source is next read. Letting go dismisses them there, unshown.
 Where a source holds none, or has no such thing, nothing is drawn.
 
+What a source holds back in the first place is yours to choose too. Above the list, each source
+you have asked for notices has a line, What it holds back, that opens its choices: people you
+don't follow, people who don't follow you, new accounts, private mentions from people you don't
+follow, and accounts the server limited. Each is Let in, Hold back or Let go, as the source
+offers; Let go asks first, since the source then throws those notices away, neither shown nor
+held for you to let through. A choice is drawn at once and is the one the server's own page
+shows, and the other way round; one that did not arrive puts the choice back and says so. A
+source that cannot hold notices back says so in that place, with nothing to choose, and a sign-in
+that reads notices and cannot change them says what more choosing would ask for.
+
 Notices are held on this device. The page draws what is held the moment it is entered —
 after a relaunch too — and reads behind it, and the list changes by itself as answers land.
-The post a notice is about is written with its line: it stands in no timeline, becomes a post
-like any other only once you open it, and leaves the line whenever that post is let go. What
-a source holds back is not written at all.
+The post a notice is about is written with it: it stands in no timeline, becomes a post like
+any other once you open it or act on it, and leaves the notice whenever that post is let go.
+What a source holds back is not written at all.
 
 A reader's notices go when the sign-in does: signing out, Clear, a sign-in the source ended,
 or another account signing in at that source. They go with a source that is removed, and when
 a store is read back or held from nearby. Each is gone from the store's file, not only from
 the screen. Keeping does not apply to a notice, and notices are not carried by Take away or
 Move nearby.
+
+### Tending a server
+
+Where your account at a Mastodon source holds a role there — an administrator's, a moderator's —
+the source's row on Account has Tend and the host behind its three dots. Somebody without such a
+role sees no trace of any of this. Where the sign-in was not asked for tending, the item wears
+the mark signing in wears, and a press asks for it alone — see Signing in to Mastodon, above.
+
+Tend opens a page of its own, as somebody's page does, with a tab for each thing your role there
+lets you do and no tab for the rest. Its head counts the open reports and who waits to join, as
+far as they were read, and each count opens its tab. A notice of a new report or a new sign-up
+opens the page on that tab.
+
+| Tab     | What it reads                                         | What can be done                       |
+| ------- | ----------------------------------------------------- | -------------------------------------- |
+| Reports | open first: who reported whom, why, the posts named   | take on, hand back, close, open again  |
+| People  | who waits to join, with what they wrote; any account  | let in, turn away; act on an account   |
+| Servers | servers refused and allowed, mail domains, addresses  | add, change, take off                  |
+| Server  | how it is doing over 7, 30 or 90 days; what may rise; rules | let rise, keep back              |
+
+A report's posts are drawn as posts' rows, and its three dots offer acting on the account it
+names, which goes on to what People offers. A note on a report is written on the server's own
+page, which a press opens, since Fediqo cannot write one there. Accounts are found by name, by
+name@server, or by state — waiting, active, frozen, limited, suspended, marked sensitive — and
+each opens as somebody's page, whose About then also says what only those who answer for the
+server see: when they signed up, their mail, where they last signed in from. Acting on an
+account is a sheet: warn, mark sensitive, freeze, limit or suspend, with the words the server
+sends them and whether it mails them; each but a warning is undone from the same three dots. A
+refused server is limited or suspended, its pictures or reports refused, and why is said to all
+or kept among staff; an address or a range is refused for sign-ups or for all access. How the
+server is doing is the server's own numbers — who joined, who was active, what was reported —
+as it counted them at the time it says. Rules are read here, and changed on the server's page.
+
+The acts that cannot be undone, or cut the server off, are red and ask first, saying what will
+be so: turning away somebody who asks to join, suspending an account, suspending a server, and
+refusing an address with no access at all or a range wide enough to shut whole networks out;
+taking anything off the lists asks as well. A sign-in that may read and not act shows every
+list, with each act dim and saying why. Whatever the server refuses or fails at is said, in its
+own words where it gives some, and nothing on this device changes for it.
 
 ### On a phone
 
@@ -971,12 +1114,13 @@ is what moves. A wide screen keeps every name in a row, and swipes all the same.
 
 One post is always marked as the one being read: the first wholly on screen, moving as you
 scroll, and never moving the list by itself. Nothing is done to the marked post. One press on a
-post opens it, a mark under a post acts on that post, and pressing and holding a post says who
-wrote it, exactly when and for whom, and offers what its marks do. Every post draws the same
+post opens it, a mark under a post acts on that post, and pressing and holding a post opens the
+same panel its three dots open, rising from the bottom of the screen. Every post draws the same
 seven marks in the same order — answer, boost, quote, favourite, bookmark, keep and three dots —
-and one its source does not offer is grey and says why. The dots open what pressing and holding
-opens; taking back a post of your own is there and nowhere else, and asks first. A timeline you come back to
-is where you left it.
+and one its source does not offer is grey, and says why when pressed. The panel offers only what
+those marks do not; taking back a post of your own is there and nowhere else, red, and asks
+first. Who wrote a post, when and for whom are on its row, and the panel does not repeat them. A
+timeline you come back to is where you left it.
 
 Pull a timeline down to read it again, or Trends, Notices, or an opened page that can be asked
 again. While any of them reads, the reload mark is Stop. Press the top of the screen to go to the top of the list. On an

@@ -82,6 +82,14 @@ struct TimelinePane: View {
     /// hashtag's page, or a link through the door a post's link goes through, of the first
     /// source that named it.
     var onOpenRising: (RisingListed) -> Void = { _ in }
+    /// The page of a rising link whose posts are open (#379), answered by the root: through the
+    /// door a post's link goes through, of the first source that named it.
+    var onOpenSharedPage: (SharedLink) -> Void = { _ in }
+    /// A report's own page on the server tended (#381), answered by the root: through the door a
+    /// post's link goes through, of that source.
+    var onOpenServerPage: (URL, String) -> Void = { _, _ in }
+    /// A tab of a server tended pressed or swiped to, answered by the root: the step turned in place.
+    var onTurnTending: (TendingTab) -> Void = { _ in }
     /// A row of what a search found at a source opened (#319), answered by the root: somebody's
     /// page, a hashtag's, or the page of all of one kind.
     var onOpenFound: (SearchFoundRow) -> Void = { _ in }
@@ -178,6 +186,10 @@ struct TimelinePane: View {
         case followed(FollowedTags)
         /// A hashtag's page: its ask of the sources, as the side in front made it.
         case tag(PostTag)
+        /// The posts sharing a rising link (#379): its asks of the sources that list them.
+        case shared(SharedLink)
+        /// A server tended (#380): its ask of what the server keeps for those who answer for it.
+        case tending(Tending)
         /// A tab of Trends that lists what is rising, with nothing drawn over it.
         case rising(RisingWhich)
         /// A page that asks nothing of its own: the hashtags a search found.
@@ -200,10 +212,12 @@ struct TimelinePane: View {
             guard let found = shown.found else { return nil }
             return found.which == .people ? .people(found.at.people) : .quiet
         case .followedTags(let page) where shown.drawn: return .followed(page)
+        case .shared(let page) where shown.drawn: return .shared(page)
+        case .server(let page) where shown.drawn: return .tending(page)
         // Always drawn, whatever it holds.
         case .tag(let tag): return .tag(tag)
         case .thread where shown.drawn: return nil
-        case .people, .found, .followedTags, .thread, .link, nil: break
+        case .people, .found, .followedTags, .shared, .server, .thread, .link, nil: break
         }
         // What stands in the stream's place on Trends, where a tab of what is rising is drawn.
         guard let rising, people.rising.said(rising, in: session) != nil else { return nil }
@@ -217,6 +231,8 @@ struct TimelinePane: View {
         case .people(let list): people.lists.ask(of: list, in: session)
         case .followed(let page): people.followed.ask(of: page, in: session)
         case .tag(let tag): session.reload.tagPageAsk(of: tag, on: session.stream)
+        case .shared(let page): people.shared.ask(of: page)
+        case .tending(let page): people.tending.ask(of: page)
         case .rising(let which): people.rising.ask(of: which, in: session)
         case .quiet: PageAsking()
         }
@@ -232,6 +248,8 @@ struct TimelinePane: View {
         case .people(let list): people.lists.stop(list)
         case .followed(let page): people.followed.stop(page)
         case .tag(let tag): session.reload.stopTag(tag, on: session.stream)
+        case .shared(let page): people.shared.stop(page)
+        case .tending(let page): people.tending.stop(page)
         case .rising(let which): people.rising.stop(which)
         case .quiet: false
         }
@@ -303,6 +321,20 @@ struct TimelinePane: View {
                 // or its source was removed — draws the stream instead.
                 if let followed = people?.followed, let said = shown.followed {
                     followedPage(page, said: said, in: followed)
+                } else {
+                    underneath
+                }
+            case .server(let page):
+                // The standing, or the words, gone since — or the source — draws the stream instead.
+                if let tending = people?.tending, drawn {
+                    tendingPage(page, in: tending)
+                } else {
+                    underneath
+                }
+            case .shared(let page):
+                // Every source it was asked of removed since draws the stream instead.
+                if let shared = people?.shared, drawn {
+                    sharedPage(page, in: shared)
                 } else {
                     underneath
                 }
@@ -550,7 +582,7 @@ struct TimelinePane: View {
         // is drawn; over the stream drawn in its stead the swipe goes back, as it did.
         // So is a list of people's (F10), where it is drawn.
         // And what a search found at a source, and the hashtags followed.
-        case .thread, .people, .found, .followedTags: drawn ? .tabbed : .opened
+        case .thread, .people, .found, .followedTags, .shared, .server: drawn ? .tabbed : .opened
         case .link: .link
         case nil: .timeline
         }
@@ -564,7 +596,7 @@ struct TimelinePane: View {
     static func headDrawn(over standing: ShellStep?, drawn: Bool = true) -> Bool {
         switch standing {
         case .person, .tag: false
-        case .thread, .people, .found, .followedTags: !drawn
+        case .thread, .people, .found, .followedTags, .shared, .server: !drawn
         case .link, nil: true
         }
     }
@@ -610,6 +642,10 @@ struct TimelinePane: View {
         case .followedTags(let page):
             let said = people?.followed.said(of: page, in: session)
             return Drawn(followed: said, drawn: said != nil)
+        case .shared(let page):
+            return Drawn(drawn: people?.shared.canAskAgain(page, in: session) ?? false)
+        case .server(let page):
+            return Drawn(drawn: people != nil && ShellTending.drawn(page, in: session))
         case .person, .tag, .link, nil:
             return Drawn(drawn: true)
         }
@@ -681,8 +717,13 @@ struct TimelinePane: View {
         // **And what they feature, once the source has said who they are** (B7): their
         // hashtags, and whether they feature anybody — two asks more of the page opening.
         .task(id: people?.featuredOpening(of: person, in: session)) { await people?.featuredOpened(person, in: session) }
+        // **And what only staff see of them** (#382), **and who is known in common** (#377): two
+        // asks of the page's own, in one modifier so the page's chain does not grow.
+        .modifier(PersonPageAsks(person: person, people: people, session: session))
         // What their own server said is held only while this page is in front (#310).
         .onDisappear { people?.home.letGo(of: person) }
+        // And what only staff see of them (#382).
+        .onDisappear { people?.tending.people.forgetStaff(of: people?.said(of: person, in: session)?.person) }
     }
 
     /// What the parts of somebody's page press.
@@ -718,6 +759,16 @@ struct TimelinePane: View {
                 Task { await people.lists.press(act, on: listed, of: list, in: session) }
             },
             onAct: { act in Task { await people?.act(act, on: person, in: session) } },
+            onNote: { words in
+                // Nothing written: the lock's press, which only asks for the account part.
+                guard let words else {
+                    _ = session.askFor([PersonAct.feature.needs], host: person.host)
+                    return
+                }
+                guard let people else { return }
+                Task { await people.acts.writeNote(words, of: person, said: people.said(of: person, in: session), in: session) }
+            },
+            onLanguages: { codes in Task { await people?.chooseLanguages(codes, of: person, in: session) } },
             onAskFollows: { session.askFor([PersonAct.follow.needs], host: person.host) },
             onChange: { people?.changeOwn(person, in: session) },
             onReadOn: { Task { await people?.readOn(person, in: session) } },
@@ -727,6 +778,12 @@ struct TimelinePane: View {
             onListReadOn: {
                 guard let people, let list = people.list(people.front(of: person, in: session), of: person, in: session) else { return }
                 Task { await people.lists.readOn(list, in: session) }
+            },
+            onStaffAct: { staff in
+                guard let shown = staff.account.person else { return }
+                people?.tending.people.openAct(
+                    on: staff.account.id, handle: shown.handle, local: staff.account.local, at: staff.host, in: session
+                )
             }
         )
     }
@@ -898,6 +955,125 @@ struct TimelinePane: View {
         .task(id: followed.opening(page, in: session)) { await followed.opened(page, in: session) }
     }
 
+    /// A server tended (#380): the whole height of the pane, in the frame every opened page stands
+    /// in, with a tab for each task the standing allows. Its bar's mark asks again where `r`
+    /// would, and is Stop while the server is asked.
+    private func tendingPage(_ page: Tending, in tending: ShellTending) -> some View {
+        let people = tending.people
+        let askWords = { _ = session.askFor([.tending], host: page.host) }
+        return TendingPane(
+            page: page,
+            tabs: ShellTending.tabs(at: page.host, in: session),
+            reports: page.tab == .reports ? tending.said(of: page, in: session) : nil,
+            people: page.tab == .people ? people.said(of: page, in: session) : nil,
+            servers: page.tab == .servers ? tending.servers.said(of: page, in: session) : nil,
+            server: page.tab == .server ? tending.server.said(of: page, in: session) : nil,
+            counts: tending.counts(of: page, in: session),
+            acts: ShellTending.acts(at: page.host, in: session),
+            reload: TendingPane.reloadName(page.host, canReload: ways.canReload),
+            slide: session.slide("tending"),
+            frame: OpenedPageActs(
+                onBack: onBack,
+                onTab: onTurnTending,
+                onReload: ways.onReload,
+                onPull: { await tending.again(page, in: session) },
+                onStop: onStop(.tending(page))
+            ),
+            onReport: TendingReportActs(
+                onAct: { act, report in Task { await tending.act(act, on: report.id, of: page, in: session) } },
+                onAskWords: askWords,
+                onOpenPage: { report in
+                    if let url = ShellTending.page(of: report, host: page.host) { onOpenServerPage(url, page.host) }
+                },
+                onActOnAccount: ShellTendingPeople.actsOn(at: page.host, in: session) ? { report in
+                    guard let target = report.target else { return }
+                    people.openAct(
+                        on: target.accountID, handle: target.handle, local: target.livesHere, at: page.host, report: report.id,
+                        in: session
+                    )
+                } : nil
+            ),
+            onPeople: TendingPeopleActs(
+                onFind: { filter in Task { await people.find(filter, on: page, in: session) } },
+                onLetIn: { account in Task { await people.letIn(account.id, of: page, in: session) } },
+                onTurnAway: { account in Task { await people.turnAway(account.id, of: page, in: session) } },
+                onUndo: { act, account in Task { await people.undo(act, on: account.id, of: page, in: session) } },
+                onActOn: { account in
+                    people.openAct(
+                        on: account.id, handle: account.person?.handle ?? account.id, local: account.local, at: page.host, in: session
+                    )
+                },
+                onAskWords: askWords
+            ),
+            onServers: TendingServersActs(
+                onAdd: { list in tending.servers.open(TendingServersActs.kind(of: list), at: page.host, in: session) },
+                onChange: { block in tending.servers.open(.block(block), at: page.host, in: session) },
+                onRemove: { list, id in Task { await tending.servers.remove(list, id: id, on: page, in: session) } },
+                onReadOn: { list in Task { await tending.servers.readOn(list, of: page, in: session) } },
+                onAskWords: askWords
+            ),
+            onServer: TendingServerActs(
+                onSpan: { days in Task { await tending.server.choose(days: days, on: page, in: session) } },
+                onReview: { item, rise in Task { await tending.server.review(item, rise: rise, on: page, in: session) } },
+                onReadOn: { kind in Task { await tending.server.readOn(kind, of: page, in: session) } },
+                onOpenRules: { url in onOpenServerPage(url, page.host) },
+                onAskWords: askWords
+            ),
+            onOpenPerson: onOpenPerson,
+            onReadOn: { Task { await tending.readOn(page, pressed: true, in: session) } },
+            onReachFoot: { Task { await tending.readOn(page, pressed: false, in: session) } },
+            catalogues: session.emoji,
+            posts: session.posts,
+            selectedID: $selectedID,
+            jumpToTop: jumpToTop
+        )
+        .id(page.host)
+        // **The ask is the tab coming in front**, once a run; and again where who is signed in changes.
+        .task(id: tending.opening(page, in: session)) { await tending.opened(page, in: session) }
+        // **And the head's figures, as the page opens**: the open reports and those waiting, once.
+        .task(id: tending.opening(Tending(host: page.host, tab: .reports), in: session)) { await tending.headOpened(page, in: session) }
+    }
+
+    /// The posts sharing a rising link (#379): the whole height of the pane, in the frame every
+    /// opened page stands in, with no tabs, handed what this device holds of what its sources
+    /// listed. Its bar's mark asks them again from the top where `r` would — and is Stop while
+    /// they are asked — and its other mark opens the link's own page.
+    private func sharedPage(_ page: SharedLink, in shared: ShellSharedLinks) -> some View {
+        let said = shared.said(of: page, in: session)
+        return SharedLinkPane(
+            said: said,
+            reload: SharedLinkPane.reloadName(of: said, canReload: ways.canReload),
+            slide: session.slide("shared"),
+            acts: OpenedPageActs(
+                onBack: onBack,
+                onReload: ways.onReload,
+                // Pulled down, the sources are asked from the top as `r` asks them.
+                onPull: { await shared.again(page, in: session) },
+                onStop: onStop(.shared(page))
+            ),
+            onOpenPage: { onOpenSharedPage(page) },
+            onReadOn: { Task { await shared.readOn(page, pressed: true, in: session) } },
+            onReachFoot: { Task { await shared.readOn(page, pressed: false, in: session) } },
+            rows: PersonPageRows(
+                catalogues: session.emoji,
+                posts: session.posts,
+                acting: acting,
+                playback: playback,
+                onPlayRow: onPlayRow,
+                onViewRow: onViewRow,
+                onTurnRow: onTurnRow,
+                onOpenThread: onOpenThread
+            ),
+            onOpenPerson: onOpenPerson,
+            selectedID: $selectedID,
+            decks: $decks,
+            jumpToTop: jumpToTop
+        )
+        .id(page.id)
+        // **The ask is the page opening**, once a link a run: each source's newest stretch.
+        .task(id: page.id) { await shared.opened(page, in: session) }
+    }
+
     /// A hashtag's page (F10): the whole height of the pane, in the frame every opened page
     /// stands in, handed which tabs it has, which is in front and what its head says — all of
     /// them worked out where its sources are asked, and nothing here looks at which kind of
@@ -978,6 +1154,8 @@ struct TimelinePane: View {
         case .people(let list): "people:" + list.id
         case .found(let at, let which): "found:" + at.id + "\u{1e}" + which.rawValue
         case .followedTags(let page): "followed:" + page.id
+        case .shared(let page): "shared:" + page.id
+        case .server(let page): "server:" + page.host + "\u{1e}" + page.tab.rawValue
         case .link, nil: nil
         }
     }
@@ -1024,6 +1202,13 @@ struct TimelinePane: View {
         // of what is rising there, of that source and nobody else. A tab never in front has
         // asked nothing.
         .task(id: rising.opening(which, in: session)) { await rising.opened(which, in: session) }
+        // And on Links, each source's document not yet had this run — again where one was let
+        // go: whether it lists the posts sharing a link is its own word there (#379), and a
+        // link's row opens them only where it says so.
+        .task(id: which == .links ? people?.shared.unheard(said.answers.map(\.source)) : nil) {
+            guard which == .links, let shared = people?.shared else { return }
+            await shared.hear(said.answers.map(\.source), in: session)
+        }
     }
 
     /// The stream, under the line that says which of its sources is not being read (#371) — over
@@ -1321,78 +1506,13 @@ struct TimelinePane: View {
     }
 
     /// The same, for a row drawn inside the conversation around `root` — where the answer mark
-    /// opens the answer rather than the conversation (#108).
+    /// opens the answer rather than the conversation (#108). Built by `RowActing`, which the
+    /// notices page builds a post's row by too (#375).
     func acting(_ item: DummyItem, inside root: DummyItem?) -> ItemActing {
-        var acting = session.acting(on: item)
-        acting.perform = { act in
-            switch act {
-            case .boost, .favourite, .bookmark:
-                Task { await session.toggle(act, on: item) }
-            case .answer:
-                if let root {
-                    session.openAnswer(to: item, in: root)
-                } else {
-                    onOpenThread(item.id)
-                }
-            // No mark performs these: taking back is an item of the row's `…` (`withdraw`,
-            // below), and a vote is pressed from the post's poll with its choices (`vote`).
-            case .withdraw, .vote:
-                break
-            }
-        }
-        // A post's poll (#331): voted in where the post offers it, read again wherever it is.
-        if acting.acts.offers(.vote), acting.poll != nil {
-            acting.vote = { choices in Task { await session.vote(item, choices: choices) } }
-        }
-        if acting.poll != nil { acting.readPoll = { Task { await session.readPollAgain(item) } } }
-        if let lock = acting.voteLock { acting.askToVote = { _ = session.askFor([.acting], host: lock.host) } }
-        // What `y` does (#284), and it says so itself: one act, one outcome, whichever asked.
-        acting.keep = { Task { await session.toggleKept(item) } }
-        acting.ask = { _ in session.askToBookmark(item) }
-        acting.locks = session.locks(on: item, acts: acting.acts)
-        // Reporting it (#339): the sheet goes up at the press, or the sign-in is asked for more.
-        if let people, let offer = session.reportOffer(on: item) {
-            acting.report = ItemActing.Report(lock: offer.lock) {
-                Task { await people.reports.start(offer.who, post: offer.post, people: people, in: session) }
-            }
-        }
-        // The preview of the page it links to (#335), where the person lets previews be drawn:
-        // its picture only where the gate lets it through as one its own source pointed to.
-        acting.preview = LinkPreview.of(item, shown: linkPreviews) { reached, source in
-            session.work.admits(reached: reached, source: source)
-        }
-        // Pinning, quieting, translating, and who boosted and favourited it (#334). Translate on a
-        // list row opens the post, where its translation is drawn beside its words.
-        if let people {
-            acting.post = session.postOffer(
-                on: item, people: people, openPeople: { list in onOpenPeople(list, item.id) },
-                afterTranslate: root == nil ? { onOpenThread(item.id) } : nil
-            )
-        }
-        // Quoting it (#330): the mark live where its source lets the reader, dim with why where not;
-        // and on the reader's own post, who may quote it and its quotes.
-        acting.quote = session.quoteOffer(on: item)
-        acting.ownQuotes = session.ownQuotesOffer(on: item)
-        // Changing it (#332): the sheet opens on the reader's own copy, or the sign-in is asked.
-        if let offer = session.changeOffer(on: item) {
-            acting.change = ItemActing.Change(lock: offer.lock) {
-                if let lock = offer.lock {
-                    _ = session.askFor([.acting], host: lock.host)
-                } else {
-                    session.changes.start(item, in: session)
-                }
-            }
-        }
-        // Taking back is an item of the row's `…` (#109), built only where the post offers it:
-        // the question the key `d` asks, about the copy that goes, and a yes that refuses what
-        // that asking refuses.
-        if acting.acts.offers(.withdraw) {
-            acting.withdraw = ItemActing.Withdraw(
-                asks: { ShellQuestion.withdraw(session.actingCopy(of: item, for: .withdraw) ?? item) },
-                yes: { session.withdrawAsked(item) }
-            )
-        }
-        return acting
+        RowActing(
+            session: session, people: people, linkPreviews: linkPreviews, openThread: onOpenThread,
+            openPeople: onOpenPeople
+        )(item, inside: root)
     }
 
     private func showToast(_ text: String) {
@@ -2030,5 +2150,32 @@ struct RowAsks: ViewModifier {
 
     private var asked: Binding<ShellMoreAsk?> {
         Binding(get: { session.rowAsk }, set: { session.putRowAsk($0) })
+    }
+}
+
+/// What somebody's page asks beside its own reads, each once its time comes: what only staff see
+/// of them, where the reader answers for their server (#382), and who of the people the reader
+/// follows also follow them, once the source has said how the reader stands — and again each
+/// time it is read again (#377). **A modifier of its own**, so the page's chain of modifiers does
+/// not grow by one a feature.
+struct PersonPageAsks: ViewModifier {
+    let person: DummyPerson
+    let people: ShellPersonPages?
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content
+            .task(id: people?.tending.people.staffOpening(of: people?.said(of: person, in: session)?.person, in: session)) {
+                await people?.tending.people.staffOpened(of: people?.said(of: person, in: session)?.person, in: session)
+            }
+            .task(id: people.flatMap { $0.acts.familiarOpening(person, said: $0.said(of: person, in: session), in: session) }) {
+                guard let people else { return }
+                await people.acts.familiarOpened(person, said: people.said(of: person, in: session), in: session)
+            }
+            // **And which languages its host knows**, once the reader follows them there (#378).
+            .task(id: people.flatMap { $0.acts.languagesOpening(person, said: $0.said(of: person, in: session), in: session) }) {
+                guard let people else { return }
+                await people.acts.languagesOpened(person, said: people.said(of: person, in: session), in: session)
+            }
     }
 }

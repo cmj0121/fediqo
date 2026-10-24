@@ -113,6 +113,9 @@ public enum PersonAct: Sendable, Hashable, CaseIterable {
     /// Has the reader told of each post of somebody followed, or not told.
     case notify
     case stopNotifying
+    /// Has only the posts of somebody followed in the languages chosen reach the reader's Home —
+    /// or, with none chosen, every language (#378).
+    case chooseLanguages
     /// Lets somebody who asked to follow the reader do so, or refuses them.
     case acceptRequest
     case refuseRequest
@@ -142,8 +145,8 @@ public enum PersonAct: Sendable, Hashable, CaseIterable {
     /// so and asks. **No `default:`**, so an act added later has to say which.
     public var needs: MastodonPart {
         switch self {
-        case .follow, .unfollow, .withdraw, .showBoosts, .hideBoosts, .notify, .stopNotifying, .acceptRequest, .refuseRequest,
-             .removeFollower: .follows
+        case .follow, .unfollow, .withdraw, .showBoosts, .hideBoosts, .notify, .stopNotifying, .chooseLanguages, .acceptRequest,
+             .refuseRequest, .removeFollower: .follows
         case .feature, .unfeature, .dismissSuggestion: .account
         case .mute, .unmute, .block, .unblock, .blockServer, .unblockServer: .blocks
         case .report: .reports
@@ -155,8 +158,8 @@ public enum PersonAct: Sendable, Hashable, CaseIterable {
     public var isMuteOrBlock: Bool {
         switch self {
         case .mute, .unmute, .block, .unblock, .blockServer, .unblockServer: true
-        case .follow, .unfollow, .withdraw, .showBoosts, .hideBoosts, .notify, .stopNotifying, .acceptRequest, .refuseRequest,
-             .removeFollower, .feature, .unfeature, .dismissSuggestion, .report: false
+        case .follow, .unfollow, .withdraw, .showBoosts, .hideBoosts, .notify, .stopNotifying, .chooseLanguages, .acceptRequest,
+             .refuseRequest, .removeFollower, .feature, .unfeature, .dismissSuggestion, .report: false
         }
     }
 }
@@ -201,6 +204,9 @@ public enum PostActRefusal: Sendable, Hashable, CaseIterable {
     /// This device cannot name the post on its own server, so there is nothing to point an act
     /// at — a row kept before its server id was, and every forum post.
     case unnameable
+    /// The post is older than this device keeps, so nothing done to it could be held here: a
+    /// notice's post the store will not take (#375).
+    case tooOld
 }
 
 /// What may be done to one post, and why not where nothing may.

@@ -165,8 +165,11 @@ struct PersonSaid: Equatable {
         var opens = true
         /// Whether the account says it hides the list this counts.
         var hidden = false
+        /// A glyph of its own over its tab's: a figure that is not the tab's count — who is known
+        /// in common (#377), which opens About, where they are.
+        var glyph: String?
 
-        var id: String { tab.rawValue }
+        var id: String { tab.rawValue + (glyph.map { "." + $0 } ?? "") }
 
         /// What a pointer and a listener are told it is: the figure in its sentence, and of a
         /// list the account hides, that it is hidden.
@@ -176,7 +179,7 @@ struct PersonSaid: Equatable {
 
         /// How the head draws it with `front` in front: lit only where it opens that tab.
         func drawn(front: PersonTab?, language: DummyLanguage? = nil) -> PageFigure {
-            PageFigure(symbol: tab.symbol, figure: figure, spoken: spoken(language: language), opens: opens, lit: tab == front)
+            PageFigure(symbol: glyph ?? tab.symbol, figure: figure, spoken: spoken(language: language), opens: opens, lit: glyph == nil && tab == front)
         }
     }
 

@@ -121,6 +121,10 @@ final class SourceWork {
         /// opened that source's page or a round read that source (#321). Nothing read under it is
         /// held.
         case announcements
+        /// What a server keeps for those who answer for it — what was reported to it — read and
+        /// acted on as the reader, whose role there allows it, because they opened its page of
+        /// tending or pressed there (#380). Nothing read under it is held.
+        case tending
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -133,7 +137,7 @@ final class SourceWork {
         /// Everything else reaches wherever a post, a page or a directory points.
         var isOfTheSource: Bool {
             switch self {
-            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people, .serverSays, .rising, .ownSettings, .lookUp, .followedTags, .announcements: true
+            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people, .serverSays, .rising, .ownSettings, .lookUp, .followedTags, .announcements, .tending: true
             case .forumPost, .forumReplies, .joining, .boards, .directory, .serverCheck, .picture, .emoji,
                  .signIn, .signOut, .page, .video, .signInPage, .personCheck, .pagePart, .takeAway, .readBack,
                  .nearbyMove, .personHome:

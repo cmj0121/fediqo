@@ -43,7 +43,15 @@ token = Doorkeeper::AccessToken.find_or_create_by!(
 end
 
 path = "/tmp/fediqo-mastodon-token"
-File.write(path, token.token)
+# Read by the checks on this machine and by nobody else: kept to its owner, whatever the umask.
+# Written to a fresh owner-only file and moved over the old one: a file left from before at
+# another mode never holds the new token, even for a moment.
+owner_only = lambda do |target, contents|
+  fresh = "#{target}.#{Process.pid}"
+  File.open(fresh, File::WRONLY | File::CREAT | File::EXCL, 0o600) { |file| file.write(contents) }
+  File.rename(fresh, target)
+end
+owner_only.call(path, token.token)
 puts "wrote #{path}"
 
 # What the checks of what a Mastodon says need beyond one writer (#298): a second person, so
@@ -332,7 +340,9 @@ Doorkeeper::AccessToken.where(application: widening, revoked_at: nil).update_all
 # **Nobody is told of anything here, and nothing reaches a home or a list.** Follows and the
 # one boost are made in the model, which tells nobody; a post's fan-out is left queued and never
 # run (`tell` runs only the fan-outs it is handed); nobody is mentioned. One post is public and
-# so stands in the public timeline; the rest are unlisted, for followers or for nobody. None of
+# so stands in the public timeline, and so do the three that reached here from the one of
+# another server, which carry the rising link (#379, below); the rest are unlisted, for
+# followers or for nobody. None of
 # these people follows the writer, so the checks of notices read what they read before.
 wrote = lambda do |who, words, visibility = "unlisted", **more|
   Status.where(account: who, reblog_of_id: nil).where("text LIKE ?", "%#{words}%").first ||
@@ -470,6 +480,18 @@ far = afar.call(
   fields: [{ "name" => "Home", "value" => "<a href=\"https://elsewhere.example/far\">elsewhere.example/far</a>" }]
 )
 far_posts = (1..3).map { |n| heard.call(far, n) }
+# What the checks of the posts sharing a rising link need (#379): the three that reached here
+# from them carry the link the seed made rise, as this server would have found it in them, and
+# stand public — a server lists a link's posts only where they are public, and only of somebody
+# who chose to be found, as they do below. Theirs, and nobody new's: anybody else listed by the
+# link would be listed in the directory the checks of it read, and posts of anybody else would
+# be counted where theirs are.
+far_posts.each do |post|
+  post.update_columns(visibility: "public") unless post.public_visibility?
+  PreviewCardsStatus.find_or_create_by!(status_id: post.id, preview_card_id: rising_card.id) do |row|
+    row.url = rising_card.url
+  end
+end
 fans.first(2).each { |fan| follows.call(fan, far) }
 follows.call(far, shown)
 counted.call(far, 2811, 310, 1204)
@@ -559,8 +581,154 @@ parts_sign_ins = { "parts" => every_part, "partsLacking" => every_part.sub(" wri
     { "token" => held.token, "scopes" => scopes }
   end
 
+# What the checks of tending the server need (#380, #381): somebody whose role is Admin and
+# somebody whose role is Moderator, each with a password a check signs in with and a sign-in
+# holding every word of every part this app asks for, tending's two among them; the writer —
+# whose role is nobody's — holding tending's words too, since the words may be granted to
+# anyone and only the role lets anything be done; this app as it registers itself now, for the
+# check that signs in through the server's own page; and two open reports by the other person,
+# one naming a post and a rule, one naming a post of somebody of another server. An app of
+# their own for the tokens, whose words hold tending's. **Put back every run**: whatever a run
+# did to the reports — taken on, closed — is undone, and the page's tokens left live revoked.
+staffed = lambda do |username, email, password, role|
+  found = Account.find_local(username)
+  unless found
+    made = User.new(email: email, password: password, password_confirmation: password, confirmed_at: Time.now.utc, approved: true)
+    made.account = Account.new(username: username)
+    made.skip_confirmation_notification! if made.respond_to?(:skip_confirmation_notification!)
+    made.save!(validate: false)
+    found = made.account
+  end
+  found.user.approve! if found.user.respond_to?(:approve!) && !found.user.approved?
+  found.user.update_columns(role_id: UserRole.find_by!(name: role).id) unless found.user.role_id == UserRole.find_by!(name: role).id
+  found
+end
+admin = staffed.call("fediqo_admin", "admin@example.com", "LocalOnlyPass3", "Admin")
+mod = staffed.call("fediqo_mod", "mod@example.com", "LocalOnlyPass4", "Moderator")
+everything = "#{every_part} write:media read:bookmarks read:favourites read:mutes write:mutes read:blocks write:blocks " \
+  "write:reports admin:read admin:write"
+tending_app = Doorkeeper::Application.find_or_create_by!(name: "fediqo-servers-tending") do |record|
+  record.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+  record.scopes = "read write admin:read admin:write"
+end
+tending_sign_ins = { "admin" => [admin, everything], "mod" => [mod, everything], "writer" => [writer_account, "#{reading} admin:read admin:write"] }
+  .transform_values do |(who, scopes)|
+    # Tending's tokens do not outlive the checks by long: two days, and a fresh one once lapsed.
+    held = Doorkeeper::AccessToken.where(application: tending_app, resource_owner_id: who.user.id, scopes: scopes, revoked_at: nil)
+      .detect { |token| !token.expired? } ||
+      Doorkeeper::AccessToken.create!(application: tending_app, resource_owner_id: who.user.id, scopes: scopes, expires_in: 2.days.to_i)
+    named.call(who).merge("token" => held.token, "scopes" => scopes)
+  end
+tending_ask = Doorkeeper::Application.find_or_create_by!(name: "fediqo-servers-tending-ask") do |record|
+  record.redirect_uri = "fediqo://oauth"
+  record.scopes = everything
+end
+Doorkeeper::AccessToken.where(application: tending_ask, revoked_at: nil).update_all(revoked_at: Time.now.utc)
+rule = Rule.find_by(text: "fediqo381seed rule") || Rule.create!(text: "fediqo381seed rule", priority: 0)
+reported = [
+  ["fediqo381seed one", shown, person_public, :violation, [rule.id]],
+  ["fediqo381seed two", far, far_posts.first, :spam, []],
+].map do |(words, whom, post, category, rules)|
+  report = Report.find_by(account: other, comment: words) ||
+    Report.create!(account: other, target_account: whom, status_ids: [post.id], comment: words, category: category, rule_ids: rules)
+  report.update_columns(action_taken_at: nil, action_taken_by_account_id: nil, assigned_account_id: nil)
+  report
+end
+
+# What the checks of the server's accounts need (#382): sign-ups that wait to be let in — the
+# server asks for approval — each with what they wrote; one a check lets in and one it turns
+# away, which the server deletes; and somebody a check warns, limits, marks sensitive, freezes
+# and suspends, and takes each back from. Nobody another check reads, and none named as the
+# seed's people are. **Put back every run**: whoever was let in waits again, whoever was turned
+# away is made again, and the one acted on is held in nothing.
+Setting.registrations_mode = "approved" unless Setting.registrations_mode == "approved"
+asking_to_join = lambda do |username, words|
+  found = Account.find_local(username)
+  unless found
+    secret = SecureRandom.hex(16)
+    made = User.new(
+      email: "#{username}@example.com", password: secret, password_confirmation: secret, confirmed_at: Time.now.utc,
+      approved: false
+    )
+    made.account = Account.new(username: username)
+    made.skip_confirmation_notification! if made.respond_to?(:skip_confirmation_notification!)
+    made.save!(validate: false)
+    found = made.account
+  end
+  found.user.update_columns(approved: false) if found.user.approved?
+  request = UserInviteRequest.find_or_initialize_by(user: found.user)
+  request.update!(text: words) unless request.persisted? && request.text == words
+  found
+end
+waiting_ones = {
+  "stays" => asking_to_join.call("asks_382", "I read the rules and would like to write here."),
+  "letIn" => asking_to_join.call("asks_382_in", "Let me in, please."),
+  "turnedAway" => asking_to_join.call("asks_382_away", "Buy cheap watches."),
+}
+acted_on = person.call("acted_382")
+acted_on.unsuspend! if acted_on.suspended?
+acted_on.unsilence! if acted_on.silenced?
+acted_on.unsensitize! if acted_on.sensitized?
+acted_on.user.enable! if acted_on.user.disabled?
+
+# What the checks of the servers and addresses this one refuses need (#383): a server suspended
+# and one limited, with what is refused of each and why; one allowed; a mail domain refused;
+# and a range of addresses refused to sign up from. Hosts nobody reaches, and the addresses of
+# the documentation range. **Put back every run**: each made again where a check took it off,
+# and as it was where a check changed it; what a check made and left is taken off.
+DomainBlock.where(domain: %w(fediqo383.example)).destroy_all
+DomainAllow.where(domain: %w(fediqo383.example)).destroy_all
+EmailDomainBlock.where(domain: %w(fediqo383.example)).destroy_all
+IpBlock.where(ip: "198.51.100.0/24").destroy_all
+blocked = {
+  "suspended" => ["suspended.example", { severity: :suspend, reject_media: false, reject_reports: false,
+                                         private_comment: "fediqo383seed spam", public_comment: "Spam", obfuscate: false }],
+  "limited" => ["limited.example", { severity: :silence, reject_media: true, reject_reports: false,
+                                     private_comment: "", public_comment: "Too loud", obfuscate: false }],
+}.transform_values do |(domain, said)|
+  block = DomainBlock.find_or_initialize_by(domain: domain)
+  block.assign_attributes(said)
+  block.save!
+  block
+end
+allowed = DomainAllow.find_or_create_by!(domain: "allowed.example")
+refused_mail = EmailDomainBlock.find_or_create_by!(domain: "spam.example")
+refused_ip = IpBlock.find_or_initialize_by(ip: "192.0.2.0/24")
+refused_ip.assign_attributes(severity: :sign_up_block, comment: "fediqo383seed range", expires_at: nil)
+refused_ip.save!
+
+# What the checks of a server's own page of tending need (#384): a second rule, with a hint, so
+# the rules read in their order; and a hashtag, a link and a post **waiting to be reviewed** —
+# each with a row among those rising that the server has not allowed, as a server's own count
+# would write once enough people used them (it runs no worker here, so the rows are written
+# beside the ones above). Put back every run: never reviewed, never let rise, nothing allowed.
+second_rule = Rule.find_by(text: "fediqo384seed second rule") ||
+  Rule.create!(text: "fediqo384seed second rule", hint: "fediqo384seed hint", priority: 1)
+second_rule.update!(priority: 1, hint: "fediqo384seed hint", deleted_at: nil)
+waiting_tag = Tag.find_or_create_by_names(["FediqoWaiting"]).first
+waiting_tag.update!(trendable: nil, reviewed_at: nil, requested_review_at: Time.now.utc, usable: true, listable: true)
+waiting_tag_trend = TagTrend.find_or_initialize_by(tag_id: waiting_tag.id)
+waiting_tag_trend.assign_attributes(score: 6.0, rank: 2, allowed: false, language: "")
+waiting_tag_trend.save!
+waiting_card = PreviewCard.find_or_initialize_by(url: "https://waiting.example/stories/waiting")
+waiting_card.assign_attributes(
+  title: "fediqo384seed a story waiting", description: "Waiting to be reviewed.", type: :link,
+  provider_name: "Waiting", provider_url: "https://waiting.example", trendable: nil, language: "en"
+)
+waiting_card.save!
+waiting_card_trend = PreviewCardTrend.find_or_initialize_by(preview_card_id: waiting_card.id)
+waiting_card_trend.assign_attributes(score: 5.0, rank: 2, allowed: false, language: "en")
+waiting_card_trend.save!
+riser_384 = person.call("rising_384")
+riser_384.update!(reviewed_at: nil, trendable: nil)
+waiting_post = said.call(riser_384, "fediqo384seed a post waiting")
+waiting_post.update!(trendable: nil)
+waiting_post_trend = StatusTrend.find_or_initialize_by(status_id: waiting_post.id)
+waiting_post_trend.assign_attributes(account_id: riser_384.id, score: 4.0, rank: 2, allowed: false, language: waiting_post.language)
+waiting_post_trend.save!
+
 more = "/tmp/fediqo-mastodon-tokens.json"
-File.write(more, JSON.generate(tokens.merge(
+owner_only.call(more, JSON.generate(tokens.merge(
   # The sign-in page is asked by this id for a scope the registration does not include.
   "client" => full.uid,
   "seeded" => {
@@ -577,6 +745,21 @@ File.write(more, JSON.generate(tokens.merge(
     "held" => waiting.call.map { |request| { "by" => request.from_account.username, "post" => request.last_status_id.to_s } }
   ),
   "signIn" => { "id" => widening.uid, "secret" => widening.secret, "scopes" => widening.scopes.to_s },
+  "tending" => tending_sign_ins.merge(
+    "adminPassword" => "LocalOnlyPass3", "adminEmail" => "admin@example.com",
+    "app" => { "id" => tending_ask.uid, "secret" => tending_ask.secret, "scopes" => tending_ask.scopes.to_s },
+    "reports" => reported.map { |report| report.id.to_s },
+    "waiting" => waiting_ones.transform_values { |who| named.call(who) },
+    "actedOn" => named.call(acted_on),
+    "servers" => {
+      "suspended" => blocked["suspended"].id.to_s, "limited" => blocked["limited"].id.to_s,
+      "allowed" => allowed.id.to_s, "mail" => refused_mail.id.to_s, "ip" => refused_ip.id.to_s,
+    },
+    "server" => {
+      "rules" => [rule.id.to_s, second_rule.id.to_s],
+      "tag" => waiting_tag.id.to_s, "link" => waiting_card.id.to_s, "post" => waiting_post.id.to_s,
+    }
+  ),
   "people" => people_sign_ins.merge(
     "person" => named.call(shown), "locked" => named.call(locked), "hidden" => named.call(hidden).merge(people_sign_ins["hidden"]),
     "moved" => named.call(moved), "gone" => named.call(gone), "limited" => named.call(limited),

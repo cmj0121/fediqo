@@ -596,7 +596,12 @@ final class ShellSession {
     }
 
     /// The note held under `key`, as `heldNote(_:)` finds it.
+    ///
+    /// **`notes` is read on every call, found or not**, so a view that looked a key up and found
+    /// nothing is drawn again once the key is held (#375: a notice's post drawn from the notice's
+    /// own copy turns into the store's row as it lands).
     func heldNote(key: NoteKey) -> Note? {
+        let notes = self.notes
         let index: [NoteKey: Int]
         if let builtHeldIndex {
             index = builtHeldIndex

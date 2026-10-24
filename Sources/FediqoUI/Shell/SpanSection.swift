@@ -14,7 +14,7 @@ import SwiftUI
 /// **Let go is a destructive item of the row's `…`, and has no button of its own.** It counts
 /// again at the press, as the button it replaces did, so the number the question names is the
 /// number at the press and never a figure the screen drew before the store moved under it.
-/// Where the days and source hold nothing it is dim, and the menu's head says so.
+/// Where the days and source hold nothing it is dim, and says so after its name.
 ///
 /// **Every host with a post held is offered**, not only the sources joined: a source removed
 /// while its posts were kept (#250) is a host `Holdings` still counts, and its posts are as much
@@ -63,6 +63,7 @@ struct SpanSection: View {
                     }
                 ))
             }
+            .shellMoreHeld()
             if let went { ShellReadingLine(Self.wentLine(went, offDevice: !Self.unwritten(in: session))) }
         } header: {
             ShellSectionHead(title: "prefs.span", line: "usage.span.line", help: "prefs.span.footer")
@@ -92,7 +93,7 @@ struct SpanSection: View {
     /// `ShellQuestion.letGo` names that count — not `figure`, which is only what the row drew.
     /// Where the count is none, `none` is told so the row says so, and nothing is asked.
     ///
-    /// Dim while `figure` is none or not yet read, and then the head says why in its own words:
+    /// Dim while `figure` is none or not yet read, saying why in its own words (`ShellMore.ending`):
     /// there is nothing on these days, which "not right now" would not say.
     static func more(
         _ ask: SpanAsk, figure: Int?,

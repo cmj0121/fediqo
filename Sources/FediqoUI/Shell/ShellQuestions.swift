@@ -455,16 +455,19 @@ enum ShellQuestion {
         )
     }
 
-    /// Unfollowing somebody who must agree to be followed (#313). **Asked first, and drawn as
-    /// a loss**: what goes is their yes, and following them again means asking for it again.
-    /// Unfollowing anybody else is not asked about — it is followed again in one press.
+    /// Unfollowing somebody (#313, #385). **Asked first every time, and drawn as a loss**: their
+    /// posts stop coming. Of somebody who must agree (`asksFirst`) it also says that what goes is
+    /// their yes, and following them again means asking for it again.
     ///
     /// `named` is their handle, already made fit for a line.
-    static func unfollow(_ named: String, at host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+    static func unfollow(
+        _ named: String, at host: String, asksFirst: Bool = true, language: DummyLanguage? = nil
+    ) -> ShellConfirmation {
         ShellConfirmation(
             symbol: PersonActing.symbol(.unfollow),
             title: String(format: L10n.t("person.unfollow.ask.title", language: language), named, host),
-            line: L10n.t("person.unfollow.ask.line", language: language), help: nil,
+            line: L10n.t(asksFirst ? "person.unfollow.ask.line" : "person.unfollow.ask.line.open", language: language),
+            help: nil,
             choices: [.init(yes, PersonActing.name(.unfollow, language: language), role: .destructive)],
             cancel: L10n.t("board.choose.cancel", language: language)
         )
@@ -931,6 +934,19 @@ enum ShellQuestion {
             line: String(format: L10n.t("account.mastodon.ended.line", language: language), named),
             help: String(format: L10n.t("account.mastodon.ended.detail", language: language), named),
             choices: [], cancel: L10n.t("store.newer.ok", language: language)
+        )
+    }
+
+    /// Letting a kind of sender's notices go at `host` (#376): the source throws them away, so it
+    /// is asked first. `whose` and `yes` are the words the choice is drawn with.
+    static func letGo(_ whose: String, at host: String, yes label: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "trash",
+            title: String(format: L10n.t("notices.policy.drop.ask.title", language: language), whose, host),
+            line: String(format: L10n.t("notices.policy.drop.ask.line", language: language), host),
+            help: nil,
+            choices: [.init(yes, label, role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
         )
     }
 }

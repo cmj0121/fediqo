@@ -112,6 +112,9 @@ public final class MastodonSessions {
     /// Whether the last look at who is signed in could be had at all. A Keychain that cannot be
     /// read — a locked device at launch — is not everybody signing out.
     @ObservationIgnored private(set) var grantsKnown = false
+    /// Whether the last look read the filings of each sign-in: where it could not, nothing laid
+    /// on a sign-in this run — its standing (#380) — is believed of whatever is filed now.
+    private(set) var partsKnown = false
 
     /// Whether the last look at who may read notices could be had (#323). Where it could not,
     /// `noticeHosts` is empty for want of an answer, and a sign-in that would carry notices reads
@@ -154,6 +157,10 @@ public final class MastodonSessions {
         /// How many ask to follow them, as the check that named them said. Nothing where it
         /// said none, and nothing for a reader known only from what was written down.
         fileprivate var asking: Int? = nil
+        /// What the server's role lets them do there (#380), as the check that named them said.
+        /// Nothing for a reader known only from what was written down: **the standing is never
+        /// written anywhere**, and is asked again by every check.
+        fileprivate var staff: MastodonStaff? = nil
 
         /// `handle`, made fit to stand in a sentence of ours: no control or format character,
         /// no line break, and no longer than a name may run (`LineText.oneLine`).
@@ -200,6 +207,23 @@ public final class MastodonSessions {
         let host = raw.lowercased()
         guard let held = token(host: host), let reader = readers[host], held.accessToken == reader.accessToken else { return nil }
         return reader.asking
+    }
+
+    /// What the server's role lets whoever is signed in at `host` do there (#380), **as that
+    /// sign-in's own account check last said this run** — nothing where the check has not run
+    /// for the sign-in held now, or was another sign-in's, or named no role: then nothing of
+    /// tending is drawn. In memory only, and asked again by every check: a role changes.
+    ///
+    /// **No token is read for it**: drawn for every source row, it is asked often, and what it
+    /// answers by is already the sign-in's own — a reader is let go the moment the filing at its
+    /// host becomes another (`noteFilings`), and is laid down only through the sign-in held.
+    func staff(host raw: String) -> MastodonStaff? {
+        _ = readersLearnt
+        let host = raw.lowercased()
+        // **Closed where the last look could not be had**: who is filed may have changed under a
+        // look that failed, and a standing laid down for the sign-in before never stands over it.
+        guard partsKnown, grants[host] != nil else { return nil }
+        return readers[host]?.staff
     }
 
     /// How many ask to follow the reader at `host`, as a change to their own account was just
@@ -631,6 +655,8 @@ public final class MastodonSessions {
         // the source gave it one of its own.
         let account: String?
         let handle: String?
+        // What the role lets them do there (#380), off the same check.
+        let staff: MastodonStaff?
         // Whether the source handed back a token made before this sign-in: somebody's working
         // sign-in, on this device or another, and never ended for not being kept here.
         let handedBack: Bool
@@ -651,6 +677,7 @@ public final class MastodonSessions {
             token = signed.accountID.map { issued.named(accountID: $0, handle: signed.handle) } ?? issued
             account = signed.accountID
             handle = signed.handle
+            staff = signed.staff
             handedBack = signed.handedBack
         } catch let error as MastodonSignInError {
             // No server's page sends `invalid_scope` back; one that did has said what a page
@@ -814,7 +841,7 @@ public final class MastodonSessions {
         if self.token(host: host)?.accessToken == token.accessToken {
             // Its words are the ones its own trade named, to this device and nobody else.
             wordsConfirmed[host] = token.accessToken
-            readers[host] = account.map { Reader(id: $0, handle: handle, accessToken: token.accessToken) }
+            readers[host] = account.map { Reader(id: $0, handle: handle, accessToken: token.accessToken, staff: staff) }
             handles[host] = handle
             unlearned.remove(host)
             readersLearnt += 1
@@ -1110,7 +1137,9 @@ public final class MastodonSessions {
         }
         if who.handle != handles[host] { handles[host] = who.handle }
         let newer = askingAnswers[host, default: 0] != answered ? readers[host].flatMap { $0.id == who.id ? $0.asking : nil } : nil
-        readers[host] = who.id.map { Reader(id: $0, handle: who.handle, accessToken: asked.accessToken, asking: newer ?? who.asking) }
+        readers[host] = who.id.map {
+            Reader(id: $0, handle: who.handle, accessToken: asked.accessToken, asking: newer ?? who.asking, staff: who.staff)
+        }
         askingChecks[host, default: 0] += 1
         readersLearnt += 1
     }
@@ -2210,7 +2239,9 @@ public final class MastodonSessions {
         // the look itself could be had.
         if read != nil { readersChanged.formUnion(Set(self.grants.keys).subtracting(grants.keys)) }
         if grants != self.grants { self.grants = grants }
-        if read != nil, let parts = try? tokens.parts() {
+        let parts = read == nil ? nil : try? tokens.parts()
+        if partsKnown != (parts != nil) { partsKnown = parts != nil }
+        if let parts {
             noteFilings(Dictionary(uniqueKeysWithValues: grants.keys.map { ($0, parts[$0]?.stamp ?? "") }))
             let held = parts.filter { grants[$0.key] != nil }
             if held != heldParts { heldParts = held }

@@ -35,6 +35,11 @@ public struct PersonStanding: Hashable, Sendable {
     /// **said of a mute, and of nothing else** — nothing where the reader does not mute them,
     /// and nothing where the source did not say.
     public var mutesNotices: Bool?
+    /// The languages of their posts the reader takes into Home (#378), as ISO 639-1 codes in the
+    /// order the source keeps them. **Said of a follow, and of nothing else**, and **nothing
+    /// means every language** — as the source takes an empty choice, and as a source that says
+    /// nothing of it delivers them: never an empty list, so "all" has one spelling.
+    public var languages: [String]?
     /// The reader blocks the whole server they live on (#314). **Only its yes is a word**: a
     /// source that leaves it out has said nothing of a block of a server, and is read as none.
     public var serverBlocked: Bool
@@ -43,9 +48,10 @@ public struct PersonStanding: Hashable, Sendable {
         accountID: String, following: Bool = false, followedBy: Bool = false, requested: Bool = false,
         muting: Bool = false, mutedUntil: Date? = nil, blocking: Bool = false, blockedBy: Bool = false,
         showsBoosts: Bool? = nil, notifies: Bool? = nil, featured: Bool? = nil, mutesNotices: Bool? = nil,
-        serverBlocked: Bool = false
+        serverBlocked: Bool = false, languages: [String]? = nil
     ) {
         self.featured = featured
+        self.languages = languages?.isEmpty == false ? languages : nil
         self.mutesNotices = muting ? mutesNotices : nil
         self.serverBlocked = serverBlocked
         self.showsBoosts = showsBoosts
@@ -58,6 +64,18 @@ public struct PersonStanding: Hashable, Sendable {
         self.mutedUntil = mutedUntil
         self.blocking = blocking
         self.blockedBy = blockedBy
+    }
+}
+
+/// One language a source knows a post to be in (#378): its ISO 639-1 code, and the name the
+/// source gives it — in the source's own language, which a page names again in the reader's.
+public struct FollowLanguage: Hashable, Sendable, Decodable {
+    public let code: String
+    public let name: String
+
+    public init(code: String, name: String) {
+        self.code = code
+        self.name = name
     }
 }
 
@@ -104,10 +122,54 @@ public struct MastodonStanding: Sendable {
     /// nothing where it answered with no entry for them: an id nobody has there, or an account
     /// it suspended.
     public func standing(to accountID: String) async throws -> PersonStanding? {
+        try await standingNoted(to: accountID).standing
+    }
+
+    /// `standing(to:)`, and the reader's own note on them (#377) — which the source keeps on how
+    /// the reader stands to them — in the same one ask. The note is nothing where the source said
+    /// none, or sent it empty.
+    public func standingNoted(to accountID: String) async throws -> (standing: PersonStanding?, note: String?) {
         guard ListSubscription.isPathSegment(accountID) else { throw MastodonRequestError.invalidURL }
         // `id[]`, spelled as the wire carries it: a query's name goes out as it is written here.
         let body = try await door.get(path: Self.path, query: [URLQueryItem(name: "id%5B%5D", value: accountID)])
-        return try Self.standing(to: accountID, in: body)
+        let standing = try Self.standing(to: accountID, in: body)
+        let wire = (try? MastodonJSON.decoder.decode([StatusDTO.Lenient<Said>].self, from: body)) ?? []
+        let note = wire.compactMap(\.value).first { $0.id == accountID }.flatMap(\.noteSaid)
+        return (standing, note)
+    }
+
+    /// Writes the reader's own note on them (#377), which only the reader reads and the source
+    /// keeps — empty clears it — and hands back how the reader stands and the note **as the source
+    /// now says them**. Needs the account part (`write:accounts`): without it, `AccountPartError`
+    /// says so; a note the source will not keep — one too long — is `.refused` in its own words.
+    public func note(_ words: String, on accountID: String) async throws -> (standing: PersonStanding, note: String?) {
+        guard ListSubscription.isPathSegment(accountID) else { throw MastodonRequestError.invalidURL }
+        let body = try await AccountPartError.act(
+            door, path: "/api/v1/accounts/\(accountID)/note", method: "POST", form: [("comment", words)]
+        )
+        let standing = try Self.answered(about: accountID, body)
+        let note = (try? MastodonJSON.decoder.decode(Said.self, from: body))?.noteSaid
+        return (standing, note)
+    }
+
+    static let familiarPath = "/api/v1/accounts/familiar_followers"
+
+    /// Which of the people the reader follows also follow the account `accountID` names (#377),
+    /// as the source says them: nobody where it names nobody in common. Needs the follows part.
+    public func familiarFollowers(of accountID: String, at source: Source) async throws -> [Person] {
+        guard ListSubscription.isPathSegment(accountID) else { throw MastodonRequestError.invalidURL }
+        let body = try await door.get(path: Self.familiarPath, query: [URLQueryItem(name: "id%5B%5D", value: accountID)])
+        guard let wire = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<Familiar>].self, from: body) else {
+            throw MastodonStandingError.unreadable
+        }
+        let entry = wire.compactMap(\.value).first { $0.id == accountID }
+        return (entry?.accounts ?? []).compactMap { $0.value?.asPerson(source: source) }
+    }
+
+    /// One entry of `familiar_followers`: whom it is about, and who in common.
+    private struct Familiar: Decodable, Sendable {
+        let id: String
+        let accounts: [StatusDTO.Lenient<AccountDTO>]?
     }
 
     /// How many people one ask names at most: as many as the longest stretch of a list
@@ -123,12 +185,26 @@ public struct MastodonStanding: Sendable {
     /// Naming nobody asks nothing, and naming more than `most` is refused before anything is
     /// asked. `unreadable` where the body is no list.
     public func standings(to accountIDs: [String]) async throws -> [String: PersonStanding] {
+        try await standingsAsking(to: accountIDs).stands
+    }
+
+    /// `standings(to:)`, and who of them asks to follow the reader (#375) — what a request to
+    /// follow on the notices page offers accepting by — in the same one ask.
+    public func standingsAsking(to accountIDs: [String]) async throws -> (stands: [String: PersonStanding], asking: Set<String>) {
         var asked: [String] = []
         for id in accountIDs where ListSubscription.isPathSegment(id) && !asked.contains(id) { asked.append(id) }
-        guard !asked.isEmpty else { return [:] }
+        guard !asked.isEmpty else { return ([:], []) }
         guard asked.count <= Self.most else { throw MastodonRequestError.invalidURL }
         let body = try await door.get(path: Self.path, query: asked.map { URLQueryItem(name: "id%5B%5D", value: $0) })
-        return try Self.standings(to: asked, in: body)
+        return (try Self.standings(to: asked, in: body), Self.asking(among: asked, in: body))
+    }
+
+    /// Who of `accountIDs` the answer to `relationships` says asks to follow the reader. An entry
+    /// that does not say is nobody asking.
+    static func asking(among accountIDs: [String], in body: Data) -> Set<String> {
+        let wire = (try? MastodonJSON.decoder.decode([StatusDTO.Lenient<Said>].self, from: body)) ?? []
+        let asked = Set(accountIDs)
+        return Set(wire.compactMap(\.value).filter { $0.requestedBy?.value == true && asked.contains($0.id) }.map(\.id))
     }
 
     /// The standings to `accountIDs` in the answer to `relationships`: each entry that is
@@ -157,10 +233,13 @@ public struct MastodonStanding: Sendable {
     /// The words a follow is sent with to say what is taken from them.
     static let boostsWord = "reblogs"
     static let notifyWord = "notify"
+    static let languagesWord = "languages"
 
     /// Says what is taken from the account `accountID` names, whom the reader follows (#313):
-    /// whether their boosts are shown — `boosts` — and whether the reader is told of each of
-    /// their posts — `notify` — and hands back how the reader stands to them afterwards.
+    /// whether their boosts are shown — `boosts` — whether the reader is told of each of their
+    /// posts — `notify` — and which languages of their posts reach Home — `languages`, ISO 639-1
+    /// codes, none for every language (#378) — and hands back how the reader stands to them
+    /// afterwards. A code the source does not know is refused by it, in its own words.
     /// **Each is sent only where it is handed in**: one left out is left as it stands at the
     /// source (asked of a real one: `MastodonStandingCaptures`). **With neither it is refused
     /// before anything is asked**: that would be a bare follow, which is `follow`'s to send.
@@ -168,12 +247,40 @@ public struct MastodonStanding: Sendable {
     /// **It is a follow, said again with the words**: the source has no other address for it.
     /// So of somebody the reader does not follow it follows them — whoever calls it has seen
     /// that the reader does.
-    public func narrow(_ accountID: String, boosts: Bool? = nil, notify: Bool? = nil) async throws -> PersonStanding {
-        guard ListSubscription.isPathSegment(accountID), boosts != nil || notify != nil else {
+    public func narrow(
+        _ accountID: String, boosts: Bool? = nil, notify: Bool? = nil, languages: [String]? = nil
+    ) async throws -> PersonStanding {
+        guard ListSubscription.isPathSegment(accountID), boosts != nil || notify != nil || languages != nil else {
             throw MastodonRequestError.invalidURL
         }
-        let form = [boosts.map { (Self.boostsWord, String($0)) }, notify.map { (Self.notifyWord, String($0)) }].compactMap { $0 }
-        return try Self.answered(about: accountID, try await door.post(path: "/api/v1/accounts/\(accountID)/follow", form: form))
+        var form = [boosts.map { (Self.boostsWord, String($0)) }, notify.map { (Self.notifyWord, String($0)) }].compactMap { $0 }
+        if let languages {
+            // Every language is the word with nothing in it: an empty item is refused as no
+            // language (asked of a real one: `MastodonStandingSaysTests.followedInLanguages`).
+            form += languages.isEmpty ? [(Self.languagesWord, "")] : languages.map { (Self.languagesWord + "[]", $0) }
+        }
+        let body: Data
+        do {
+            body = try await door.actAtAddress(path: "/api/v1/accounts/\(accountID)/follow", method: "POST", form: form)
+        } catch let refused as MastodonUnprocessable {
+            // A language it does not know: said in its own words.
+            throw AccountPartError.refusal(from: refused.body)
+        }
+        return try Self.answered(about: accountID, body)
+    }
+
+    /// The path of the languages a Mastodon knows (#378).
+    static let languagesPath = "/api/v1/instance/languages"
+
+    /// The languages the source knows a post to be in, and so takes in a follow (#378): each
+    /// code it names, with the name it gives it, in its order. `unreadable` where it answers
+    /// with no such list.
+    public func languages() async throws -> [FollowLanguage] {
+        let body = try await door.get(path: Self.languagesPath, query: [])
+        guard let wire = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<FollowLanguage>].self, from: body) else {
+            throw MastodonStandingError.unreadable
+        }
+        return wire.compactMap(\.value).filter { !$0.code.isEmpty }
     }
 
     /// Answers the request of the account `accountID` names to follow the reader (#313): lets
@@ -270,6 +377,17 @@ public struct MastodonStanding: Sendable {
         let endorsed: StatusDTO.Lenient<Bool>?
         let mutingNotifications: StatusDTO.Lenient<Bool>?
         let domainBlocking: StatusDTO.Lenient<Bool>?
+        /// Whether they ask to follow the reader: no part of a standing, read for a request's row.
+        let requestedBy: StatusDTO.Lenient<Bool>?
+        /// The reader's own note on them (#377): no part of a standing either.
+        let note: StatusDTO.Lenient<String>?
+        let languages: StatusDTO.Lenient<[String]>?
+
+        /// The note, where it says anything.
+        var noteSaid: String? {
+            guard let words = note?.value, !words.isEmpty else { return nil }
+            return words
+        }
 
         /// The standing, where the source said every part of it. What is taken from them is
         /// no such part: a source that leaves it out has said the rest.
@@ -280,7 +398,7 @@ public struct MastodonStanding: Sendable {
                 mutedUntil: muting ? mutingExpiresAt?.value : nil, blocking: blocking, blockedBy: blockedBy,
                 showsBoosts: following ? showingReblogs : nil, notifies: following ? notifying : nil,
                 featured: following ? endorsed?.value : nil, mutesNotices: mutingNotifications?.value,
-                serverBlocked: domainBlocking?.value ?? false
+                serverBlocked: domainBlocking?.value ?? false, languages: following ? languages?.value : nil
             )
         }
     }

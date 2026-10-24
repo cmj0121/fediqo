@@ -22,7 +22,8 @@ struct MastodonHostTests {
         let said = Self.says(MastodonHostCaptures.document)
         #expect(said.featuredTagLimit == 10 && said.has(.featuredTags) == .present)
         #expect(said.translates == false && said.has(.translation) == .absent && said.pinLimit == 5)
-        #expect(Self.unsaid.count == MastodonHostThing.allCases.count - 3 && said.has(.quotes) == .present)
+        #expect(Self.unsaid.count == MastodonHostThing.allCases.count - 4 && said.has(.quotes) == .present)
+        #expect(said.has(.linkPosts) == .present)
         for thing in Self.unsaid { #expect(said.has(thing) == .unsaid, "\(thing)") }
         for thing in MastodonHostThing.allCases { #expect(MastodonHostSays.nothing.has(thing) == .unsaid, "\(thing)") }
     }

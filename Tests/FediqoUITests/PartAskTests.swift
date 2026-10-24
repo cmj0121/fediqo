@@ -1103,6 +1103,7 @@ struct PartAskTests {
         .marks: ["read:bookmarks", "read:favourites"],
         .blocks: ["read:mutes", "write:mutes", "read:blocks", "write:blocks"],
         .reports: ["write:reports"],
+        .tending: ["admin:read", "admin:write"],
     ]
 
     private static func split(_ scopes: String) -> Set<String> {
@@ -1309,7 +1310,7 @@ struct PartAskTests {
     @Test("The words a question says are given up are a few, each cut short, and then a count: what a source chose to call its words does not fill the question")
     func manyWordsGivenUp() async throws {
         let long = String(repeating: "x", count: 64)
-        let (session, _, _) = try await shell(holding: Self.acting + " push follow \(long) admin:read crypto")
+        let (session, _, _) = try await shell(holding: Self.acting + " push follow \(long) admin:read:reports crypto")
         #expect(session.askBookmarks(host: host))
         let ask = try #require(session.partAsks.open)
         #expect(ask.givesUp.count == 5)

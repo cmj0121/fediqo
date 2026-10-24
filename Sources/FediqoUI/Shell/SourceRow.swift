@@ -121,8 +121,8 @@ struct SourceRow: Identifiable, Hashable {
         }
     }
 
-    /// Every sentence standing about this source now, in the order the head of the row's `…`
-    /// reads them: the errand running, then a refusal of the last press on this host, then the
+    /// Every sentence standing about this source now, in the order the source's detail reads
+    /// them: the errand running, then a refusal of the last press on this host, then the
     /// forum's own notice, then that its reads keep failing (#371). The row draws none of them — its `…` says in colour and in its name that
     /// there is something to read (`saying`) — VoiceOver hears them all, and the source's detail
     /// (`SourceStanding`) says every one whole.
@@ -459,9 +459,8 @@ extension SourceRow {
     /// for followers only — and never a sign-in. `key.slash` is forgetting a password.
     static let permissionSymbol = "person.badge.key"
 
-    /// What the permission control says beyond its word — to the pointer, to VoiceOver, and at
-    /// the head of the row's `…`, which is where a finger reads it. Nothing where nothing is
-    /// owed. **The only place a row says why**: no sentence stands on the page about it.
+    /// What the permission control says beyond its word — to the pointer and to VoiceOver.
+    /// Nothing where nothing is owed. **The only place a row says why**: no sentence stands on the page about it.
     ///
     /// `lock` is how the sign-in's bookmarks stand, where that is what is owed
     /// (`MastodonSessions.bookmarkPlace`): **its line is then the control's** — never asked in
@@ -518,21 +517,12 @@ extension SourceRow {
 
     /// What the row's `…` says besides that it is there: nothing at rest, that it waits while
     /// the errand running is all the row has to say, and a warning otherwise. **The one signal a
-    /// sighted reader has that the menu has something at its head**, since no line is held open
-    /// under the hostname for it — and it is colour and words, never a second glyph.
+    /// sighted reader has that the row has something to say**, since no line is held open under
+    /// the hostname for it — and it is colour and words, never a second glyph. The sentences
+    /// themselves are the source's detail's (`SourceStanding`), and no longer the menu's (#385).
     static func saying(waiting: Bool, said: [String]) -> ShellMoreSaying {
         guard !said.isEmpty else { return .nothing }
         return warns(waiting: waiting, said: said) ? .warns : .waits
-    }
-
-    /// What stands at the head of the row's `…` before any dim mark's reason: every standing
-    /// sentence, then what the sign-in holds, part by part (`holds`, #347) — the only place
-    /// a finger reads it on the row — then what the permission glyph says.
-    static func head(
-        _ row: SourceRow, said: [String], holds: String? = nil, lock: PartWords.Place? = nil,
-        language: DummyLanguage? = nil
-    ) -> [String] {
-        said + [holds, permissionLine(row, lock: lock, language: language)].compactMap { $0 }
     }
 
     /// What a listener is told of the row: what it is, then whatever it has to say, and then
@@ -576,6 +566,27 @@ extension SourceRow {
         /// no such page to open — no sign-in, a source that does not say who people are, or
         /// one that has not yet said who the reader is there — and then no item is drawn.
         var ownPage: (() -> Void)?
+        /// Opens the page of tending this server, or asks for tending's words (#380). Pressed
+        /// only through the item `tending` draws, and nothing is drawn without it.
+        var tend: () -> Void = {}
+    }
+
+    /// The item that tends a server the reader answers for (#380), where their standing there
+    /// allows it: the page, plain; or, where the sign-in lacks tending's words, that part's lock,
+    /// whose press asks for them alone. Nothing without the standing — no trace of it is drawn.
+    static func tendItem(
+        _ entry: ShellTending.Entry?, host: String, actsLive: Bool, press: @escaping () -> Void, language: DummyLanguage? = nil
+    ) -> ShellMoreItem? {
+        switch entry {
+        case nil:
+            return nil
+        case .open:
+            return .plain(TendingTab.reports.symbol, String(format: L10n.t("tend.item", language: language), host), act: press)
+        case .lock(let place):
+            let line = String(format: L10n.t(place.key, language: language), host)
+            let dim: DimReason = place.kind == .none ? .never : .notNow
+            return .plain(ShellMark(permissionSymbol, line, look: actsLive && place.asks ? .live : .dim(dim)), act: press)
+        }
     }
 
     /// The glyph and the name of the item that opens the reader's own page at a source.
@@ -587,10 +598,10 @@ extension SourceRow {
 
     /// The row's `…`, as a value.
     ///
-    /// The head is what the row has to say, then why each of the row's marks that is dim is dim
-    /// — the lock where one is drawn, and the key — the only place a finger reads either. Then
-    /// Boards and Lists, dim with their reason in their own title where the source has none or
-    /// cannot just now; then, under the divider, Clear and Remove (`inMore`'s order).
+    /// **No line heads it** (#385): what the row has to say, and why the lock or the key is dim,
+    /// are not the menu's. Boards and Lists, dim with their reason in their own title where the
+    /// source has none or cannot just now; then, under the divider, Clear and Remove (`inMore`'s
+    /// order).
     ///
     /// **"Your page there" stands first, and only where there is such a page** (`Presses.ownPage`):
     /// an item of this menu that a kind of source has not got is absent, never dim.
@@ -604,18 +615,17 @@ extension SourceRow {
     /// not once a row each time the list is drawn.
     @MainActor
     static func more(
-        _ row: SourceRow, actsLive: Bool, said: [String], holds: String? = nil, lock: PartWords.Place? = nil,
-        marks: ShellMark? = nil, clearAsks: @escaping () -> ShellConfirmation,
+        _ row: SourceRow, actsLive: Bool, marks: ShellMark? = nil, tending: ShellTending.Entry? = nil,
+        clearAsks: @escaping () -> ShellConfirmation,
         removeAsks: @escaping () -> ShellConfirmation, presses: Presses
     ) -> ShellMore {
         func mark(_ control: Control) -> ShellMark {
             Self.mark(control, source: row.source, signedIn: row.signedIn, actsLive: actsLive)
         }
-        let drawn = [permission(row, actsLive: actsLive, lock: lock)].compactMap { $0 } + onRow.map(mark)
         let own = presses.ownPage.map { ShellMoreItem.plain(ownPageSymbol, ownPageLabel(row.source.host), act: $0) }
+        let tend = tendItem(tending, host: row.source.host, actsLive: actsLive, press: presses.tend)
         return ShellMore(
-            head: head(row, said: said, holds: holds, lock: lock) + ShellMore.reasons(of: drawn),
-            items: [own].compactMap { $0 } + [
+            items: [own, tend].compactMap { $0 } + [
                 .plain(mark(.boards), act: presses.changeBoards),
                 .plain(mark(.lists), act: presses.chooseLists),
             ] + [marks.map { ShellMoreItem.plain($0, act: presses.marks) }].compactMap { $0 } + [
@@ -764,6 +774,8 @@ struct SourceRowView: View {
     /// reads them where it does not hold it (#317): the marks item of `…` is drawn from these.
     var marksReads = false
     var marksPlace: PartWords.Place? = nil
+    /// What the row offers for tending its server (#380), where the reader's standing there allows it.
+    var tending: ShellTending.Entry? = nil
     /// How many announcements its source holds that are not seen and not dismissed (#321), as
     /// last asked — or nothing, and then no mark is drawn. Handed in: the row asks nothing.
     var announced: Int? = nil
@@ -810,9 +822,9 @@ struct SourceRowView: View {
     /// acts that take something away are destructive items of it.
     var more: ShellMore {
         SourceRow.more(
-            row, actsLive: actsLive, said: said, holds: holds, lock: lock,
+            row, actsLive: actsLive,
             marks: SourceRow.marksMark(row, actsLive: actsLive, reads: marksReads, place: marksPlace),
-            clearAsks: clearAsks, removeAsks: removeAsks, presses: presses
+            tending: tending, clearAsks: clearAsks, removeAsks: removeAsks, presses: presses
         )
     }
 
@@ -866,6 +878,7 @@ struct SourceRowView: View {
         // area is the row and not only its words.
         .background { if let wash = pressed.wash { wash } }
         .onHover { hovering = $0 }
+        .shellMoreHeld()
     }
 
     /// The row's one line, with the permission control as it is handed in.
@@ -999,7 +1012,7 @@ struct SourceRowView: View {
 }
 
 /// Every sentence standing about a source, whole, at the head of its detail (#244): what its row
-/// keeps at the head of its `…`. A line each, read in order.
+/// says in colour on its `…` and to a listener. A line each, read in order.
 struct SourceStanding: View {
     let lines: [String]
     @Environment(\.colorScheme) private var colorScheme

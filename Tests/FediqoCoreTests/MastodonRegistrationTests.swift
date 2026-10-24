@@ -32,7 +32,7 @@ struct MastodonRegistrationTests {
     private let host = MastodonFixture.host
     private static let whole = "read:statuses read:lists read:accounts read:search write:statuses write:favourites "
         + "write:bookmarks read:notifications write:notifications read:follows write:follows write:accounts write:media "
-        + "read:bookmarks read:favourites read:mutes write:mutes read:blocks write:blocks write:reports"
+        + "read:bookmarks read:favourites read:mutes write:mutes read:blocks write:blocks write:reports admin:read admin:write"
 
     private static func list(_ words: [String]) -> Data {
         try! JSONSerialization.data(withJSONObject: ["scopes_supported": words])
@@ -64,8 +64,8 @@ struct MastodonRegistrationTests {
         let without: Set<String> = Set(words).subtracting(["write:bookmarks", "read:search"])
         #expect(MastodonRegistration.superset(listed: without)
             == "read:statuses read:lists read:accounts write:statuses write:favourites read:notifications write:notifications read:follows write:follows write:accounts write:media "
-               + "read:bookmarks read:favourites read:mutes write:mutes read:blocks write:blocks write:reports")
-        let larger = Set(words).union(["admin:write", "follow", "push", "read", "write"])
+               + "read:bookmarks read:favourites read:mutes write:mutes read:blocks write:blocks write:reports admin:read admin:write")
+        let larger = Set(words).union(["admin:read:reports", "follow", "push", "read", "write"])
         #expect(MastodonRegistration.superset(listed: larger) == Self.whole)
         #expect(MastodonRegistration.superset(listed: nil) == Self.whole, "no list: asked as it is")
     }
@@ -210,12 +210,14 @@ struct MastodonRegistrationTests {
         let real = MastodonSignInCaptures.widestRegistration
         let all = try await registered(real, for: MastodonSignInCaptures.everyPart)
         #expect(all.app.scopes == MastodonSignInCaptures.everyPart && all.echoed)
+        // Asked for more than that answer named — tending's two words, which came after it — the
+        // registration is believed of what both said: the answer named neither.
         let ours = try await registered(real, for: Self.whole)
-        #expect(ours.app.scopes == Self.whole, "the server named more than was asked, and none of it is written down")
+        #expect(ours.app.scopes == Self.whole.replacingOccurrences(of: " admin:read admin:write", with: ""))
 
         let narrower = #"{"client_id":"cid","client_secret":"cs","scopes":["write:statuses","read:statuses","admin:write"]}"#
         let less = try await registered(narrower, for: Self.whole)
-        #expect(less.app.scopes == "read:statuses write:statuses" && less.echoed)
+        #expect(less.app.scopes == "read:statuses write:statuses admin:write" && less.echoed)
         let asString = #"{"client_id":"cid","client_secret":"cs","scopes":"read:lists  read:statuses","redirect_uri":"fediqo://oauth"}"#
         #expect(try await registered(asString, for: Self.whole).app.scopes == "read:statuses read:lists")
 
