@@ -393,4 +393,20 @@ struct ListFileTests {
         try FileManager.default.removeItem(at: place.directory.appendingPathComponent("index.sqlite"))
         #expect(lists.timelines.read() == .data(Self.kept))
     }
+
+    @Test("Where the person stopped in Home is one of the lists, and an aside of it — and of what is hidden — is settled like the others")
+    func stoppedIsSettled() throws {
+        let place = try Place()
+        let lists = ListFiles(directory: place.directory, defaults: place.defaults, protected: .always)
+        #expect(lists.all.map(\.key) == ["fediqo.allowances", "fediqo.timelines", "fediqo.hides", "fediqo.stopped"])
+        let stopped = Data(#"{"version":1,"hosts":["mastodon.social"]}"#.utf8)
+        let hides = Data(#"{"version":1,"hides":[]}"#.utf8)
+        #expect(lists.stopped.write(stopped) && lists.hides.write(hides))
+        _ = try #require(try lists.stopped.putAside())
+        _ = try #require(try lists.hides.putAside())
+        StorePackager.sweepLeftovers(directory: place.directory, media: nil, temporary: place.directory)
+        #expect(lists.stopped.read() == .data(stopped), "the person's own, put back")
+        #expect(lists.hides.read() == .data(hides), "what is hidden was left aside")
+        #expect(place.names == [ListFile.hidesName, ListFile.stoppedName])
+    }
 }
