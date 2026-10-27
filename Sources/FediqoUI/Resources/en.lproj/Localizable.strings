@@ -2150,6 +2150,13 @@
 "source.you.media" = "Its media";
 "source.you.media.covered" = "Covered";
 "source.you.media.open" = "Not covered";
+"source.you.stopped" = "Tell %@ where you stopped in Home";
+"source.you.stopped.help" = "Off until you turn it on. While on, %@ is told the post you are reading in Home, and another reader of this account can start there.";
+"home.place.line" = "You are at a post here. %@ has you at another.";
+"home.place.here" = "Stay on this post";
+"home.place.there" = "Go to the post %@ has";
+"home.place.missing" = "The post %@ has is not on this device.";
+"home.place.failed" = "%@ did not say where you stopped. Nothing here moved.";
 "work.purpose.rising" = "Reading what is rising on a source";
 "rising.asking" = "Asking %@…";
 "rising.none.tags" = "%@ gave no rising hashtags.";

@@ -415,8 +415,10 @@ struct TimelinePane: View {
             let wasReading = mark.left()
             mark.forget(for: arrived?.id ?? TimelineQuery.all.id)
             // The one left keeps the stretch round the post it was left at, drawn at once on the
-            // way back (#359).
-            session.timelineLeft(left ?? .all, at: (touch ? wasReading : selectedID) ?? top)
+            // way back (#359). The row being read is what Home is told (#316), not the top row
+            // a place falls back to.
+            let leaving = touch ? wasReading : selectedID
+            session.timelineLeft(left ?? .all, at: leaving ?? top)
             if !searching {
                 if !onTag {
                     // Under a finger the place kept is the post being read, and the one given
@@ -447,6 +449,33 @@ struct TimelinePane: View {
             }
             // The walk ends on the same change, where it is held: `FediqoRootView` clears it, all
             // but a tag's page in front, which stays and asks the new timeline (#197).
+            let from = left ?? .all
+            let to = arrived ?? .all
+            if from != to {
+                let arriving = searching ? nil : (touch ? mark.id : selectedID)
+                Task {
+                    await session.homePlace.switched(
+                        from: from, to: to, leaving: leaving, arriving: arriving, touch: touch, in: session
+                    )
+                }
+            }
+        }
+        .onAppear {
+            guard trends == nil else { return }
+            let row = touch ? session.readingMark.id : selectedID
+            Task {
+                await session.homePlace.opened(
+                    session.timelineID ?? .all, reading: row, touch: touch, tellSettled: true, in: session
+                )
+            }
+        }
+        .onDisappear {
+            guard trends == nil else { return }
+            // The list taking this pane's place may already have cleared the mark. `left()`
+            // still names the row a finger had; `id` by then is nothing.
+            let row = touch ? session.readingMark.left() : selectedID
+            let timeline = session.timelineID ?? .all
+            Task { await session.homePlace.left(row, on: timeline, in: session) }
         }
     }
 
@@ -1396,6 +1425,7 @@ struct TimelinePane: View {
                 if touch, selectedID != nil { selectedID = nil }
             }
             .onChange(of: selectedID) { _, id in
+                if !touch { session.homePlace.selectionNoted(id, in: session) }
                 // Not under a finger, and not for the row a keyboard was just handed (#303).
                 let mark = session.readingMark
                 let handed = mark.handed
@@ -1458,7 +1488,10 @@ struct TimelinePane: View {
             // launch was there all along, and a launch with a keyboard selects nothing.
             .onChange(of: touch) { _, now in
                 let mark = session.readingMark
-                defer { if now { mark.becameTouch() } }
+                defer {
+                    if now { mark.becameTouch() }
+                    session.homePlace.mode(touch: now, row: now ? mark.id : selectedID, in: session)
+                }
                 guard standing == nil else { return }
                 let next = ShellReadingMark.handover(touchNow: now, marked: mark.id, used: mark.used, selected: selectedID)
                 guard next != selectedID else { return }
@@ -1597,6 +1630,9 @@ struct TimelinePane: View {
             if let latest = prefs.latestDate {
                 latestMark(latest)
             }
+            if trends == nil {
+                HomePlaceLine(session: session, touch: touch, apply: applyHomePlace)
+            }
         }
         .accessibilityElement(children: .contain)
         .modifier(ScrollsToNeighbour(session: session, steps: trends == nil))
@@ -1625,6 +1661,26 @@ struct TimelinePane: View {
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .lineLimit(1)
             .accessibilityLabel(String(format: L10n.t("timeline.latest.label"), day))
+    }
+
+    /// The press that goes to the post the source names (#316): the selection with a keyboard
+    /// or a pointer, the mark kept under a finger. The line appearing does not call this.
+    private func applyHomePlace() {
+        guard let move = session.homePlace.move else { return }
+        session.homePlace.clearMove()
+        switch move.how {
+        case .select:
+            if selectedID != move.rowID {
+                selectedID = move.rowID
+            } else {
+                session.homePlace.selectionNoted(move.rowID, in: session)
+            }
+        case .keep:
+            session.readingMark.keep(move.rowID)
+            returns += 1
+            let row = move.rowID
+            Task { await session.homePlace.fingerNoted(row, in: session) }
+        }
     }
 
     /// One of the timeline's tabs: a `ShellTabPill` named by the reader, marked where one of its
@@ -1789,11 +1845,18 @@ struct KeepsTopRow: ViewModifier {
         // (`ShellReadingMark.wholeShare`) — never asked for as exactly all of it.
         .onScrollTargetVisibilityChange(idType: String.self, threshold: ShellReadingMark.wholeShare) { whole in
             session.readingMark.whole(whole, of: session.currentTimeline.id)
+            let noted = session.readingMark.id
+            Task { await session.homePlace.wholeNoted(noted, in: session) }
         }
         // The person moving the list, as against the list being moved: what a timeline
         // returned to was kept on gives way to what is on screen only for the first (#303).
         .onScrollPhaseChange { _, phase in
-            if ShellReadingMark.byHand(phase) { session.readingMark.scrolledByHand() }
+            if ShellReadingMark.byHand(phase) {
+                session.readingMark.scrolledByHand()
+                session.homePlace.moving()
+            } else {
+                Task { await session.homePlace.settled(in: session) }
+            }
         }
     }
 }

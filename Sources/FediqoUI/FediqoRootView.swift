@@ -161,7 +161,8 @@ public struct FediqoRootView: View {
             // A launch made for a picture writes no timeline down: one it makes for itself
             // (`ShellStaged.Step.empty`) is gone with the launch.
             timelines: staged == nil ? WrittenTimelineStore(defaults: .standard, file: lists?.timelines) : nil,
-            hides: staged == nil ? ShellHides(defaults: .standard, file: lists?.hides) : nil
+            hides: staged == nil ? ShellHides(defaults: .standard, file: lists?.hides) : nil,
+            stopped: staged == nil ? ShellStopped(defaults: .standard, file: lists?.stopped) : nil
         )
         session.persist = persist
         session.persistUnsent = persistUnsent

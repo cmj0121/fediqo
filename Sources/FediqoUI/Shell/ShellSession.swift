@@ -68,6 +68,10 @@ final class ShellSession {
     let acts = ShellActs()
     /// What this device hides of what it held of whom the person muted or blocked (#314).
     let hides: ShellHides
+    /// Which Mastodon hosts are told where Home was left (#316). Off until that choice is made.
+    let stopped: ShellStopped
+    /// What those hosts last said, and the line that names both places.
+    let homePlace = ShellHomePlace()
 
     /// The conversation around each post the reader has opened — #90.
     ///
@@ -992,10 +996,12 @@ final class ShellSession {
         posts: ForumPosts? = nil,
         blogs: ForumBlogs? = nil,
         timelines: WrittenTimelineStore? = nil,
-        hides: ShellHides? = nil
+        hides: ShellHides? = nil,
+        stopped: ShellStopped? = nil
     ) {
         self.http = http
         self.hides = hides ?? ShellHides()
+        self.stopped = stopped ?? ShellStopped()
         timelineStore = timelines
         carry = ShellCarry(work: work)
         nearby = ShellNearby(work: work)
