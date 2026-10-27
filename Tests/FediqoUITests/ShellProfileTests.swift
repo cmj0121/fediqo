@@ -146,7 +146,7 @@ struct ShellProfileTests {
     @Test("The root presents the sheet in one line beside the part's question, among the person's presenters, with no closure presenter in its body; the sheet's file names no kind of source, and the file that asks draws nothing")
     func presentedFromTheRoot() throws {
         let root = try String(contentsOf: ShellSource.root.appendingPathComponent("FediqoRootView.swift"), encoding: .utf8)
-        #expect(root.contains(".modifier(PartQuestion(session: session))\n            .modifier(PersonPresenters(people: people, session: session, onOpenThread: { setOut(to: .thread($0)) }))"))
+        #expect(root.contains(".modifier(PartQuestion(session: session))\n            .modifier(PersonPresenters(people: people, session: session, onOpenThread: threadOpener))"))
         #expect(root.contains("content\n            .modifier(ProfileSheetPresenter(profile: people.profile, session: session))"))
         let sheet = try ShellSource.shell("ProfileSheet"), asks = try ShellSource.shell("ShellProfile")
         #expect(!sheet.contains("Mastodon") && !sheet.contains("session.mastodon"))
