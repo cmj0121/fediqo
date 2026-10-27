@@ -30,6 +30,7 @@ struct MastodonSignInPartsTests {
         (.marks, "read:bookmarks read:favourites", ""),
         (.blocks, "read:mutes write:mutes read:blocks write:blocks", ""),
         (.reports, "write:reports", ""),
+        (.filters, "read:filters write:filters", ""),
         (.tending, "admin:read admin:write", ""),
     ]
 
@@ -171,7 +172,7 @@ struct MastodonSignInPartsTests {
     @Test("A held word the table does not know is on no page — the whole of reading, as a source names what an older or another app's token holds, among them — and no page names a word that is neither held nor a ticked part's")
     func anUnknownHeldWordIsLeftOut() {
         let reading = MastodonOAuth.reading
-        #expect(MastodonParts.page(held: "\(reading) read:filters write:nonsense", ticked: [.notices]) == "\(reading) read:notifications")
+        #expect(MastodonParts.page(held: "\(reading) read:collections write:nonsense", ticked: [.notices]) == "\(reading) read:notifications")
         #expect(MastodonParts.page(held: "read write", ticked: [.reading]) == MastodonOAuth.readingWithoutSearch)
         // What a real source said a sign-in for everything holds (`MastodonSignInCaptures.wholeInfo`).
         #expect(MastodonParts.page(held: "read write", ticked: []) == "")
@@ -278,7 +279,7 @@ struct MastodonSignInPartsTests {
         #expect(MastodonParts.page(held: nil, ticked: reads, readOnly: true) == MastodonOAuth.reading)
         #expect(MastodonParts.page(held: nil, ticked: reads.union([.notices]), readOnly: true) == MastodonOAuth.scopes(writing: false, notices: true))
         // Ticking what acts beside that answer asks for none of it: of follows, the word that reads.
-        #expect(MastodonParts.page(held: everything, ticked: Set(Part.allCases), readOnly: true) == "\(r) read:search \(n) read:follows read:bookmarks read:favourites read:mutes read:blocks admin:read")
+        #expect(MastodonParts.page(held: everything, ticked: Set(Part.allCases), readOnly: true) == "\(r) read:search \(n) read:follows read:bookmarks read:favourites read:mutes read:blocks read:filters admin:read")
         #expect(MastodonParts.page(held: nil, ticked: [.acting, .bookmarks], readOnly: true) == "")
 
         let acts = reads.union([.acting, .bookmarks])

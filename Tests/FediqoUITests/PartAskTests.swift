@@ -1103,6 +1103,7 @@ struct PartAskTests {
         .marks: ["read:bookmarks", "read:favourites"],
         .blocks: ["read:mutes", "write:mutes", "read:blocks", "write:blocks"],
         .reports: ["write:reports"],
+        .filters: ["read:filters", "write:filters"],
         .tending: ["admin:read", "admin:write"],
     ]
 

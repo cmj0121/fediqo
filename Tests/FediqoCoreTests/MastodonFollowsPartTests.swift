@@ -49,7 +49,7 @@ struct MastodonFollowsPartTests {
             ("\(r) read:follows", "\(r) \(f)"),
             ("write:follows \(r)", "\(r) \(f)"),
             // A word this build does not use is on no page.
-            ("\(r) push read:filters", "\(r) \(f)"),
+            ("\(r) push read:collections", "\(r) \(f)"),
             ("read write", f),
             (nil, f),
         ]
@@ -139,7 +139,7 @@ struct MastodonFollowsPartTests {
         #expect(MastodonParts.holdings(in: "\(r) \(f)") == MastodonHoldings(entries: [.whole(.reading), .whole(.follows)], other: []))
         #expect(MastodonParts.holdings(in: "\(r) read:follows").entries == [E.whole(.reading), .partly(.follows)])
         #expect(MastodonParts.holdings(in: "\(r) write:follows").entries == [E.whole(.reading), .partly(.follows)])
-        #expect(MastodonParts.unknown(in: "\(r) \(f) read:filters") == ["read:filters"])
+        #expect(MastodonParts.unknown(in: "\(r) \(f) read:collections") == ["read:collections"])
         #expect(MastodonParts.holds(.follows, in: "write:follows read:follows"))
         #expect(!MastodonParts.holds(.follows, in: "read:follows"))
         #expect(!MastodonParts.holds(.follows, in: "follow read write"), "the source's older word for it was read as the part")
