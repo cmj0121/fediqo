@@ -171,6 +171,10 @@ public enum Category: Hashable, Sendable {
     case bookmarks
     /// What a signed-in Mastodon reader favourited at the source, from any reader (#317).
     case favourites
+    /// Posts written to named people, read back as a list of conversations (#326). The server
+    /// can read them. Not a mark: a line is the conversation, and the latest post is an ordinary
+    /// post opened as a thread.
+    case conversations
 
     /// Whether this is something the reader marked (#317): **listed by when it was marked, not
     /// by when it was posted**, and paged by the source's own mark, which is no post's id. So
@@ -184,7 +188,7 @@ public enum Category: Hashable, Sendable {
         switch self {
         case .bookmarks: "bookmarks"
         case .favourites: "favourites"
-        case .public, .trends, .home, .list, .board: nil
+        case .public, .trends, .home, .list, .board, .conversations: nil
         }
     }
 }
@@ -537,7 +541,10 @@ public struct Note: Identifiable, Hashable, Sendable {
     ///
     /// **The only thing a mention in the words is read by** (`PostMention.spans`): the words
     /// alone name nobody. It goes where the words go — a later wording brings its own.
-    public let mentions: [String]
+    ///
+    /// A `var` for `categories`' reason: the store sets it when a conversation names who is in
+    /// it (#326), on a row it already holds.
+    public var mentions: [String]
     public let url: URL?
     /// What the source last counted of answers, boosts and favourites, each nothing where it
     /// never said. Kept with the row (#208): a figure of the moment it was read, and still the

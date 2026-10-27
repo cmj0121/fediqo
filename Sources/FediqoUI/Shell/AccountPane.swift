@@ -629,6 +629,8 @@ struct AccountPane: View {
                         lock: session.mastodon.bookmarkPlace(host: row.source.host),
                         marksReads: !session.readableMarks(host: row.source.host).isEmpty,
                         marksPlace: session.marksLock(host: row.source.host),
+                        directsReads: session.directsReads(host: row.source.host),
+                        directsPlace: session.directsLock(host: row.source.host),
                         tending: onTend == nil ? nil : ShellTending.entry(at: row.source.host, in: session),
                         announced: announced?.mark(at: row.source.host, in: session),
                         clearAsks: { session.clearQuestion(host: row.source.host) },
@@ -664,6 +666,7 @@ struct AccountPane: View {
             changeBoards: { Task { await changeBoards(row) } },
             chooseLists: { Task { await changeLists(row) } },
             marks: { Task { await pressMarks(row) } },
+            directs: { Task { await pressDirects(row) } },
             clear: { Task { await clear(row) } },
             remove: { Task { await remove(row, keepingPosts: postsStay()) } },
             open: { openSource(row) },
@@ -692,6 +695,11 @@ struct AccountPane: View {
     /// A row's bookmarks and favourites item (#317): read again, or asked for.
     func pressMarks(_ row: SourceRow) async {
         await session.pressMarks(host: row.source.host)
+    }
+
+    /// A row's conversations item (#326): the list, or asked for.
+    func pressDirects(_ row: SourceRow) async {
+        await session.pressDirects(host: row.source.host)
     }
 
     // MARK: - What every control on this page actually does

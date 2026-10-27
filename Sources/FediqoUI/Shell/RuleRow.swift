@@ -38,7 +38,7 @@ enum RuleBuilder {
             // Every source, or one a category of this kind can mean — which is the source's
             // own to say (`SourceOffers.serves`): public and Home where it has timelines, what
             // is rising where it has that, bookmarks and favourites where it reads them (#317).
-            case .public, .home, .trends, .bookmarks, .favourites:
+            case .public, .home, .trends, .bookmarks, .favourites, .conversations:
                 return [.every] + sources.filter { $0.kind.offers.serves(category) }.map { .source(host: $0.host) }
             }
         // Every source, or one whose kind declares the field: no other could match it.
@@ -102,13 +102,14 @@ enum RuleBuilder {
     /// sign-in may read them (`marks`, #317) — and any other its held posts arrived through.
     /// **Never what is trending**, which is the Trends page's and no timeline's.
     static func categories(
-        in sources: [Source], notes: [Note], signedIn: (String) -> Bool, marks: (String) -> Bool = { _ in false }
+        in sources: [Source], notes: [Note], signedIn: (String) -> Bool, marks: (String) -> Bool = { _ in false },
+        directs: (String) -> Bool = { _ in false }
     ) -> [(host: String, categories: [FediqoCore.Category])] {
         sources.compactMap { source in
             // What the source can be read by now, as it offers it — completed here with who is
             // signed in to it, which only the caller knows.
             var picked = source.kind.offers.categories(
-                of: source, signedIn: signedIn(source.host), marks: marks(source.host)
+                of: source, signedIn: signedIn(source.host), marks: marks(source.host), directs: directs(source.host)
             )
                 .filter { $0 != .trends }
             let held = Set(notes.filter { $0.source.host == source.host }.flatMap(\.categories))
@@ -202,6 +203,7 @@ enum RuleText {
         case .home: L10n.t("rule.category.home", language: language)
         case .bookmarks: L10n.t("rule.category.bookmarks", language: language)
         case .favourites: L10n.t("rule.category.favourites", language: language)
+        case .conversations: L10n.t("rule.category.conversations", language: language)
         case .list(let id):
             sources.first { $0.host == host }?.lists.first { $0.id == id }?.name
                 ?? String(format: L10n.t("rule.category.list", language: language), id)

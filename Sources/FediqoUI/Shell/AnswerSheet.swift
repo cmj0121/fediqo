@@ -14,6 +14,9 @@ struct AnswerTarget: Identifiable, Equatable {
     /// Where the reach started: the post's own, or the narrowest where this device was never told
     /// it. `Audience.answering`.
     let start: Audience
+    /// Who a conversation's answer goes to (#326). Empty is an ordinary answer, whose reach can
+    /// be widened. When these are set, the answer stays with them and the picker is not drawn.
+    var directs: [String] = []
 
     var id: String { item.id }
 }
@@ -74,24 +77,32 @@ struct AnswerSheet: View {
             failedAt: { host }
         ) { _ in
             answered(item)
-            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
-                Text(Self.goesTo(host: host))
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                Picker(L10n.t("answer.reach"), selection: reach) {
-                    ForEach(Audience.allCases, id: \.self) { audience in
-                        Text(L10n.t(ComposerSheet.visibilityKey(audience))).tag(audience)
+            if target.directs.isEmpty {
+                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
+                    Text(Self.goesTo(host: host))
+                        .shellFont(.meta)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    Picker(L10n.t("answer.reach"), selection: reach) {
+                        ForEach(Audience.allCases, id: \.self) { audience in
+                            Text(L10n.t(ComposerSheet.visibilityKey(audience))).tag(audience)
+                        }
                     }
+                    .pickerStyle(.menu)
+                    .shellFont(.meta)
+                    .accessibilityLabel(L10n.t("answer.reach"))
                 }
-                .pickerStyle(.menu)
-                .shellFont(.meta)
-                .accessibilityLabel(L10n.t("answer.reach"))
-            }
-            if Self.widens(reach.wrappedValue, from: target.start) {
-                Text(L10n.t("answer.wider"))
+                if Self.widens(reach.wrappedValue, from: target.start) {
+                    Text(L10n.t("answer.wider"))
+                        .shellFont(.meta)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                Text(L10n.t("answer.direct.same"))
                     .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(L10n.t("answer.direct.same"))
             }
         }
         .task(id: host) { await session.refreshPostLimit(of: host) }

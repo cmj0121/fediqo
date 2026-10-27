@@ -1160,6 +1160,30 @@ public actor ItemStore {
     ///
     /// `membersPooled` is a caller that asked `marked` for this category before its read, which
     /// laid the file's rows of it into the pool: they are not asked of the file again.
+    /// The post `key` is one of conversation `id` (#326): the category, the id the list knows it
+    /// by, and who is in it. Nothing where the post is not held. An unchanged row says nothing.
+    public func direct(_ key: NoteKey, conversation id: String, mentions handles: [String]) {
+        guard let note = notes[key] else { return }
+        let bounded = PostMention.bounded(handles)
+        var next = note
+        next.categories.insert(.conversations)
+        next.listed[.conversations] = id
+        next.mentions = bounded
+        guard next != note else { return }
+        notes[key] = next
+        changed(shown: !next.isPartOfTopic, replies: next.isPartOfTopic)
+    }
+
+    /// `category` leaves the post `key`. The post stays. Nothing where it was not in that
+    /// category. A failure of the ask that would take it off does not call this.
+    public func release(_ key: NoteKey, from category: Category) {
+        guard var note = notes[key], note.categories.contains(category) || note.listed[category] != nil else { return }
+        note.categories.remove(category)
+        note.listed[category] = nil
+        notes[key] = note
+        changed(shown: !note.isPartOfTopic, replies: note.isPartOfTopic)
+    }
+
     public func land(_ read: MarksRead, of category: Category, ifSourceHere raw: String, membersPooled: Bool = false) {
         let host = raw.lowercased()
         guard category.isMarks, sourceList.contains(where: { $0.host == host }) else { return }
@@ -3256,7 +3280,7 @@ public actor ItemStore {
         for category in note.categories {
             switch category {
             case .public, .trends: return false
-            case .home, .list, .bookmarks, .favourites: through = true
+            case .home, .list, .bookmarks, .favourites, .conversations: through = true
             case .board: break
             }
         }
