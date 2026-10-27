@@ -86,6 +86,19 @@ public struct MastodonAccount: Sendable {
         return complete && all
     }
 
+    /// Home read on to now and landed, as the line opens (#325): what was missed while no line was
+    /// open is read, or said to be missing, before anything the line tells lands above it. Reads
+    /// the newest stretch too where the bound is reached, so it ends at the source's newest.
+    ///
+    /// Returns whether Home is read through to its newest, with nothing said to remain above
+    /// it: only then may a line's posts land over it, since landing one moves where reading on
+    /// starts. Throws what the read threw.
+    public func catchUp() async throws -> Bool {
+        guard let source = await source() else { return false }
+        let read = try await read("/api/v1/timelines/home", source: source, category: .home, catchingUp: true)
+        return read.newerRemainAbove == nil
+    }
+
     /// Makes `picks` the lists this source reads, and reads the ones that were not chosen before.
     ///
     /// Returns whether every read came back. Throws only `.signedOut` and cancellation.
@@ -193,9 +206,17 @@ public struct MastodonAccount: Sendable {
     ///
     /// A stretch that failed after the first lands what came before it, then fails the read.
     private func readOn(_ path: String, source: Source, category: Category) async throws {
+        _ = try await read(path, source: source, category: category)
+    }
+
+    /// `readOn(_:source:category:)`, and what it said: `catchingUp` reads the newest stretch too
+    /// where the bound is reached (`MastodonReadOn.read`).
+    private func read(
+        _ path: String, source: Source, category: Category, catchingUp: Bool = false
+    ) async throws -> ReadOn {
         let anchor = await store.newestListedID(host: host, category: category)
         let held = anchor == nil ? await store.held(host: host, category: category) : []
-        let read = try await MastodonReadOn.read(from: anchor, holding: held) { minID in
+        let read = try await MastodonReadOn.read(from: anchor, holding: held, catchingUp: catchingUp) { minID in
             try await listed(path, source: source, category: category, query: try MastodonPage.newer(than: minID))
         } older: { maxID in
             try await listed(path, source: source, category: category, query: try MastodonPage.older(than: maxID))
@@ -203,6 +224,7 @@ public struct MastodonAccount: Sendable {
         try Task.checkCancellation()
         await store.land(read, of: category, ifSourceHere: host)
         if let stopped = read.stopped { throw stopped }
+        return read
     }
 
     private func statuses(

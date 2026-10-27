@@ -3571,6 +3571,20 @@ public actor ItemStore {
         return true
     }
 
+    /// `markGone(_:at:)` of every row of `host` its source names by `statusID` — the post, or a
+    /// reblog under its own id (#325): the source said on its line that it deleted it. Read in
+    /// from the file first, where it holds them. The rows marked now; nothing where none is held,
+    /// or each was marked already.
+    @discardableResult
+    public func markGone(host raw: String, statusID: String, at moment: Date = Date()) -> [NoteKey] {
+        let host = raw.lowercased()
+        if let disk, !passingThrough, let read = reading({ try disk.rows(host: host, statusIDs: [statusID]) }) {
+            pool(found: read.rows)
+        }
+        let named = notes.values.filter { $0.key.host == host && $0.statusID == statusID }.map(\.key)
+        return named.filter { markGone($0, at: moment) }
+    }
+
     /// How many rows are marked gone from their source (#179) — what a press would let go, so
     /// never one the person keeps (#284).
     public func goneCount() -> Int {
