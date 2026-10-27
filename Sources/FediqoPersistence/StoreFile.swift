@@ -1554,6 +1554,11 @@ private var migrator: DatabaseMigrator {
             t.add(column: "quote_policy", .text)
         }
     }
+    // Posts written to named people, as a kind of category (#326).
+    // **Empty, and an id all the same** (`CategoryRow`): a build from before drops a kind it does
+    // not know, and its next save would lose every such row's category for good. The id makes it
+    // refuse the store instead.
+    migrator.registerMigration("v24-conversations") { _ in }
     return migrator
 }
 
@@ -1691,6 +1696,7 @@ struct CategoryRow: Codable, Comparable {
         case .board(let board): kind = "board"; id = board
         case .bookmarks: kind = "bookmarks"
         case .favourites: kind = "favourites"
+        case .conversations: kind = "conversations"
         }
     }
 
@@ -1704,6 +1710,7 @@ struct CategoryRow: Codable, Comparable {
         case ("board", let id?): .board(id: id)
         case ("bookmarks", _): .bookmarks
         case ("favourites", _): .favourites
+        case ("conversations", _): .conversations
         default: nil
         }
     }

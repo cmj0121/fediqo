@@ -435,6 +435,9 @@ extension ShellReload {
         // The reader's marks are asked by mark (`Due.Cursor.mark`), never before a post's id.
         case .some(let category) where category.isMarks:
             return
+        // A conversation's pages are the sheet's. A stretch of one asks nothing here.
+        case .conversations?:
+            return
         case .some(let category):
             // As the reader, through a door named for the timeline it reads, and ended by a
             // sign-out or a Clear before anything it brings lands.
