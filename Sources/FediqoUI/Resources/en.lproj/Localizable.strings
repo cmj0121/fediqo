@@ -2687,3 +2687,17 @@
 "standing.mute.minutes.one" = "For %d minute";
 "standing.mute.hours.one" = "For %d hour";
 "standing.mute.days.one" = "For %d day";
+
+/* #325 — what is new in Home arrives as it happens. */
+"work.purpose.line" = "Hearing what is new in Home as it happens";
+"activity.detail.until" = "Open until";
+"activity.detail.stillOpen" = "Still open";
+"source.line" = "New posts in Home at %@ arrive as they happen";
+"source.line.help" = "Off until you turn it on. While on, and a timeline that reads this Home is in front, Fediqo keeps one line open to %@: new posts land as they are written, and a post changed or deleted there shows so. Home is read up to now as the line opens. Reloading and the wait go on as before, and the line is let go when the timeline is not in front.";
+"source.line.open" = "The line to %@ is open.";
+"source.line.refused" = "%1$@ refused the line (%2$d). Home is read as before.";
+"source.line.signIn" = "Sign in to %@ to have new posts in Home arrive as they happen.";
+"source.line.cannot" = "%@ does not say what is new as it happens. It is read as before.";
+"timeline.line.above" = "%d new posts above";
+"timeline.line.above.one" = "%d new post above";
+"timeline.line.above.hint" = "Goes up to them.";

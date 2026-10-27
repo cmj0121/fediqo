@@ -155,6 +155,16 @@ struct ActivityDetail: View {
             (L10n.t("activity.detail.purpose", language: language), act.purposeText(language: language)),
             (L10n.t("activity.detail.time", language: language), act.time(language: language)),
         ]
+        // A line is one act, open for as long as it was (#325): when it was let go, or that it is not.
+        if act.purpose == .line {
+            let until = act.until.map {
+                $0.formatted(Date.FormatStyle(date: .omitted, time: .standard).locale(L10n.locale(language)))
+            }
+            facts.append((
+                L10n.t("activity.detail.until", language: language),
+                until ?? L10n.t("activity.detail.stillOpen", language: language)
+            ))
+        }
         if act.reached != act.source {
             facts.append((L10n.t("activity.detail.reached", language: language), act.reached))
         }
