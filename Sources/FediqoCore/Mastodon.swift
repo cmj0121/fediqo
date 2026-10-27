@@ -456,6 +456,10 @@ struct StatusDTO: Decodable, Sendable {
     /// unsigned read, as `reblogged` is; read leniently, as `pinned` is.
     let muted: Lenient<Bool>?
     let mediaAttachments: [MediaAttachment]?
+    /// Which of the reader's filters at this source caught it (#338): what the source says of the
+    /// post, and never matched here. Read leniently, each entry by itself: one this build cannot
+    /// read is passed over, and never costs the status. Absent on an unsigned read.
+    let filtered: Lenient<[Lenient<FilterResultDTO>]>?
     /// Whether the author covered it, and the line they covered it with. Optional because a
     /// server that did not send them has told us nothing, which is not the same as telling us
     /// there is nothing: `"spoiler_text": ""` is a server saying there is no line, and absent
@@ -693,6 +697,8 @@ struct StatusDTO: Decodable, Sendable {
             statusID: id, via: Self.applicationName(application), refs: [reference]
         )
         item.asked = sent
+        // What the reader's filters say of the reblog, as the source said it of the reblog (#338).
+        item.serverFiltered = filtered?.value.map { $0.compactMap { $0.value?.hit } }
         guard inner.reblog == nil else { return (item, nil) }
         var post = inner.post(source: source, categories: [])
         post.asked = sent
@@ -796,6 +802,8 @@ struct StatusDTO: Decodable, Sendable {
         )
         // The quoted post came in the same payload: handed to the store beside this one.
         note.brought = quote?.post.map { [$0] } ?? []
+        // What the reader's filters there say of it, where the read was the reader's (#338).
+        note.serverFiltered = subject.filtered?.value.map { $0.compactMap { $0.value?.hit } }
         return note
     }
 

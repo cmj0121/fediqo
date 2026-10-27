@@ -679,6 +679,10 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// takes each in beside it as the copy lands, and keeps none of it on the row — what an
     /// item keeps of the post it quotes is its reference, and the post is its own item's.
     public var brought: [Note] = []
+    /// The person's filters at its source that the source said caught this post, as it was last
+    /// read (#338): nothing where no read said, empty where one said none did. **The source's
+    /// word**, never matched here; the last read that says replaces it (`ItemStore.ingest`).
+    public var serverFiltered: [ServerFilterHit]?
     /// Whether what this item refers to is still to be asked for (#293). It is asked for once,
     /// when the item first arrives: the store marks the arrival, and takes the mark off when the
     /// asking is done. A target let go afterwards stays let go — the mark is off, and it is a
