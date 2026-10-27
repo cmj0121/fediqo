@@ -276,7 +276,7 @@ struct StoreSearchPagesTests {
         let list = NoteSearch.NamedCategory(category: .list(id: "7"), host: Self.one.host)
         #expect(try #require(NoteSearch("sev", sources: Self.sources)).namedCategories == [list])
         let e = Set(try #require(NoteSearch("e", sources: Self.sources)).namedCategories)
-        #expect(e == Set([list] + [FediqoCore.Category.home, .trends, .favourites].map { NoteSearch.NamedCategory(category: $0, host: nil) }))
+        #expect(e == Set([list] + [FediqoCore.Category.home, .trends, .favourites, .conversations].map { NoteSearch.NamedCategory(category: $0, host: nil) }))
         #expect(try #require(NoteSearch("rocks", sources: Self.sources)).namedCategories.isEmpty)
     }
 
