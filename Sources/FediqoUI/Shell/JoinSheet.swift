@@ -620,6 +620,7 @@ struct JoinSheet: View {
                         LineControl(host: source.host, session: session)
                         NoticesToldControl(host: source.host, session: session)
                     }
+                    if case .joined(let source) = origin { ServerFiltersBlock(host: source.host, session: session) }
                     if case .joined(let source) = origin, let more {
                         SourceMoreBlock(
                             host: source.host, more: more, session: session, onDirectory: directoryPress(at: source.host),
