@@ -62,6 +62,7 @@ public struct ListFile: @unchecked Sendable {
     package static let allowancesName = "allowances.json"
     package static let timelinesName = "timelines.json"
     package static let hidesName = "hides.json"
+    package static let stoppedName = "stopped.json"
 
     package init(
         directory: URL, name: String, key: String, defaults: UserDefaults, protected: ProtectedData,
@@ -197,7 +198,7 @@ public struct ListFile: @unchecked Sendable {
     package static func settleAsides(in directory: URL, after outcome: Outcome) {
         let manager = FileManager.default
         let names = ((try? manager.contentsOfDirectory(atPath: directory.path)) ?? []).sorted()
-        for name in [allowancesName, timelinesName] {
+        for name in [allowancesName, timelinesName, hidesName, stoppedName] {
             let strays = names.filter { $0.hasPrefix(name + asideInfix) }.map { directory.appendingPathComponent($0) }
             let list = directory.appendingPathComponent(name)
             if outcome == .held {
@@ -264,8 +265,11 @@ public struct ListFiles: Sendable {
     /// The timelines the person wrote (#27).
     public let timelines: ListFile
     /// What the person chose to hide here of whom they muted or blocked at a source (#314).
-    /// Carried in a package with the other two (`all`).
+    /// Carried in a package with the others (`all`).
     public let hides: ListFile
+    /// Which Mastodon hosts are told where the person stopped in Home (#316). Not an allowance.
+    /// Carried in a package with the others (`all`).
+    public let stopped: ListFile
 
     public init(directory: URL, defaults: UserDefaults, protected: ProtectedData) {
         self.init(directory: directory, defaults: defaults, protected: protected, device: .this)
@@ -284,7 +288,11 @@ public struct ListFiles: Sendable {
             directory: directory, name: ListFile.hidesName, key: "fediqo.hides",
             defaults: defaults, protected: protected, device: device
         )
+        stopped = ListFile(
+            directory: directory, name: ListFile.stoppedName, key: "fediqo.stopped",
+            defaults: defaults, protected: protected, device: device
+        )
     }
 
-    package var all: [ListFile] { [allowances, timelines, hides] }
+    package var all: [ListFile] { [allowances, timelines, hides, stopped] }
 }
