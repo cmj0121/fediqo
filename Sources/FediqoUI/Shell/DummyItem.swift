@@ -233,6 +233,9 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// to, and what opening it opens. Empty on anything but a reblog, and on a reblog whose post
     /// this device no longer holds (`reblogUnheld`).
     public private(set) var reblogged: [DummyItem] = []
+    /// The person's filters at its source that the source said caught it (#338): the post's, and
+    /// a reblog's own beside them. The source's word; weighed where the row is drawn.
+    public private(set) var serverFiltered: [ServerFilterHit] = []
     /// Whether this is a reblog of a post no longer held here: the row says who reblogged and
     /// when, and that the post is not here, and draws nothing of a post.
     public var reblogUnheld: Bool { isReblog && reblogged.isEmpty && !reblogOnItsWay }
@@ -525,6 +528,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// time, what it arrived through, where its timeline is not whole, whether it is kept.
     private init(content note: Note, as identity: Note) {
         let reblog = identity.isReblog && identity.key != note.key
+        serverFiltered = (note.serverFiltered ?? []) + (reblog ? identity.serverFiltered ?? [] : [])
         noteID = identity.id
         id = identity.key.rowID
         source = DummySource.unsigned(note.source.host, kind: Self.shape(of: note.source.kind))

@@ -235,7 +235,7 @@ struct DummyItemRow: View {
         // A post of whoever the person muted or blocked, and chose to hide here (#314): one line
         // that says why, where the post stood, and nothing of the post.
         if let hidden = acting.hidden {
-            HiddenRow(hidden: hidden)
+            HiddenRow(hidden: hidden, onShow: acting.showAnyway)
                 .padding(.horizontal, ShellSpace.pad)
                 .padding(.vertical, ShellSpace.snug)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -2444,6 +2444,8 @@ struct SourcePill: View {
 /// is the post's own place, saying what the person chose for it.
 struct HiddenRow: View {
     let hidden: HiddenHere
+    /// A warning's press: the post shown anyway (#338). Nothing for a hide.
+    var onShow: (() -> Void)?
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -2452,6 +2454,12 @@ struct HiddenRow: View {
                 .accessibilityHidden(true)
             Text(hidden.words)
                 .fixedSize(horizontal: false, vertical: true)
+            if let onShow {
+                Spacer(minLength: 0)
+                ShellLinkButton(L10n.t("hidden.filter.show"), action: onShow)
+                    .fixedSize()
+                    .accessibilityLabel(L10n.t("hidden.filter.show"))
+            }
         }
         .shellFont(.meta)
         .foregroundStyle(ShellChrome.inkDim(colorScheme))

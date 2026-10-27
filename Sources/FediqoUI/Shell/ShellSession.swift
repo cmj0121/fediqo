@@ -80,6 +80,10 @@ final class ShellSession {
     /// page was last in front (#324). The app's own is built over this device's preferences and
     /// the system's notices; a test hands in one holding a seam for the system.
     var noticesTold = ShellNoticesTold()
+    /// The rows a filter's warning covered that the person opened this run (#338), by row id.
+    var shownAnyway: Set<String> = []
+    /// The person's filters at each signed-in source, as read and tended this run (#338).
+    let serverFilters = ShellServerFilters()
 
     /// The conversation around each post the reader has opened — #90.
     ///
@@ -1521,6 +1525,24 @@ final class ShellSession {
         var acting = ItemActing(acts: Self.acts(from: each.map(\.acts)))
         // Hidden here, saying why, where the person muted or blocked whoever made it (#314).
         acting.hidden = hides.hide(of: item).map { HiddenHere($0) }
+        // Or where the person's filter at its source caught it (#338), as the source said — a
+        // warning not already opened this run.
+        if acting.hidden == nil, let hit = serverFilter(over: item) {
+            acting.hidden = HiddenHere(filter: hit, host: item.source.host)
+            if acting.hidden?.opens == true {
+                let id = item.id
+                acting.showAnyway = { [weak self] in self?.shownAnyway.insert(id) }
+            }
+        }
+        // Or where the person's filter at its source caught it (#338), as the source said, where
+        // it stands over a timeline — and a warning not already opened this run.
+        if acting.hidden == nil, let hit = serverFilter(over: item) {
+            acting.hidden = HiddenHere(filter: hit, host: item.source.host)
+            if acting.hidden?.opens == true {
+                let id = item.id
+                acting.showAnyway = { [weak self] in self?.shownAnyway.insert(id) }
+            }
+        }
         for act in PostAct.allCases {
             let copy = each.first { $0.acts.offers(act) }?.copy ?? item
             acting.standings[act] = acts.standing(of: copy.id, act)

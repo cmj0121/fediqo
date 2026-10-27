@@ -202,6 +202,22 @@ final class ShellHides {
 struct HiddenHere: Equatable {
     let symbol: String
     let words: String
+    /// Whether it is a warning that opens on asking (#338): the row then offers to show the post.
+    var opens = false
+
+    /// A post the person's filter at its source caught (#338), named as the source names the
+    /// filter: hidden, or covered with a warning that opens on asking. **The server's**, said as
+    /// such, and never a rule's.
+    init(filter hit: ServerFilterHit, host: String, language: DummyLanguage? = nil) {
+        symbol = "line.3.horizontal.decrease.circle"
+        switch hit.action {
+        case .hide:
+            words = String(format: L10n.t("hidden.filter", language: language), LineText.oneLine(hit.title), host)
+        case .warn, .blur, .unknown:
+            words = String(format: L10n.t("hidden.filter.warn", language: language), LineText.oneLine(hit.title), host)
+            opens = true
+        }
+    }
 
     init(_ hide: ShellHides.Hide, language: DummyLanguage? = nil) {
         switch hide.why {
