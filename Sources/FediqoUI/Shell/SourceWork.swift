@@ -129,6 +129,9 @@ final class SourceWork {
         /// new in Home as it happens (#325): **one act, open for as long as the line was**
         /// (`SourceWork.endLine`), whatever it told.
         case line
+        /// The person's filters at a source they are signed in to, read, made, changed and removed
+        /// as them because they opened that source's page or pressed there (#338).
+        case filters
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -141,7 +144,7 @@ final class SourceWork {
         /// Everything else reaches wherever a post, a page or a directory points.
         var isOfTheSource: Bool {
             switch self {
-            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people, .serverSays, .rising, .ownSettings, .lookUp, .followedTags, .announcements, .tending: true
+            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people, .serverSays, .rising, .ownSettings, .lookUp, .followedTags, .announcements, .tending, .filters: true
             case .forumPost, .forumReplies, .joining, .boards, .directory, .serverCheck, .picture, .emoji,
                  .signIn, .signOut, .page, .video, .signInPage, .personCheck, .pagePart, .takeAway, .readBack,
                  .nearbyMove, .personHome, .line:

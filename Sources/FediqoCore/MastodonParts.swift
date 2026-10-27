@@ -48,6 +48,11 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     /// `acting`**: telling a server's moderators is not writing as the reader, and a sign-in that
     /// only reads may be asked for it.
     case reports
+    /// The person's filters at the source (#338): what it hides or warns of for them, read, made,
+    /// changed and removed. **Stands without `acting`**: a sign-in that only reads may be asked for
+    /// it, and then sees the filters and changes none. What a post says a filter caught needs no
+    /// part: the source tells every reader of the post.
+    case filters
     /// Tending the server the reader answers for (#380): what was reported to it, who asks to
     /// join, the servers and addresses it refuses, and what it lets rise. **The larger thing,
     /// asked only from its own lock and alone** — never ridden on another question — and of use
@@ -70,6 +75,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
         case .marks: ["read:bookmarks", "read:favourites"]
         case .blocks: ["read:mutes", "write:mutes", "read:blocks", "write:blocks"]
         case .reports: ["write:reports"]
+        case .filters: ["read:filters", "write:filters"]
         case .tending: ["admin:read", "admin:write"]
         }
     }
@@ -79,7 +85,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var wordsBesideActing: [String] {
         switch self {
         case .notices: ["write:notifications"]
-        case .reading, .search, .acting, .bookmarks, .follows, .account, .media, .marks, .blocks, .reports, .tending: []
+        case .reading, .search, .acting, .bookmarks, .follows, .account, .media, .marks, .blocks, .reports, .filters, .tending: []
         }
     }
 
@@ -89,7 +95,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var rider: Bool {
         switch self {
         case .search, .bookmarks: true
-        case .reading, .acting, .notices, .follows, .account, .media, .marks, .blocks, .reports, .tending: false
+        case .reading, .acting, .notices, .follows, .account, .media, .marks, .blocks, .reports, .filters, .tending: false
         }
     }
 
@@ -98,7 +104,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var needsActing: Bool {
         switch self {
         case .bookmarks, .media: true
-        case .reading, .search, .acting, .notices, .follows, .account, .marks, .blocks, .reports, .tending: false
+        case .reading, .search, .acting, .notices, .follows, .account, .marks, .blocks, .reports, .filters, .tending: false
         }
     }
 }

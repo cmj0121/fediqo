@@ -71,6 +71,7 @@ extension SourceWork.Purpose {
         case .announcements: "megaphone"
         case .tending: "exclamationmark.bubble"
         case .line: "dot.radiowaves.up.forward"
+        case .filters: "line.3.horizontal.decrease.circle"
         }
     }
 }

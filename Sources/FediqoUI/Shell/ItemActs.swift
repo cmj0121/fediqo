@@ -126,6 +126,8 @@ struct ItemActing {
     /// made it, or their whole server, and chose that what this device held of them is hidden.
     /// Nothing for a row drawn as it is.
     var hidden: HiddenHere?
+    /// A warning's press (#338): the post shown anyway, for this run. Nothing where it is not one.
+    var showAnyway: (() -> Void)?
 
     /// The question taking a post back asks, and what a yes to it does. **The question is built
     /// when the item is chosen** — it names the copy that goes as things stand at the press.
