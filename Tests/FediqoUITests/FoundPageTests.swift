@@ -301,7 +301,8 @@ struct FoundPageTests {
             }
         }
         // The people a search found say no line of their own any more: the head says it once.
-        #expect(PeopleSaid(list: at.people).line() == nil)
+        let found = PeopleSaid(list: at.people)
+        #expect(found.sorting.map { PeopleSaid.sortingLine($0, source: found.source) } == nil)
     }
 
     // MARK: - Hosted
