@@ -130,6 +130,35 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Mastodon's streaming service: what holds a line open and tells a reader what is new as it
+  # happens (#325). Not part of `make servers`; it comes up only for
+  # `FEDIQO_SERVERS_STREAMING=1 make servers`, and Caddy hands it `/api/v1/streaming` on
+  # `mastodon.localhost` — the source's own host, as a server with the usual proxy in front does.
+  # Where it is not up that path answers 502 and nothing else is touched. What it tells, the
+  # worker (`worker` profile) hands it: with no worker up a line opens and nothing new is said.
+  mastodon-streaming:
+    profiles: [streaming]
+    image: ghcr.io/mastodon/mastodon-streaming:v4.6.6@sha256:0420a546ff1e8979b15bdf5685c9ce8ee16df939e313a7e8475a8110cc97019a
+    environment:
+      <<: *mastodon-env
+      BIND: 0.0.0.0
+      PORT: "4000"
+    depends_on:
+      mastodon-db:
+        condition: service_healthy
+      mastodon-redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS --noproxy localhost http://127.0.0.1:4000/api/v1/streaming/health || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
   discourse-db:
     # Discourse 2026 structure.sql wants `vector`. Vanilla postgres will not boot it.
     image: pgvector/pgvector:pg17@sha256:143f87bbb8cbec339013c275cbf158c55d807d6aec4a98ff56086f1e87c861d5

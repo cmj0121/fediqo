@@ -14,9 +14,9 @@ fi
 # The profiles are named whether or not they were brought up: a `down` without one would leave
 # its container and volume behind.
 docker compose -f servers/compose.yml --project-directory servers --env-file servers/.env \
-    --profile gotosocial --profile worker down --volumes --remove-orphans 2>/dev/null \
+    --profile gotosocial --profile worker --profile streaming down --volumes --remove-orphans 2>/dev/null \
     || docker compose -f servers/compose.yml --project-directory servers \
-        --profile gotosocial --profile worker down --volumes --remove-orphans
+        --profile gotosocial --profile worker --profile streaming down --volumes --remove-orphans
 
 rm -rf servers/.run
 echo "servers: thrown away"
