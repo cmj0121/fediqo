@@ -1935,6 +1935,34 @@ private struct NoteFacts: Codable {
     /// as never asked, and asks once; an older build ignores the key, and a row it writes back
     /// without it asks once again — the one thing lost is an ask already made.
     var historyAt: Date?
+    /// `Note.serverFiltered` (#338): which of the person's filters at its source caught it, as the
+    /// last read said. Additive and optional for `gaps`' reasons: a row written before reads as a
+    /// post no read said that of, which the next read that does say fills in; an older build
+    /// ignores the key, and a row it writes back without it is said of again by the next read.
+    var filtered: [FilteredRow]?
+}
+
+/// `ServerFilterHit` as `NoteFacts` writes it.
+private struct FilteredRow: Codable {
+    var id: String
+    var title: String
+    var action: String
+    var context: [String]
+    var expiresAt: Date?
+
+    init(_ hit: ServerFilterHit) {
+        id = hit.filterID
+        title = hit.title
+        action = hit.action.word
+        context = hit.context.sorted()
+        expiresAt = hit.expiresAt
+    }
+
+    var hit: ServerFilterHit {
+        ServerFilterHit(
+            filterID: id, title: title, action: ServerFilterAction(word: action), context: Set(context), expiresAt: expiresAt
+        )
+    }
 }
 
 /// `Poll` as `NoteFacts` writes it. Held to `Poll`'s own bounds on the way back, whoever wrote
@@ -2340,7 +2368,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             mentions: note.mentions.isEmpty ? nil : note.mentions,
             via: note.via,
             poll: note.poll.map(PollRow.init),
-            historyAt: note.historyAt
+            historyAt: note.historyAt,
+            filtered: note.serverFiltered?.map(FilteredRow.init)
         )
     }
 
@@ -2392,7 +2421,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
            facts.attachments.isEmpty, facts.opening == nil {
             return nil
         }
-        return Note(
+        var note = Note(
             id: id,
             source: source,
             author: facts.author,
@@ -2440,5 +2469,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             refs: references,
             refsDue: refs_due
         )
+        note.serverFiltered = facts.filtered?.map(\.hit)
+        return note
     }
 }

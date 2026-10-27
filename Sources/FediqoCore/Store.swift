@@ -800,6 +800,9 @@ public actor ItemStore {
                     // are: not this copy's word where it was sent before their own vote landed.
                     if older { merged.poll = Poll.later(note.poll, over: existing.poll, reader: false, revised: true) }
                 }
+                // Which of the person's filters there caught it, as the last read that says
+                // says it (#338): a filter made, changed or removed since shows at the next read.
+                merged.serverFiltered = note.serverFiltered ?? existing.serverFiltered
                 // The same source handing the post over again is the source having it (#179):
                 // a mark it once earned comes off.
                 let kept = categories != existing.categories
