@@ -539,6 +539,12 @@ struct DummyThreadPane: View {
     /// **No `default:`.** A sixth standing has to be given a shape.
     @ViewBuilder
     private func around(answered: Bool) -> some View {
+        // The source still gathering answers from elsewhere (#340): said, and more drawn as they
+        // come, with nothing to press.
+        if conversations.gathering[root.id] != nil {
+            ForumWaiting(line: L10n.t("thread.gathering"))
+                .padding(.top, ShellSpace.snug)
+        }
         switch conversations.standing(of: root.id) {
         case .unasked, .coming:
             ForumWaiting(line: L10n.t("thread.replies.loading"))

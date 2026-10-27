@@ -82,7 +82,9 @@ struct FeaturingTests {
     }
 
     private func asked(_ server: PageServer) async -> [String] {
-        await server.asked.filter { $0 != Self.who }
+        // A person's collections are asked beside what they feature, with no token (#340), and
+        // are another test's to count.
+        await server.asked.filter { $0 != Self.who && !$0.hasSuffix("/collections") }
     }
 
     // MARK: - Somebody featured from their page
@@ -403,7 +405,7 @@ struct FeaturingTests {
             await pull.value
             let after = Array(await server.asked.dropFirst(before.count))
             // The steps up to the one stopped, in the order `again` takes them, and nothing after.
-            let steps = ["/api/v1/accounts/lookup?acct=ada", Self.stands] + (held == Self.stands ? [] : [Self.theirTags, Self.theirPeople])
+            let steps = ["/api/v1/accounts/lookup?acct=ada", Self.stands] + (held == Self.stands ? [] : [Self.theirTags, Self.theirPeople, "/api/v1/accounts/42/collections"])
             #expect(after.allSatisfy(steps.contains), "nothing after the stopped step was asked: \(after)")
             #expect(pages.ask(of: Self.ada, in: session) == PageAsking(stopped: true), "\(held)")
             // And nothing the other tabs held was let go for the press.
@@ -836,7 +838,7 @@ struct FeaturingTests {
 
         await features.opened(Self.ada, said: page, in: session)
         #expect(await server.asked.filter { $0 == Self.theirTags }.count == 2, "asked afresh, as them")
-        #expect(await server.bearers.last == "Bearer other")
+        #expect(await server.bearers.filter { $0 != "" }.last == "Bearer other")
         #expect(features.said(of: Self.ada, said: page, own: false, in: session)?.tags.map(\.name) == ["swift"])
     }
 

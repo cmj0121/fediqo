@@ -131,7 +131,8 @@ struct MastodonHostSaysTests {
         let weeks = try await ask("/api/v1/instance/activity")
         #expect(((weeks.json as? [[String: Any]])?.first?["statuses"]) is String, "every figure a string")
         // All eleven were asked; translating is a post's, asked where posts are (`MastodonPostActsSaysTests`), and
-        // the posts sharing a link a rising link's (`MastodonLinkPostsSaysTests`).
-        #expect(Set(open.map(\.0)).union(signed.map(\.0)) == Set(MastodonHostThing.allCases).subtracting([.translation, .quotes, .linkPosts]))
+        // the posts sharing a link a rising link's (`MastodonLinkPostsSaysTests`), and a year and a
+        // collection what else a server keeps (`MastodonExtrasCaptures`).
+        #expect(Set(open.map(\.0)).union(signed.map(\.0)) == Set(MastodonHostThing.allCases).subtracting([.translation, .quotes, .linkPosts, .yearsLookedBack, .collections]))
     }
 }

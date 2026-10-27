@@ -15,7 +15,7 @@ import SwiftUI
 struct PersonAboutSaid: Equatable {
     /// One block of the tab, top to bottom: what the lamp stops on.
     enum Block: String, CaseIterable {
-        case view, sentences, picture, words, fields, featuredTags, featuredPeople, figures, none, stands, boosts, notices, languages,
+        case view, sentences, picture, words, fields, featuredTags, featuredPeople, collections, figures, none, stands, boosts, notices, languages,
              familiar, note, home, requests, muted, blocked, servers, waiting, you, staff
     }
 
@@ -108,6 +108,7 @@ struct PersonAboutSaid: Equatable {
             case .fields: person?.fields.isEmpty == false
             case .featuredTags: featured?.tagsDrawn == true
             case .featuredPeople: featured?.people != nil
+            case .collections: featured?.collections.isEmpty == false
             case .figures: figures != nil
             case .none: none != nil
             case .stands: standsDrawn
@@ -148,6 +149,7 @@ struct PersonAboutSaid: Equatable {
             switch block {
             case .featuredTags: featured?.tagRows ?? []
             case .featuredPeople: [FeaturedSaid.peopleID]
+            case .collections: featured?.collectionRows ?? []
             default: [lamp(on: block)]
             }
         }
@@ -268,6 +270,7 @@ struct PersonAbout<Lead: View>: View {
         case .fields: fields
         case .featuredTags: featuredTags
         case .featuredPeople: featuredPeople
+        case .collections: collections
         case .figures: quiet(said.figures ?? "")
         case .none: quiet(said.none ?? "")
         case .stands: stands
@@ -679,6 +682,31 @@ struct PersonAbout<Lead: View>: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(featured.peopleWords())
+        }
+    }
+
+    /// The collections of people they put together (#340): its title, then a row each — its
+    /// name and how many are in it, and the mark that says it leads on.
+    @ViewBuilder
+    private var collections: some View {
+        if let featured = said.featured, !featured.collections.isEmpty {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                Text(L10n.t("person.collections")).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme))
+                ForEach(featured.collections, id: \.id) { list in
+                    let words = FeaturedSaid.collectionWords(list)
+                    Button { onFeatured(.people(list)) } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                            Text(words).fixedSize(horizontal: false, vertical: true)
+                            Image(systemName: "chevron.right").shellFont(.mark).accessibilityHidden(true)
+                        }
+                        .shellFont(.reading)
+                        .foregroundStyle(ShellChrome.ink(colorScheme))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(words)
+                }
+            }
         }
     }
 
