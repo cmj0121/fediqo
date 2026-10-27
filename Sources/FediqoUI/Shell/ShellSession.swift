@@ -84,6 +84,8 @@ final class ShellSession {
     var shownAnyway: Set<String> = []
     /// The person's filters at each signed-in source, as read and tended this run (#338).
     let serverFilters = ShellServerFilters()
+    /// The years each signed-in source looked back on for the person, read this run (#340).
+    let years = ShellYears()
 
     /// The conversation around each post the reader has opened — #90.
     ///

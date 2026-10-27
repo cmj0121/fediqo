@@ -176,6 +176,10 @@ final class ShellConversations {
     /// How far each loaded thread has been read toward its end (#177). Nothing for one that is not
     /// loaded, whose foot is its standing's to draw.
     private(set) var furthers: [String: ShellThreadFurther<Absence>] = [:]
+    /// What each thread's source said it is still gathering of it from elsewhere, as its last read
+    /// said (#340): nothing where it gathers nothing. The open thread is read again for it
+    /// (`ShellReload.gathered`), bounded, and only while it stays open.
+    private(set) var gathering: [String: MastodonGathering] = [:]
     /// The posts whose own thread has been asked for, per open thread — the post itself first. A
     /// post asked once is not asked again this run, so a count of answers the source will not
     /// show (a private one, a deleted one) cannot keep a thread asking for ever.
@@ -531,6 +535,7 @@ final class ShellConversations {
         said = [:]
         saidAbove = [:]
         furthers = [:]
+        gathering = [:]
         asked = [:]
         failedAtRoot = []
         heldBack = []
@@ -646,6 +651,7 @@ final class ShellConversations {
             // nothing, and adopting then would be a round trip to the store for nothing.
             let landed = await Self.land(thread.ancestors + thread.descendants, host: host, in: session)
             if landed.changed { await session.reloadFromStore() }
+            gathering[item.id] = thread.gathering
             // **And then drawn from what is held** (#293): the thread's posts show because the
             // store now holds them and they refer, each under what it answers — where it was
             // drawn before, since the place is the references' to say and they have not changed.

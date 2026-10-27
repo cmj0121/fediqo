@@ -91,6 +91,9 @@ struct PeopleSaid: Equatable {
         if own, list.which == .featured {
             return String(format: L10n.t("people.title.featured.own", language: language), list.host)
         }
+        if list.which == .collection {
+            return String(format: L10n.t("people.title.collection", language: language), list.lineWords, list.lineHandle)
+        }
         return String(
             format: L10n.t("people.title.\(list.which.rawValue)", language: language),
             titleNamesHost(list) ? list.host : list.lineHandle
@@ -193,6 +196,7 @@ struct PeopleSaid: Equatable {
         case .blocked: "people.blocked"
         case .boostedBy: "people.boostedBy"
         case .favouritedBy: "people.favouritedBy"
+        case .collection: "people.collection"
         case .following, .followers: "people"
         }
     }
@@ -237,7 +241,7 @@ struct PeopleSaid: Equatable {
             let key = switch list.which {
             case .found: "people.found.foot.farthest"
             case .suggested: "people.suggested.foot.farthest"
-            case .directory, .following, .followers, .requests, .featured, .muted, .blocked, .boostedBy, .favouritedBy:
+            case .directory, .following, .followers, .requests, .featured, .muted, .blocked, .boostedBy, .favouritedBy, .collection:
                 "people.directory.foot.farthest"
             }
             return String(format: L10n.t(key, language: language), L10n.grouped(people.count, language: language), source)
@@ -282,7 +286,7 @@ struct PeopleSaid: Equatable {
         if list.which == .featured {
             return String(format: L10n.t("people.featured.none", language: language), source)
         }
-        if list.which == .muted || list.which == .blocked || list.which == .boostedBy || list.which == .favouritedBy {
+        if [.muted, .blocked, .boostedBy, .favouritedBy, .collection].contains(list.which) {
             return String(format: L10n.t("\(Self.words(list.which)).none", language: language), source)
         }
         if list.hidden, !own {
