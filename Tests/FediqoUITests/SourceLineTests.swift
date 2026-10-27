@@ -73,7 +73,7 @@ struct SourceLineTests {
                 // The reader's bookmarks and favourites only where a kind has them (#317): an act
                 // one kind alone has is absent from every other's menu, never dim.
                 let marks = kind.offers.marks ? [SourceRow.marksSymbol] : []
-                #expect(drawn.more.items.map(\.symbol) == ["checklist", "list.bullet"] + marks + ["eraser", "trash"], "\(kind)")
+                #expect(drawn.more.items.map(\.symbol) == ["checklist", "list.bullet"] + marks + [SourceRow.directsSymbol] + ["eraser", "trash"], "\(kind)")
             }
         }
     }
@@ -161,7 +161,7 @@ struct SourceLineTests {
         #expect(drawn.more.whys.isEmpty)
         #expect(!drawn.more.items.contains { drawn.said.contains($0.name) })
         #expect(drawn.saying == .warns)
-        #expect(drawn.more.ordinary.map(\.symbol) == ["checklist", "list.bullet"])
+        #expect(drawn.more.ordinary.map(\.symbol) == ["checklist", "list.bullet", SourceRow.directsSymbol])
         #expect(drawn.more.dangers.map(\.symbol) == ["eraser", "trash"])
         #expect(drawn.more.divides)
         // A menu draws no colour of ours, so a dim item's reason is in its own words.
@@ -174,10 +174,11 @@ struct SourceLineTests {
         #expect(rest.more.items.map(\.name) == [
             "Change which boards you read on forum.example",
             "Choose which of your lists you read on forum.example",
+            "Conversations at forum.example",
             "Clear what this device holds from forum.example",
             "Remove forum.example and everything it left here",
         ])
-        #expect(rest.more.items.map(\.answers) == [true, false, true, true])
+        #expect(rest.more.items.map(\.answers) == [true, false, false, true, true])
         // Signed out of a protocol with lists: not right now, and said in the item.
         let lists = Self.view(Self.row(Self.micro)).more.items[1]
         #expect(lists.title() == "Choose which of your lists you read on micro.example. \(L10n.t("mark.dim.notNow"))")
@@ -249,7 +250,7 @@ struct SourceLineTests {
             let more = drawn.more
             #expect(more.dangers.map(\.symbol) == ["eraser", "trash"], "\(source.kind)")
             #expect(more.dangers.allSatisfy(\.isDanger) && more.ordinary.allSatisfy { !$0.isDanger })
-            #expect(more.items.map(\.answers).count == (source.kind.offers.marks ? 5 : 4) && more.divides)
+            #expect(more.items.map(\.answers).count == (source.kind.offers.marks ? 6 : 5) && more.divides)
             _ = (drawn.key, drawn.saying, drawn.permission, more.label(), more.items.map { $0.title() })
             #expect(built == 0, "\(source.kind): a question was built for a row nobody pressed")
             #expect(more.ordinary.allSatisfy { $0.question == nil })

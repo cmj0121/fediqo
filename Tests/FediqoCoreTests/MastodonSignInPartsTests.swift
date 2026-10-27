@@ -32,6 +32,7 @@ struct MastodonSignInPartsTests {
         (.reports, "write:reports", ""),
         (.filters, "read:filters write:filters", ""),
         (.lists, "write:lists", ""),
+        (.conversations, "write:conversations", ""),
         (.tending, "admin:read admin:write", ""),
     ]
 

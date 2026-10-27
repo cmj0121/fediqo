@@ -119,7 +119,7 @@ struct MastodonReportsTests {
         #expect(MastodonPart.reports.words == ["write:reports"])
         #expect(!MastodonPart.reports.rider && !MastodonPart.reports.needsActing && MastodonPart.reports.wordsBesideActing.isEmpty)
         #expect(MastodonGrant.of(scopes: "read:statuses read:lists read:accounts write:reports") == .reading)
-        #expect(MastodonParts.everything.hasSuffix("write:reports read:filters write:filters write:lists admin:read admin:write"))
+        #expect(MastodonParts.everything.hasSuffix("write:reports read:filters write:filters write:lists write:conversations admin:read admin:write"))
         #expect(ReportCategory.allCases.map(\.rawValue) == ["spam", "legal", "violation", "other"])
     }
 }
