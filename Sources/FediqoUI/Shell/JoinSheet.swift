@@ -616,7 +616,10 @@ struct JoinSheet: View {
                     }
                     SourcePreviewView(preview: preview, surface: .sheet, origin: origin)
                     if case .joined(let source) = origin, let you { YouThereBlock(host: source.host, you: you, session: session) }
-                    if case .joined(let source) = origin { LineControl(host: source.host, session: session) }
+                    if case .joined(let source) = origin {
+                        LineControl(host: source.host, session: session)
+                        NoticesToldControl(host: source.host, session: session)
+                    }
                     if case .joined(let source) = origin, let more {
                         SourceMoreBlock(
                             host: source.host, more: more, session: session, onDirectory: directoryPress(at: source.host),

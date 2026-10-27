@@ -85,19 +85,37 @@ struct LineArrivedPill: View {
     }
 }
 
-/// While the timeline is in front and the window is not in the background, the lines it wants are
-/// held (#325); its leaving, a change of what is wanted, or the background lets them go. A
-/// modifier of its own for `AsksOnAWait`'s reason.
-struct HearsLines: ViewModifier {
+/// The timeline's pane telling `ShellLines` which timeline is in front and whether it is in front
+/// of the reader (#325); its leaving says there is none. A modifier of its own for
+/// `AsksOnAWait`'s reason.
+struct ShowsLineFront: ViewModifier {
     let session: ShellSession
     let timeline: TimelineQuery
     let inFront: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .task(id: ShellLines.Front(timeline: timeline, inFront: inFront)) {
+                session.lines.front = ShellLines.Front(timeline: timeline, inFront: inFront)
+            }
+            .onDisappear { session.lines.front = nil }
+            .onChange(of: timeline) { _, _ in session.lines.forgetAbove() }
+    }
+}
+
+/// While Fediqo runs and its window is not in the background, the lines wanted are held: Home's
+/// for the timeline in front (#325) and the notices told of (#324). A change of what is wanted, or
+/// the background, lets them go. And the notices page in front has nothing waiting to be seen.
+/// On the root, a modifier of its own for `AsksOnAWait`'s reason.
+struct HearsLines: ViewModifier {
+    let session: ShellSession
+    let noticesInFront: Bool
     @Environment(\.scenePhase) private var phase
 
     func body(content: Content) -> some View {
-        let wanted = session.lines.wanted(timeline: timeline, inFront: inFront && phase != .background, in: session)
+        let wants = session.lines.wants(running: phase != .background, in: session)
         content
-            .task(id: wanted) { await session.lines.hear(wanted, in: session) }
-            .onChange(of: timeline) { _, _ in session.lines.forgetAbove() }
+            .task(id: wants) { await session.lines.hear(wants, in: session) }
+            .task(id: noticesInFront) { session.noticesTold.pageInFront = noticesInFront }
     }
 }

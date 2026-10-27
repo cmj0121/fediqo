@@ -2643,3 +2643,15 @@
 "timeline.line.above" = "上方有 %d 則新貼文";
 "timeline.line.above.one" = "上方有 %d 則新貼文";
 "timeline.line.above.hint" = "移到它們那裡。";
+
+/* #324 — the person is told of a new notice while Fediqo runs. */
+"source.told" = "Fediqo 開著時，告訴我 %@ 的新通知";
+"source.told.help" = "預設關閉，由你開啟。開啟時，只要 Fediqo 開著，就與 %1$@ 保持一條連線：每則新通知立刻列在通知裡，並在打開通知的地方計數，直到你打開為止。%1$@ 擋下的通知不會告訴你。除了那個來源，不會送往任何地方。";
+"source.told.system" = "也用系統的通知告訴我";
+"source.told.system.help" = "預設關閉，由你開啟。開啟的那一刻，系統才會詢問 Fediqo 能否顯示通知；啟動時從不詢問。只會顯示下方開著的種類。";
+"source.told.system.refused" = "系統設定裡關掉了 Fediqo 的通知。計數照常運作，也不會再詢問。";
+"source.told.kinds" = "會告訴你的種類";
+"source.told.signIn" = "登入 %@ 並允許讀取通知，Fediqo 開著時就會告訴你新通知。";
+"source.told.cannot" = "%@ 沒有通知可說，照舊讀取。";
+"rail.count" = "%d 則新的";
+"rail.count.one" = "%d 則新的";

@@ -76,6 +76,10 @@ final class ShellSession {
     /// app's own is built over this device's preferences (`FediqoRootView`); a test hands in one
     /// holding its lines.
     var lines = ShellLines()
+    /// Which sources' notices are told while Fediqo runs, and how many were since the notices
+    /// page was last in front (#324). The app's own is built over this device's preferences and
+    /// the system's notices; a test hands in one holding a seam for the system.
+    var noticesTold = ShellNoticesTold()
 
     /// The conversation around each post the reader has opened — #90.
     ///
