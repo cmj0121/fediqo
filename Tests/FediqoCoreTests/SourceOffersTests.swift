@@ -16,7 +16,7 @@ struct SourceOffersTests {
             fields: [.audience, .language, .covered, .reblog, .reblogOf],
             loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true, people: true,
             follows: true, polls: true, marks: true, blocks: true, reports: true, changesPosts: true, sendsLater: true,
-            tendsLists: true
+            tendsLists: true, conversations: true
         ))
         #expect(ProtocolKind.allCases.filter(\.offers.tendsLists) == [.mastodon], "only at a Mastodon are lists kept (#337)")
         #expect(ProtocolKind.allCases.filter(\.offers.reports) == [.mastodon], "only at a Mastodon is anything reported (#339)")
