@@ -357,9 +357,8 @@ public struct FediqoRootView: View {
             .modifier(FollowingSaves(session: session))
             // And the store is held within the room the person gave it (#249).
             .modifier(KeepingWithinRoom(session: session))
-            .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes))
-            // The lines wanted held while Fediqo runs (#325, #324).
-            .modifier(HearsLines(session: session, noticesInFront: place == .notices))
+            // The wait, and the lines wanted held while Fediqo runs (#325, #324) in the same group.
+            .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes, noticesInFront: place == .notices))
             .modifier(AnnouncementsAsk(session: session, announcements: people.announcements))
             // The pages open over the timeline, whose rows the store keeps while they are (#359).
             .modifier(PinsPages(session: session, pages: openPages))

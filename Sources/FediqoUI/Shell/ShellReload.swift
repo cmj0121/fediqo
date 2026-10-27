@@ -1519,14 +1519,22 @@ enum WaitKeeper {
 /// have passed (#95). A wait chosen anew starts counting again from the choice. A modifier of its
 /// own so the root view's chain, long enough already for the compiler the CI builds with, does
 /// not grow a closure.
+///
+/// **And the lines wanted held while Fediqo runs** (`HearsLines`, #325, #324), in the same
+/// group: the root's chain is as long as the compiler the CI builds with will read, and gains no
+/// line for them.
 struct AsksOnAWait: ViewModifier {
     let session: ShellSession
     let minutes: Int
+    /// Whether the notices page is in front, for the lines (`HearsLines.noticesInFront`).
+    var noticesInFront = false
 
     func body(content: Content) -> some View {
-        content.task(id: minutes) {
-            await session.reload.keepAsking(every: Self.wait(minutes), in: session)
-        }
+        content
+            .task(id: minutes) {
+                await session.reload.keepAsking(every: Self.wait(minutes), in: session)
+            }
+            .modifier(HearsLines(session: session, noticesInFront: noticesInFront))
     }
 
     static func wait(_ minutes: Int) -> Duration { .seconds(minutes * 60) }
