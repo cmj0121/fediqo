@@ -812,6 +812,22 @@ public struct MastodonAuthorized: Sendable {
         return try await finish(result, path: path)
     }
 
+    /// `actAtAddress` and the scope refusal `put(path:form:)` tells apart (#337): a not-found of
+    /// the address throws `MastodonHostMoreError.noSuchAddress`, a refusal for want of a scope
+    /// `MastodonScopeError.outside`, a 422 `MastodonUnprocessable`, and anything else what `get`
+    /// throws. A 404 whose body names a missing record is that last, not the address.
+    public func actAtAddressInScope(path: String, method: String, form: [(String, String)]? = nil) async throws -> Data {
+        let result = try await send(path: path, method: method, form: form)
+        if MastodonHostNotFound.isOfTheAddress(status: result.status, body: result.body) {
+            throw MastodonHostMoreError.noSuchAddress
+        }
+        if MastodonScopeRefusal.isOne(status: result.status, body: result.body, authenticate: result.authenticate) {
+            throw MastodonScopeError.outside
+        }
+        if result.status == 422 { throw MastodonUnprocessable(body: result.body) }
+        return try await finish(result, path: path)
+    }
+
     /// As `get`, with a refusal for want of a scope told from every other 403 (#319): throws
     /// `MastodonScopeError.outside` where the server says the token was not issued with what
     /// the ask needs (`MastodonScopeRefusal`), and what `get` throws for any other refusal.

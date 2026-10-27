@@ -97,6 +97,8 @@ struct EmptyNotice: Equatable, Sendable {
         case latest
         /// A thread with nothing under it — not the timeline's empty, and not a wait.
         case thread
+        /// Every include of this timeline is a list this device no longer keeps (#337).
+        case goneList
     }
 
     var kind: Kind
@@ -181,6 +183,10 @@ struct EmptyNotice: Equatable, Sendable {
             )
         }
 
+        if notes.isEmpty, let gone = Self.listGone(definition, sources: sources, language: language) {
+            return gone
+        }
+
         if !notes.isEmpty, let latest {
             let allowed = CompiledTimeline(definition, sources: sources).shown(notes, index)
             if !allowed.isEmpty, latest.shown(allowed).isEmpty {
@@ -263,6 +269,26 @@ struct EmptyNotice: Equatable, Sendable {
             symbol: "list.bullet.rectangle",
             title: title,
             detail: detail
+        )
+    }
+
+    /// A timeline whose every include is a list this device no longer keeps: it says the list
+    /// is gone. Nothing where there is no include, or any include is still here, or a list's
+    /// source itself is gone — those stay the ordinary empty.
+    private static func listGone(
+        _ definition: TimelineDefinition, sources: [Source], language: DummyLanguage?
+    ) -> EmptyNotice? {
+        let includes = definition.rules.filter { $0.effect == .include }
+        guard !includes.isEmpty else { return nil }
+        let compiled = CompiledTimeline(definition, sources: sources)
+        for rule in includes {
+            guard case .category(.list, _) = rule.kind, compiled.status(of: rule) == .missingCategory else { return nil }
+        }
+        return EmptyNotice(
+            kind: .goneList,
+            symbol: "list.bullet",
+            title: L10n.t("timeline.list.gone.title", language: language),
+            detail: L10n.t("timeline.list.gone.detail", language: language)
         )
     }
 

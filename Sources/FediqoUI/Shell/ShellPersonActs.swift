@@ -271,6 +271,13 @@ final class ShellPersonActs {
             acting.reportsLock = session.mastodon.place(PersonAct.report.needs, host: host)
                 ?? PartWords.Place(kind: .none, key: "part.reports.unasked")
         }
+        // Lists they can be put on (#337), where the source keeps them. A sign-in that was not
+        // asked for them still offers the item, dim, and the press only asks.
+        acting.lists = source.kind.offers.tendsLists
+        if !MastodonParts.holds(.lists, in: session.mastodon.token(host: host)?.scopes) {
+            acting.listsLock = session.mastodon.place(.lists, host: host)
+                ?? PartWords.Place(kind: .unasked, key: "part.lists.unasked")
+        }
         if !Self.blocks(at: host, in: session) {
             acting.blocksLock = session.mastodon.place(PersonAct.mute.needs, host: host)
                 ?? PartWords.Place(kind: .none, key: "part.ask.partly")

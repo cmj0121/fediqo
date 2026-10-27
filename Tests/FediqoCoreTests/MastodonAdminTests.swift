@@ -46,7 +46,7 @@ struct MastodonAdminTests {
         #expect(MastodonPart.tending.words == ["admin:read", "admin:write"])
         #expect(!MastodonPart.tending.rider && !MastodonPart.tending.needsActing && MastodonPart.tending.wordsBesideActing.isEmpty)
         #expect(MastodonPart.allCases.last == .tending, "no scope string sent before changes")
-        #expect(MastodonParts.everything.hasSuffix("write:reports read:filters write:filters admin:read admin:write"))
+        #expect(MastodonParts.everything.hasSuffix("write:reports read:filters write:filters write:lists admin:read admin:write"))
         #expect(MastodonParts.page(held: nil, ticked: [.reading, .tending], readOnly: true)
             == "read:statuses read:lists read:accounts admin:read")
         #expect(MastodonParts.half(of: .tending, in: "admin:read") == .seeing)
