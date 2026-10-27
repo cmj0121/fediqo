@@ -755,6 +755,13 @@ public struct MastodonAuthorized: Sendable {
         return (try await finish(answer, path: path), answer.date.flatMap(Self.httpDate))
     }
 
+    /// `get(path:query:)`, and beside the body what the source says it is still gathering for
+    /// the answer (#340): its `Mastodon-Async-Refresh`, read. Nothing where it gathers nothing.
+    public func getGathering(path: String, query: [URLQueryItem] = []) async throws -> (body: Data, gathering: MastodonGathering?) {
+        let answer = try await send(path: path, query: query)
+        return (try await finish(answer, path: path), MastodonGathering(header: answer.refresh))
+    }
+
     /// A moment as an HTTP header writes it (`Wed, 21 Oct 2026 04:43:08 GMT`), or nothing.
     static func httpDate(_ text: String) -> Date? {
         httpDates.date(from: text)
@@ -952,6 +959,8 @@ public struct MastodonAuthorized: Sendable {
         let authenticate: String?
         /// The answer's `Date` header: the source's clock as it answered.
         var date: String? = nil
+        /// The answer's `Mastodon-Async-Refresh` header: what the source is still gathering (#340).
+        var refresh: String? = nil
     }
 
     private func finish(_ result: Answered, path: String) async throws -> Data {
@@ -997,7 +1006,8 @@ public struct MastodonAuthorized: Sendable {
         return Answered(
             body: body, status: response.statusCode, link: response.value(forHTTPHeaderField: "Link"),
             authenticate: response.value(forHTTPHeaderField: "WWW-Authenticate"),
-            date: response.value(forHTTPHeaderField: "Date")
+            date: response.value(forHTTPHeaderField: "Date"),
+            refresh: response.value(forHTTPHeaderField: MastodonGathering.header)
         )
     }
 }

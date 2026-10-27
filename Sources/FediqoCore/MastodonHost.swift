@@ -86,6 +86,12 @@ public enum MastodonHostThing: String, Sendable, Hashable, CaseIterable {
     /// none says nothing. Its address answers no not-found of its own for a link not rising, so
     /// only a page of the host's own is the host lacking it.
     case linkPosts
+    /// The years it looked back on for the person (#340). An address a host older than it
+    /// answers not-found of; the document's word for it says only when one may be made.
+    case yearsLookedBack
+    /// The collections of people somebody put together (#340), at an address a host older than
+    /// them answers not-found of.
+    case collections
 }
 
 /// What is known of one thing at one host.
@@ -174,7 +180,7 @@ public struct MastodonHostSays: Sendable, Hashable {
             guard let apiVersion else { return .unsaid }
             return apiVersion >= Self.linkPostsFrom ? .present : .absent
         case .suggestions, .directory, .featuredPeople, .risingTags, .risingLinks, .announcements,
-             .longerAccount, .knownServers, .activity, .pinnedPosts:
+             .longerAccount, .knownServers, .activity, .pinnedPosts, .yearsLookedBack, .collections:
             return .unsaid
         }
     }

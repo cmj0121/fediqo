@@ -12,10 +12,13 @@ actor FixtureSender: HTTPSender {
     }
 
     private let routes: [String: Outcome]
+    /// Headers every answer carries beside its body.
+    private let headers: [String: String]
     private(set) var requests: [URLRequest] = []
 
-    init(_ routes: [String: Outcome]) {
+    init(_ routes: [String: Outcome], headers: [String: String] = [:]) {
         self.routes = routes
+        self.headers = headers
     }
 
     var paths: [String] { requests.compactMap { $0.url?.path } }
@@ -28,7 +31,7 @@ actor FixtureSender: HTTPSender {
         switch outcome {
         case .json(let body, let status):
             let response = HTTPURLResponse(
-                url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil
+                url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers
             )!
             return (Data(body.utf8), response)
         case .fail:

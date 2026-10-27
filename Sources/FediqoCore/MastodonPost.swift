@@ -87,12 +87,12 @@ public struct MastodonPost: Sendable {
     /// opinion about it belongs to whatever draws it, if anywhere.
     public func conversation(id: String, source: Source) async throws -> MastodonThread {
         let sent = ReadMoment.now()
-        let context = try MastodonJSON.decoder.decode(
-            ContextDTO.self, from: try await get(Self.path(id) + "/context")
-        )
+        let (body, gathering) = try await getGathering(Self.path(id) + "/context")
+        let context = try MastodonJSON.decoder.decode(ContextDTO.self, from: body)
         return MastodonThread(
             ancestors: context.ancestors.map { $0.asNote(source: source, categories: [], sent: sent) },
-            descendants: context.descendants.map { $0.asNote(source: source, categories: [], sent: sent) }
+            descendants: context.descendants.map { $0.asNote(source: source, categories: [], sent: sent) },
+            gathering: gathering
         )
     }
 
@@ -140,6 +140,19 @@ public struct MastodonPost: Sendable {
         return "/api/v1/statuses/\(id)"
     }
 
+    /// `get`, and what the source says it is still gathering for the answer (#340).
+    func getGathering(_ path: String) async throws -> (Data, MastodonGathering?) {
+        switch door {
+        case .signedIn(let door):
+            return try await door.getGathering(path: path)
+        case .unsigned(let http):
+            guard let url = Host.httpsURL(host: host, path: path) else { throw MastodonRequestError.invalidURL }
+            let (data, response) = try await http.data(from: url)
+            guard (200..<300).contains(response.statusCode) else { throw MastodonRequestError.http(response.statusCode) }
+            return (data, MastodonGathering(header: response.value(forHTTPHeaderField: MastodonGathering.header)))
+        }
+    }
+
     func get(_ path: String, query: [URLQueryItem] = []) async throws -> Data {
         switch door {
         case .signedIn(let door):
@@ -164,9 +177,14 @@ public struct MastodonThread: Hashable, Sendable {
     /// In the order the server walked them, deepest chains kept beside their parents.
     public let descendants: [Note]
 
-    public init(ancestors: [Note], descendants: [Note]) {
+    /// What the source said it is still gathering of the thread from elsewhere (#340): nothing
+    /// where it gathers nothing, or never says.
+    public let gathering: MastodonGathering?
+
+    public init(ancestors: [Note], descendants: [Note], gathering: MastodonGathering? = nil) {
         self.ancestors = ancestors
         self.descendants = descendants
+        self.gathering = gathering
     }
 
     /// Whether the post is alone in its thread. Both halves, because a post that answers
