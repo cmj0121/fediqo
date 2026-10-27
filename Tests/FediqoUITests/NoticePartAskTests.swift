@@ -566,6 +566,30 @@ struct NoticePartAskTests {
         #expect(session.mastodon.asking.isEmpty, "the claim on the source outlived its ask")
     }
 
+    @Test("While an ask is out, a source whose last ask failed is listed by the status mark and not counted: nothing there to press")
+    func anAskOutIsNotCounted() async throws {
+        let (session, server, _) = try await shell(holding: Self.whole)
+        let gate = Gate()
+        defer { Task { await gate.open() } }
+        await server.hold(S.info, at: gate)
+        #expect(session.askForNotices(host: host))
+        let ask = try #require(session.partAsks.open)
+        session.partAsks.answer(ask, through: PartPage(), in: session)
+        let asking = Task { await session.partAsks.landed(host: host) }
+        await met("the ask is waiting", by: asking) { await server.waiting.contains(S.info) }
+        session.noticeList.acts.say(
+            ShellNoticeActs.Said(act: .ask, why: .unreachable, key: "notices.ask.failed"), host: host
+        )
+
+        let status = NoticesPane.status(in: session)
+        #expect(Set(status.map(\.id)) == ["asking:\(host)", "said:\(host)"])
+        #expect(status.allSatisfy { $0.press == nil })
+        #expect(StatusWords.count(status) == 0, "a source with nothing to press was counted")
+        #expect(StatusWords.spoken(status, language: .english) == "No source needs you. Opens what there is to know of them.")
+        await gate.open()
+        await session.partAsks.landed(host: host)
+    }
+
     @Test("A question standing open is taken down when its sign-in is signed out of, and when another takes its place; and a press for another part while one is open puts that one in its place")
     func aQuestionOpenIsTakenDown() async throws {
         let (session, _, tokens) = try await shell(holding: Self.acts)

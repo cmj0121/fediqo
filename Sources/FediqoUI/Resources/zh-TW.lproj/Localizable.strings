@@ -1711,7 +1711,6 @@
 "notices.foot.reading" = "正在讀取更早的通知…";
 "notices.foot.held" = "更早的通知要等讀不到的那個來源回應才會顯示。重新載入就會再問它一次。";
 "notices.foot.limit" = "不再讀取更早的通知：它們比「保留貼文」留下的月數還舊。";
-"notices.foot.end" = "沒有更早的通知了：每個來源都把有的送來了。";
 "notices.server.admin.sign_up.by" = "在這個來源註冊了";
 "notices.server.admin.report.by" = "在這個來源提出了一則檢舉";
 "notices.spoken.named" = "%2$@（%1$@）";
@@ -1810,7 +1809,6 @@
 "notices.act.letThrough.many" = "%1$@ 擋下的通知中，有 %2$d 個人的沒有放行。再讀取一次看看各自的狀況。";
 "notices.act.letGo.many" = "%1$@ 擋下的通知中，有 %2$d 個人的沒有放下。再讀取一次看看各自的狀況。";
 "notices.person.named" = "%1$@（%2$@）";
-"notices.foot.full" = "不再讀取更早的通知：Fediqo 為單一來源保留的通知已達上限。等有空位就會再讀——移除通知，或保留期限讓舊的離開之後。";
 "notices.ask.signin.detail" = "%@ 自己的頁面會打開，再問一次這個登入已經有的，包含你的通知。「登入來讀」問讀取，包含你的通知。「登入來讀與寫」另外問發文、回覆、轉發、收藏與加書籤，以及移除通知。不會先登出：關掉那一頁，你原有的登入照舊。";
 "said.act.boost.failed" = "連不上 %@，所以轉發沒有變動。它和原來一樣。";
 "said.act.boost.refused" = "%@ 不讓這個登入變動轉發。它和原來一樣。";
@@ -2806,3 +2804,13 @@
 "people.collection.absent" = "%@ 沒有人的收藏集。";
 "people.collection.none" = "%@ 沒有給出這個收藏集裡的任何人。";
 "thread.gathering" = "還在向其他地方收集回覆。有更多時會出現在這裡。";
+
+/* A page's status mark (#396): every source's state behind one count. */
+"status.mark.spoken" = "%d 個來源需要你處理。打開可看各自需要什麼。";
+"status.press.ask" = "詢問";
+"status.press.again" = "再試";
+"status.press.again.ask.spoken" = "再次向 %@ 詢問你的通知";
+"status.press.again.read.spoken" = "再讀一次 %@";
+"status.press.again.notices.spoken" = "再讀一次通知";
+"notices.foot.endMark" = "通知到此為止";
+"status.mark.quiet.spoken" = "沒有來源需要你處理。打開可看關於它們的消息。";

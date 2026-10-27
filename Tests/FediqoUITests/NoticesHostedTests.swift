@@ -553,21 +553,23 @@ struct NoticesHostedTests {
             Self.settle(view)
             return await server.asked.count == 1 && session.noticeList.ask().asking != nil
         }
-        #expect(probe.frames[.line("unread:a.example")] == nil, "a source on the wire was named as not read")
+        #expect(probe.frames[.statusMark] == nil, "a source on the wire was named as not read")
 
         #expect(session.noticeList.stop())
-        await met("the page names the source as not read") {
+        await met("the page's status mark names the source as not read") {
             Self.settle(view)
-            return probe.says[.line("unread:a.example")] != nil
+            return probe.says[.statusMark] != nil
         }
         await Self.still(view, read: session.noticeList) { Self.drawn(probe) }
         await gate.open()
 
         #expect(!session.noticeList.isReading && session.noticeList.reaches.isEmpty)
         #expect(NoticesPane.lines(in: session) == [.unread(host: Self.a)])
-        #expect(probe.says[.line("unread:a.example")]
-            == "a.example was not read: the read was stopped before it answered. Press the reload mark, or r, to read again.")
-        #expect((probe.frames[.line("unread:a.example")]?.height ?? 0) > 0, "a head, and then a blank page")
+        let status = NoticesPane.status(in: session)
+        #expect(status.map(\.words)
+            == ["a.example was not read: the read was stopped before it answered. Press the reload mark, or r, to read again."])
+        #expect(status.first?.press?.kind == .again, "its list reads it again")
+        #expect(probe.says[.statusMark] == StatusWords.spoken(status) && probe.frames[.line("unread:a.example")] == nil)
         #expect(NoticesLine.unread(host: Self.a).words(language: .english, touch: true)
             == "a.example was not read: the read was stopped before it answered. Press the reload mark to read again.")
         #expect(session.noticeList.ask() == PageAsking(stopped: true), "the toast says the stop, and no failure")
@@ -588,9 +590,9 @@ struct NoticesHostedTests {
             return await server.asked.count == 2 && session.noticeList.standing(host: Self.a) == .read
         }
         #expect(session.noticeList.stop())
-        await met("the page names the second source as not read") {
+        await met("the page's status mark names the second source as not read") {
             Self.settle(view)
-            return probe.says[.line("unread:b.example")] != nil
+            return probe.says[.statusMark] != nil
         }
         await Self.still(view, read: session.noticeList) { Self.drawn(probe) }
         await gate.open()
@@ -598,9 +600,9 @@ struct NoticesHostedTests {
         #expect(session.noticeList.standing(host: Self.b) == .unread)
         #expect(NoticesPane.lines(in: session) == [.unread(host: Self.b)])
         #expect(rows(probe).count == 1, "the source that answered is shown")
-        #expect(probe.says[.line("unread:b.example")]?.hasPrefix("b.example was not read") == true)
-        let unread = try #require(probe.frames[.line("unread:b.example")]), row = try #require(probe.frames[.row(rows(probe)[0])])
-        #expect(unread.maxY <= row.minY + 0.5, "it is named above the list, as a failure is")
+        #expect(NoticesPane.status(in: session).first?.words.hasPrefix("b.example was not read") == true)
+        let mark = try #require(probe.frames[.statusMark]), row = try #require(probe.frames[.row(rows(probe)[0])])
+        #expect(mark.maxY <= row.minY + 0.5, "it is marked in the head, above the list")
 
         // And where the one that answered had nothing: the page does not say nothing happened.
         let closed = Gate()
@@ -611,15 +613,15 @@ struct NoticesHostedTests {
             return await asked.asked.count == 2 && empty.noticeList.standing(host: Self.a) == .read
         }
         #expect(empty.noticeList.stop())
-        await met("the page names the second source as not read") {
+        await met("the page's status mark names the second source as not read") {
             Self.settle(other)
-            return said.says[.line("unread:b.example")] != nil
+            return said.says[.statusMark] != nil
         }
         await Self.still(other, read: empty.noticeList) { Self.drawn(said) }
         await closed.open()
         #expect(NoticesPane.none(in: empty) == .unread)
         #expect(said.says[.none] == nil, "nothing was said to have happened with a source unread")
-        #expect(said.says[.line("unread:b.example")] != nil)
+        #expect(said.says[.statusMark] != nil)
         // Before the page has read at all, nobody is named as left unread.
         #expect(NoticesPane.lines(in: empty, began: false).isEmpty)
     }
@@ -635,16 +637,18 @@ struct NoticesHostedTests {
             Self.settle(view)
             return session.noticeList.locked == [Self.a]
         }
-        await met("the page names the source as not asked") {
+        await met("the page's status mark names the source as not asked") {
             Self.settle(view)
-            return probe.says[.line("locked:a.example")] != nil
+            return probe.says[.statusMark] != nil
         }
         await Self.still(view, read: session.noticeList) { Self.drawn(probe) }
 
         #expect(await server.asked.isEmpty)
         #expect(NoticesPane.lines(in: session) == [.locked(host: Self.a)])
-        #expect(probe.says[.line("locked:a.example")] == "This device could not read the sign-in for a.example, so it was not asked.")
-        #expect((probe.frames[.line("locked:a.example")]?.height ?? 0) > 0, "a head, and then a blank page")
+        let status = NoticesPane.status(in: session)
+        #expect(status.map(\.words) == ["This device could not read the sign-in for a.example, so it was not asked."])
+        #expect(status.first?.press?.kind == .again)
+        #expect((probe.frames[.statusMark]?.height ?? 0) > 0, "a head, and then a blank page")
         #expect(NoticesPane.none(in: session) == .unread, "the line above says why, and nothing says it twice")
     }
 
@@ -831,7 +835,8 @@ struct NoticesHostedTests {
             return NoticesPane.foot(in: session) == .end
         }
         let (_, after) = await hosted(session)
-        #expect(after.says[.foot] == "No older notices: every source has sent all it has.")
+        #expect(after.says[.foot] == "End of notices", "the end is a plain mark")
+        #expect(after.frames[.statusMark] == nil, "every source is well: nothing to mark")
         #expect(rows(after).count == 3)
     }
 
@@ -1214,19 +1219,16 @@ struct NoticesHostedTests {
             #expect(words.width >= whole - 0.5 && words.minX >= title.maxX - 0.5, "\(type): the words about the kinds are cut")
         }
 
-        // Each source's line: its words at the height they ask for at the width they have. The
-        // source that failed has none: the toast names it.
+        // Each source's line is the status mark's, whole at its own box. The source that failed
+        // has none: the toast names it.
         let lines = NoticesPane.lines(in: session)
         #expect(lines.map(\.id) == ["unasked:c.example"])
-        for line in lines {
-            let words = try #require(probe.frames[.lineWords(line.id)], "\(type): \(line.id) is not drawn")
-            let asks = Self.wrapped(Text(line.words()).shellFont(.meta), width: words.width, type)
-            #expect(words.height >= asks - 0.5, "\(type): \(line.id) is cut: \(words.height) of \(asks)")
-        }
+        let mark = try #require(probe.frames[.statusMark], "\(type): the status mark is not drawn")
+        #expect(mark.width >= box.width - 0.5 && mark.height >= box.height - 0.5, "\(type): the status mark is squeezed")
 
         // The foot's words wrap too.
         let foot = try #require(probe.frames[.foot])
-        #expect(foot.height >= Self.wrapped(Text(NoticesFoot.more.words()).shellFont(.meta), width: 320 - 2 * ShellSpace.pad, type) - 0.5)
+        #expect(foot.height >= Self.wrapped(Text(NoticesFoot.more.words() ?? "").shellFont(.meta), width: 320 - 2 * ShellSpace.pad, type) - 0.5)
 
         // And the two pages with no list.
         let (empty, _) = try await shell([:], signedIn: [Self.a: nil])
@@ -1371,7 +1373,7 @@ struct NoticesHostedTests {
         #expect(NoticeRow.tooOldWords(language: .taiwanese) != NoticeRow.tooOldWords(language: .english))
     }
 
-    @Test("A source held to the bound is drawn as a line above the list, whole, saying its older notices are not shown")
+    @Test("A source held to the bound is in the status mark's list, saying its older notices are not shown")
     func aFullSourceIsDrawn() async throws {
         let (session, _) = try await shell([
             Self.a: Self.page(Self.one(4, "favourite", minutes: 2), Self.one(3, "favourite", minutes: 4)),
@@ -1384,14 +1386,13 @@ struct NoticesHostedTests {
 
         for width in [600, 320] as [CGFloat] {
             let (_, probe) = await hosted(session, width: width, layout: width < 400 ? .narrow : .wide)
-            let words = NoticesLine.full(host: Self.a).words()
-            #expect(probe.says[.line("full:a.example")] == words, "what a listener is read is the line's own words")
-            let line = try #require(probe.frames[.line("full:a.example")])
-            let said = try #require(probe.frames[.lineWords("full:a.example")])
-            #expect(said.height > 0 && said.maxX <= width + 1, "the words were cut at \(width)")
-            #expect(probe.frames[.linePress("full:a.example")] == nil, "nothing is offered to press: a reload reads the newest")
-            let first = try #require(rows(probe).first.flatMap { probe.frames[.row($0)] })
-            #expect(line.maxY <= first.minY + 1, "the name stands above the lines")
+            let status = NoticesPane.status(in: session)
+            let full = try #require(status.first { $0.id == "full:a.example" })
+            #expect(full.words == NoticesLine.full(host: Self.a).words() && full.standsOut)
+            #expect(full.press == nil, "nothing is offered to press: a reload reads the newest")
+            #expect(probe.says[.statusMark] == StatusWords.spoken(status) && probe.frames[.line("full:a.example")] == nil)
+            let mark = try #require(probe.frames[.statusMark])
+            #expect(mark.maxX <= width + 1, "the mark runs past \(width)")
             #expect(rows(probe).count == 3)
         }
     }

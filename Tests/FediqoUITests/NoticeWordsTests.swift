@@ -420,9 +420,9 @@ struct NoticeWordsTests {
         #expect(NoticesFoot.foot(hasMore: false, floor: floor) == .held)
         #expect(NoticesFoot.foot(hasMore: false, floor: nil) == .end)
         #expect(NoticesFoot.more.words(language: .english) == "Older notices can be read. Press here, or scroll to here, to read them.")
-        #expect(NoticesFoot.end.words(language: .english) == "No older notices: every source has sent all it has.")
-        for foot in [NoticesFoot.more, .held, .end] {
-            #expect(!foot.words(language: .taiwanese).hasPrefix("notices."))
+        #expect(NoticesFoot.end.words(language: .english) == nil, "the end is a plain mark, with nothing to say")
+        for foot in [NoticesFoot.more, .held, .limit] {
+            #expect(foot.words(language: .taiwanese)?.hasPrefix("notices.") == false)
         }
     }
 
@@ -529,11 +529,7 @@ struct NoticeWordsTests {
         // What is still to be read, or held up by a source the toast named, is said first.
         #expect(NoticesFoot.foot(hasMore: true, floor: nil, full: true) == .more)
         #expect(NoticesFoot.foot(hasMore: false, floor: Self.at, full: true) == .held)
-        #expect(NoticesFoot.full.words(language: .english)
-            == "Older notices are not read: Fediqo holds as many of one source as it keeps. They are read again once there is room — when notices are dismissed, or the months limit lets old ones go.")
-        #expect(NoticesFoot.full.words(language: .english) != NoticesFoot.end.words(language: .english))
-        let ours = NoticesFoot.full.words(language: .taiwanese)
-        #expect(!ours.hasPrefix("notices.") && ours != NoticesFoot.end.words(language: .taiwanese))
+        #expect(NoticesFoot.full.words(language: .english) == nil, "the source held names itself, in its own line")
         #expect(!NoticesFoot.full.symbol.isEmpty && NoticesFoot.full.symbol != NoticesFoot.end.symbol)
     }
 
