@@ -2629,3 +2629,17 @@
 "standing.mute.minutes.one" = "%d 分鐘";
 "standing.mute.hours.one" = "%d 小時";
 "standing.mute.days.one" = "%d 天";
+
+/* #325 — what is new in Home arrives as it happens. */
+"work.purpose.line" = "即時接收首頁的新內容";
+"activity.detail.until" = "開到";
+"activity.detail.stillOpen" = "仍開著";
+"source.line" = "%@ 首頁的新貼文即時送達";
+"source.line.help" = "預設關閉，由你開啟。開啟時，只要讀這個首頁的時間軸在前面，Fediqo 就與 %@ 保持一條連線：新貼文一寫好就到，那邊改過或刪除的貼文也會顯示出來。連線開啟時會先把首頁讀到現在。重新整理與等候照舊，時間軸不在前面時連線就會放掉。";
+"source.line.open" = "與 %@ 的連線已開啟。";
+"source.line.refused" = "%1$@ 拒絕了這條連線（%2$d）。首頁照舊讀取。";
+"source.line.signIn" = "登入 %@，首頁的新貼文就能即時送達。";
+"source.line.cannot" = "%@ 不會即時說出新內容，照舊讀取。";
+"timeline.line.above" = "上方有 %d 則新貼文";
+"timeline.line.above.one" = "上方有 %d 則新貼文";
+"timeline.line.above.hint" = "移到它們那裡。";

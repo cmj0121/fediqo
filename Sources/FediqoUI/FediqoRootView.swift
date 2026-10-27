@@ -164,6 +164,8 @@ public struct FediqoRootView: View {
             hides: staged == nil ? ShellHides(defaults: .standard, file: lists?.hides) : nil,
             stopped: staged == nil ? ShellStopped(defaults: .standard, file: lists?.stopped) : nil
         )
+        // A launch made for a picture keeps no choice of the person's either.
+        if staged == nil { session.lines = ShellLines(defaults: .standard) }
         session.persist = persist
         session.persistUnsent = persistUnsent
         session.savesLanded = savesLanded

@@ -50,10 +50,11 @@ struct ActivityTests {
             }
         }
         // What an act holds is a host, a host, a word, a time, which fixed entry let it
-        // through (#220) and a count of the bytes it carried out (#312): no field could carry
+        // through (#220), a count of the bytes it carried out (#312) and, for a line, when it was
+        // let go (#325): a time again. No field could carry
         // more.
         let held = Mirror(reflecting: act).children.map { "\($0.label ?? "")" }
-        #expect(held == ["id", "source", "reached", "purpose", "at", "allowedBy", "sent"])
+        #expect(held == ["id", "source", "reached", "purpose", "at", "allowedBy", "sent", "until"])
     }
 
     @Test("A request that fails, or is sent rather than fetched, is recorded all the same")

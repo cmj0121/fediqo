@@ -125,6 +125,10 @@ final class SourceWork {
         /// acted on as the reader, whose role there allows it, because they opened its page of
         /// tending or pressed there (#380). Nothing read under it is held.
         case tending
+        /// The reader's own line held open to a source they are signed in to, which tells what is
+        /// new in Home as it happens (#325): **one act, open for as long as the line was**
+        /// (`SourceWork.endLine`), whatever it told.
+        case line
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -140,7 +144,7 @@ final class SourceWork {
             case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people, .serverSays, .rising, .ownSettings, .lookUp, .followedTags, .announcements, .tending: true
             case .forumPost, .forumReplies, .joining, .boards, .directory, .serverCheck, .picture, .emoji,
                  .signIn, .signOut, .page, .video, .signInPage, .personCheck, .pagePart, .takeAway, .readBack,
-                 .nearbyMove, .personHome:
+                 .nearbyMove, .personHome, .line:
                 false
             }
         }
@@ -248,6 +252,9 @@ final class SourceWork {
         /// Whether the list as it now stands is written down where it is kept (#344): no
         /// where the device would not keep the last change.
         var allowancesWritten = true
+        /// Lines ended since the last copy onto the main actor, by the act each began as, and
+        /// when: what the record writes as how long each stayed open (#325).
+        var linesEnded: [(id: Int, at: Date)] = []
     }
 
     @ObservationIgnored private nonisolated let held = OSAllocatedUnfairLock(initialState: Held())
@@ -538,6 +545,17 @@ final class SourceWork {
         ))
     }
 
+    /// `end` of a line (#325): the act it began as says when it was let go, so the record shows
+    /// one ask, open for as long as it was.
+    nonisolated func endLine(_ token: Token) {
+        let publish = held.withLock { held -> Bool in
+            held.linesEnded.append((token.id, Date()))
+            held.running.removeValue(forKey: token.id)
+            return Self.claim(&held)
+        }
+        if publish { schedule() }
+    }
+
     nonisolated func end(_ token: Token) {
         let publish = held.withLock { held -> Bool in
             guard held.running.removeValue(forKey: token.id) != nil else { return false }
@@ -585,14 +603,17 @@ final class SourceWork {
     /// Copies what is running onto the main actor for the page. Assigned only when it differs:
     /// the section redraws on every assignment.
     private func publish() {
-        let (now, fresh) = held.withLock { held in
+        let (now, fresh, ended) = held.withLock { held in
             held.publishing = false
             let fresh = held.pending
             held.pending = []
-            return (held.running, fresh)
+            let ended = held.linesEnded
+            held.linesEnded = []
+            return (held.running, fresh, ended)
         }
         if now != running { running = now }
         if !fresh.isEmpty { log.append(fresh) }
+        for line in ended { log.ended(id: line.id, at: line.at) }
     }
 }
 
@@ -781,6 +802,8 @@ struct SourceAct: Identifiable, Equatable, Sendable {
     let allowedBy: Allowance.ID?
     /// How many bytes of body it carried out; nil where it carried none.
     let sent: Int?
+    /// When a line it opened was let go (#325); nil for any other act, and for a line still open.
+    var until: Date?
 
     init(
         id: Int, reached: String, pointedBy: String? = nil, purpose: SourceWork.Purpose, at: Date,
@@ -805,9 +828,11 @@ struct SourceAct: Identifiable, Equatable, Sendable {
 
     /// The same act, listed under `source` instead.
     func renamed(to source: String) -> SourceAct {
-        SourceAct(
+        var renamed = SourceAct(
             id: id, reached: source, pointedBy: nil, purpose: purpose, at: at, allowedBy: allowedBy, sent: sent
         )
+        renamed.until = until
+        return renamed
     }
 
     /// The source an act is listed under: the one that pointed to it where one did, and
@@ -882,6 +907,13 @@ final class SourceRecord {
         acts[at] = acts[at].renamed(to: source)
         bySource = Dictionary(grouping: acts, by: \.source)
         sources = bySource.keys.sorted()
+    }
+
+    /// The line `id` began as was let go `at` (#325). Rare, so the index is simply rebuilt.
+    func ended(id: Int, at moment: Date) {
+        guard let at = acts.firstIndex(where: { $0.id == id }) else { return }
+        acts[at].until = moment
+        bySource = Dictionary(grouping: acts, by: \.source)
     }
 
     /// Newest first, and only `source`'s where one is chosen.

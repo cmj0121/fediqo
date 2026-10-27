@@ -70,6 +70,7 @@ extension SourceWork.Purpose {
         case .followedTags: "number"
         case .announcements: "megaphone"
         case .tending: "exclamationmark.bubble"
+        case .line: "dot.radiowaves.up.forward"
         }
     }
 }
