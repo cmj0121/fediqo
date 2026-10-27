@@ -294,6 +294,24 @@ struct MastodonAccountTests {
         ])
         #expect(source.lists == [Self.friends])
     }
+
+    @Test("Caught up as a line opens, Home is read and landed, read on from what is held, and whole")
+    func catchUp() async throws {
+        let (account, store, server, _) = try await account(["/api/v1/timelines/home": Self.timeline("2", "1")])
+        #expect(try await account.catchUp())
+        #expect(await categories(store) == ["1": [.home], "2": [.home]])
+        #expect(await store.newestListedID(host: host, category: .home) == "2")
+        #expect(try await account.catchUp())
+        let again = try #require(await server.requests.last?.url?.query())
+        #expect(again.contains("min_id=1"), "read on from one before what is held: \(again)")
+    }
+
+    @Test("A catch-up that could not read Home throws, and nothing lands")
+    func catchUpFails() async throws {
+        let (account, store, _, _) = try await account(["/api/v1/timelines/home": .fail])
+        await #expect(throws: (any Error).self) { _ = try await account.catchUp() }
+        #expect(await store.all().isEmpty)
+    }
 }
 
 /// Answers by path, running `meanwhile` before it answers — something the reader does while the
