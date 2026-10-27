@@ -360,7 +360,7 @@ struct YouThereTests {
             guard line.hasPrefix("\"source.you.") || line.hasPrefix("\"work.purpose.ownSettings\"") else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 13 && keys.contains("source.you.notGiven") && keys.contains("work.purpose.ownSettings"))
+        #expect(keys.count == 15 && keys.contains("source.you.notGiven") && keys.contains("source.you.stopped") && keys.contains("work.purpose.ownSettings"))
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }
