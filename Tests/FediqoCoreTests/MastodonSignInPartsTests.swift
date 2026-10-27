@@ -31,6 +31,7 @@ struct MastodonSignInPartsTests {
         (.blocks, "read:mutes write:mutes read:blocks write:blocks", ""),
         (.reports, "write:reports", ""),
         (.filters, "read:filters write:filters", ""),
+        (.lists, "write:lists", ""),
         (.tending, "admin:read admin:write", ""),
     ]
 
