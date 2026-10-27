@@ -19,6 +19,15 @@ if [ "$WITH_GOTOSOCIAL" = "1" ]; then
     COMPOSE+=(--profile gotosocial)
 fi
 
+# Mastodon's streaming service (the `streaming` profile of compose.yml): the line a reader holds
+# open to be told what is new as it happens (#325). Only where it is asked for. It changes nothing
+# the server holds, so it needs no throwing away after; what it tells, the worker hands it, so a
+# check of what arrives on it wants `FEDIQO_SERVERS_WORKER=1` beside it.
+WITH_STREAMING="${FEDIQO_SERVERS_STREAMING:-}"
+if [ "$WITH_STREAMING" = "1" ]; then
+    COMPOSE+=(--profile streaming)
+fi
+
 # Mastodon's worker (the `worker` profile of compose.yml): what publishes a post at its time and
 # fetches a link's preview. Only where it is asked for, and only after the seed, so that the seed
 # runs the jobs it means to and the three come up exactly as they did without it.
@@ -258,6 +267,12 @@ echo "servers-up: starting application containers"
 wait_for "mastodon-web is healthy" 90 \
     "${COMPOSE[@]}" exec -T mastodon-web \
     curl -fsS --noproxy localhost http://127.0.0.1:3000/health
+
+if [ "$WITH_STREAMING" = "1" ]; then
+    wait_for "mastodon-streaming is healthy" 60 \
+        "${COMPOSE[@]}" exec -T mastodon-streaming \
+        curl -fsS --noproxy localhost http://127.0.0.1:4000/api/v1/streaming/health
+fi
 
 wait_for "discourse is healthy" 180 \
     "${COMPOSE[@]}" exec -T discourse \

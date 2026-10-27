@@ -352,6 +352,10 @@ struct TimelinePane: View {
                 underneath
             }
             }
+            // What arrived on a line above where the reader is (#325), over the stream alone.
+            .overlay(alignment: .top) {
+                if Self.headDrawn(over: standing, drawn: drawn), !searching { LineArrivedPill(session: session) }
+            }
             // What is under the head follows a sideways swipe (#305) — this, and not the pane.
             .modifier(ProbedPane(part: .under))
             .modifier(Slid(slide: slide))
@@ -375,6 +379,11 @@ struct TimelinePane: View {
         ))
         // The timeline in front read from this device as it shows (#357).
         .modifier(CoversTimeline(session: session, latest: prefs.latestDate))
+        // What is new in Home arrives as it happens while this timeline is in front (#325): not
+        // under a page opened over it, nor under a search's results.
+        .modifier(ShowsLineFront(
+            session: session, timeline: timeline, inFront: Self.headDrawn(over: standing, drawn: drawn) && !searching
+        ))
         .task(id: catalogueHosts) { await waitForCatalogues() }
         .onChange(of: session.toast) { _, toast in
             if let toast { showToast(toast.text) }
@@ -1499,6 +1508,8 @@ struct TimelinePane: View {
                 selectedID = next
             }
             .onChange(of: jumpToTop) { _, _ in jumpedToTop(first: items.first?.id, proxy: proxy) }
+            // The press that goes up to what arrived on a line (#325) goes where `g` goes.
+            .onChange(of: session.lines.wentUp) { _, _ in jumpedToTop(first: items.first?.id, proxy: proxy) }
         }
     }
 
@@ -1828,6 +1839,8 @@ struct KeepsTopRow: ViewModifier {
     func body(content: Content) -> some View {
         content.onScrollTargetVisibilityChange(idType: String.self) { visible in
             session.scrolledTop = visible.first
+            // Up as far as the newest that arrived on a line: nothing is above any more (#325).
+            session.lines.seen(top: visible.first)
             // The reader's place, which moves the timeline's window every twenty rows (C19).
             if let placing, let top = visible.first { session.scrolled(to: top, of: placing, latest: latest) }
             // The reading mark is worked out from the same report (#303), and from the rows

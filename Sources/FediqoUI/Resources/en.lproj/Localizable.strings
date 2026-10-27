@@ -2687,3 +2687,29 @@
 "standing.mute.minutes.one" = "For %d minute";
 "standing.mute.hours.one" = "For %d hour";
 "standing.mute.days.one" = "For %d day";
+
+/* #325 — what is new in Home arrives as it happens. */
+"work.purpose.line" = "Hearing what is new in Home as it happens";
+"activity.detail.until" = "Open until";
+"activity.detail.stillOpen" = "Still open";
+"source.line" = "New posts in Home at %@ arrive as they happen";
+"source.line.help" = "Off until you turn it on. While on, and a timeline that reads this Home is in front, Fediqo keeps one line open to %@: new posts land as they are written, and a post changed or deleted there shows so. Home is read up to now as the line opens. Reloading and the wait go on as before, and the line is let go when the timeline is not in front.";
+"source.line.open" = "The line to %@ is open.";
+"source.line.refused" = "%1$@ refused the line (%2$d). Home is read as before.";
+"source.line.signIn" = "Sign in to %@ to have new posts in Home arrive as they happen.";
+"source.line.cannot" = "%@ does not say what is new as it happens. It is read as before.";
+"timeline.line.above" = "%d new posts above";
+"timeline.line.above.one" = "%d new post above";
+"timeline.line.above.hint" = "Goes up to them.";
+
+/* #324 — the person is told of a new notice while Fediqo runs. */
+"source.told" = "Tell me of new notices from %@ while Fediqo runs";
+"source.told.help" = "Off until you turn it on. While on, Fediqo keeps one line open to %1$@ as long as it runs: each new notice is listed under notices at once, and counted where notices are opened until you open them. A notice %1$@ holds back is not told. Nothing goes anywhere but to that source.";
+"source.told.system" = "Also as the system's notices";
+"source.told.system.help" = "Off until you turn it on. Turning it on is when the system asks whether Fediqo may show notices; it is never asked at launch. Only the kinds left on below are shown.";
+"source.told.system.refused" = "The system's notices are turned off for Fediqo in the system's settings. The count still works, and nothing asks again.";
+"source.told.kinds" = "Kinds that tell you";
+"source.told.signIn" = "Sign in to %@, with its notices, to be told of new ones while Fediqo runs.";
+"source.told.cannot" = "%@ tells no notices. It is read as before.";
+"rail.count" = "%d new";
+"rail.count.one" = "%d new";

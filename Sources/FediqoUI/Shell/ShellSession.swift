@@ -72,6 +72,14 @@ final class ShellSession {
     let stopped: ShellStopped
     /// What those hosts last said, and the line that names both places.
     let homePlace = ShellHomePlace()
+    /// Which sources' Home arrives as it happens, and the lines held for them now (#325). The
+    /// app's own is built over this device's preferences (`FediqoRootView`); a test hands in one
+    /// holding its lines.
+    var lines = ShellLines()
+    /// Which sources' notices are told while Fediqo runs, and how many were since the notices
+    /// page was last in front (#324). The app's own is built over this device's preferences and
+    /// the system's notices; a test hands in one holding a seam for the system.
+    var noticesTold = ShellNoticesTold()
 
     /// The conversation around each post the reader has opened — #90.
     ///

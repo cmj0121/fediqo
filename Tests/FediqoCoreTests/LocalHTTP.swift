@@ -47,6 +47,13 @@ enum LocalServers {
         ProcessInfo.processInfo.environment["FEDIQO_SERVERS_WORKER"] == "1"
     }
 
+    /// Mastodon's streaming service beside its web process, brought up only where it is asked
+    /// for (`FEDIQO_SERVERS_STREAMING=1 make servers`), and asked of only with the worker, which
+    /// hands it everything it tells (#325).
+    static var streamingRequested: Bool {
+        workerRequested && ProcessInfo.processInfo.environment["FEDIQO_SERVERS_STREAMING"] == "1"
+    }
+
     /// The fourth is up, or this throws: the same two questions as the gate above.
     static func requireGoToSocial() async throws {
         guard let url = Host.httpsURL(host: gotosocial, path: "/readyz") else {
@@ -291,6 +298,12 @@ enum LocalHTTP {
         try Cache.shared.client()
     }
 
+    /// A line held open to one of the three, under the same trust and the same admission as
+    /// `client()` (#325).
+    static func lines() throws -> LoopbackLines {
+        try Cache.shared.lines()
+    }
+
     /// A session that keeps cookies and follows no redirect, for the one thing a sign-in page
     /// needs that a source's API does not: to be signed in to as a person at a browser is, and
     /// to see where the page sends them. Admitted as every other ask here is.
@@ -427,6 +440,17 @@ private final class Cache: @unchecked Sendable {
         return client
     }
 
+    func lines() throws -> LoopbackLines {
+        let trust = LocalTrust(anchors: [try Self.loadCA()], allowed: LocalServers.hosts)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.httpShouldSetCookies = false
+        configuration.timeoutIntervalForRequest = 60
+        configuration.waitsForConnectivity = false
+        let session = URLSession(configuration: configuration, delegate: trust, delegateQueue: nil)
+        return LoopbackLines(inner: URLSessionLines(session: session, watchedOnly: false))
+    }
+
     func browser() throws -> LocalBrowser {
         let trust = LocalTrust(anchors: [try Self.loadCA()], allowed: LocalServers.hosts)
         let configuration = URLSessionConfiguration.ephemeral
@@ -496,5 +520,16 @@ struct LoopbackClient: HTTPClient, HTTPSender {
         guard let url = request.url else { throw LocalHTTPError.invalidURL }
         try LocalHTTP.admit(url)
         return try await inner.send(request)
+    }
+}
+
+/// See `LocalHTTP.lines()`.
+struct LoopbackLines: LineOpener {
+    let inner: URLSessionLines
+
+    func open(_ request: URLRequest) async throws -> OpenLine {
+        guard let url = request.url else { throw LocalHTTPError.invalidURL }
+        try LocalHTTP.admit(url)
+        return try await inner.open(request)
     }
 }
