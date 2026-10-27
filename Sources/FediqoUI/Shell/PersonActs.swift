@@ -80,6 +80,10 @@ struct PersonActing: Equatable {
     var reportable = false
     /// How the sign-in stands where it holds less than reporting needs, or nothing where it holds it.
     var reportsLock: PartWords.Place?
+    /// Whether the source keeps lists the reader can put them on (#337).
+    var lists = false
+    /// How the sign-in stands where it holds less than changing lists needs, or nothing where it holds it.
+    var listsLock: PartWords.Place?
     /// Whether the page offers the reader's own note on them (#377): where how the reader stands
     /// to them is read here, which is where the source keeps it.
     var notes = false
@@ -286,6 +290,9 @@ struct PersonActing: Equatable {
     /// source has reports — **whatever the source has said of how the reader stands**, since a
     /// report needs none of it. None while a press is on its way.
     var reporting: [PersonAct] { reportable && doing == nil ? [.report] : [] }
+
+    /// Whether the page's `…` has anything to offer, lists included (#337).
+    var hasMenu: Bool { !more.isEmpty || !keeping.isEmpty || !reporting.isEmpty || lists }
 
     /// Whether the page's `…` offers `act`: among `more`, `keeping` or `reporting`.
     func offersInMenu(_ act: PersonAct) -> Bool { more.contains(act) || keeping.contains(act) || reporting.contains(act) }
@@ -544,8 +551,8 @@ struct PersonActing: Equatable {
     /// part, is dim with the lock**, saying the part's sentence after its name, and its press is
     /// `act`'s too — which only asks (`asksForPart`).
     @MainActor
-    func menu(act: @escaping (PersonAct) -> Void) -> ShellMore {
-        let items: [ShellMoreItem] = (more + keeping + reporting).map { offered in
+    func menu(act: @escaping (PersonAct) -> Void, onLists: @escaping () -> Void = {}) -> ShellMore {
+        func item(_ offered: PersonAct) -> ShellMoreItem {
             let symbol = Self.symbol(offered), name = Self.name(offered, server: server)
             if let lock = lock(of: offered) {
                 let dim = ShellMark(SourceRow.permissionSymbol, name, look: .dim(.askAgain))
@@ -555,6 +562,20 @@ struct PersonActing: Equatable {
             guard asksBefore(offered) else { return .plain(symbol, name) { act(offered) } }
             return .danger(symbol, name, asks: question(before: offered)) { act(offered) }
         }
+        var items = more.map(item)
+        // Before muting, blocking and reporting, so those stay last in the menu's own order.
+        // Drawn, a list is ordinary and stands with the other ordinary acts.
+        if lists {
+            let name = L10n.t("lists.section.title")
+            if let lock = listsLock {
+                let mark = ShellMark("list.bullet", name, look: .dim(.askAgain))
+                let why = String(format: L10n.t(lock.key), source)
+                items.append(ShellMoreItem.plain(mark, ask: lock.asks ? onLists : nil, act: {}).because(why))
+            } else {
+                items.append(.plain("list.bullet", name, act: onLists))
+            }
+        }
+        items += (keeping + reporting).map(item)
         return ShellMore(items: items)
     }
 
@@ -599,11 +620,12 @@ struct PersonHeadActs: View {
     let acting: PersonActing
     var onAct: (PersonAct) -> Void
     var onAsk: () -> Void
+    var onLists: () -> Void = {}
     @Environment(\.colorScheme) private var colorScheme
 
     /// Whether there is anything to draw: a press, or a menu with something in it.
     static func draws(_ acting: PersonActing) -> Bool {
-        acting.press != nil || !acting.more.isEmpty || !acting.keeping.isEmpty || !acting.reporting.isEmpty
+        acting.press != nil || acting.hasMenu
     }
 
     var body: some View {
@@ -628,8 +650,8 @@ struct PersonHeadActs: View {
             case nil:
                 EmptyView()
             }
-            if !acting.more.isEmpty || !acting.keeping.isEmpty || !acting.reporting.isEmpty {
-                ShellMoreButton(label: ShellMore.label()) { acting.menu(act: onAct) }
+            if acting.hasMenu {
+                ShellMoreButton(label: ShellMore.label()) { acting.menu(act: onAct, onLists: onLists) }
                     .fixedSize()
             }
         }

@@ -1432,9 +1432,13 @@ extension ShellSession {
               let answered = note(ofRow: item.id),
               mastodon.authorized(host: host, for: .write) != nil
         else { return false }
+        // A conversation's answer is prepared for the same people, whatever reach was chosen.
+        let prepared = target.directs.isEmpty ? nil : DirectAnswer.prepared(text, to: target.directs)
+        let outgoing = prepared?.text ?? text
+        guard !outgoing.isEmpty else { return false }
         let writer = mastodon.reader(host: host)
         let unsent = Unsent(
-            host: host, text: text, audience: answerReach[item.id] ?? target.start,
+            host: host, text: outgoing, audience: prepared?.audience ?? answerReach[item.id] ?? target.start,
             answers: answered.key, root: NoteKey(rowID: target.root.id),
             writerID: writer?.id, writer: writer?.handle
         )

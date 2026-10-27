@@ -126,6 +126,9 @@ extension ShellReload {
             case .bookmarks, .favourites:
                 try await readDownMarks(category, of: host, below: post, in: session)
                 return true
+            // A conversation's pages are the sheet's. A stretch of one asks nothing here.
+            case .conversations:
+                return true
             default:
                 // Signed out since the place was drawn: nothing is asked, and nothing failed.
                 guard let token = session.mastodon.token(host: host) else { return true }

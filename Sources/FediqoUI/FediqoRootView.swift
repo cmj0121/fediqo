@@ -420,7 +420,7 @@ public struct FediqoRootView: View {
             // its own rather than the dialog spelled here — see `WithdrawQuestion`.
             .modifier(WithdrawQuestion(session: session))
             .modifier(PartQuestion(session: session))
-            .modifier(PersonPresenters(people: people, session: session))
+            .modifier(PersonPresenters(people: people, session: session, onOpenThread: threadOpener))
             .modifier(UnsentPresenters(session: session))
             .modifier(WholePostPresenters(session: session, hosts: people.postActs.hosts, composing: $composing))
             // An answer, over the conversation it belongs to (#108). Driven by the session's one
@@ -490,7 +490,10 @@ public struct FediqoRootView: View {
             // device is the preview sitting on screen while the session says boards. `JoinSheet`
             // reads `session.stage` inside its own body and switches there, which is a redraw.
             .sheet(isPresented: stagePresented) {
-                JoinSheet(session: session, onOwnPage: ownPageOpener, onPeople: directoryOpener, more: people.more, you: people.you, announcements: people.announcements)
+                JoinSheet(
+                    session: session, onOwnPage: ownPageOpener, onPeople: directoryOpener, more: people.more, you: people.you,
+                    announcements: people.announcements, serverLists: people.serverLists
+                )
             }
             // The timeline editor (#27), on the root beside the other presenters for their reason.
             // Dismissed by any route it is Cancel: the draft is dropped (Decision 21).
@@ -2583,6 +2586,11 @@ public struct FediqoRootView: View {
         return { me in openOwnPage(me) }
     }
 
+    /// A conversation opened as its thread (#326). Named here, as `ownPageOpener` is, so the
+    /// root's chain of presenters does not carry a closure of its own: one more closure there
+    /// is one more type the runner's compiler will not check.
+    private var threadOpener: (String) -> Void { { setOut(to: .thread($0)) } }
+
     /// `p` — whoever wrote the post the lamp is on (#140). The face's own press, from the keyboard.
     ///
     /// **Through `openPerson` and not beside it**, so the key and the face are one act with one
@@ -3260,6 +3268,7 @@ private struct WithdrawQuestion: ViewModifier {
 private struct PersonPresenters: ViewModifier {
     let people: ShellPersonPages
     let session: ShellSession
+    var onOpenThread: (String) -> Void = { _ in }
 
     func body(content: Content) -> some View {
         content
@@ -3267,8 +3276,10 @@ private struct PersonPresenters: ViewModifier {
             .modifier(StandingSheetPresenter(people: people, session: session))
             .modifier(BlockedServersPresenter(servers: people.servers, session: session))
             .modifier(ReportSheetPresenter(people: people, session: session))
+            .modifier(ServerListsPresenter(lists: people.serverLists, session: session))
             .modifier(AccountActSheetPresenter(people: people.tending.people, session: session))
             .modifier(FederationAskSheetPresenter(servers: people.tending.servers, session: session))
+            .modifier(DirectsPresenter(directs: session.directs, session: session, onOpen: onOpenThread))
     }
 }
 

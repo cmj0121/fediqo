@@ -93,6 +93,9 @@ final class ShellSession {
     /// object and the microblog half is this one, and both have to be the object a Clear presses.
     /// Nothing it holds is in the store's list of rows; see its own doc.
     let conversations = ShellConversations()
+    /// Posts written to named people, read as a list of conversations (#326). Beside
+    /// `conversations` — that one is the thread around a post — and held nowhere else.
+    let directs = ShellDirects()
 
     /// What each signed-in source says happened to the reader (#323), as one list. On the
     /// session for `conversations`' reason, and held nowhere else: it is read each run.
@@ -1963,6 +1966,17 @@ final class ShellSession {
     @discardableResult
     func openAnswer(to row: DummyItem, in root: DummyItem) -> Bool {
         guard let item = actingCopy(of: row, for: .answer) else { return false }
+        let same = directs.locked(
+            touching: item.id, root: root.id, itemNote: heldNote(item.id), rootNote: heldNote(root.id)
+        )
+        if !same.isEmpty {
+            // The same people, and nobody else: the draft names them once, and the reach cannot
+            // be widened. Seeded only while nothing has been written yet.
+            if answerDrafts[item.id] == nil { answerDrafts[item.id] = same.joined(separator: " ") + " " }
+            answerReach[item.id] = .mentioned
+            answering = AnswerTarget(item: item, root: root, start: .mentioned, directs: same)
+            return true
+        }
         if answerDrafts[item.id] == nil, let handle = item.handle, handle.hasPrefix("@") {
             answerDrafts[item.id] = handle + " "
         }

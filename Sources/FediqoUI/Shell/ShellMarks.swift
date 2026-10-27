@@ -210,4 +210,26 @@ extension SourceRow {
     /// The glyph of the marks item: a bookmark, the first of the two, and a glyph no other item
     /// of the menu wears.
     static let marksSymbol = "bookmark"
+
+    /// How the conversations item of a row's `…` is drawn (#326). **Always drawn**, the same
+    /// glyph on every source: live where the sign-in may read them, and dim with the shared
+    /// reason where it may not. Where reading is not held, the item is that part's lock.
+    @MainActor
+    static func directsMark(
+        _ row: SourceRow, actsLive: Bool, reads: Bool, place: PartWords.Place?, language: DummyLanguage? = nil
+    ) -> ShellMark {
+        let named = String(format: L10n.t("account.source.conversations", language: language), row.source.host)
+        guard row.source.kind.offers.conversations else { return ShellMark(directsSymbol, named, look: .dim(.never)) }
+        guard row.signedIn else { return ShellMark(directsSymbol, named, look: .dim(.notNow)) }
+        if let place {
+            let line = String(format: L10n.t(place.key, language: language), row.source.host)
+            if actsLive, place.asks { return ShellMark(directsSymbol, line, look: .dim(.askAgain)) }
+            let dim: DimReason = place.kind == .none ? .never : .notNow
+            return ShellMark(directsSymbol, line, look: .dim(dim))
+        }
+        return ShellMark(directsSymbol, named, look: actsLive && reads ? .live : .dim(.notNow))
+    }
+
+    /// The glyph of the conversations item, worn live and dim alike.
+    static let directsSymbol = "bubble.left.and.bubble.right"
 }

@@ -414,6 +414,9 @@ struct JoinSheet: View {
     /// What a joined source announces to the reader signed in there (#321), asked and kept by
     /// the pages the root holds. Nothing where the sheet is drawn with none.
     var announcements: ShellAnnouncements?
+    /// The lists a joined source keeps (#337). Nothing where the sheet is drawn with none:
+    /// the section is then not asked, and not drawn.
+    var serverLists: ShellServerLists?
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.locale) private var locale
@@ -622,6 +625,9 @@ struct JoinSheet: View {
                     }
                     if case .joined(let source) = origin { ServerFiltersBlock(host: source.host, session: session) }
                     if case .joined(let source) = origin { YearBlock(host: source.host, session: session) }
+                    if case .joined(let source) = origin, let serverLists {
+                        ServerListsBlock(host: source.host, lists: serverLists, session: session)
+                    }
                     if case .joined(let source) = origin, let more {
                         SourceMoreBlock(
                             host: source.host, more: more, session: session, onDirectory: directoryPress(at: source.host),

@@ -71,13 +71,19 @@ public struct SourceOffers: Hashable, Sendable {
     /// Whether a post can be given to it to send at a later time, and what waits so read, moved
     /// and let go there (#333), given a sign-in that may.
     public let sendsLater: Bool
+    /// Whether a list is made, renamed and removed there, and who is on it changed (#337),
+    /// given a sign-in that may — so the source's page offers it only where this is so.
+    public let tendsLists: Bool
+    /// Whether posts written to named people can be read back as conversations (#326), given a
+    /// sign-in that may read — so a source's row offers the list only where this is so.
+    public let conversations: Bool
 
     public init(
         timelines: Bool = false, trends: Bool = false, boards: Bool = false, authorsAreItsOwn: Bool = false,
         writes: Bool = false, fields: [SourceField] = [], loadsReferences: Bool = false,
         saysReaderMarks: Bool = false, saysQuotes: Bool = false, notices: Bool = false, people: Bool = false,
         follows: Bool = false, polls: Bool = false, marks: Bool = false, blocks: Bool = false, reports: Bool = false,
-        changesPosts: Bool = false, sendsLater: Bool = false
+        changesPosts: Bool = false, sendsLater: Bool = false, tendsLists: Bool = false, conversations: Bool = false
     ) {
         self.timelines = timelines
         self.trends = trends
@@ -97,6 +103,8 @@ public struct SourceOffers: Hashable, Sendable {
         self.reports = reports
         self.changesPosts = changesPosts
         self.sendsLater = sendsLater
+        self.tendsLists = tendsLists
+        self.conversations = conversations
     }
 
     /// The field it declares under `name`, or nothing.
@@ -114,6 +122,7 @@ public struct SourceOffers: Hashable, Sendable {
         case .trends: trends
         case .board: boards
         case .bookmarks, .favourites: marks
+        case .conversations: conversations
         }
     }
 
@@ -125,12 +134,14 @@ public struct SourceOffers: Hashable, Sendable {
     /// **Completed by the caller, who holds what this cannot know**: `source` carries the lists
     /// and boards chosen on it, and `signedIn` is whether somebody is signed in to it at this
     /// moment — asked of whoever keeps sign-ins, never here. `marks` is whether that sign-in
-    /// may read what its reader marked (#317), which is asked of the same keeper.
-    public func categories(of source: Source, signedIn: Bool, marks readsMarks: Bool = false) -> [Category] {
+    /// may read what its reader marked (#317), which is asked of the same keeper. `directs` is
+    /// whether it may read posts written to named people (#326), asked of the same keeper.
+    public func categories(of source: Source, signedIn: Bool, marks readsMarks: Bool = false, directs readsDirects: Bool = false) -> [Category] {
         var served: [Category] = timelines ? [.public] : []
         if trends { served.append(.trends) }
         if timelines, signedIn { served.append(.home) }
         if marks, signedIn, readsMarks { served += [.bookmarks, .favourites] }
+        if conversations, signedIn, readsDirects { served.append(.conversations) }
         served += source.lists.map { .list(id: $0.id) }
         served += source.boards.map { .board(id: String($0.fid)) }
         return served
@@ -150,7 +161,7 @@ extension ProtocolKind {
                 fields: [.audience, .language, .covered, .reblog, .reblogOf],
                 loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true, people: true,
                 follows: true, polls: true, marks: true, blocks: true, reports: true, changesPosts: true,
-                sendsLater: true
+                sendsLater: true, tendsLists: true, conversations: true
             )
         case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial:
             SourceOffers(timelines: true, trends: true)
