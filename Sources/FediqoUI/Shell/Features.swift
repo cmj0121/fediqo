@@ -15,6 +15,9 @@ struct FeaturedSaid: Equatable {
     var tags: [FeaturedTag] = []
     /// The list of the people they feature, where the source said there is somebody in it.
     var people: PeopleList?
+    /// The collections of people they put together and let be found (#340), each the list of its
+    /// people: a row each, which opens it.
+    var collections: [PeopleList] = []
     /// Whether a row's `…` holds Take off your profile: on the reader's own page alone.
     var takesOff = false
     /// How the sign-in stands where it lacks the account part Take off wants: the item is dim
@@ -28,6 +31,18 @@ struct FeaturedSaid: Equatable {
     var tagsDrawn: Bool { !tags.isEmpty }
 
     static let peopleID = "about.featured.people"
+
+    /// What the lamp calls the row of a collection.
+    static func lamp(ofCollection list: PeopleList) -> String { "about.collection:" + list.accountID }
+
+    /// The rows `j` and `k` walk among the collections.
+    var collectionRows: [String] { collections.map(Self.lamp(ofCollection:)) }
+
+    /// A collection's row as it is drawn and heard: its name, and how many are in it.
+    static func collectionWords(_ list: PeopleList, language: DummyLanguage? = nil) -> String {
+        let counted = list.counted.map { L10n.count("person.collection.count", $0, language: language) }
+        return [list.lineWords, counted].compactMap { $0 }.joined(separator: L10n.t("people.row.between", language: language))
+    }
     static let tagsID = "about.featured.tags"
 
     /// What the lamp calls the row of `tag`.
@@ -92,6 +107,7 @@ struct FeaturedSaid: Equatable {
     /// What Return does with the lamp on the row `id`, where that row is one of these.
     func press(on id: String) -> FeaturedPress? {
         if id == Self.peopleID, let people { return .people(people) }
+        if let list = collections.first(where: { Self.lamp(ofCollection: $0) == id }) { return .people(list) }
         return tags.first { Self.lamp(of: $0.tag) == id }.map { .tag($0.tag) }
     }
 }

@@ -132,6 +132,9 @@ final class SourceWork {
         /// The person's filters at a source they are signed in to, read, made, changed and removed
         /// as them because they opened that source's page or pressed there (#338).
         case filters
+        /// The years a source looked back on for the person, read as them because they opened
+        /// that source's page (#340). Nothing read under it is held.
+        case yearsLookedBack
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -144,7 +147,7 @@ final class SourceWork {
         /// Everything else reaches wherever a post, a page or a directory points.
         var isOfTheSource: Bool {
             switch self {
-            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people, .serverSays, .rising, .ownSettings, .lookUp, .followedTags, .announcements, .tending, .filters: true
+            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people, .serverSays, .rising, .ownSettings, .lookUp, .followedTags, .announcements, .tending, .filters, .yearsLookedBack: true
             case .forumPost, .forumReplies, .joining, .boards, .directory, .serverCheck, .picture, .emoji,
                  .signIn, .signOut, .page, .video, .signInPage, .personCheck, .pagePart, .takeAway, .readBack,
                  .nearbyMove, .personHome, .line:

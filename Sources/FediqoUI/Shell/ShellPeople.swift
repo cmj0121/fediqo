@@ -101,6 +101,9 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         /// gave it, and given to anyone.
         case boostedBy
         case favouritedBy
+        /// The people in a collection somebody put together (#340), by the id its source gave the
+        /// collection: given to anyone, and read with no token.
+        case collection
 
         /// The two lists that are somebody's, in the order their page counts them.
         static let ofSomebody: [Which] = [.following, .followers]
@@ -141,9 +144,21 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case .following: counted = person.tally.following
         case .followers: counted = person.tally.followers
         // Not somebody's: a directory is made by `init(directoryAt:)`, and counts nobody.
-        case .directory, .found, .suggested, .requests, .featured, .muted, .blocked, .boostedBy, .favouritedBy: counted = nil
+        case .directory, .found, .suggested, .requests, .featured, .muted, .blocked, .boostedBy, .favouritedBy, .collection: counted = nil
         }
         hidden = person.hidesLists
+    }
+
+    /// The people of `collection`, which `person` put together (#340): counted as its source
+    /// counts it, hidden by nobody, and named by its own name.
+    init(collection: PersonCollection, of person: Person) {
+        which = .collection
+        host = person.source.host
+        accountID = collection.id
+        handle = person.handle
+        counted = collection.count
+        hidden = false
+        words = collection.name
     }
 
     /// Who boosted or favourited the post `id` at `host` (#334), written by `author`: the post's
@@ -243,7 +258,7 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case .blocked: .blocked
         case .boostedBy: .boostedBy(post: accountID)
         case .favouritedBy: .favouritedBy(post: accountID)
-        case .directory, .found, .suggested: nil
+        case .directory, .found, .suggested, .collection: nil
         }
     }
 
@@ -258,6 +273,7 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case .directory: .directory
         case .suggested: .suggestions
         case .featured: .featuredPeople
+        case .collection: .collections
         case .following, .followers, .found, .requests, .muted, .blocked, .boostedBy, .favouritedBy: nil
         }
     }
@@ -537,7 +553,7 @@ final class ShellPeoplePages {
         switch said.list.which {
         case .requests: return [.acceptRequest, .refuseRequest]
         case .followers: return [.removeFollower]
-        case .following, .directory, .found, .suggested, .featured, .muted, .blocked, .boostedBy, .favouritedBy: return []
+        case .following, .directory, .found, .suggested, .featured, .muted, .blocked, .boostedBy, .favouritedBy, .collection: return []
         }
     }
 
@@ -939,7 +955,7 @@ final class ShellPeoplePages {
         case .suggested:
             let passed = next.flatMap(MastodonSuggestions.passed) ?? 0
             return passed + stretchLength >= MastodonSuggestions.furthest
-        case .following, .followers, .requests, .featured, .muted, .blocked, .boostedBy, .favouritedBy: return false
+        case .following, .followers, .requests, .featured, .muted, .blocked, .boostedBy, .favouritedBy, .collection: return false
 
         }
     }
@@ -1069,6 +1085,12 @@ final class ShellPeoplePages {
                 }
                 return try await suggestions.stretch(source: source, after: passed, limit: length)
             }
+        }
+        if list.which == .collection {
+            // Given to anyone, and refused to a sign-in without its own word (#340): read unsigned.
+            let collections = session.reach.unsignedCollections(source.host, for: .people, within: deadline)
+            let id = list.accountID
+            return { _ in PeopleStretch(people: try await collections.people(in: id, source: source), next: nil) }
         }
         guard let asked = list.asked else {
             let directory = reachingDirectory?(source)

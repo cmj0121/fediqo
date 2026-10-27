@@ -40,8 +40,29 @@ extension ShellReload {
         } else {
             // A thread read earlier this run is drawn from what is held now by the same call.
             await session.conversations.open(item, in: session)
+            // Read again while its source says it is still gathering it from elsewhere (#340).
+            await gathered(item, in: session)
             // A quote post kept before quotes were read, read again so its quote shows (#214).
             if inFront?.id == item.id { await readQuoteIfHeldBefore(item, in: session) }
+        }
+    }
+
+    /// How many times an open thread is read again while its source is still gathering it.
+    static let gatheringBound = 10
+
+    /// The open thread of `item` read again after the wait its source names, as long as the
+    /// source says it is still gathering answers from elsewhere (#340) — and only while it stays
+    /// the thread in front, at most `gatheringBound` times: the pane leaving cancels the wait,
+    /// and a source that never stops saying so is let be. What each read brings lands as any
+    /// read of the thread does, and is drawn with no key pressed.
+    func gathered(_ item: DummyItem, in session: ShellSession) async {
+        var times = 0
+        while times < Self.gatheringBound, inFront?.id == item.id,
+              let gathering = session.conversations.gathering[item.id] {
+            do { try await gatherSleep(.seconds(gathering.retry)) } catch { return }
+            guard !Task.isCancelled, inFront?.id == item.id else { return }
+            times += 1
+            await session.conversations.renew(item, in: session)
         }
     }
 

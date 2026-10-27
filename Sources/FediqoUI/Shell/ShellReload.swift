@@ -156,6 +156,9 @@ final class ShellReload {
         asking.reduce(into: []) { $0.formUnion(Self.purposes(of: $1)) }
     }
 
+    /// What a thread still gathered waits on before it is read again (#340): `Task.sleep` but for
+    /// a test, which turns it by hand.
+    @ObservationIgnored var gatherSleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     /// How long one request of a reload may take before it counts as failed.
     @ObservationIgnored var deadline: Duration = .seconds(30)
     /// The categories of the reader's marks being read now, by source (#317, `readMarks`).

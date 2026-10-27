@@ -123,6 +123,12 @@ struct SourceReach {
         MastodonPeople(http: wire(small(), for: purpose, within: limit), host: host)
     }
 
+    /// The collections a source keeps of somebody's, and the people in one (#340): with no token,
+    /// listed as `purpose`, ended within `limit`, and under the small ceiling.
+    func unsignedCollections(_ host: String, for purpose: SourceWork.Purpose, within limit: Duration) -> MastodonCollections {
+        MastodonCollections(http: wire(small(), for: purpose, within: limit), host: host)
+    }
+
     /// A source's directory of people (#315), as the reader, through `door`: the source then
     /// leaves out the people they block or mute.
     func directory(_ door: MastodonAuthorized) -> MastodonDirectory {
