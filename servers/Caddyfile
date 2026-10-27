@@ -12,9 +12,19 @@
 # on this OS, so 443 is the one port a join can actually use.
 mastodon.localhost {
 	tls internal
-	reverse_proxy mastodon-web:3000 {
-		header_up X-Forwarded-Proto https
-		header_up X-Forwarded-Host {host}
+	# The streaming service (the `streaming` profile of compose.yml), on the source's own host.
+	# Where it is not up this path answers 502, and the rest of the server is as it was.
+	handle /api/v1/streaming* {
+		reverse_proxy mastodon-streaming:4000 {
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-Host {host}
+		}
+	}
+	handle {
+		reverse_proxy mastodon-web:3000 {
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-Host {host}
+		}
 	}
 }
 
