@@ -1577,12 +1577,16 @@ struct TimelinePane: View {
         }
     }
 
-    /// `[+]`, the queries, then the rule the current one is under — one line.
+    /// `[+]`, the queries, then search and reload.
     ///
     /// `[+]` is pinned leading, outside the scroll, so adding is always in reach. It is a
     /// press, not a Tab stop: Tab rotates All, Trends and yours. The names scroll so a
-    /// narrow window or a larger text size does not squeeze them; the rule keeps its own
-    /// width on the trailing edge.
+    /// narrow window or a larger text size does not squeeze them.
+    ///
+    /// **A wide page does not spell the rule** (#404). The pills, search and reload stand
+    /// without it. The list of timelines and the editor keep it. A narrow page that has
+    /// timelines says the rule under the name (`TimelineNarrowHead`). This row is that page
+    /// only when it has no timeline, and then there is no rule to say.
     ///
     /// **On a narrow page it is the one timeline in front, by name** (#304): its rules and where
     /// it stands under the name, and every other timeline behind a press on it. See
@@ -1629,12 +1633,10 @@ struct TimelinePane: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                if session.timelineID != nil {
-                    Text(session.rule(of: timeline))
-                        .shellFont(.meta)
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                        .lineLimit(1)
-                }
+                // No rule sentence on this row (#404). A narrow page with timelines is
+                // `TimelineNarrowHead`, above. This row is reached on a narrow page only when
+                // `queries` is empty, and then `timelineID` is nil, so the sentence could not
+                // be said here anyway.
                 searchMark
                 reloadMark
             }
