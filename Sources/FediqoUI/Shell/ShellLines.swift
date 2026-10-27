@@ -10,8 +10,12 @@ import Observation
 ///
 /// **One line a source, held only while it is wanted** (`wanted`): the source is chosen, signed
 /// in, a Mastodon, and the timeline in front reads its Home — and the window is not in the
-/// background. Anything else lets the line go at once (`HearsLines` is a task of the timeline's
-/// own: the timeline leaving takes it). The wait and `r` read as they always did beside it.
+/// background. Anything else lets the line go at once. The wait and `r` read as they always did
+/// beside it.
+///
+/// **And while notices are told of** (#324, `ShellNoticesTold`): a source whose notices the person
+/// asked to be told of holds the same line while Fediqo runs, whatever page is in front. One line
+/// a source, whatever it is held for (`Want`): a change of what it is held for opens it again.
 ///
 /// **What it brings lands as a read would** (`MastodonLine.land`), and only over a Home read
 /// through to now: as the line opens, Home is read on first (`MastodonAccount.catchUp`), so what
@@ -58,6 +62,23 @@ final class ShellLines {
     /// Bumped by the press that goes up to them: the list in front goes to its top.
     private(set) var wentUp = 0
 
+    /// The timeline in front, and whether it is in front of the reader now: told by the timeline's
+    /// pane (`ShowsLineFront`), nothing while that pane is not drawn.
+    var front: Front?
+
+    struct Front: Equatable {
+        let timeline: TimelineQuery
+        let inFront: Bool
+    }
+
+    /// One source's line and what it is held for: Home landing as it happens, notices told, or
+    /// both.
+    struct Want: Hashable {
+        let host: String
+        var home: Bool
+        var notices: Bool
+    }
+
     @ObservationIgnored private let defaults: UserDefaults?
     @ObservationIgnored let opener: any LineOpener
     @ObservationIgnored let sleep: @Sendable (Duration) async throws -> Void
@@ -99,6 +120,21 @@ final class ShellLines {
             guard ask.categories == nil || ask.categories?.contains(.home) == true else { return nil }
             return host
         }.sorted()
+    }
+
+    /// Every line wanted now, by host: Home's (`wanted`) for the timeline in front, and the
+    /// sources whose notices are told (`ShellNoticesTold.hosts`) — only while Fediqo is `running`,
+    /// and neither from a source refused this run.
+    func wants(running: Bool, in session: ShellSession) -> [Want] {
+        guard running else { return [] }
+        let home = front.map { wanted(timeline: $0.timeline, inFront: $0.inFront, in: session) } ?? []
+        let notices = session.noticesTold.hosts(in: session).filter { host in
+            if case .refused? = standing[host] { return false }
+            return true
+        }
+        return Set(home).union(notices).sorted().map {
+            Want(host: $0, home: home.contains($0), notices: notices.contains($0))
+        }
     }
 
     // MARK: - The source's page
@@ -159,25 +195,31 @@ final class ShellLines {
     /// Holds each of `hosts`' lines until cancelled — when what is wanted changes, the timeline
     /// leaves, or the window goes to the background — and lets every one go then.
     func hear(_ hosts: [String], in session: ShellSession) async {
-        let held = hosts.map { host in Task { await self.keep(host, in: session) } }
+        await hear(hosts.map { Want(host: $0, home: true, notices: false) }, in: session)
+    }
+
+    /// `hear(_:in:)` of lines held for what each is wanted for.
+    func hear(_ wants: [Want], in session: ShellSession) async {
+        let held = wants.map { want in Task { await self.keep(want, in: session) } }
         await withTaskCancellationHandler {
             for line in held { await line.value }
         } onCancel: {
             for line in held { line.cancel() }
         }
-        for host in hosts {
-            if case .refused? = standing[host] { continue }
-            standing[host] = nil
+        for want in wants {
+            if case .refused? = standing[want.host] { continue }
+            standing[want.host] = nil
         }
     }
 
     /// One source's line, opened, heard, and opened again after a drop, until cancelled or
     /// refused.
-    private func keep(_ host: String, in session: ShellSession) async {
+    private func keep(_ want: Want, in session: ShellSession) async {
+        let host = want.host
         var wait = Self.firstWait
         while !Task.isCancelled {
             let opened = now()
-            let end = await once(host, in: session)
+            let end = await once(want, in: session)
             guard !Task.isCancelled else { return }
             switch end {
             case .refused(let status):
@@ -203,8 +245,9 @@ final class ShellLines {
     }
 
     /// One line: opened through the gate and on the record for as long as it is open, Home read
-    /// up to now, then each event landed as it comes.
-    private func once(_ host: String, in session: ShellSession) async -> End {
+    /// up to now where it is held for Home, then each event landed or told as it comes.
+    private func once(_ want: Want, in session: ShellSession) async -> End {
+        let host = want.host
         guard let token = session.mastodon.token(host: host),
               let source = session.sources.first(where: { $0.host.lowercased() == host })
         else { return .over }
@@ -214,7 +257,7 @@ final class ShellLines {
         guard let admission = work.admission(reached: host, source: nil, for: .line), work.spend(admission, at: host) else {
             return .over
         }
-        let record = work.begin(host: host, for: .line, name: .home, allowedBy: admission.allowedBy)
+        let record = work.begin(host: host, for: .line, name: want.home ? .home : nil, allowedBy: admission.allowedBy)
         defer { work.endLine(record) }
         let line = MastodonLine(token: token, opener: opener)
         let events: AsyncThrowingStream<LineEvent, any Error>
@@ -226,21 +269,27 @@ final class ShellLines {
             return .dropped
         }
         // Home up to now, before anything the line tells lands over it.
-        let door = session.mastodon.authorized(token: token, for: .timeline, name: .home)
-        do {
-            guard try await MastodonAccount(door: door, store: session.store).catchUp() else { return .dropped }
-        } catch MastodonAuthError.signedOut {
-            session.mastodon.endedByServer(host: host)
-            return .over
-        } catch {
-            return .dropped
+        if want.home {
+            let door = session.mastodon.authorized(token: token, for: .timeline, name: .home)
+            do {
+                guard try await MastodonAccount(door: door, store: session.store).catchUp() else { return .dropped }
+            } catch MastodonAuthError.signedOut {
+                session.mastodon.endedByServer(host: host)
+                return .over
+            } catch {
+                return .dropped
+            }
+            guard !Task.isCancelled else { return .dropped }
+            await session.reloadFromStore()
         }
-        guard !Task.isCancelled else { return .dropped }
-        await session.reloadFromStore()
         standing[host] = .open(since: now())
         do {
             for try await event in events {
-                guard MastodonLine.homeEvents.contains(event.name) else { continue }
+                if want.notices, let notice = MastodonNotices.told(event, source: source) {
+                    await session.noticesTold.told(notice, in: session)
+                    continue
+                }
+                guard want.home, MastodonLine.homeEvents.contains(event.name) else { continue }
                 let landed = await MastodonLine.land(event, of: source, in: session.store)
                 if case .arrived(let key, true) = landed {
                     above += 1
