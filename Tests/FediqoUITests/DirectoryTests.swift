@@ -502,6 +502,28 @@ struct DirectoryTests {
 
     // MARK: - What the page says
 
+    @Test("A directory head names the order in a word; the gear lights only while the list is local, and choosing either is what the head then says")
+    func theGearNamesTheOrder() {
+        #expect(DirectoryGear.symbol == "gearshape")
+        #expect(DirectoryGear.word(DirectoryChoice(), language: .english) == "Recently active")
+        #expect(DirectoryGear.word(DirectoryChoice(order: .new), language: .taiwanese) == "最新")
+        #expect(!DirectoryGear.lit(DirectoryChoice()) && DirectoryGear.lit(DirectoryChoice(localOnly: true)))
+        let newest = PeopleSaid.choosing(.new, from: DirectoryChoice())
+        #expect(DirectoryGear.word(newest, language: .english) == "Newest" && !DirectoryGear.lit(newest))
+        let local = PeopleSaid.choosing(localOnly: true, from: newest)
+        #expect(DirectoryGear.word(local, language: .english) == "Newest" && DirectoryGear.lit(local))
+        // The long sentence stays what a listener hears of the word. It is not the word.
+        #expect(PeopleSaid.sortingLine(DirectoryChoice(), source: "m.example", language: .english) != DirectoryGear.word(DirectoryChoice(), language: .english))
+        let there = PeopleSaid(list: Self.directory, sorting: DirectoryChoice())
+        #expect(DirectoryGear.shown(for: there))
+        var asking = there
+        asking.asking = true
+        #expect(DirectoryGear.shown(for: asking) && !asking.choosesSorting)
+        var none = there
+        none.reading = .absent
+        #expect(!DirectoryGear.shown(for: none))
+    }
+
     @Test("The head of a directory says whose it is and, in one sentence, how it is being read; the control names the two orders a source takes and the people who live there; where it gave nobody the page says so of the source, and of the people who live there where only they were asked for")
     func theWords() {
         #expect(PeopleSaid.title(Self.directory, language: .english) == "The directory of m.example")
