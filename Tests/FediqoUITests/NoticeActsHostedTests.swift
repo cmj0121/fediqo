@@ -159,7 +159,7 @@ struct NoticeActsHostedTests {
 
     // MARK: - The ask
 
-    @Test("Each source not asked has one press beside its name, on the page with no list and above the list; the press raises a question naming notices and opens nothing")
+    @Test("Each source not asked has one press beside its name on the page with no list, and in the status mark's list beside one; the press raises a question naming notices and opens nothing")
     func theAskIsOnePress() async throws {
         // Nobody may read notices yet: the page says so and each source has its press.
         let (unasked, quiet, _) = try await F.shell([:], signedIn: [Self.a: F.plain, Self.b: F.plainActing])
@@ -183,22 +183,29 @@ struct NoticeActsHostedTests {
         #expect(await quiet.asked.isEmpty, "the question itself asked the source something")
         unasked.partAsks.putDown()
 
-        // Beside a list: the unasked source is named above it with the same press.
+        // Beside a list: the unasked source is counted by the head's status mark, and its list
+        // offers the same press; nothing stands above the lines for it.
         let (session, _, _) = try await F.shell(
             [F.get(Self.a): F.page(F.one(4, minutes: 2))], signedIn: [Self.a: F.reads, Self.b: F.plain]
         )
         await session.noticeList.read(in: session)
         let (_, page) = await hosted(session)
-        let named = try #require(page.frames[.line("unasked:b.example")])
-        let press = try #require(page.frames[.linePress("unasked:b.example")])
-        let row = try #require(page.frames[.row(rows(page)[0])])
-        #expect(press.height > 0 && press.minY >= named.minY - 0.5 && press.maxY <= named.maxY + 0.5)
-        #expect(named.maxY <= row.minY + 0.5)
+        let status = NoticesPane.status(in: session)
+        #expect(status.map(\.id) == ["unasked:b.example"])
+        #expect((page.frames[.statusMark]?.height ?? 0) > 0)
+        #expect(page.says[.statusMark] == StatusWords.spoken(status))
+        #expect(StatusWords.spoken(status, language: .english) == "1 source needs you. Opens what it needs.")
+        #expect(page.frames[.line("unasked:b.example")] == nil && page.frames[.linePress("unasked:b.example")] == nil)
+        let ask = try #require(status[0].press)
+        #expect(ask.kind == .ask && ask.spoken == NoticeAskSlot.spoken(Self.b))
+        ask.act()
+        #expect(session.partAsks.open != nil, "the press raises the question")
+        session.partAsks.putDown()
 
-        // Once allowed, the press is gone and the source's lines are read.
+        // Once allowed, the source's lines are read and nothing is left to mark.
         await session.allowNotices(host: Self.b, through: NoticeActPage())
         let (_, after) = await hosted(session)
-        #expect(after.frames[.linePress("unasked:b.example")] == nil && after.frames[.line("unasked:b.example")] == nil)
+        #expect(after.frames[.statusMark] == nil)
         #expect(session.mastodon.notices(host: Self.b) == .allowed)
     }
 
@@ -239,7 +246,7 @@ struct NoticeActsHostedTests {
         #expect(chinese.help?.contains("並加上書籤") == true, "not #285's words for it")
     }
 
-    @Test("An ask that fails is said above the list in the page's own words, and the press stands to ask again")
+    @Test("An ask that fails is said in the status mark's list in the page's own words, and the press stands to ask again")
     func aFailedAskIsSaid() async throws {
         let (session, server, _) = try await F.shell(
             [F.get(Self.a): F.page(F.one(4, minutes: 2))], signedIn: [Self.a: F.reads, Self.b: F.plain]
@@ -249,9 +256,32 @@ struct NoticeActsHostedTests {
         await session.allowNotices(host: Self.b, through: NoticeActPage())
 
         let (_, page) = await hosted(session)
-        #expect(page.says[.said(Self.b)] == "Notices were not allowed on b.example. Its sign-in works as it did.")
-        #expect((page.frames[.said(Self.b)]?.height ?? 0) > 0)
-        #expect((page.frames[.linePress("unasked:b.example")]?.height ?? 0) > 0)
+        let status = Dictionary(uniqueKeysWithValues: NoticesPane.status(in: session).map { ($0.id, $0) })
+        #expect(status["said:b.example"]?.words == "Notices were not allowed on b.example. Its sign-in works as it did.")
+        #expect(status["unasked:b.example"]?.press?.kind == .ask)
+        #expect(StatusWords.count(Array(status.values)) == 1, "one source, counted once")
+        #expect(page.frames[.said(Self.b)] == nil && (page.frames[.statusMark]?.height ?? 0) > 0)
+    }
+
+    @Test("A source asked for notices that gave none needs the reader: its line offers Again, which asks it again")
+    func aRefusedSourceIsAskedAgain() async throws {
+        let (session, _, _) = try await F.shell(
+            [F.get(Self.a): F.page(F.one(4, minutes: 2))], signedIn: [Self.a: F.reads, Self.b: F.plain]
+        )
+        session.mastodon.refusedNotices(host: Self.b, sentWith: F.token(Self.b, scopes: F.plain))
+        await session.noticeList.read(in: session)
+        #expect(session.mastodon.notices(host: Self.b) == .unavailable)
+
+        let (_, page) = await hosted(session)
+        let status = NoticesPane.status(in: session)
+        let refused = try #require(status.first { $0.id == "refused:b.example" })
+        #expect(refused.needsReader && StatusWords.count(status) == 1)
+        #expect(page.says[.statusMark] == StatusWords.spoken(status))
+        let again = try #require(refused.press)
+        #expect(again.kind == .again && again.spoken == "Ask b.example again for your notices")
+        again.act()
+        #expect(session.partAsks.open?.host == Self.b, "Again raises the question for notices")
+        session.partAsks.putDown()
     }
 
     // MARK: - A line's menu
@@ -438,7 +468,7 @@ struct NoticeActsHostedTests {
         #expect(rows(page).count == 3)
         #expect(!page.frames.keys.contains { part in
             switch part {
-            case .held, .heldWords, .heldPress, .heldReading, .heldPartial, .request, .requestWords, .requestMore, .onWay: true
+            case .held, .heldWords, .heldPress, .request, .requestWords, .requestMore: true
             default: false
             }
         }, "a held-back line was drawn with nothing held")
@@ -564,9 +594,9 @@ struct NoticeActsHostedTests {
         acts.asked = nil
         await met("the request let through is said to be on its way") { acts.onItsWay.count == 1 }
         let (_, page) = await hosted(session)
-        #expect(page.says[.onWay(listed[0].id)] == "@eve@a.example (Eve)'s notices are on their way from a.example. A later read shows them.")
-        let way = try #require(page.frames[.onWay(listed[0].id)]), top = try #require(page.frames[.row(rows(page)[0])])
-        #expect(way.height > 0 && way.maxY <= top.minY + 0.5)
+        let way = NoticesPane.status(in: session).first { $0.id == "onWay:" + listed[0].id }
+        #expect(way?.words == "@eve@a.example (Eve)'s notices are on their way from a.example. A later read shows them.")
+        #expect((page.frames[.statusMark]?.height ?? 0) > 0)
         #expect(page.frames[.request(listed[0].id)] == nil && page.frames[.request(listed[1].id)] != nil)
         #expect(page.says[.held(Self.a)] == "a.example is holding back 1 notice.")
 
@@ -582,7 +612,8 @@ struct NoticeActsHostedTests {
         #expect(await server.posts == [accept, go])
         let (_, after) = await hosted(session)
         #expect(after.frames[.held(Self.a)] == nil && after.frames[.request(listed[1].id)] == nil)
-        #expect(after.says[.onWay(listed[0].id)] != nil, "what was let through stopped being said before a read showed it")
+        #expect(NoticesPane.status(in: session).contains { $0.id == "onWay:" + listed[0].id },
+                "what was let through stopped being said before a read showed it")
     }
 
     @Test("A sign-in that only reads is shown what is held, and both acts dim with why")
@@ -610,25 +641,25 @@ struct NoticeActsHostedTests {
         await acts.open(host: Self.a, in: session)
         #expect(acts.requests[Self.a] == [] && acts.held(host: Self.a) != nil)
 
+        let partial = { NoticesPane.status(in: session).first { $0.id == "heldPartial:" + Self.a }?.words }
         let (_, empty) = await hosted(session)
-        #expect(empty.says[.heldPartial(Self.a)] == "a.example listed none of the people whose notices it is holding back.")
-        #expect((empty.frames[.heldPartial(Self.a)]?.height ?? 0) > 0, "an opened line stood over nothing")
+        #expect(partial() == "a.example listed none of the people whose notices it is holding back.")
+        #expect((empty.frames[.statusMark]?.height ?? 0) > 0, "an opened line stood over nothing")
         #expect(L10n.t("notices.held.none", language: .taiwanese) != "notices.held.none")
 
         // One of the two it counts.
         await server.set(F.get(Self.a, Self.requests), .body("[" + F.request(71, by: "Eve", count: 3) + "]"))
         acts.close(host: Self.a)
         await acts.open(host: Self.a, in: session)
-        let (_, partial) = await hosted(session)
-        #expect(partial.says[.heldPartial(Self.a)] == "a.example is holding back more people's notices than are listed here.")
-        #expect(partial.frames[.request(try #require(acts.requests[Self.a]?.first).id)] != nil)
+        let (_, short) = await hosted(session)
+        #expect(partial() == "a.example is holding back more people's notices than are listed here.")
+        #expect(short.frames[.request(try #require(acts.requests[Self.a]?.first).id)] != nil)
 
         // Both of the two: nothing more to say.
         await server.set(F.get(Self.a, Self.requests), .body("[" + F.request(71, by: "Eve", count: 3) + "," + F.request(72, by: "Flo", count: 1) + "]"))
         acts.close(host: Self.a)
         await acts.open(host: Self.a, in: session)
-        let (_, whole) = await hosted(session)
-        #expect(whole.frames[.heldPartial(Self.a)] == nil)
+        #expect(partial() == nil)
     }
 
     // MARK: - 320 points across
@@ -677,17 +708,10 @@ struct NoticeActsHostedTests {
         let whole = Self.wrapped(Text(said.words()).shellFont(.meta), width: spoken.width, type)
         #expect(spoken.height >= whole - 0.5, "\(type): the strip's sentence is cut: \(spoken.height) of \(whole)")
 
-        // Each sentence the acts say on the page stands at the height it asks for at the width it has.
-        let sentences: [(NoticesProbe.Part, String)] = [
-            (.onWay(listed[1].id), NoticeActs.onItsWay(listed[1])),
-            (.heldPartial(Self.long), String(format: L10n.t("notices.held.partial"), Self.long)),
-        ]
-        for (part, words) in sentences {
-            let frame = try #require(probe.frames[part], "\(type): \(part) is not drawn")
-            #expect(probe.says[part] == words)
-            let asks = Self.wrapped(Text(words).shellFont(.meta), width: frame.width, type)
-            #expect(frame.height >= asks - 0.5, "\(type): \(part) is cut: \(frame.height) of \(asks)")
-        }
+        // What the acts say of a source is the status mark's list, and nothing above the lines.
+        let status = NoticesPane.status(in: session).map(\.id)
+        #expect(status.contains("onWay:" + listed[1].id) && status.contains("heldPartial:" + Self.long))
+        #expect(status.contains("unasked:c.example"))
         let words = try #require(probe.frames[.heldWords(Self.long)])
         let holding = try #require(acts.held(host: Self.long))
         let asks = Self.wrapped(
@@ -700,12 +724,11 @@ struct NoticeActsHostedTests {
         let toggle = try #require(probe.frames[.heldPress(Self.long)])
         let hide = Self.ideal(ShellLinkButton(L10n.t("notices.held.hide")) {}, type)
         #expect(toggle.width >= hide.width - 0.5 && toggle.height >= hide.height - 0.5, "\(type): the press on the held-back line is cut")
-        let ask = try #require(probe.frames[.linePress("unasked:c.example")])
-        let button = Self.ideal(ShellLinkButton(L10n.t("notices.ask.press")) {}, type)
-        #expect(ask.width >= button.width - 0.5 && ask.height >= button.height - 0.5, "\(type): the press to ask is cut")
 
-        // Every three dots at its own box, and clear of the words beside it.
+        // Every three dots at its own box, and clear of the words beside it; the status mark too.
         let box = Self.box(type)
+        let mark = try #require(probe.frames[.statusMark], "\(type): the status mark is not drawn")
+        #expect(mark.width >= box.width - Self.pixel && mark.height >= box.height - Self.pixel, "\(type): the status mark is squeezed")
         let head = try #require(probe.frames[.moreMark]), title = try #require(probe.frames[.title])
         #expect(head.width >= box.width - Self.pixel && head.height >= box.height - Self.pixel, "\(type): the head's three dots are squeezed")
         #expect(head.minX >= title.maxX - 0.5 || head.minY >= title.maxY - 0.5)

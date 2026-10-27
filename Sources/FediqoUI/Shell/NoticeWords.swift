@@ -308,6 +308,15 @@ enum NoticesLine: Equatable, Identifiable {
         }
     }
 
+    /// The source the line is about.
+    var host: String {
+        switch self {
+        case .unasked(let host), .refused(let host), .declined(let host), .asking(let host),
+             .locked(let host), .unread(let host), .full(let host):
+            host
+        }
+    }
+
     /// The lines, in the order they are drawn: what is not shown, then what was never asked.
     ///
     /// `places` is what each source's sign-in draws where its notices would be
@@ -423,13 +432,15 @@ enum NoticesFoot: Equatable {
         footInViewAtEnd && !footInViewAtStart && shown > 0
     }
 
-    func words(language: DummyLanguage? = nil) -> String {
+    /// What the press says, or why the list ends where the status list says it (#396).
+    /// Nothing where the end needs no reason: every source sent all it has, or the source held
+    /// to the most kept names itself (`NoticesLine.full`).
+    func words(language: DummyLanguage? = nil) -> String? {
         switch self {
         case .more: L10n.t("notices.foot.more", language: language)
         case .held: L10n.t("notices.foot.held", language: language)
         case .limit: L10n.t("notices.foot.limit", language: language)
-        case .full: L10n.t("notices.foot.full", language: language)
-        case .end: L10n.t("notices.foot.end", language: language)
+        case .full, .end: nil
         }
     }
 

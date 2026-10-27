@@ -18,9 +18,11 @@ import SwiftUI
 ///
 /// **What it says before any line**, in this order: that nobody is signed in to a source that
 /// has notices, and what would make the page fill; that somebody is, and no sign-in may read
-/// them; and then the lines, with what each source has to say above them — not read, held to
-/// the most kept, never asked, asked and refused. **A read on the wire, a source that failed
-/// and a read stopped are its bottom toast's**, as the timeline's are (DESIGN-reload).
+/// them; and then the head and the lines. **What each source has to say — not read, held to the
+/// most kept, never asked, asked and refused — is one status mark in the head** (#396,
+/// `StatusMark`), which opens each source's sentence and its Ask or Again; nothing stands above
+/// the lines for it. **A read on the wire, a source that failed and a read stopped are its
+/// bottom toast's**, as the timeline's are (DESIGN-reload).
 struct NoticesPane: View {
     let session: ShellSession
     /// The line the lamp is on, with a keyboard or a pointer. Held by the app, where `j`, `k`
@@ -111,6 +113,118 @@ struct NoticesPane: View {
         )
     }
 
+    /// What the status mark in the head lists now (#396): each source's line (`lines`), what
+    /// an ask or a reading of requests came to (`said`), a request let through and on its way,
+    /// a held-back list being read or listed short, and why the list ends where the foot is
+    /// a plain mark. `reload` is what Again reads with where a source was not read.
+    static func status(
+        in session: ShellSession, began: Bool = true, language: DummyLanguage? = nil
+    ) -> [StatusLine] {
+        let hosts = hosts(in: session)
+        return status(
+            hosts: hosts, unread: unread(among: hosts, in: session, began: began), in: session, language: language
+        )
+    }
+
+    static func status(
+        hosts: [(host: String, notices: NoticeStanding)], unread: [String], in session: ShellSession,
+        touch: Bool = false, reload: @escaping () -> Void = {}, language: DummyLanguage? = nil
+    ) -> [StatusLine] {
+        let acts = session.noticeList.acts
+        var status = lines(hosts: hosts, unread: unread, in: session).map { line in
+            let press = press(line, in: session, reload: reload, language: language)
+            return StatusLine(
+                id: line.id, host: line.host, words: line.words(language: language, touch: touch),
+                needsReader: press != nil || standsOut(line), standsOut: standsOut(line), press: press
+            )
+        }
+        // An ask that came to nothing leaves its source unasked, and that line carries the press
+        // and the count: this one only says what happened.
+        status += said(in: session, language: language).map {
+            StatusLine(id: "said:" + $0.host, host: $0.host, words: $0.words, needsReader: false)
+        }
+        status += acts.onItsWay.map {
+            StatusLine(
+                id: "onWay:" + $0.id, host: $0.source.host.lowercased(),
+                words: NoticeActs.onItsWay($0, language: language), needsReader: false
+            )
+        }
+        for host in acts.shownHolders where acts.opened.contains(host) {
+            let listed = acts.listed(host: host)
+            if listed.isEmpty, acts.readingRequests.contains(host) {
+                status.append(StatusLine(
+                    id: "heldReading:" + host, host: host,
+                    words: String(format: L10n.t("notices.held.reading", language: language), host), needsReader: false
+                ))
+            }
+            // The source counts more people than it listed — or listed nobody at all: said,
+            // so an opened line never stands over nothing unexplained.
+            if let held = acts.shownHeld(host: host), acts.requests[host] != nil, held.requests > listed.count,
+               !acts.readingRequests.contains(host) {
+                let key = listed.isEmpty ? "notices.held.none" : "notices.held.partial"
+                status.append(StatusLine(
+                    id: "heldPartial:" + host, host: host, words: String(format: L10n.t(key, language: language), host),
+                    needsReader: false
+                ))
+            }
+        }
+        // Why the list ends where it does, where its foot is a plain mark. A source held to the
+        // most kept is named by its own line above.
+        switch foot(in: session) {
+        case .held?:
+            status.append(StatusLine(
+                id: "foot:held", host: nil, words: L10n.t("notices.foot.held", language: language),
+                press: StatusPress(
+                    kind: .again, spoken: L10n.t("status.press.again.notices.spoken", language: language), act: reload
+                )
+            ))
+        case .limit?:
+            status.append(StatusLine(
+                id: "foot:limit", host: nil, words: L10n.t("notices.foot.limit", language: language), needsReader: false
+            ))
+        case .more?, .full?, .end?, nil:
+            break
+        }
+        return status
+    }
+
+    /// What a source's line offers in the status list: Ask where it was never asked, Again
+    /// where it was refused — on its own page, or by the source — or where it was not read.
+    /// A line with no press only informs, and is not counted (`StatusLine.needsReader`).
+    static func press(
+        _ line: NoticesLine, in session: ShellSession, reload: @escaping () -> Void, language: DummyLanguage? = nil
+    ) -> StatusPress? {
+        switch line {
+        case .unasked(let host):
+            StatusPress(kind: .ask, spoken: NoticeAskSlot.spoken(host, language: language)) {
+                session.askForNotices(host: host)
+            }
+        case .refused(let host):
+            // Asked again where the sign-in may be asked for notices; where it already holds
+            // them and the source still gave none, the source is read again — but never while
+            // an ask is out there, which the toast then says.
+            StatusPress(
+                kind: .again, spoken: String(format: L10n.t("status.press.again.ask.spoken", language: language), host)
+            ) {
+                if !session.askFor([.notices], host: host), !session.isAsking(host: host) { reload() }
+            }
+        case .declined(let host):
+            StatusPress(
+                kind: .again, spoken: String(format: L10n.t("status.press.again.ask.spoken", language: language), host)
+            ) {
+                session.askForNotices(host: host)
+            }
+        case .locked(let host), .unread(let host):
+            StatusPress(
+                kind: .again,
+                spoken: String(format: L10n.t("status.press.again.read.spoken", language: language), host),
+                act: reload
+            )
+        case .asking, .full:
+            nil
+        }
+    }
+
     /// What each source's sign-in draws where its notices would be, by how it stands to them
     /// (`MastodonSessions.standing`) and whether it is being asked for something now.
     static func places(
@@ -180,7 +294,10 @@ struct NoticesPane: View {
             case .notAllowed(let unasked, _):
                 notAllowed(unasked: unasked, hosts: hosts)
             case .list:
-                head(hosts)
+                head(hosts, status: Self.status(
+                    hosts: hosts, unread: Self.unread(among: hosts, in: session, began: began), in: session,
+                    touch: touch, reload: onReload
+                ))
                     .modifier(NoticesProbed(.head, says: NoticeWords.narrowed(prefs.noticesHidden), probe: probe))
                 ShellRule()
                 listed(hosts)
@@ -248,9 +365,9 @@ struct NoticesPane: View {
     /// **Nothing here is cut short.** Where the line has no room for the words about the kinds
     /// they go — the mark beside them is lit while any kind is left out, and says how many —
     /// and where it has no room for the name beside the marks, the marks stand under it.
-    private func head(_ hosts: [(host: String, notices: NoticeStanding)]) -> some View {
+    private func head(_ hosts: [(host: String, notices: NoticeStanding)], status: [StatusLine]) -> some View {
         // Made once a draw, and stood in whichever of the three fits.
-        let marks = marks(hosts)
+        let marks = marks(hosts, status: status)
         return ViewThatFits(in: .horizontal) {
             HStack(alignment: .center, spacing: ShellSpace.step) {
                 title
@@ -296,9 +413,13 @@ struct NoticesPane: View {
             .modifier(NoticesProbed(.kindsWords, probe: probe))
     }
 
-    private func marks(_ hosts: [(host: String, notices: NoticeStanding)]) -> some View {
+    private func marks(_ hosts: [(host: String, notices: NoticeStanding)], status: [StatusLine]) -> some View {
         let more = NoticeActs.more(in: session, among: hosts)
         return HStack(spacing: ShellSpace.step) {
+            if !status.isEmpty {
+                StatusMark(lines: status)
+                    .modifier(NoticesProbed(.statusMark, says: StatusWords.spoken(status), probe: probe))
+            }
             NoticeKindsMenu(kinds: NoticeWords.narrowable(held: list.lines, hidden: prefs.noticesHidden), prefs: prefs)
                 .modifier(NoticesProbed(.kindsMark, probe: probe))
             reloadMark
@@ -341,18 +462,6 @@ struct NoticesPane: View {
     private func listed(_ hosts: [(host: String, notices: NoticeStanding)]) -> some View {
         let shown = list.shown(hiding: prefs.noticesHidden)
         let unread = Self.unread(among: hosts, in: session, began: began)
-        ForEach(Self.lines(hosts: hosts, unread: unread, in: session)) { line in
-            sourceLine(line)
-            ShellRule()
-        }
-        ForEach(Self.said(in: session), id: \.host) { said in
-            wordLine(said.words, part: .said(said.host), ink: ShellChrome.ink(colorScheme))
-            ShellRule()
-        }
-        ForEach(acts.onItsWay) { request in
-            wordLine(NoticeActs.onItsWay(request), part: .onWay(request.id), ink: ShellChrome.inkDim(colorScheme))
-            ShellRule()
-        }
         let holders = acts.shownHolders
         ForEach(holders, id: \.self) { host in
             if let held = acts.shownHeld(host: host) {
@@ -413,30 +522,13 @@ struct NoticesPane: View {
     }
 
     /// What the opened sources hold back, a row a person: at the head of what scrolls, so a
-    /// long list of them never pushes the notices off the page.
+    /// long list of them never pushes the notices off the page. Whether a list is still being
+    /// read, or is short of what its source counts, is the status mark's to say.
     @ViewBuilder
     private func heldBack(_ hosts: [String]) -> some View {
         ForEach(hosts, id: \.self) { host in
-            let listed = acts.listed(host: host)
-            if listed.isEmpty, acts.readingRequests.contains(host) {
-                wordLine(
-                    String(format: L10n.t("notices.held.reading"), host), part: .heldReading(host),
-                    ink: ShellChrome.inkFaint(colorScheme)
-                )
-                ShellRule()
-            }
-            ForEach(listed) { request in
+            ForEach(acts.listed(host: host)) { request in
                 NoticeRequestRow(request: request, more: { NoticeActs.more(request, in: session) }, asks: asked)
-                ShellRule()
-            }
-            // The source counts more people than it listed — or listed nobody at all: said,
-            // so an opened line never stands over nothing.
-            if let held = acts.shownHeld(host: host), acts.requests[host] != nil, held.requests > listed.count,
-               !acts.readingRequests.contains(host) {
-                wordLine(
-                    String(format: L10n.t(listed.isEmpty ? "notices.held.none" : "notices.held.partial"), host),
-                    part: .heldPartial(host), ink: ShellChrome.inkFaint(colorScheme)
-                )
                 ShellRule()
             }
         }
@@ -532,7 +624,7 @@ struct NoticesPane: View {
     private var foot: some View {
         if let foot = Self.foot(in: session) {
             NoticesFootRow(foot: foot, hand: hand, onPress: readOn)
-                .modifier(NoticesProbed(.foot, says: foot.words(), probe: probe))
+                .modifier(NoticesProbed(.foot, says: NoticesFootRow.spoken(foot), probe: probe))
         }
     }
 
@@ -736,8 +828,8 @@ struct NoticeKindsMenu: View {
     }
 }
 
-/// What stands under the last line: older notices to reach, a stretch on its way, where the list
-/// is held, or its end — said where the list ends, as a timeline says what remains at its place.
+/// What stands under the last line: a press while older notices can be read, and otherwise a
+/// plain end mark (#396) — why the list ends there is the status mark's to say.
 struct NoticesFootRow: View {
     let foot: NoticesFoot
     /// Told whether the foot is in view: what a hand's scroll is weighed by when it ends.
@@ -745,8 +837,18 @@ struct NoticesFootRow: View {
     let onPress: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
+    /// What the foot is said as: the press's own words, or the end mark's name.
+    static func spoken(_ foot: NoticesFoot, language: DummyLanguage? = nil) -> String {
+        guard foot == .more, let words = foot.words(language: language) else {
+            return L10n.t("notices.foot.endMark", language: language)
+        }
+        return words
+    }
+
+    static let endSymbol = "smallcircle.filled.circle"
+
     var body: some View {
-        let words = foot.words()
+        let words = Self.spoken(foot)
         Group {
             if foot == .more {
                 Button(action: onPress) { label(words) }
@@ -755,7 +857,11 @@ struct NoticesFootRow: View {
                     .accessibilityLabel(words)
                     .accessibilityAddTraits(.isButton)
             } else {
-                label(words)
+                Image(systemName: Self.endSymbol)
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, ShellSpace.step)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(words)
             }
@@ -773,7 +879,7 @@ struct NoticesFootRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .shellFont(.meta)
-        .foregroundStyle(foot == .more ? ShellChrome.inkDim(colorScheme) : ShellChrome.inkFaint(colorScheme))
+        .foregroundStyle(ShellChrome.inkDim(colorScheme))
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.step)
         .contentShape(Rectangle())
@@ -874,12 +980,13 @@ final class NoticesProbe {
         case nobody, notAllowed, head, none, foot
         /// The head's parts: the place's name, the words about the kinds, and the three marks.
         case title, kindsWords, kindsMark, reloadMark, moreMark
+        /// The head's status mark (#396): every source's state, behind one count.
+        case statusMark
         /// What the page says of itself at one source — its ask, its reading of requests —
-        /// and a request said to be on its way, by its id.
-        case said(String), onWay(String)
-        /// One source's held-back line, its words and its press, by host; and under it, while
-        /// its requests are read and where it holds more than it listed.
-        case held(String), heldWords(String), heldPress(String), heldReading(String), heldPartial(String)
+        /// where no sign-in may read notices and there is no head to hold it.
+        case said(String)
+        /// One source's held-back line, its words and its press, by host.
+        case held(String), heldWords(String), heldPress(String)
         /// One held-back request, its words and its `…`, by the request's id.
         case request(String), requestWords(String), requestMore(String)
         /// The words of one source's line, and the press beside them, by `NoticesLine.id`.
