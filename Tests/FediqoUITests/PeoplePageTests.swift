@@ -66,9 +66,11 @@ struct PeoplePageTests {
     func theLineUnderTheTitle() {
         let en = DummyLanguage.english
         let choice = DirectoryChoice(order: .new, localOnly: true)
-        #expect(PeopleSaid(list: Self.directory, sorting: choice).line(language: en) == PeopleSaid.sortingLine(choice, source: Self.host, language: en))
+        let directory = PeopleSaid(list: Self.directory, sorting: choice)
+        #expect(directory.sorting.map { PeopleSaid.sortingLine($0, source: directory.source, language: en) } == PeopleSaid.sortingLine(choice, source: Self.host, language: en))
         for list in [Self.suggested, Self.requests, Self.followers, Self.found] {
-            #expect(PeopleSaid(list: list).line(language: en) == nil, "\(list.which)")
+            let said = PeopleSaid(list: list)
+            #expect(said.sorting.map { PeopleSaid.sortingLine($0, source: said.source, language: en) } == nil, "\(list.which)")
         }
     }
 

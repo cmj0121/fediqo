@@ -121,8 +121,8 @@ struct PeopleSaid: Equatable {
         String(format: L10n.t("people.directory.local", language: language), source)
     }
 
-    /// How a directory is being read, as one sentence under its title — where a list of
-    /// somebody's says what its source counts.
+    /// How a directory is being read, as one sentence: what a listener hears of the order's
+    /// word and of the gear (#401), where a list of somebody's says what its source counts.
     static func sortingLine(_ choice: DirectoryChoice, source: String, language: DummyLanguage? = nil) -> String {
         let key = "people.directory.line.\(choice.order.rawValue)" + (choice.localOnly ? ".local" : "")
         return String(format: L10n.t(key, language: language), source)
@@ -168,13 +168,6 @@ struct PeopleSaid: Equatable {
                 opens: false
             )
         }
-    }
-
-    /// The sentence under the title: how a directory is read — nothing on a list whose source
-    /// counts it, which says so by its figure. What a search was asked is said by the head of
-    /// the page of what it found (`FoundHead`), whose tab the people it found are.
-    func line(language: DummyLanguage? = nil) -> String? {
-        sorting.map { Self.sortingLine($0, source: source, language: language) }
     }
 
     /// What the source counts in the list, where it said: its figure, said as its figure.
@@ -460,11 +453,12 @@ struct PeoplePane: View {
 /// what that source counts — its figure (`PageFigure`), a glyph and the number opening
 /// nothing, only where it said one, since the rows below may be fewer.
 ///
-/// **A directory's head says how it is being read, and holds the one control that chooses**
-/// (#315): where a list of somebody's has the source's count, a directory has a sentence — in
-/// which order, and whether only of the people who live there — and beside it a menu named by
-/// the order in force. The sentence and the title are the heading a listener hears; the menu
-/// is an element of its own after it.
+/// **A directory's head names the order in a word, and the choice sits behind a gear**
+/// (#401). The title and that word are the heading a listener hears; the long sentence of how
+/// the directory is read is the word's value, not a paragraph. The gear is an element of its
+/// own after them, lit while only the people who live there are listed. A source that says it
+/// has no directory draws no gear: a choice it does not have is absent, not greyed. A list of
+/// somebody's keeps the source's count, and its pill.
 struct PeopleHead: View {
     let said: PeopleSaid
     var onChoose: (DirectoryChoice) -> Void = { _ in }
@@ -480,20 +474,22 @@ struct PeopleHead: View {
                     .shellFont(.name)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
-                if let line = said.line() {
-                    Text(line)
-                        .shellFont(.reading)
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                        .fixedSize(horizontal: false, vertical: true)
+                if let sorting {
+                    Text(DirectoryGear.word(sorting))
+                        .shellFont(.meta, weight: .medium)
+                        .foregroundStyle(said.choosesSorting ? ShellChrome.ink(colorScheme) : ShellChrome.inkFaint(colorScheme))
+                        .accessibilityValue(PeopleSaid.sortingLine(sorting, source: list.host))
                 }
                 if let figure = said.figure() { PageFigureView(figure: figure) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .modifier(HeadElement(alone: sorting != nil))
             if let sorting {
-                DirectoryChoiceMenu(choice: sorting, source: list.host, onChoose: onChoose)
-                    .disabled(!said.choosesSorting)
-                    .fixedSize()
+                if DirectoryGear.shown(for: said) {
+                    DirectoryGearMenu(choice: sorting, source: list.host, onChoose: onChoose)
+                        .disabled(!said.choosesSorting)
+                        .fixedSize()
+                }
             } else {
                 ShellWellPill(list.host)
                     .fixedSize()
@@ -525,12 +521,32 @@ struct PeopleHead: View {
     }
 }
 
-/// How a source's directory is read, chosen behind one press in the page's head: a menu named
-/// by the order in force, as the notices' page keeps its kinds behind one mark. The two orders
-/// are the two a source takes; under them, only the people who live there.
-///
-/// It chooses and asks nothing itself: the asking is `ShellPeoplePages`'s.
-struct DirectoryChoiceMenu: View {
+/// What a directory's head shows of how it is read (#401): the order's name, in a word, and
+/// whether the gear is lit. The gear is lit while only the people who live there are listed.
+/// Changing either still asks the directory again from the top (`PeopleSaid.choosing`).
+enum DirectoryGear {
+    static let symbol = "gearshape"
+
+    static func word(_ choice: DirectoryChoice, language: DummyLanguage? = nil) -> String {
+        PeopleSaid.orderName(choice.order, language: language)
+    }
+
+    static func lit(_ choice: DirectoryChoice) -> Bool {
+        choice.localOnly
+    }
+
+    /// The gear is drawn where the source has a directory to order. One that says it has none
+    /// offers no choice, so the gear is absent, not greyed. While the directory is asked from
+    /// the top the gear stays, dimmed: the choice is still there.
+    static func shown(for said: PeopleSaid) -> Bool {
+        said.sorting != nil && said.reading != .absent
+    }
+}
+
+/// The gear a directory's order and local-only choice sit behind (#401). The two orders are
+/// the two a source takes; under them, only the people who live there. It chooses and asks
+/// nothing itself: the asking is `ShellPeoplePages`'s, and the head follows whatever it chose.
+struct DirectoryGearMenu: View {
     let choice: DirectoryChoice
     let source: String
     var onChoose: (DirectoryChoice) -> Void
@@ -551,20 +567,22 @@ struct DirectoryChoiceMenu: View {
                 set: { onChoose(PeopleSaid.choosing(localOnly: $0, from: choice)) }
             ))
         } label: {
-            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
-                Text(PeopleSaid.orderName(choice.order))
-                Image(systemName: "chevron.down")
-                    .imageScale(.small)
-                    .accessibilityHidden(true)
-            }
-            .shellFont(.meta, weight: .medium)
-            .foregroundStyle(isEnabled ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkFaint(colorScheme))
+            Image(systemName: DirectoryGear.symbol)
+                .foregroundStyle(gearInk)
+                .modifier(ShellGlyphBox())
         }
         .menuStyle(.button)
         .menuIndicator(.hidden)
         .buttonStyle(.plain)
         .shellNamed("people.directory.choose")
         .accessibilityValue(PeopleSaid.sortingLine(choice, source: source))
+    }
+
+    /// Lit while the directory is narrowed to the people who live there; dim while the
+    /// directory is being asked from the top. A source that has no directory draws no gear.
+    private var gearInk: Color {
+        guard isEnabled else { return ShellChrome.inkFaint(colorScheme) }
+        return DirectoryGear.lit(choice) ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme)
     }
 }
 
