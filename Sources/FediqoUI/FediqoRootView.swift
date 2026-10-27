@@ -420,7 +420,7 @@ public struct FediqoRootView: View {
             // its own rather than the dialog spelled here — see `WithdrawQuestion`.
             .modifier(WithdrawQuestion(session: session))
             .modifier(PartQuestion(session: session))
-            .modifier(PersonPresenters(people: people, session: session, onOpenThread: { setOut(to: .thread($0)) }))
+            .modifier(PersonPresenters(people: people, session: session, onOpenThread: threadOpener))
             .modifier(UnsentPresenters(session: session))
             .modifier(WholePostPresenters(session: session, hosts: people.postActs.hosts, composing: $composing))
             // An answer, over the conversation it belongs to (#108). Driven by the session's one
@@ -2585,6 +2585,11 @@ public struct FediqoRootView: View {
         guard availability.allows(.timeline) else { return nil }
         return { me in openOwnPage(me) }
     }
+
+    /// A conversation opened as its thread (#326). Named here, as `ownPageOpener` is, so the
+    /// root's chain of presenters does not carry a closure of its own: one more closure there
+    /// is one more type the runner's compiler will not check.
+    private var threadOpener: (String) -> Void { { setOut(to: .thread($0)) } }
 
     /// `p` — whoever wrote the post the lamp is on (#140). The face's own press, from the keyboard.
     ///
