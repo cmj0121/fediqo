@@ -822,6 +822,14 @@ struct TimelinePane: View {
                 people?.tending.people.openAct(
                     on: staff.account.id, handle: shown.handle, local: staff.account.local, at: staff.host, in: session
                 )
+            },
+            onLists: {
+                guard let said = people?.said(of: person, in: session), let account = said.person else { return }
+                if people?.acts.acting(of: person, said: said, in: session)?.listsLock?.asks == true {
+                    _ = people?.serverLists.ask(person.host, in: session)
+                    return
+                }
+                people?.serverLists.openPerson(account.accountID, named: account.lineHandle, at: person.host, in: session)
             }
         )
     }

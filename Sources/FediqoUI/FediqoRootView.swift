@@ -490,7 +490,10 @@ public struct FediqoRootView: View {
             // device is the preview sitting on screen while the session says boards. `JoinSheet`
             // reads `session.stage` inside its own body and switches there, which is a redraw.
             .sheet(isPresented: stagePresented) {
-                JoinSheet(session: session, onOwnPage: ownPageOpener, onPeople: directoryOpener, more: people.more, you: people.you, announcements: people.announcements)
+                JoinSheet(
+                    session: session, onOwnPage: ownPageOpener, onPeople: directoryOpener, more: people.more, you: people.you,
+                    announcements: people.announcements, serverLists: people.serverLists
+                )
             }
             // The timeline editor (#27), on the root beside the other presenters for their reason.
             // Dismissed by any route it is Cancel: the draft is dropped (Decision 21).
@@ -3267,6 +3270,7 @@ private struct PersonPresenters: ViewModifier {
             .modifier(StandingSheetPresenter(people: people, session: session))
             .modifier(BlockedServersPresenter(servers: people.servers, session: session))
             .modifier(ReportSheetPresenter(people: people, session: session))
+            .modifier(ServerListsPresenter(lists: people.serverLists, session: session))
             .modifier(AccountActSheetPresenter(people: people.tending.people, session: session))
             .modifier(FederationAskSheetPresenter(servers: people.tending.servers, session: session))
     }

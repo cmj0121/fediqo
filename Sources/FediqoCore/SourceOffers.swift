@@ -71,13 +71,16 @@ public struct SourceOffers: Hashable, Sendable {
     /// Whether a post can be given to it to send at a later time, and what waits so read, moved
     /// and let go there (#333), given a sign-in that may.
     public let sendsLater: Bool
+    /// Whether a list is made, renamed and removed there, and who is on it changed (#337),
+    /// given a sign-in that may — so the source's page offers it only where this is so.
+    public let tendsLists: Bool
 
     public init(
         timelines: Bool = false, trends: Bool = false, boards: Bool = false, authorsAreItsOwn: Bool = false,
         writes: Bool = false, fields: [SourceField] = [], loadsReferences: Bool = false,
         saysReaderMarks: Bool = false, saysQuotes: Bool = false, notices: Bool = false, people: Bool = false,
         follows: Bool = false, polls: Bool = false, marks: Bool = false, blocks: Bool = false, reports: Bool = false,
-        changesPosts: Bool = false, sendsLater: Bool = false
+        changesPosts: Bool = false, sendsLater: Bool = false, tendsLists: Bool = false
     ) {
         self.timelines = timelines
         self.trends = trends
@@ -97,6 +100,7 @@ public struct SourceOffers: Hashable, Sendable {
         self.reports = reports
         self.changesPosts = changesPosts
         self.sendsLater = sendsLater
+        self.tendsLists = tendsLists
     }
 
     /// The field it declares under `name`, or nothing.
@@ -150,7 +154,7 @@ extension ProtocolKind {
                 fields: [.audience, .language, .covered, .reblog, .reblogOf],
                 loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true, people: true,
                 follows: true, polls: true, marks: true, blocks: true, reports: true, changesPosts: true,
-                sendsLater: true
+                sendsLater: true, tendsLists: true
             )
         case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial:
             SourceOffers(timelines: true, trends: true)

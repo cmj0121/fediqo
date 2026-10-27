@@ -599,6 +599,34 @@ enum ShellQuestion {
         )
     }
 
+    /// Removing a list the source keeps (#337). **A loss, and drawn as one**: the list goes at
+    /// the source, and a timeline that used it is told the list is gone. The posts already held
+    /// stay. The line names the timelines that use it, while the name is still known — on the
+    /// line where it fits, and behind the (?) where it does not.
+    static func deleteList(
+        named name: String, usedBy names: [String], at host: String, language: DummyLanguage? = nil
+    ) -> ShellConfirmation {
+        let used = names.isEmpty
+            ? nil
+            : String(
+                format: L10n.t("lists.delete.used", language: language),
+                names.joined(separator: L10n.t("mark.dim.names", language: language))
+            )
+        let (line, help) = saying(
+            used,
+            line: String(format: L10n.t("lists.delete.line", language: language), name, host),
+            help: L10n.t("lists.delete.help", language: language),
+            language: language
+        )
+        return ShellConfirmation(
+            symbol: "trash",
+            title: String(format: L10n.t("lists.delete.title", language: language), name),
+            line: line, help: help,
+            choices: [.init(yes, L10n.t("lists.delete.confirm", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
     /// Removing a timeline. Its line already says it all, so there is no (?).
     static func removeTimeline(named name: String, language: DummyLanguage? = nil) -> ShellConfirmation {
         ShellConfirmation(

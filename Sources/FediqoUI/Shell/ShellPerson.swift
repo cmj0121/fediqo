@@ -284,6 +284,9 @@ final class ShellPersonPages {
     /// page (#321): asked the same way, numbered on the same count, and let go with the same
     /// reader.
     let you: ShellYouThere
+    /// The lists a source keeps, for that source's own page and for a person's page (#337):
+    /// numbered on the same count, and let go with the same reader.
+    let serverLists: ShellServerLists
     /// What a source announces to the reader there, for that source's own page and its row's
     /// mark (#321): numbered on the same count, and let go with the same reader.
     let announcements: ShellAnnouncements
@@ -339,6 +342,8 @@ final class ShellPersonPages {
         self.tending = tending
         let you = ShellYouThere(errands: count, readers: looks)
         self.you = you
+        let serverLists = ShellServerLists(errands: count, readers: looks)
+        self.serverLists = serverLists
         let announcements = ShellAnnouncements(errands: count, readers: looks, hosts: hosts)
         self.announcements = announcements
         let profile = ShellProfile(errands: count, readers: looks)
@@ -375,6 +380,7 @@ final class ShellPersonPages {
         looks.whenChanged { [weak shared] host in shared?.letGo(at: host) }
         looks.whenChanged { [weak tending] host in tending?.letGo(at: host) }
         looks.whenChanged { [weak you] host in you?.letGo(at: host) }
+        looks.whenChanged { [weak serverLists] host in serverLists?.letGo(at: host) }
         looks.whenChanged { [weak announcements] host in announcements?.letGo(at: host) }
         looks.whenChanged { [weak tags] host in tags?.letGo(at: host) }
         looks.whenChanged { [weak features] host in features?.letGo(at: host) }

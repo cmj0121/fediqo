@@ -126,6 +126,8 @@ struct PersonHead: View {
     var onAskFollows: () -> Void = {}
     /// Change pressed, on the reader's own page: the sheet, or the question for the account part.
     var onChange: () -> Void = {}
+    /// Lists, from the page's `…`: which of the reader's lists they are on (#337).
+    var onLists: () -> Void = {}
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.shellLayout) private var shellLayout
@@ -471,7 +473,7 @@ struct PersonHead: View {
             OwnChangeAct(entry: change, onChange: onChange)
                 .modifier(HeadProbed(.acts, probe: probe))
         } else if let acting, PersonHeadActs.draws(acting) {
-            PersonHeadActs(acting: acting, onAct: onAct, onAsk: onAskFollows)
+            PersonHeadActs(acting: acting, onAct: onAct, onAsk: onAskFollows, onLists: onLists)
                 .modifier(HeadProbed(.acts, probe: probe))
         }
     }
