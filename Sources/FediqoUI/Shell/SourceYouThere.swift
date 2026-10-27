@@ -10,8 +10,9 @@ import SwiftUI
 // language — the language following the one this device asks in. So no sentence here says
 // "you set".
 //
-// **Read only.** Nothing here is a control: what the person set there is changed there. And
-// nothing here starts a post — the sheet a post is written in is another unit's to teach.
+// **Read only, except one choice.** What the person set there is changed there, and nothing
+// here starts a post. The one control is whether this source is told where Home was left
+// (#316), and it stays off until that is chosen.
 //
 // **Each value is the source's word about the person's own settings.** The ones this app has
 // words for are said in them — a reach as a row's is, a language by its name in the shell's
@@ -181,8 +182,46 @@ struct YouThereBlock: View {
 
     var body: some View {
         if let said = you.said(at: host, in: session) {
-            YouThereSection(said: said, onAgain: { Task { await you.again(host, in: session) } })
-                .task(id: ShellYouThere.opening(host, in: session)) { await you.opened(host, in: session) }
+            VStack(alignment: .leading, spacing: 0) {
+                YouThereSection(said: said, onAgain: { Task { await you.again(host, in: session) } })
+                HomeStoppedControl(host: host, session: session)
+            }
+            .task(id: ShellYouThere.opening(host, in: session)) { await you.opened(host, in: session) }
+        }
+    }
+}
+
+/// Whether this Mastodon is told where Home was left (#316). Dim, with the acting part's own
+/// sentence, until that part is held: the press asks, and the choice is not written down before.
+struct HomeStoppedControl: View {
+    let host: String
+    let session: ShellSession
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if let offer = session.homePlace.offer(host: host, in: session) {
+            switch offer.shape {
+            case .locked(let sentence):
+                Button(sentence) { session.homePlace.pressLocked(host: host, in: session) }
+                    .buttonStyle(.plain)
+                    .shellFont(.reading)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(sentence)
+                    .padding(.horizontal, ShellSpace.pad)
+                    .padding(.bottom, ShellSpace.step)
+            case .toggle:
+                let title = String(format: L10n.t("source.you.stopped"), host)
+                Toggle(title, isOn: Binding(
+                    get: { session.stopped.hosts.contains(host.lowercased()) },
+                    set: { on in Task { await session.homePlace.setOn(on, host: host, in: session) } }
+                ))
+                .shellFont(.reading)
+                .shellHelp(verbatim: String(format: L10n.t("source.you.stopped.help"), host), about: title)
+                .padding(.horizontal, ShellSpace.pad)
+                .padding(.bottom, ShellSpace.step)
+            }
         }
     }
 }

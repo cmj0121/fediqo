@@ -2094,6 +2094,13 @@
 "source.you.media" = "它的媒體";
 "source.you.media.covered" = "蓋住";
 "source.you.media.open" = "不蓋住";
+"source.you.stopped" = "告訴 %@ 你在 Home 讀到哪裡";
+"source.you.stopped.help" = "打開之前不會告訴它。打開之後，%@ 會知道你正在 Home 讀的那一則，同一個帳號的另一個閱讀器可以從那裡接著讀。";
+"home.place.line" = "你在這一則。%@ 把你記在另一則。";
+"home.place.here" = "留在這一則";
+"home.place.there" = "到 %@ 記的那一則";
+"home.place.missing" = "%@ 記的那一則不在這台裝置上。";
+"home.place.failed" = "%@ 沒有說你讀到哪裡。這裡沒有移動。";
 "work.purpose.rising" = "讀取來源上的趨勢";
 "rising.asking" = "正在詢問 %@…";
 "rising.none.tags" = "%@ 沒有給出任何主題標籤。";

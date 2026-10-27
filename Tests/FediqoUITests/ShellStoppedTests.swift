@@ -45,7 +45,10 @@ struct ShellStoppedTests {
         let place = try Place()
         let stopped = ShellStopped(defaults: place.defaults, file: place.file)
         stopped.turnOn("mastodon.social")
-        #expect(place.onDisk == Data(#"{"version":1,"hosts":["mastodon.social"]}"#.utf8))
+        // The encoder's key order is its own: what is on disk is read, not matched byte for byte.
+        let written = try #require(place.onDisk.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        #expect(Set(written.keys) == ["version", "hosts"])
+        #expect(written["version"] as? Int == 1 && written["hosts"] as? [String] == ["mastodon.social"])
         #expect(place.file.key == ShellStopped.key && ShellStopped.key == "fediqo.stopped")
         #expect(place.file.url.lastPathComponent == ListFile.stoppedName && ListFile.stoppedName == "stopped.json")
         #expect(place.file.url.deletingLastPathComponent().path == place.lists.allowances.url.deletingLastPathComponent().path)
@@ -58,7 +61,10 @@ struct ShellStoppedTests {
         let stopped = ShellStopped(file: place.file)
         stopped.turnOn("Mastodon.Social")
         #expect(stopped.hosts == Set(["mastodon.social"]))
-        #expect(place.onDisk == Data(#"{"version":1,"hosts":["mastodon.social"]}"#.utf8))
+        // The encoder's key order is its own: what is on disk is read, not matched byte for byte.
+        let written = try #require(place.onDisk.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        #expect(Set(written.keys) == ["version", "hosts"])
+        #expect(written["version"] as? Int == 1 && written["hosts"] as? [String] == ["mastodon.social"])
         #expect(ShellStopped(file: place.file).hosts == Set(["mastodon.social"]))
     }
 
