@@ -183,7 +183,8 @@ struct TimelineEditor: View {
         case .category:
             return RuleBuilder.categories(
                 in: session.sources, notes: session.notes, signedIn: session.isSignedIn,
-                marks: { !session.readableMarks(host: $0).isEmpty }
+                marks: { !session.readableMarks(host: $0).isEmpty },
+                directs: { session.directsReads(host: $0) }
             )
                 .flatMap { group in group.categories.map { RuleTarget.category($0, on: group.host) } }
         case .field:

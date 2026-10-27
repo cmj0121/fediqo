@@ -606,7 +606,7 @@ end
 admin = staffed.call("fediqo_admin", "admin@example.com", "LocalOnlyPass3", "Admin")
 mod = staffed.call("fediqo_mod", "mod@example.com", "LocalOnlyPass4", "Moderator")
 everything = "#{every_part} write:media read:bookmarks read:favourites read:mutes write:mutes read:blocks write:blocks " \
-  "write:reports write:lists admin:read admin:write"
+  "write:reports write:lists write:conversations admin:read admin:write"
 tending_app = Doorkeeper::Application.find_or_create_by!(name: "fediqo-servers-tending") do |record|
   record.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
   record.scopes = "read write admin:read admin:write"

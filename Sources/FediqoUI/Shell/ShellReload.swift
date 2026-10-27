@@ -1454,6 +1454,7 @@ final class ShellReload {
             case .list(let id): titles[id].map { .called($0) }
             case .bookmarks: .bookmarks
             case .favourites: .favourites
+            case .conversations: .conversations
             case .board: nil
             }
         }

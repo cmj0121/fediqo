@@ -420,7 +420,7 @@ public struct FediqoRootView: View {
             // its own rather than the dialog spelled here — see `WithdrawQuestion`.
             .modifier(WithdrawQuestion(session: session))
             .modifier(PartQuestion(session: session))
-            .modifier(PersonPresenters(people: people, session: session))
+            .modifier(PersonPresenters(people: people, session: session, onOpenThread: { setOut(to: .thread($0)) }))
             .modifier(UnsentPresenters(session: session))
             .modifier(WholePostPresenters(session: session, hosts: people.postActs.hosts, composing: $composing))
             // An answer, over the conversation it belongs to (#108). Driven by the session's one
@@ -3263,6 +3263,7 @@ private struct WithdrawQuestion: ViewModifier {
 private struct PersonPresenters: ViewModifier {
     let people: ShellPersonPages
     let session: ShellSession
+    var onOpenThread: (String) -> Void = { _ in }
 
     func body(content: Content) -> some View {
         content
@@ -3273,6 +3274,7 @@ private struct PersonPresenters: ViewModifier {
             .modifier(ServerListsPresenter(lists: people.serverLists, session: session))
             .modifier(AccountActSheetPresenter(people: people.tending.people, session: session))
             .modifier(FederationAskSheetPresenter(servers: people.tending.servers, session: session))
+            .modifier(DirectsPresenter(directs: session.directs, session: session, onOpen: onOpenThread))
     }
 }
 

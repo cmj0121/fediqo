@@ -116,7 +116,7 @@ enum UnreadDivision: Hashable, Sendable {
     /// Whether the reader's sign-in is what reads it: what a sign-out takes off the count.
     var readAsYou: Bool {
         switch self {
-        case .listNames, .of(.home), .of(.list), .of(.bookmarks), .of(.favourites): true
+        case .listNames, .of(.home), .of(.list), .of(.bookmarks), .of(.favourites), .of(.conversations): true
         case .whole, .of: false
         }
     }

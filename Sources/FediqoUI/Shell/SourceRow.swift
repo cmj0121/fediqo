@@ -556,6 +556,8 @@ extension SourceRow {
         var chooseLists: () -> Void = {}
         /// Reads the reader's bookmarks and favourites again, or asks for what reads them (#317).
         var marks: () -> Void = {}
+        /// Opens conversations, or asks for what reads them (#326).
+        var directs: () -> Void = {}
         /// What the yes to Clear's question does. Reached only through that yes.
         var clear: () -> Void = {}
         /// What the yes to Remove's question does. Reached only through that yes.
@@ -615,7 +617,8 @@ extension SourceRow {
     /// not once a row each time the list is drawn.
     @MainActor
     static func more(
-        _ row: SourceRow, actsLive: Bool, marks: ShellMark? = nil, tending: ShellTending.Entry? = nil,
+        _ row: SourceRow, actsLive: Bool, marks: ShellMark? = nil, directs: ShellMark? = nil,
+        tending: ShellTending.Entry? = nil,
         clearAsks: @escaping () -> ShellConfirmation,
         removeAsks: @escaping () -> ShellConfirmation, presses: Presses
     ) -> ShellMore {
@@ -628,7 +631,8 @@ extension SourceRow {
             items: [own, tend].compactMap { $0 } + [
                 .plain(mark(.boards), act: presses.changeBoards),
                 .plain(mark(.lists), act: presses.chooseLists),
-            ] + [marks.map { ShellMoreItem.plain($0, act: presses.marks) }].compactMap { $0 } + [
+            ] + [marks.map { ShellMoreItem.plain($0, act: presses.marks) }].compactMap { $0 }
+                + [directs.map { ShellMoreItem.plain($0, ask: presses.directs, act: presses.directs) }].compactMap { $0 } + [
                 .danger(mark(.clear), asks: clearAsks(), act: presses.clear),
                 .danger(mark(.remove), asks: removeAsks(), act: presses.remove),
             ]
@@ -774,6 +778,10 @@ struct SourceRowView: View {
     /// reads them where it does not hold it (#317): the marks item of `…` is drawn from these.
     var marksReads = false
     var marksPlace: PartWords.Place? = nil
+    /// Whether the sign-in may read conversations, and the lock of reading where it does not
+    /// hold it (#326): the conversations item of `…` is drawn from these.
+    var directsReads = false
+    var directsPlace: PartWords.Place? = nil
     /// What the row offers for tending its server (#380), where the reader's standing there allows it.
     var tending: ShellTending.Entry? = nil
     /// How many announcements its source holds that are not seen and not dismissed (#321), as
@@ -824,6 +832,7 @@ struct SourceRowView: View {
         SourceRow.more(
             row, actsLive: actsLive,
             marks: SourceRow.marksMark(row, actsLive: actsLive, reads: marksReads, place: marksPlace),
+            directs: SourceRow.directsMark(row, actsLive: actsLive, reads: directsReads, place: directsPlace),
             tending: tending, clearAsks: clearAsks, removeAsks: removeAsks, presses: presses
         )
     }

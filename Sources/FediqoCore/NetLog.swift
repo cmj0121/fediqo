@@ -74,6 +74,7 @@ public enum NetLog {
         case .board: "board"
         case .bookmarks: "bookmarks"
         case .favourites: "favourites"
+        case .conversations: "conversations"
         }
     }
 
