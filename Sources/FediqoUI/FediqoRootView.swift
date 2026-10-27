@@ -165,7 +165,10 @@ public struct FediqoRootView: View {
             stopped: staged == nil ? ShellStopped(defaults: .standard, file: lists?.stopped) : nil
         )
         // A launch made for a picture keeps no choice of the person's either.
-        if staged == nil { session.lines = ShellLines(defaults: .standard) }
+        if staged == nil {
+            session.lines = ShellLines(defaults: .standard)
+            session.noticesTold = ShellNoticesTold(defaults: .standard, system: UserSystemNotices())
+        }
         session.persist = persist
         session.persistUnsent = persistUnsent
         session.savesLanded = savesLanded
@@ -355,6 +358,8 @@ public struct FediqoRootView: View {
             // And the store is held within the room the person gave it (#249).
             .modifier(KeepingWithinRoom(session: session))
             .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes))
+            // The lines wanted held while Fediqo runs (#325, #324).
+            .modifier(HearsLines(session: session, noticesInFront: place == .notices))
             .modifier(AnnouncementsAsk(session: session, announcements: people.announcements))
             // The pages open over the timeline, whose rows the store keeps while they are (#359).
             .modifier(PinsPages(session: session, pages: openPages))
@@ -2942,6 +2947,7 @@ public struct FediqoRootView: View {
                 place: placeBinding,
                 expanded: $railExpanded,
                 availability: availability,
+                counts: [.notices: session.noticesTold.count],
                 onCompose: {
                     guard availability.canCompose else { return }
                     composing = true
@@ -3029,6 +3035,8 @@ public struct FediqoRootView: View {
             ForEach(availability.tabbedPlaces) { item in
                 placedPage(item.drawn(standingOn: place))
                     .tabItem { Label(item.title, systemImage: item.symbolName) }
+                    // What was told since the notices page was last in front (#324).
+                    .badge(item == .notices ? session.noticesTold.count : 0)
                     .tag(item)
             }
         }

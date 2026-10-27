@@ -381,7 +381,7 @@ struct TimelinePane: View {
         .modifier(CoversTimeline(session: session, latest: prefs.latestDate))
         // What is new in Home arrives as it happens while this timeline is in front (#325): not
         // under a page opened over it, nor under a search's results.
-        .modifier(HearsLines(
+        .modifier(ShowsLineFront(
             session: session, timeline: timeline, inFront: Self.headDrawn(over: standing, drawn: drawn) && !searching
         ))
         .task(id: catalogueHosts) { await waitForCatalogues() }
