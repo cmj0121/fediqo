@@ -106,7 +106,7 @@ struct ShowsLineFront: ViewModifier {
 /// While Fediqo runs and its window is not in the background, the lines wanted are held: Home's
 /// for the timeline in front (#325) and the notices told of (#324). A change of what is wanted, or
 /// the background, lets them go. And the notices page in front has nothing waiting to be seen.
-/// On the root, a modifier of its own for `AsksOnAWait`'s reason.
+/// On the root, inside `AsksOnAWait`'s group, so the chain gains no line.
 struct HearsLines: ViewModifier {
     let session: ShellSession
     let noticesInFront: Bool
