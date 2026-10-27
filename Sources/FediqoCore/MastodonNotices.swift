@@ -80,6 +80,19 @@ public struct MastodonNotices: Sendable {
         )
     }
 
+    // MARK: - Told on a line
+
+    /// The notice a `notification` event of the reader's own line carries (#324), as the single
+    /// read makes it — a line of one, by its own id — or nothing where it does not read as one.
+    /// **Only what the source tells**: a notice it holds back is never on the line
+    /// (`MastodonNoticeLineCaptures`), so nothing here weighs a policy.
+    public static func told(_ event: LineEvent, source: Source) -> Notice? {
+        guard event.name == "notification",
+              let entry = try? MastodonJSON.decoder.decode(SingleDTO.self, from: Data(event.data.utf8))
+        else { return nil }
+        return entry.asNotice(source: source, sent: ReadMoment.now())
+    }
+
     // MARK: - Dismissing
 
     static let clearPath = "/api/v1/notifications/clear"
