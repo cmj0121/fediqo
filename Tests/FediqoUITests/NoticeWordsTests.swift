@@ -451,6 +451,11 @@ struct NoticeWordsTests {
         #expect(NoticeKindsMenu.choosing("favourite", shown: false, among: []) == ["favourite"])
         #expect(NoticeKindsMenu.choosing("favourite", shown: true, among: ["favourite", "poll"]) == ["poll"])
         #expect(NoticeWords.narrowed([], language: .english) == "Every kind")
+        // The gear is lit while any kind is left out, and put out by showing every kind.
+        #expect(!NoticeKindsMenu.lit([]) && NoticeKindsMenu.lit(["poll"]))
+        #expect(!NoticeKindsMenu.lit(NoticeKindsMenu.choosing("poll", shown: true, among: ["poll"])))
+        #expect(NoticeKindsMenu.spoken(["poll"], language: .english) == "1 kind left out")
+        #expect(NoticeKindsMenu.symbol == "gearshape")
         #expect(NoticeWords.narrowed(["poll"], language: .english) == "1 kind left out")
         #expect(NoticeWords.narrowed(["poll", "favourite"], language: .english) == "2 kinds left out")
         #expect(NoticeWords.narrowed(["poll", "favourite"], language: .taiwanese) == "略過 2 種")

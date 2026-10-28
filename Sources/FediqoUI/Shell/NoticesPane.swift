@@ -298,7 +298,7 @@ struct NoticesPane: View {
                     hosts: hosts, unread: Self.unread(among: hosts, in: session, began: began), in: session,
                     touch: touch, reload: onReload
                 ))
-                    .modifier(NoticesProbed(.head, says: NoticeWords.narrowed(prefs.noticesHidden), probe: probe))
+                    .modifier(NoticesProbed(.head, probe: probe))
                 ShellRule()
                 listed(hosts)
             }
@@ -359,22 +359,17 @@ struct NoticesPane: View {
 
     // MARK: - The head
 
-    /// The place's name, what the choice of kinds leaves out, and the marks: the kinds shown,
-    /// the read, and `…` where a source may be read. On the trailing edge, where a timeline keeps its search and reload.
+    /// The place's name and the marks: every source's state, the gear that chooses the kinds
+    /// shown — lit while any is left out, with no words about it in the head (#397) — the read,
+    /// and `…` where a source may be read. On the trailing edge, where a timeline keeps its
+    /// search and reload.
     ///
-    /// **Nothing here is cut short.** Where the line has no room for the words about the kinds
-    /// they go — the mark beside them is lit while any kind is left out, and says how many —
-    /// and where it has no room for the name beside the marks, the marks stand under it.
+    /// **Nothing here is cut short.** Where the line has no room for the name beside the marks,
+    /// the marks stand under it.
     private func head(_ hosts: [(host: String, notices: NoticeStanding)], status: [StatusLine]) -> some View {
-        // Made once a draw, and stood in whichever of the three fits.
+        // Made once a draw, and stood in whichever of the two fits.
         let marks = marks(hosts, status: status)
         return ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: ShellSpace.step) {
-                title
-                kindsWords
-                Spacer(minLength: 0)
-                marks
-            }
             HStack(alignment: .center, spacing: ShellSpace.step) {
                 title
                 Spacer(minLength: 0)
@@ -404,15 +399,6 @@ struct NoticesPane: View {
             .modifier(NoticesProbed(.title, probe: probe))
     }
 
-    private var kindsWords: some View {
-        Text(NoticeWords.narrowed(prefs.noticesHidden))
-            .shellFont(.meta)
-            .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            .lineLimit(1)
-            .fixedSize()
-            .modifier(NoticesProbed(.kindsWords, probe: probe))
-    }
-
     private func marks(_ hosts: [(host: String, notices: NoticeStanding)], status: [StatusLine]) -> some View {
         let more = NoticeActs.more(in: session, among: hosts)
         return HStack(spacing: ShellSpace.step) {
@@ -421,7 +407,7 @@ struct NoticesPane: View {
                     .modifier(NoticesProbed(.statusMark, says: StatusWords.spoken(status), probe: probe))
             }
             NoticeKindsMenu(kinds: NoticeWords.narrowable(held: list.lines, hidden: prefs.noticesHidden), prefs: prefs)
-                .modifier(NoticesProbed(.kindsMark, probe: probe))
+                .modifier(NoticesProbed(.kindsMark, says: NoticeKindsMenu.spoken(prefs.noticesHidden), probe: probe))
             reloadMark
                 .modifier(NoticesProbed(.reloadMark, probe: probe))
             if let more {
@@ -776,8 +762,10 @@ struct NoticeAskSlot: View {
     }
 }
 
-/// The kinds of notice shown, chosen behind one mark in the page's head: a menu, as a row keeps
-/// its further acts behind three dots.
+/// The kinds of notice shown, chosen behind a gear in the page's head (#397): a menu of each
+/// kind on or off, and Show every kind. **The gear is lit while any kind is left out**, so a
+/// short list is not read as the servers sending nothing; a listener hears it selected, and how
+/// many kinds are left out.
 ///
 /// The choice is `DummyPrefs.noticesHidden` and nothing else — only what is drawn is narrowed,
 /// and no source is asked anything for it.
@@ -786,7 +774,17 @@ struct NoticeKindsMenu: View {
     @Bindable var prefs: DummyPrefs
     @Environment(\.colorScheme) private var colorScheme
 
-    static let symbol = "line.3.horizontal.decrease"
+    static let symbol = "gearshape"
+
+    /// Whether the gear is lit: any kind left out.
+    static func lit(_ hidden: Set<String>) -> Bool {
+        !hidden.isEmpty
+    }
+
+    /// What a listener hears of the gear beside its name: every kind shown, or how many are not.
+    static func spoken(_ hidden: Set<String>, language: DummyLanguage? = nil) -> String {
+        NoticeWords.narrowed(hidden, language: language)
+    }
 
     var body: some View {
         Menu {
@@ -799,16 +797,19 @@ struct NoticeKindsMenu: View {
             }
         } label: {
             Image(systemName: Self.symbol)
-                .foregroundStyle(
-                    prefs.noticesHidden.isEmpty ? ShellChrome.inkDim(colorScheme) : ShellChrome.selectInk(colorScheme)
-                )
+                .foregroundStyle(lit ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
                 .modifier(ShellGlyphBox())
         }
         .menuStyle(.button)
         .menuIndicator(.hidden)
         .buttonStyle(.plain)
         .shellNamed("notices.kinds")
-        .accessibilityValue(NoticeWords.narrowed(prefs.noticesHidden))
+        .accessibilityValue(Self.spoken(prefs.noticesHidden))
+        .accessibilityAddTraits(lit ? .isSelected : [])
+    }
+
+    private var lit: Bool {
+        Self.lit(prefs.noticesHidden)
     }
 
     private func shown(_ kind: String) -> Binding<Bool> {
@@ -978,8 +979,8 @@ final class NoticeHand {
 final class NoticesProbe {
     enum Part: Hashable {
         case nobody, notAllowed, head, none, foot
-        /// The head's parts: the place's name, the words about the kinds, and the three marks.
-        case title, kindsWords, kindsMark, reloadMark, moreMark
+        /// The head's parts: the place's name and its marks — the kinds gear, the read and `…`.
+        case title, kindsMark, reloadMark, moreMark
         /// The head's status mark (#396): every source's state, behind one count.
         case statusMark
         /// What the page says of itself at one source — its ask, its reading of requests —

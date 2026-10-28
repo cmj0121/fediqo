@@ -879,7 +879,8 @@ struct NoticesHostedTests {
         root.prefs.noticesHidden = ["favourite"]
         let (_, some) = await hosted(session, root: root)
         #expect(rows(some) == [session.noticeList.lines[1].id])
-        #expect(some.says[.head] == "1 kind left out")
+        #expect(some.says[.kindsMark] == "1 kind left out" && NoticeKindsMenu.lit(root.prefs.noticesHidden), "the gear is lit, and says so")
+        #expect(some.frames[.head] != nil && some.says[.head] == nil, "the head carries no words about the kinds")
 
         // Every line hidden, and older ones to be had: the foot is there to press, and coming
         // into view it reads nothing — or the whole history would be read with nothing shown.
@@ -897,7 +898,7 @@ struct NoticesHostedTests {
 
         root.prefs.noticesHidden = []
         let (_, all) = await hosted(session, root: root)
-        #expect(rows(all).count == 2 && all.says[.head] == "Every kind")
+        #expect(rows(all).count == 2 && all.says[.kindsMark] == "Every kind" && !NoticeKindsMenu.lit(root.prefs.noticesHidden))
         #expect(await server.asked == [Self.a], "narrowing asked a source something")
     }
 
@@ -1204,19 +1205,16 @@ struct NoticesHostedTests {
             #expect(frame.minX >= -0.5 && frame.maxX <= 320.5, "\(type): \(part) runs past a page 320 points across")
         }
 
-        // The head: the name whole, the two marks whole and clear of it; the words about the
-        // kinds whole where they are drawn, and given up where there is no room.
+        // The head: the name whole, the gear and the read whole and clear of it, and no words
+        // about the kinds anywhere in it.
         let title = try #require(probe.frames[.title])
         #expect(title.width >= Self.ideal(Text(ShellPlace.notices.title).shellFont(.name).lineLimit(1), type).width - 0.5, "\(type): the place's name is cut")
         let box = Self.ideal(Image(systemName: NoticeKindsMenu.symbol).modifier(ShellGlyphBox()), type)
+        #expect(probe.says[.kindsMark] == "1 kind left out" && probe.says[.head] == nil)
         for mark in [NoticesProbe.Part.kindsMark, .reloadMark] {
             let frame = try #require(probe.frames[mark], "\(type): \(mark) is not drawn")
             #expect(frame.width >= box.width - 0.5 && frame.height >= box.height - 0.5, "\(type): \(mark) is squeezed")
             #expect(frame.minX >= title.maxX - 0.5 || frame.minY >= title.maxY - 0.5, "\(type): \(mark) lies over the name")
-        }
-        if let words = probe.frames[.kindsWords] {
-            let whole = Self.ideal(Text(NoticeWords.narrowed(root.prefs.noticesHidden)).shellFont(.meta).lineLimit(1), type).width
-            #expect(words.width >= whole - 0.5 && words.minX >= title.maxX - 0.5, "\(type): the words about the kinds are cut")
         }
 
         // Each source's line is the status mark's, whole at its own box. The source that failed
