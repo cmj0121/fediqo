@@ -227,13 +227,18 @@ struct MastodonSignInPartsTests {
     }
 
     @Test("Over every sign-in a device could hold, every set of parts ticked and both answers to read-or-act, a page carries no word its question did not name: only what is held and known, and the words of what was ticked; a rider only where ticked; no word that acts where the answer was to read only; and each word once, in the table's order")
-    func noPageCarriesAWordItsQuestionDidNotName() {
+    func noPageCarriesAWordItsQuestionDidNotName() async {
         let table = Self.shipped.flatMap { Self.words($0.own) + Self.words($0.besideActing) }
         let acting = Set(Self.words(Self.w))
+        let everyTick = Self.everyTick
         for held in Self.helds {
             let had = Set(Self.words(held ?? ""))
             let carried = had.intersection(table)
-            for ticked in Self.everyTick {
+            for (turn, ticked) in everyTick.enumerated() {
+                // Minutes of work on a thread of the shared pool, which is three wide on the shared
+                // machine: given back now and then, so that nothing else in the run waits on all
+                // of it at once (#412).
+                if turn.isMultiple(of: 256) { await Task.yield() }
                 for readOnly in [false, true] {
                     let asked = MastodonParts.page(held: held, ticked: ticked, readOnly: readOnly)
                     let page = Self.words(asked)
