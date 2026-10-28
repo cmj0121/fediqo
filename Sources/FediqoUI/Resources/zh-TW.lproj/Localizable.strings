@@ -344,7 +344,7 @@
 "search.failed" = "無法搜尋 %@。";
 "search.scope" = "無法搜尋 %@：請重新登入，讓 Fediqo 能在那裡搜尋。";
 "search.reach.asked" = "也問了 %@。";
-"search.reach.notAsked" = "沒有問，因為從這裡無法搜尋：%@。";
+"search.reach.notAsked" = "沒有問，因為從這裡無法搜尋它：%@。";
 "search.empty.title" = "「%@」裡沒有相符的貼文";
 "search.empty.detail" = "只會搜尋這個時間軸會顯示的貼文：這台裝置上有的，以及問過的來源送回來的。試著少打幾個字，或用 * 代表任意多字。";
 "search.empty.line" = "試著少打幾個字，或用 * 代表任意多字。";
@@ -900,7 +900,6 @@
 
 /* Unit 5 — one row per server, and what it is. */
 "account.sources.title"          = "來源";
-"account.sources.line" = "這個裝置讀的全部。";
 "account.sources.detail"         = "這個裝置讀的全部。按一列，看那個來源怎麼說它自己——它的名字、它的規模、它的版塊。移除其中一個，它的版塊和它的文章都會跟著走。";
 "account.sources.held"           = "每一個在這個裝置上還留著什麼，在「用量」裡。";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */

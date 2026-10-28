@@ -124,9 +124,11 @@ struct AccountTabsTests {
         #expect(pane.contains("ShellTabs(Purpose.allCases, selected: session.accountPurpose)"))
         #expect(pane.contains("ShellIconButton(\"books.vertical\", name: \"account.browse.label\")"))
         for key in ["account.hero.detail", "account.add.detail", "account.sources.detail",
-                    "account.sources.marks", "account.sources.writing"] {
+                    "account.sources.marks", "account.sources.writing",
+                    "account.hero.promise", "account.sources.line"] {
             #expect(!pane.contains("Text(L10n.t(\"\(key)\"))"), "\(key) is drawn as a line again")
         }
+        #expect(!pane.contains("account.sources.line"), "the sources caption is drawn again")
     }
 
     @Test("The list's (?) says what the list is and what its marks mean")
@@ -169,7 +171,7 @@ struct AccountTabsTests {
     @Test("Every short line is in every language, and short")
     func linesAreShort() {
         let keys = [
-            "account.hero.line", "account.add.line", "account.sources.line",
+            "account.hero.line", "account.add.line",
             "account.source.permission.word",
             "join.preview.unread.line", "join.preview.turnedAway.line", "forum.stop.wall.line",
             "forum.signin.save.line.on", "forum.signin.save.line.off", "refusal.password.line",
