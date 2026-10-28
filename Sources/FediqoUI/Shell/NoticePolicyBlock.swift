@@ -120,7 +120,6 @@ struct NoticePolicyBlock: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: host) { await acts.look(host: host, in: session) }
         .modifier(ShellMoreAsks(asked: $asked))
     }
 
