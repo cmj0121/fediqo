@@ -454,7 +454,7 @@ struct TimelineHeadTests {
                 decks: $decks, playback: playback, onPlayRow: { _ in }, onViewRow: { _ in },
                 onTurnRow: { _ in }, onOpenThread: { _ in }, jumpToTop: 0, onBack: {},
                 ways: TimelineWays(canSearch: true, onSearch: {}, canReload: true, onReload: {}),
-                search: ShellSearch()
+                search: ShellSearch(), serverFilters: true
             )
             .environment(prefs)
             .environment(\.shellLayout, layout)

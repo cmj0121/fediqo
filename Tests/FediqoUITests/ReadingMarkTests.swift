@@ -361,7 +361,7 @@ struct ReadingMarkTests {
                 decks: $decks, playback: playback, onPlayRow: { _ in }, onViewRow: { _ in },
                 onTurnRow: { _ in }, onOpenThread: { seen.opened.append($0) }, jumpToTop: 0, onBack: {},
                 ways: TimelineWays(canSearch: true, onSearch: {}, canReload: false, onReload: {}),
-                search: ShellSearch()
+                search: ShellSearch(), serverFilters: true
             )
             .environment(prefs)
             .environment(\.shellTouch, seen.touch)
@@ -581,7 +581,8 @@ struct ReadingMarkTests {
             session: finger.session, selectedID: Binding(get: { selected }, set: { selected = $0 }), standing: nil,
             onOpenPerson: { _ in }, decks: .constant(ShellDecks()), playback: ShellPlayback(),
             onPlayRow: { _ in }, onViewRow: { _ in }, onTurnRow: { _ in }, onOpenThread: { opened.append($0) },
-            jumpToTop: 0, onBack: {}, ways: TimelineWays(canSearch: true, onSearch: {}, canReload: false, onReload: {})
+            jumpToTop: 0, onBack: {}, ways: TimelineWays(canSearch: true, onSearch: {}, canReload: false, onReload: {}),
+            serverFilters: true
         )
         let item = try #require(finger.session.held(pressed))
         // Answering is the one act whose press is seen from outside without a server: it opens

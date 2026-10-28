@@ -608,6 +608,10 @@
 "prefs.previews.head" = "Link previews";
 "prefs.previews.brief" = "A post's link shows the page it leads to.";
 "prefs.previews.footer" = "The preview is what the post's source fetched of the page: its title, what it is about, where it leads, and its picture. Off, no post shows one and no preview's picture is asked for.";
+"prefs.filters" = "Apply a source's filters";
+"prefs.filters.head" = "Source filters";
+"prefs.filters.brief" = "A source's filters hide or cover posts here.";
+"prefs.filters.footer" = "As the source says, a filter hides or covers a post on every timeline. Off, no post is hidden or covered by one, and the filters stay at the source. Nothing is asked of a source for this.";
 "prefs.askEvery" = "Ask the sources again";
 "prefs.askEvery.one" = "Every minute";
 "prefs.askEvery.many" = "Every %d minutes";

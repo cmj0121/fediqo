@@ -331,7 +331,8 @@ struct FoundPageTests {
                 playback: playback, onPlayRow: { _ in }, onViewRow: { _ in }, onTurnRow: { _ in }, onOpenThread: { _ in },
                 jumpToTop: 0, onBack: {}, ways: TimelineWays(canSearch: true, onSearch: {}, canReload: true, onReload: {}),
                 search: ShellSearch(), people: pages,
-                onTurnFound: { which in pages.found.turn(&standing.walk, to: which, lamp: &standing.lamp, in: session) }
+                onTurnFound: { which in pages.found.turn(&standing.walk, to: which, lamp: &standing.lamp, in: session) },
+                serverFilters: true
             )
             .environment(prefs)
         }

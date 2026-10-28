@@ -153,6 +153,59 @@ struct ServerFiltersTests {
         #expect(await server.asked.contains("DELETE /api/v2/filters/1"))
     }
 
+    @Test("With the choice off a caught post is drawn plainly, a muted or blocked author stays hidden, and turning it on hides or covers it again without asking the source")
+    func appliedByChoice() async throws {
+        let server = FilterServer([])
+        let session = try await make(server: server)
+        let hidden = Self.item([Self.hit(.hide)])
+        let warned = Self.item([Self.hit(.warn)])
+        #expect(session.acting(on: hidden).hidden?.opens == false)
+        #expect(session.acting(on: warned).hidden?.opens == true)
+        #expect(session.serverFilter(over: hidden, applied: false) == nil)
+        #expect(session.acting(on: hidden, applied: false).hidden == nil)
+        #expect(session.acting(on: warned, applied: false).hidden == nil)
+        #expect(session.acting(on: hidden, applied: true).hidden?.words == "Hidden by your filter “Fruit” at social.example.")
+        #expect(session.acting(on: warned, applied: true).hidden?.words == "Covered by your filter “Fruit” at social.example.")
+        // A mute or a block still hides with the choice off: that hide wins, the filter or not.
+        session.hides.hide("@ada@social.example", at: Self.host, .muted)
+        #expect(session.acting(on: hidden, applied: false).hidden?.words == "Hidden here: you muted @ada@social.example at social.example.")
+        session.hides.show("@ada@social.example", at: Self.host, .muted)
+        session.hides.hide("@ada@social.example", at: Self.host, .blocked)
+        #expect(session.acting(on: hidden, applied: false).hidden?.words == "Hidden here: you blocked @ada@social.example at social.example.")
+        #expect(session.acting(on: hidden, applied: true).hidden?.words == "Hidden here: you blocked @ada@social.example at social.example.")
+        #expect(await server.asked.allSatisfy { !$0.contains("filters") }, "turning the choice asks no source for its filters")
+    }
+
+    @Test("A row is handed the choice: off, a post a filter caught is not hidden for it, and on, it is")
+    func handedToTheRow() async throws {
+        let session = try await make()
+        let item = Self.item([Self.hit(.hide)])
+        let off = RowActing(session: session, serverFilters: false, openThread: { _ in })(item)
+        #expect(off.hidden == nil)
+        let on = RowActing(session: session, serverFilters: true, openThread: { _ in })(item)
+        #expect(on.hidden?.words == "Hidden by your filter “Fruit” at social.example.")
+        #expect(on.hidden?.opens == false)
+    }
+
+    @Test("A source's filters apply unless this device turns them off, and the choice is kept and read again")
+    func preference() throws {
+        let defaults = UserDefaults(suiteName: "fediqo.serverFilters.\(UUID().uuidString)")!
+        let prefs = DummyPrefs(defaults: defaults)
+        #expect(prefs.serverFilters)
+        prefs.serverFilters = false
+        #expect(!DummyPrefs(defaults: defaults).serverFilters)
+        defaults.set("", forKey: "fediqo.dummy.serverFilters")
+        prefs.reread()
+        #expect(prefs.serverFilters)
+        for key in ["prefs.filters", "prefs.filters.head", "prefs.filters.brief", "prefs.filters.footer"] {
+            #expect(L10n.t(key, language: .english) != key && L10n.t(key, language: .taiwanese) != key, "\(key)")
+        }
+        let pane = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/FediqoUI/Shell/TimelinePane.swift"), encoding: .utf8)
+        #expect(!pane.contains("prefs.filters"), "the timeline carries no sentence of the choice")
+    }
+
     @Test("Every word it says is in each language", arguments: [
         "work.purpose.filters", "part.filters.unasked", "part.filters.name", "hidden.filter", "hidden.filter.warn",
         "hidden.filter.show", "filters.title", "filters.remove.title", "filters.lasts.unchanged", "filters.place.account",
