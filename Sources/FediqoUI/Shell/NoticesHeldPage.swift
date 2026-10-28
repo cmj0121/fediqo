@@ -103,7 +103,7 @@ struct NoticesHeldPage: View {
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if hosts.isEmpty {
-                    words(L10n.t("notices.held.empty"), part: .heldEmpty, ink: ShellChrome.inkFaint(colorScheme))
+                    NoticesSentence(words: L10n.t("notices.held.empty"), part: .heldEmpty, ink: ShellChrome.inkFaint(colorScheme))
                 }
                 ForEach(hosts, id: \.self) { host in
                     source(host)
@@ -131,22 +131,23 @@ struct NoticesHeldPage: View {
                 .modifier(NoticesProbed(.held(host), says: said, probe: probe))
             ShellRule()
             if listed.isEmpty, acts.readingRequests.contains(host) {
-                words(NoticesHeldWords.reading(host), part: .heldReading(host), ink: ShellChrome.inkFaint(colorScheme))
+                NoticesSentence(words: NoticesHeldWords.reading(host), part: .heldReading(host), ink: ShellChrome.inkFaint(colorScheme))
                 ShellRule()
             }
             if let failed = acts.said[host], failed.act == .requests, !acts.readingRequests.contains(host) {
+                let again = StatusPress(kind: .again, spoken: NoticesHeldWords.again(host)) {
+                    Task { await acts.open(host: host, in: session) }
+                }
                 WordsThenPress(
                     words: Text(NoticeActs.words(failed, host: host))
                         .shellFont(.meta)
                         .foregroundStyle(ShellChrome.ink(colorScheme))
                         .modifier(NoticesProbed(.heldSaid(host), says: NoticeActs.words(failed, host: host), probe: probe)),
-                    press: ShellLinkButton(L10n.t("status.press.again"), symbol: "arrow.clockwise") {
-                        Task { await acts.open(host: host, in: session) }
-                    }
-                    .accessibilityLabel(NoticesHeldWords.again(host))
-                    .help(NoticesHeldWords.again(host))
-                    .fixedSize()
-                    .modifier(NoticesProbed(.heldAgain(host), says: NoticesHeldWords.again(host), probe: probe))
+                    press: ShellLinkButton(again.word(), symbol: again.symbol, action: again.act)
+                        .accessibilityLabel(again.spoken)
+                        .help(again.spoken)
+                        .fixedSize()
+                        .modifier(NoticesProbed(.heldAgain(host), says: again.spoken, probe: probe))
                 )
                 ShellRule()
             }
@@ -157,17 +158,25 @@ struct NoticesHeldPage: View {
             // The source counts more people than it listed — or listed nobody at all: said,
             // so a source never stands over nothing.
             if acts.requests[host] != nil, held.requests > listed.count, !acts.readingRequests.contains(host) {
-                words(
-                    NoticesHeldWords.short(host, listedNone: listed.isEmpty), part: .heldPartial(host),
+                NoticesSentence(
+                    words: NoticesHeldWords.short(host, listedNone: listed.isEmpty), part: .heldPartial(host),
                     ink: ShellChrome.inkFaint(colorScheme)
                 )
                 ShellRule()
             }
         }
     }
+}
 
-    /// One sentence of the page, whole: wrapped where the page is narrow, never cut.
-    private func words(_ words: String, part: NoticesProbe.Part, ink: Color) -> some View {
+/// One sentence of a notices page, whole: wrapped where the page is narrow, never cut. Above the
+/// lines on Notifications, and under a source's word on the page of what is held back.
+struct NoticesSentence: View {
+    let words: String
+    let part: NoticesProbe.Part
+    let ink: Color
+    @Environment(\.shellNoticesProbe) private var probe
+
+    var body: some View {
         Text(words)
             .shellFont(.meta)
             .foregroundStyle(ink)

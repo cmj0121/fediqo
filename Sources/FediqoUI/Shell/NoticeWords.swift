@@ -415,8 +415,8 @@ enum NoticesFoot: Equatable {
     /// Every source has handed over all it has.
     case end
 
-    /// `full` is whether a source reached that bound (`ShellNoticeList.isFull`). Said only
-    /// where nothing else is: a source the toast names still says why the list stops there.
+    /// `full` is whether a source reached that bound (`ShellNoticeList.isFull`). Never said at
+    /// the foot: the source held to the most kept names itself in the status mark (`NoticesLine.full`).
     static func foot(hasMore: Bool, floor: Date?, full: Bool = false) -> NoticesFoot {
         if hasMore { return .more }
         if floor != nil { return .held }

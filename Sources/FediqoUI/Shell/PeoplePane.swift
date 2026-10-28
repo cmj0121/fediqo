@@ -525,7 +525,7 @@ struct PeopleHead: View {
 /// whether the gear is lit. The gear is lit while only the people who live there are listed.
 /// Changing either still asks the directory again from the top (`PeopleSaid.choosing`).
 enum DirectoryGear {
-    static let symbol = "gearshape"
+    static let symbol = ShellGearLabel.symbol
 
     static func word(_ choice: DirectoryChoice, language: DummyLanguage? = nil) -> String {
         PeopleSaid.orderName(choice.order, language: language)
@@ -550,8 +550,6 @@ struct DirectoryGearMenu: View {
     let choice: DirectoryChoice
     let source: String
     var onChoose: (DirectoryChoice) -> Void
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         Menu {
@@ -567,22 +565,13 @@ struct DirectoryGearMenu: View {
                 set: { onChoose(PeopleSaid.choosing(localOnly: $0, from: choice)) }
             ))
         } label: {
-            Image(systemName: DirectoryGear.symbol)
-                .foregroundStyle(gearInk)
-                .modifier(ShellGlyphBox())
+            ShellGearLabel(lit: DirectoryGear.lit(choice))
         }
         .menuStyle(.button)
         .menuIndicator(.hidden)
         .buttonStyle(.plain)
         .shellNamed("people.directory.choose")
         .accessibilityValue(PeopleSaid.sortingLine(choice, source: source))
-    }
-
-    /// Lit while the directory is narrowed to the people who live there; dim while the
-    /// directory is being asked from the top. A source that has no directory draws no gear.
-    private var gearInk: Color {
-        guard isEnabled else { return ShellChrome.inkFaint(colorScheme) }
-        return DirectoryGear.lit(choice) ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme)
     }
 }
 

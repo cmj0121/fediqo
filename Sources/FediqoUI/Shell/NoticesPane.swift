@@ -13,8 +13,8 @@ import SwiftUI
 /// dismissing it — the head's, which dismisses all a source has, and a held-back request's.
 /// One asker on the page puts every such question (`ShellNoticeActs.asked`). **At its yes
 /// the line, or the request, leaves the page**; where its source then says no it is drawn
-/// again where it was, and the strip at the foot of every page says so (`SaidStrip`) — this
-/// page's own sentences above the list are for its ask and its reading of requests.
+/// again where it was, and the strip at the foot of every page says so (`SaidStrip`) — what
+/// the page has to say of its sources is a line of its status mark (`StatusMark`).
 ///
 /// **What it says before any line**, in this order: that nobody is signed in to a source that
 /// has notices, and what would make the page fill; that somebody is, and no sign-in may read
@@ -184,23 +184,15 @@ struct NoticesPane: View {
             // Asked again where the sign-in may be asked for notices; where it already holds
             // them and the source still gave none, the source is read again — but never while
             // an ask is out there, which the toast then says.
-            StatusPress(
-                kind: .again, spoken: String(format: L10n.t("status.press.again.ask.spoken", language: language), host)
-            ) {
+            StatusPress.askAgain(host, language: language) {
                 if !session.askFor([.notices], host: host), !session.isAsking(host: host) { reload() }
             }
         case .declined(let host):
-            StatusPress(
-                kind: .again, spoken: String(format: L10n.t("status.press.again.ask.spoken", language: language), host)
-            ) {
+            StatusPress.askAgain(host, language: language) {
                 session.askForNotices(host: host)
             }
         case .locked(let host), .unread(let host):
-            StatusPress(
-                kind: .again,
-                spoken: String(format: L10n.t("status.press.again.read.spoken", language: language), host),
-                act: reload
-            )
+            StatusPress.readAgain(host, language: language, act: reload)
         case .asking, .full:
             nil
         }
@@ -277,13 +269,13 @@ struct NoticesPane: View {
             case .list where acts.heldShown:
                 NoticesHeldPage(session: session, asks: asked)
             case .list:
+                let unread = Self.unread(among: hosts, in: session, began: began)
                 head(hosts, status: Self.status(
-                    hosts: hosts, unread: Self.unread(among: hosts, in: session, began: began), in: session,
-                    touch: touch, reload: onReload
+                    hosts: hosts, unread: unread, in: session, touch: touch, reload: onReload
                 ))
                     .modifier(NoticesProbed(.head, probe: probe))
                 ShellRule()
-                listed(hosts)
+                listed(unread: unread)
             }
         }
         .task(id: Opening(active: active, asked: hosts.filter { $0.notices == .allowed }.map(\.host))) {
@@ -334,7 +326,7 @@ struct NoticesPane: View {
             // no list to say it above.
             ForEach(Self.said(in: session), id: \.host) { said in
                 ShellRule()
-                wordLine(said.words, part: .said(said.host), ink: ShellChrome.ink(colorScheme))
+                NoticesSentence(words: said.words, part: .said(said.host), ink: ShellChrome.ink(colorScheme))
             }
             Spacer(minLength: 0)
         }
@@ -428,9 +420,8 @@ struct NoticesPane: View {
     // MARK: - The lines
 
     @ViewBuilder
-    private func listed(_ hosts: [(host: String, notices: NoticeStanding)]) -> some View {
+    private func listed(unread: [String]) -> some View {
         let shown = list.shown(hiding: prefs.noticesHidden)
-        let unread = Self.unread(among: hosts, in: session, began: began)
         // What the sources hold back: one row, which opens it as a page of its own (#399).
         let held = acts.heldCount
         if held > 0 {
@@ -452,19 +443,7 @@ struct NoticesPane: View {
         }
     }
 
-    /// One sentence above the lines, whole: wrapped where the page is narrow, never cut.
-    private func wordLine(_ words: String, part: NoticesProbe.Part, ink: Color) -> some View {
-        Text(words)
-            .shellFont(.meta)
-            .foregroundStyle(ink)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .modifier(NoticesProbed(part, says: words, probe: probe))
-            .padding(.horizontal, ShellSpace.pad)
-            .padding(.vertical, ShellSpace.snug)
-    }
-
-    /// One source's word above the lines: where the answer would have been.
+    /// One source's word where no sign-in may read its notices: where the answer would have been.
     ///
     /// On one line with its press where both fit whole; the press under the words where they
     /// do not, and the words wrapped. Neither is cut.
@@ -529,12 +508,6 @@ struct NoticesPane: View {
 
     @ViewBuilder
     private func none(_ unread: [String]) -> some View {
-        noneWords(unread)
-        Spacer(minLength: 0)
-    }
-
-    @ViewBuilder
-    private func noneWords(_ unread: [String]) -> some View {
         let said = Self.none(unread: unread, in: session)
         if let words = said.words(older: Self.foot(in: session) == .more) {
             Text(words)
@@ -548,6 +521,7 @@ struct NoticesPane: View {
         // Lines held and all of a kind left out: older ones may be of a kind shown, and
         // reading on to them is a press — nothing here reads by itself.
         if case .narrowed = said { foot }
+        Spacer(minLength: 0)
     }
 
     @ViewBuilder
@@ -715,9 +689,8 @@ struct NoticeAskSlot: View {
 struct NoticeKindsMenu: View {
     let kinds: [String]
     @Bindable var prefs: DummyPrefs
-    @Environment(\.colorScheme) private var colorScheme
 
-    static let symbol = "gearshape"
+    static let symbol = ShellGearLabel.symbol
 
     /// Whether the gear is lit: any kind left out.
     static func lit(_ hidden: Set<String>) -> Bool {
@@ -739,9 +712,7 @@ struct NoticeKindsMenu: View {
                 Button(L10n.t("notices.kinds.showAll"), action: showAll)
             }
         } label: {
-            Image(systemName: Self.symbol)
-                .foregroundStyle(lit ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
-                .modifier(ShellGlyphBox())
+            ShellGearLabel(lit: lit)
         }
         .menuStyle(.button)
         .menuIndicator(.hidden)

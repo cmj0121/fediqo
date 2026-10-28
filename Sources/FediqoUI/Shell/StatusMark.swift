@@ -41,6 +41,22 @@ struct StatusPress {
         }
     }
 
+    /// Again, reading `host` once more.
+    static func readAgain(_ host: String, language: DummyLanguage? = nil, act: @escaping () -> Void) -> StatusPress {
+        StatusPress(
+            kind: .again, spoken: String(format: L10n.t("status.press.again.read.spoken", language: language), host),
+            act: act
+        )
+    }
+
+    /// Again, asking `host`'s sign-in once more.
+    static func askAgain(_ host: String, language: DummyLanguage? = nil, act: @escaping () -> Void) -> StatusPress {
+        StatusPress(
+            kind: .again, spoken: String(format: L10n.t("status.press.again.ask.spoken", language: language), host),
+            act: act
+        )
+    }
+
     func word(language: DummyLanguage? = nil) -> String {
         switch kind {
         case .ask: L10n.t("status.press.ask", language: language)

@@ -64,7 +64,7 @@ final class ShellNoticeActs {
     @ObservationIgnored private var policyMoved: [String: UInt64] = [:]
     /// The sources a choice is out to now: one at a time each.
     @ObservationIgnored private var sendingPolicy: Set<String> = []
-    /// The requests each source handed over when its held-back line was last opened.
+    /// The requests each source handed over when the page of what is held back last read it.
     private(set) var requests: [String: [NoticeRequest]] = [:]
     /// The sources whose held-back requests are read and listed.
     private(set) var opened: Set<String> = []
@@ -182,7 +182,7 @@ final class ShellNoticeActs {
     /// How many notices the sources say they hold back, less what is on its way out: the
     /// number on the one row that opens them (#399). Each source's own figure, as it gave it.
     var heldCount: Int {
-        shownHolders.compactMap { shownHeld(host: $0) }.reduce(0) { $0 + max($1.notices, $1.requests) }
+        holdings.keys.compactMap { shownHeld(host: $0) }.reduce(0) { $0 + max($1.notices, $1.requests) }
     }
 
     /// The requests let through and said to be on their way, in host order. **Never asked
