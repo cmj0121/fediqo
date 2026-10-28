@@ -1809,10 +1809,6 @@
 "notices.act.letGo.refused" = "%@ would not let this sign-in let notices go. What it holds is still held.";
 "notices.held" = "%2$@ is holding back %1$d notices.";
 "notices.held.one" = "%2$@ is holding back %1$d notice.";
-"notices.held.show" = "Show";
-"notices.held.show.spoken" = "Show what %@ is holding back";
-"notices.held.hide" = "Hide";
-"notices.held.hide.spoken" = "Hide what %@ is holding back";
 "notices.held.reading" = "Reading what %@ is holding back…";
 "notices.held.partial" = "%@ is holding back more people's notices than are listed here.";
 "notices.held.count" = "%d notices held";
@@ -2876,3 +2872,11 @@
 "status.press.again.notices.spoken" = "Read the notices again";
 "notices.foot.endMark" = "End of notices";
 "status.mark.quiet.spoken" = "No source needs you. Opens what there is to know of them.";
+
+/* What the sources hold back, as one row that opens a page of its own (#399). */
+"notices.held.row" = "%d held back";
+"notices.held.row.spoken" = "%d notices held back by your sources. Opens them.";
+"notices.held.row.spoken.one" = "%d notice held back by your sources. Opens it.";
+"notices.held.title" = "Held back";
+"notices.held.empty" = "Nothing is held back now.";
+"notices.held.again.spoken" = "Read again what %@ is holding back";

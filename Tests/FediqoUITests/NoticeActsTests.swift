@@ -878,7 +878,7 @@ struct NoticeActsTests {
         #expect(NoticeActs.spoken(eve, language: .english) == "Eve, 3 notices held: Held words")
         #expect(NoticeActs.count(try #require(acts.requests[Self.a]?.last), language: .english) == "1 notice held")
 
-        acts.close(host: Self.a)
+        acts.hideHeld()
         #expect(acts.opened.isEmpty)
         await server.set(F.get(Self.a, Self.requests), .status(503))
         await acts.open(host: Self.a, in: session)

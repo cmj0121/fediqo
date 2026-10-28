@@ -468,7 +468,7 @@ struct NoticeActsHostedTests {
         #expect(rows(page).count == 3)
         #expect(!page.frames.keys.contains { part in
             switch part {
-            case .held, .heldWords, .heldPress, .request, .requestWords, .requestMore: true
+            case .heldRow, .held, .heldReading, .heldPartial, .heldEmpty, .request, .requestWords, .requestMore: true
             default: false
             }
         }, "a held-back line was drawn with nothing held")
@@ -515,40 +515,100 @@ struct NoticeActsHostedTests {
         }
     }
 
-    @Test("A source that holds notices back says how many and from where on a quiet line above the list; opened, it lists who, how many and the last one's words")
-    func theHeldBackLineAndItsList() async throws {
+    @Test("What the sources hold back is one row at the top of the notices, with the number they gave; pressed, it opens a page of who, how many and the last one's words, and leaving it comes back to the notices")
+    func theHeldBackRowAndItsPage() async throws {
         let (session, server) = try await holding()
         let acts = session.noticeList.acts
+        #expect(acts.heldCount == 4, "the number the source gave")
 
         let (_, closed) = await hosted(session)
-        #expect(closed.says[.held(Self.a)] == "a.example is holding back 4 notices.")
-        let held = try #require(closed.frames[.held(Self.a)]), first = try #require(closed.frames[.row(rows(closed)[0])])
-        #expect(held.height > 0 && held.maxY <= first.minY + 0.5, "it is not above the list")
-        #expect(closed.says[.heldPress(Self.a)] == "Show what a.example is holding back")
-        #expect((closed.frames[.heldPress(Self.a)]?.height ?? 0) > 0)
-        #expect(closed.frames[.held(Self.b)] == nil, "a source with no such thing was given a line")
+        let spoken = "4 notices held back by your sources. Opens them."
+        #expect(closed.says[.heldRow] == spoken && NoticesHeldWords.spoken(4, language: .english) == spoken)
+        #expect(NoticesHeldWords.row(4, language: .english) == "4 held back")
+        let row = try #require(closed.frames[.heldRow]), first = try #require(closed.frames[.row(rows(closed)[0])])
+        #expect(row.height > 0 && row.maxY <= first.minY + 0.5, "it is not at the top of the notices")
+        #expect(closed.frames[.held(Self.a)] == nil && closed.frames[.held(Self.b)] == nil, "a source's line stands above the notices")
         #expect(!closed.frames.keys.contains { if case .request = $0 { true } else { false } })
         #expect(await server.count(F.get(Self.a, Self.requests)) == 0, "what is held was read before it was opened")
 
-        await acts.open(host: Self.a, in: session)
+        await acts.showHeld(in: session)
+        #expect(acts.heldShown && acts.opened == [Self.a], "the page opened every source that holds something back, and no other")
         let listed = try #require(acts.requests[Self.a])
         let (_, open) = await hosted(session)
-        #expect(open.says[.heldPress(Self.a)] == "Hide what a.example is holding back")
+        #expect(open.says[.held(Self.a)] == "a.example is holding back 4 notices.")
         #expect(open.says[.request(listed[0].id)] == "Eve, 3 notices held: Held words")
         #expect(open.says[.request(listed[1].id)] == "Flo, 1 notice held: Held words")
         let eve = try #require(open.frames[.request(listed[0].id)]), flo = try #require(open.frames[.request(listed[1].id)])
         #expect(eve.height > 0 && eve.maxY <= flo.minY + 0.5)
-        let top = try #require(open.frames[.row(rows(open)[0])])
-        #expect(flo.maxY <= top.minY + 0.5, "the requests stand above the notices")
         for request in listed {
             let dots = try #require(open.frames[.requestMore(request.id)])
             #expect(dots.width >= Self.box().width - Self.pixel && dots.height >= Self.box().height - Self.pixel)
         }
-        #expect(rows(open).count == 3, "opening what is held took the notices away")
+        #expect(rows(open).isEmpty && open.frames[.heldRow] == nil, "the page is drawn over the notices, as a page of its own")
 
-        acts.close(host: Self.a)
+        acts.hideHeld()
         let (_, again) = await hosted(session)
-        #expect(again.frames[.request(listed[0].id)] == nil && again.says[.heldPress(Self.a)] == "Show what a.example is holding back")
+        #expect(!acts.heldShown && again.frames[.request(listed[0].id)] == nil && again.says[.heldRow] == spoken)
+        #expect(rows(again).count == 3)
+    }
+
+    @Test("Where reading a source's requests came to nothing, its page says so under it with Again, and Again reads them")
+    func aFailedReadingIsSaidWithAgain() async throws {
+        let (session, server) = try await holding([F.get(Self.a, Self.requests): .status(503)])
+        let acts = session.noticeList.acts
+        await acts.showHeld(in: session)
+        #expect(acts.requests[Self.a] == nil && acts.said[Self.a]?.act == .requests)
+        let (_, page) = await hosted(session)
+        #expect(page.says[.heldSaid(Self.a)] == "a.example did not hand over what it is holding back.")
+        #expect(page.says[.heldAgain(Self.a)] == "Read again what a.example is holding back")
+        #expect((page.frames[.heldAgain(Self.a)]?.height ?? 0) > 0)
+
+        await server.set(F.get(Self.a, Self.requests), .body("[" + F.request(71, by: "Eve", count: 3) + "]"))
+        await acts.open(host: Self.a, in: session)
+        let (_, again) = await hosted(session)
+        let eve = try #require(acts.requests[Self.a]?.first)
+        #expect(again.frames[.heldSaid(Self.a)] == nil && again.frames[.request(eve.id)] != nil)
+    }
+
+    @Test("Left while its reads are on the wire, the page of what is held back stays closed when they land")
+    func leftWhileReadingStaysClosed() async throws {
+        let gate = Gate()
+        let body = "[" + F.request(71, by: "Eve", count: 3) + "]"
+        let (session, server) = try await holding([F.get(Self.a, Self.requests): .held(gate, body)])
+        let acts = session.noticeList.acts
+        let showing = Task { await acts.showHeld(in: session) }
+        await met("the page is shown and its read is on the wire", by: showing) {
+            guard acts.heldShown else { return false }
+            return await server.count(F.get(Self.a, Self.requests)) == 1
+        }
+        acts.hideHeld()
+        await gate.open()
+        await showing.value
+        #expect(!acts.heldShown && acts.opened.isEmpty, "a read that landed after the reader left opened the page again")
+    }
+
+    @Test("Leaving Notifications closes the page of what is held back: the place opens on the notices again")
+    func leavingClosesTheHeldPage() async throws {
+        let (session, _) = try await holding()
+        let acts = session.noticeList.acts
+        await acts.showHeld(in: session)
+        #expect(acts.heldShown)
+        FediqoRootView.leftNotices(session)
+        #expect(!acts.heldShown && acts.opened.isEmpty)
+        let (_, page) = await hosted(session)
+        #expect(page.frames[.heldRow] != nil && !rows(page).isEmpty)
+    }
+
+    @Test("With nothing held back there is no row, and opening asks nobody")
+    func noRowWithNothingHeld() async throws {
+        let (session, server) = try await two([:])
+        let acts = session.noticeList.acts
+        #expect(acts.heldCount == 0)
+        let (_, page) = await hosted(session)
+        #expect(page.frames[.heldRow] == nil)
+        await acts.showHeld(in: session)
+        #expect(!acts.heldShown)
+        #expect(await server.asked.filter { $0.hasSuffix(Self.requests) }.isEmpty)
     }
 
     @Test("A held-back request offers Let through and Let go, each asked first — letting through says the person's later notices come through too and that Fediqo cannot undo it; let through, it is said to be on its way above the list")
@@ -596,9 +656,9 @@ struct NoticeActsHostedTests {
         let (_, page) = await hosted(session)
         let way = NoticesPane.status(in: session).first { $0.id == "onWay:" + listed[0].id }
         #expect(way?.words == "@eve@a.example (Eve)'s notices are on their way from a.example. A later read shows them.")
-        #expect((page.frames[.statusMark]?.height ?? 0) > 0)
         #expect(page.frames[.request(listed[0].id)] == nil && page.frames[.request(listed[1].id)] != nil)
         #expect(page.says[.held(Self.a)] == "a.example is holding back 1 notice.")
+        #expect(acts.heldCount == 1, "the row says what is held now, on return")
 
         // Let go only puts its question; the yes sends it.
         let last = NoticeActs.more(listed[1], in: session)
@@ -612,6 +672,10 @@ struct NoticeActsHostedTests {
         #expect(await server.posts == [accept, go])
         let (_, after) = await hosted(session)
         #expect(after.frames[.held(Self.a)] == nil && after.frames[.request(listed[1].id)] == nil)
+        #expect(after.says[.heldEmpty] == "Nothing is held back now.")
+        acts.hideHeld()
+        let (_, back) = await hosted(session)
+        #expect(back.frames[.heldRow] == nil, "on return the row is gone with what was held")
         #expect(NoticesPane.status(in: session).contains { $0.id == "onWay:" + listed[0].id },
                 "what was let through stopped being said before a read showed it")
     }
@@ -641,25 +705,25 @@ struct NoticeActsHostedTests {
         await acts.open(host: Self.a, in: session)
         #expect(acts.requests[Self.a] == [] && acts.held(host: Self.a) != nil)
 
-        let partial = { NoticesPane.status(in: session).first { $0.id == "heldPartial:" + Self.a }?.words }
+        let partial = { () async -> String? in await self.hosted(session).1.says[.heldPartial(Self.a)] }
         let (_, empty) = await hosted(session)
-        #expect(partial() == "a.example listed none of the people whose notices it is holding back.")
-        #expect((empty.frames[.statusMark]?.height ?? 0) > 0, "an opened line stood over nothing")
+        #expect(empty.says[.heldPartial(Self.a)] == "a.example listed none of the people whose notices it is holding back.")
+        #expect((empty.frames[.heldPartial(Self.a)]?.height ?? 0) > 0, "an opened source stood over nothing")
         #expect(L10n.t("notices.held.none", language: .taiwanese) != "notices.held.none")
 
         // One of the two it counts.
         await server.set(F.get(Self.a, Self.requests), .body("[" + F.request(71, by: "Eve", count: 3) + "]"))
-        acts.close(host: Self.a)
+        acts.hideHeld()
         await acts.open(host: Self.a, in: session)
         let (_, short) = await hosted(session)
-        #expect(partial() == "a.example is holding back more people's notices than are listed here.")
+        #expect(short.says[.heldPartial(Self.a)] == "a.example is holding back more people's notices than are listed here.")
         #expect(short.frames[.request(try #require(acts.requests[Self.a]?.first).id)] != nil)
 
         // Both of the two: nothing more to say.
         await server.set(F.get(Self.a, Self.requests), .body("[" + F.request(71, by: "Eve", count: 3) + "," + F.request(72, by: "Flo", count: 1) + "]"))
-        acts.close(host: Self.a)
+        acts.hideHeld()
         await acts.open(host: Self.a, in: session)
-        #expect(partial() == nil)
+        #expect(await partial() == nil)
     }
 
     // MARK: - 320 points across
@@ -684,8 +748,10 @@ struct NoticeActsHostedTests {
         await acts.dismiss(try line("4", of: Self.long, in: session), in: session)
 
         let (_, probe) = await hosted(session, width: 320, layout: .narrow, type: type)
-        #expect(rows(probe).count == 2)
-        for (part, frame) in probe.frames {
+        acts.hideHeld()
+        let (_, notices) = await hosted(session, width: 320, layout: .narrow, type: type)
+        #expect(rows(notices).count == 2)
+        for (part, frame) in probe.frames.merging(notices.frames, uniquingKeysWith: { a, _ in a }) {
             #expect(frame.minX >= -0.5 && frame.maxX <= 320 + Self.pixel, "\(type): \(part) runs past a page 320 points across")
         }
 
@@ -708,28 +774,31 @@ struct NoticeActsHostedTests {
         let whole = Self.wrapped(Text(said.words()).shellFont(.meta), width: spoken.width, type)
         #expect(spoken.height >= whole - 0.5, "\(type): the strip's sentence is cut: \(spoken.height) of \(whole)")
 
-        // What the acts say of a source is the status mark's list, and nothing above the lines.
+        // What the acts say of a source is the status mark's list, and nothing above the lines;
+        // what a source holds short of its count is said on the page of what is held.
         let status = NoticesPane.status(in: session).map(\.id)
-        #expect(status.contains("onWay:" + listed[1].id) && status.contains("heldPartial:" + Self.long))
-        #expect(status.contains("unasked:c.example"))
-        let words = try #require(probe.frames[.heldWords(Self.long)])
+        #expect(status.contains("onWay:" + listed[1].id) && status.contains("unasked:c.example"))
+        let partial = try #require(probe.frames[.heldPartial(Self.long)])
+        let partly = Self.wrapped(Text(NoticesHeldWords.short(Self.long, listedNone: false)).shellFont(.meta), width: partial.width, type)
+        #expect(partial.height >= partly - 0.5, "\(type): the held-back short line is cut")
+        let words = try #require(probe.frames[.held(Self.long)])
         let holding = try #require(acts.held(host: Self.long))
         let asks = Self.wrapped(
-            Label(NoticeActs.words(holding, host: Self.long), systemImage: "tray").labelStyle(.titleAndIcon).shellFont(.meta),
+            Label(NoticeActs.words(holding, host: Self.long), systemImage: "tray").labelStyle(.titleAndIcon).shellFont(.meta, weight: .medium),
             width: words.width, type
         )
         #expect(words.height >= asks - 0.5, "\(type): the held-back words are cut: \(words.height) of \(asks)")
 
-        // The presses, whole: opening what is held, and asking a source for notices.
-        let toggle = try #require(probe.frames[.heldPress(Self.long)])
-        let hide = Self.ideal(ShellLinkButton(L10n.t("notices.held.hide")) {}, type)
-        #expect(toggle.width >= hide.width - 0.5 && toggle.height >= hide.height - 0.5, "\(type): the press on the held-back line is cut")
+        // The row that opens what is held, whole.
+        let row = try #require(notices.frames[.heldRow])
+        let rowWords = Self.wrapped(Text(NoticesHeldWords.row(acts.heldCount)).shellFont(.meta), width: row.width - 2 * ShellSpace.pad, type)
+        #expect(row.height >= rowWords - 0.5, "\(type): the held-back row is cut")
 
         // Every three dots at its own box, and clear of the words beside it; the status mark too.
         let box = Self.box(type)
-        let mark = try #require(probe.frames[.statusMark], "\(type): the status mark is not drawn")
+        let mark = try #require(notices.frames[.statusMark], "\(type): the status mark is not drawn")
         #expect(mark.width >= box.width - Self.pixel && mark.height >= box.height - Self.pixel, "\(type): the status mark is squeezed")
-        let head = try #require(probe.frames[.moreMark]), title = try #require(probe.frames[.title])
+        let head = try #require(notices.frames[.moreMark]), title = try #require(notices.frames[.title])
         #expect(head.width >= box.width - Self.pixel && head.height >= box.height - Self.pixel, "\(type): the head's three dots are squeezed")
         #expect(head.minX >= title.maxX - 0.5 || head.minY >= title.maxY - 0.5)
         let request = listed[0]

@@ -1759,10 +1759,6 @@
 "notices.act.letGo.failed" = "連不上 %@，所以沒有放下。它擋下的仍然擋著。";
 "notices.act.letGo.refused" = "%@ 不讓這個登入放下通知。它擋下的仍然擋著。";
 "notices.held" = "%2$@ 擋下了 %1$d 則通知。";
-"notices.held.show" = "顯示";
-"notices.held.show.spoken" = "顯示 %@ 擋下的通知";
-"notices.held.hide" = "隱藏";
-"notices.held.hide.spoken" = "隱藏 %@ 擋下的通知";
 "notices.held.reading" = "正在讀取 %@ 擋下的通知…";
 "notices.held.partial" = "%@ 擋下的通知，來自比這裡列出的更多人。";
 "notices.held.count" = "擋下 %d 則通知";
@@ -2817,3 +2813,10 @@
 "status.press.again.notices.spoken" = "再讀一次通知";
 "notices.foot.endMark" = "通知到此為止";
 "status.mark.quiet.spoken" = "沒有來源需要你處理。打開可看關於它們的消息。";
+
+/* What the sources hold back, as one row that opens a page of its own (#399). */
+"notices.held.row" = "擋下 %d 則";
+"notices.held.row.spoken" = "你的來源擋下了 %d 則通知。打開來看。";
+"notices.held.title" = "擋下的通知";
+"notices.held.empty" = "目前沒有擋下的通知。";
+"notices.held.again.spoken" = "再讀一次 %@ 擋下的通知";
