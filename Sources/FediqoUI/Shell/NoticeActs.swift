@@ -177,49 +177,6 @@ enum NoticeActs {
             String(format: L10n.t("notices.spoken.post", language: language), who, $0)
         } ?? who
     }
-
-    /// The press on a source's held-back line, and what it is called to a listener.
-    static func toggle(open: Bool, host: String, language: DummyLanguage? = nil) -> (word: String, spoken: String) {
-        let key = open ? "notices.held.hide" : "notices.held.show"
-        return (L10n.t(key, language: language), String(format: L10n.t(key + ".spoken", language: language), host))
-    }
-}
-
-/// One source's word that it is holding notices back: a quiet line above the list, and the
-/// press that opens what it holds.
-///
-/// A source line's own shape (`WordsThenPress`): on one line with its press where both fit
-/// whole, the press under the words where they do not, and neither cut.
-struct NoticeHeldLine: View {
-    let host: String
-    let held: NoticesHeld
-    let open: Bool
-    let onToggle: () -> Void
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.shellNoticesProbe) private var probe
-
-    var body: some View {
-        let words = NoticeActs.words(held, host: host)
-        WordsThenPress(words: said(words), press: press)
-            .modifier(NoticesProbed(.held(host), says: words, probe: probe))
-    }
-
-    private func said(_ words: String) -> some View {
-        Label(words, systemImage: "tray")
-            .labelStyle(.titleAndIcon)
-            .shellFont(.meta)
-            .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            .modifier(NoticesProbed(.heldWords(host), probe: probe))
-    }
-
-    private var press: some View {
-        let toggle = NoticeActs.toggle(open: open, host: host)
-        return ShellLinkButton(toggle.word, action: onToggle)
-            .accessibilityLabel(toggle.spoken)
-            .help(toggle.spoken)
-            .fixedSize()
-            .modifier(NoticesProbed(.heldPress(host), says: toggle.spoken, probe: probe))
-    }
 }
 
 /// One person's notices a source is holding back: who, how many, the last one's words, and

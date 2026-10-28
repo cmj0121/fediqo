@@ -115,8 +115,8 @@ struct NoticesPane: View {
 
     /// What the status mark in the head lists now (#396): each source's line (`lines`), what
     /// an ask or a reading of requests came to (`said`), a request let through and on its way,
-    /// a held-back list being read or listed short, and why the list ends where the foot is
-    /// a plain mark. `reload` is what Again reads with where a source was not read.
+    /// and why the list ends where the foot is a plain mark. A held-back list being read, or
+    /// listed short, is said on its own page (`NoticesHeldPage`). `reload` is what Again reads with where a source was not read.
     static func status(
         in session: ShellSession, began: Bool = true, language: DummyLanguage? = nil
     ) -> [StatusLine] {
@@ -148,25 +148,6 @@ struct NoticesPane: View {
                 id: "onWay:" + $0.id, host: $0.source.host.lowercased(),
                 words: NoticeActs.onItsWay($0, language: language), needsReader: false
             )
-        }
-        for host in acts.shownHolders where acts.opened.contains(host) {
-            let listed = acts.listed(host: host)
-            if listed.isEmpty, acts.readingRequests.contains(host) {
-                status.append(StatusLine(
-                    id: "heldReading:" + host, host: host,
-                    words: String(format: L10n.t("notices.held.reading", language: language), host), needsReader: false
-                ))
-            }
-            // The source counts more people than it listed — or listed nobody at all: said,
-            // so an opened line never stands over nothing unexplained.
-            if let held = acts.shownHeld(host: host), acts.requests[host] != nil, held.requests > listed.count,
-               !acts.readingRequests.contains(host) {
-                let key = listed.isEmpty ? "notices.held.none" : "notices.held.partial"
-                status.append(StatusLine(
-                    id: "heldPartial:" + host, host: host, words: String(format: L10n.t(key, language: language), host),
-                    needsReader: false
-                ))
-            }
         }
         // Why the list ends where it does, where its foot is a plain mark. A source held to the
         // most kept is named by its own line above.
@@ -293,6 +274,8 @@ struct NoticesPane: View {
                 .modifier(NoticesProbed(.nobody, says: L10n.t("notices.empty.line"), probe: probe))
             case .notAllowed(let unasked, _):
                 notAllowed(unasked: unasked, hosts: hosts)
+            case .list where acts.heldShown:
+                NoticesHeldPage(session: session, asks: asked)
             case .list:
                 head(hosts, status: Self.status(
                     hosts: hosts, unread: Self.unread(among: hosts, in: session, began: began), in: session,
@@ -448,12 +431,11 @@ struct NoticesPane: View {
     private func listed(_ hosts: [(host: String, notices: NoticeStanding)]) -> some View {
         let shown = list.shown(hiding: prefs.noticesHidden)
         let unread = Self.unread(among: hosts, in: session, began: began)
-        let holders = acts.shownHolders
-        ForEach(holders, id: \.self) { host in
-            if let held = acts.shownHeld(host: host) {
-                NoticeHeldLine(host: host, held: held, open: acts.opened.contains(host)) { toggleHeld(host) }
-                ShellRule()
-            }
+        // What the sources hold back: one row, which opens it as a page of its own (#399).
+        let held = acts.heldCount
+        if held > 0 {
+            NoticesHeldRow(count: held) { Task { await acts.showHeld(in: session) } }
+            ShellRule()
         }
         // Whose notices each source holds back, and how (#376): a line a source that has said.
         ForEach(ShellNoticeList.asked(in: session).map { $0.host.lowercased() }, id: \.self) { host in
@@ -462,19 +444,10 @@ struct NoticesPane: View {
                 ShellRule()
             }
         }
-        let open = holders.filter { acts.opened.contains($0) }
         if !shown.isEmpty {
-            rows(shown, holding: open)
-        } else if open.isEmpty {
-            none(unread)
+            rows(shown)
         } else {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    heldBack(open)
-                    noneWords(unread)
-                }
-            }
-            .scrollIndicators(.never)
+            none(unread)
         }
     }
 
@@ -496,28 +469,6 @@ struct NoticesPane: View {
             .modifier(NoticesProbed(part, says: words, probe: probe))
             .padding(.horizontal, ShellSpace.pad)
             .padding(.vertical, ShellSpace.snug)
-    }
-
-    /// The press on a source's held-back line: opens it, reading what it holds, or closes it.
-    func toggleHeld(_ host: String) {
-        if acts.opened.contains(host) {
-            acts.close(host: host)
-        } else {
-            Task { await acts.open(host: host, in: session) }
-        }
-    }
-
-    /// What the opened sources hold back, a row a person: at the head of what scrolls, so a
-    /// long list of them never pushes the notices off the page. Whether a list is still being
-    /// read, or is short of what its source counts, is the status mark's to say.
-    @ViewBuilder
-    private func heldBack(_ hosts: [String]) -> some View {
-        ForEach(hosts, id: \.self) { host in
-            ForEach(acts.listed(host: host)) { request in
-                NoticeRequestRow(request: request, more: { NoticeActs.more(request, in: session) }, asks: asked)
-                ShellRule()
-            }
-        }
     }
 
     /// One source's word above the lines: where the answer would have been.
@@ -614,11 +565,10 @@ struct NoticesPane: View {
         }
     }
 
-    private func rows(_ shown: [Notice], holding open: [String]) -> some View {
+    private func rows(_ shown: [Notice]) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    heldBack(open)
                     ForEach(shown) { notice in
                         VStack(alignment: .leading, spacing: 0) {
                             row(notice)
@@ -986,8 +936,12 @@ final class NoticesProbe {
         /// What the page says of itself at one source — its ask, its reading of requests —
         /// where no sign-in may read notices and there is no head to hold it.
         case said(String)
-        /// One source's held-back line, its words and its press, by host.
-        case held(String), heldWords(String), heldPress(String)
+        /// The row of what the sources hold back (#399), and on the page it opens: each source's
+        /// word of it, by host; while its requests are read; where it holds more than it listed;
+        /// and where nothing is held back any more.
+        case heldRow, held(String), heldReading(String), heldPartial(String), heldEmpty
+        /// What reading a source's requests came to, where it came to nothing, and its Again.
+        case heldSaid(String), heldAgain(String)
         /// One held-back request, its words and its `…`, by the request's id.
         case request(String), requestWords(String), requestMore(String)
         /// The words of one source's line, and the press beside them, by `NoticesLine.id`.

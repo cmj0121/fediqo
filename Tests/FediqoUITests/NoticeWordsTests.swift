@@ -471,6 +471,12 @@ struct NoticeWordsTests {
         #expect(!FediqoRootView.noticesInFront(place: .notices, open: [.shortcuts]))
         #expect(!FediqoRootView.noticesInFront(place: .notices, open: [.viewer]))
         #expect(!FediqoRootView.noticesInFront(place: .timeline, open: []))
+        // Under the page of what is held back (#399) the notices take no key; q and Escape leave it.
+        #expect(!FediqoRootView.noticesInFront(place: .notices, open: [], held: true))
+        #expect(!FediqoRootView.canReadNotices(place: .notices, open: [], asked: true, held: true))
+        #expect(FediqoRootView.leavesHeldPage(place: .notices, open: [.selection], held: true))
+        #expect(!FediqoRootView.leavesHeldPage(place: .notices, open: [], held: false))
+        #expect(!FediqoRootView.leavesHeldPage(place: .notices, open: [.viewer], held: true), "what is drawn over it goes first")
         #expect(FediqoRootView.canReadNotices(place: .notices, open: [], asked: true))
         #expect(!FediqoRootView.canReadNotices(place: .notices, open: [], asked: false))
         #expect(!FediqoRootView.canReadNotices(place: .notices, open: [.shortcuts], asked: true))

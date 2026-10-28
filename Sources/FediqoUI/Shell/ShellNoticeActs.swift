@@ -68,8 +68,10 @@ final class ShellNoticeActs {
     @ObservationIgnored private var sendingPolicy: Set<String> = []
     /// The requests each source handed over when its held-back line was last opened.
     private(set) var requests: [String: [NoticeRequest]] = [:]
-    /// The sources whose held-back line is open.
+    /// The sources whose held-back requests are read and listed.
     private(set) var opened: Set<String> = []
+    /// Whether what the sources hold back is open as a page of its own over the notices (#399).
+    private(set) var heldShown = false
     /// The sources whose requests are on the wire.
     private(set) var readingRequests: Set<String> = []
     /// One act the person said yes to, on its way to its source: which source, and which act.
@@ -177,6 +179,12 @@ final class ShellNoticeActs {
     /// The sources the page says are holding something back (`shownHeld`), in host order.
     var shownHolders: [String] {
         holdings.keys.filter { shownHeld(host: $0) != nil }.sorted()
+    }
+
+    /// How many notices the sources say they hold back, less what is on its way out: the
+    /// number on the one row that opens them (#399). Each source's own figure, as it gave it.
+    var heldCount: Int {
+        shownHolders.compactMap { shownHeld(host: $0) }.reduce(0) { $0 + max($1.notices, $1.requests) }
     }
 
     /// The requests let through and said to be on their way, in host order. **Never asked
@@ -316,16 +324,40 @@ final class ShellNoticeActs {
         return sent < moved
     }
 
-    /// Opens one source's held-back line, and reads the requests it holds.
-    func open(host raw: String, in session: ShellSession) async {
-        let host = raw.lowercased()
-        guard held(host: host) != nil else { return }
-        opened.insert(host)
-        await readRequests(host: host, in: session)
+    /// Opens what the sources hold back as a page of its own, and reads each one's requests.
+    func showHeld(in session: ShellSession) async {
+        let hosts = shownHolders
+        guard !hosts.isEmpty else { return }
+        heldShown = true
+        await withTaskGroup(of: Void.self) { group in
+            for host in hosts {
+                group.addTask { await self.read(heldBy: host, in: session) }
+            }
+        }
     }
 
-    func close(host: String) {
-        opened.remove(host.lowercased())
+    /// Leaves the page of what is held back, back to the notices: its row says what is held now.
+    func hideHeld() {
+        heldShown = false
+        opened = []
+    }
+
+    /// Opens one source's held-back requests on the page of what is held back, and reads them:
+    /// a press of the reader's — the page's own Again — and so the page is shown.
+    func open(host raw: String, in session: ShellSession) async {
+        guard held(host: raw.lowercased()) != nil else { return }
+        heldShown = true
+        await read(heldBy: raw, in: session)
+    }
+
+    /// One source's held-back requests read for the page, **only while it is still shown**: a
+    /// read the page set out on that starts after the reader left it neither opens the page again
+    /// nor lists the source.
+    private func read(heldBy raw: String, in session: ShellSession) async {
+        let host = raw.lowercased()
+        guard heldShown, held(host: host) != nil else { return }
+        opened.insert(host)
+        await readRequests(host: host, in: session)
     }
 
     private func readRequests(host: String, in session: ShellSession) async {

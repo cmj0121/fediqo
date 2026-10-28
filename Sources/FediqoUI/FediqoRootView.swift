@@ -358,7 +358,10 @@ public struct FediqoRootView: View {
             // And the store is held within the room the person gave it (#249).
             .modifier(KeepingWithinRoom(session: session))
             // The wait, and the lines wanted held while Fediqo runs (#325, #324) in the same group.
-            .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes, noticesInFront: place == .notices))
+            .modifier(AsksOnAWait(
+                session: session, minutes: prefs.askMinutes,
+                noticesInFront: Self.noticesInFront(place: place, open: openLayers, held: noticesHeld)
+            ))
             .modifier(AnnouncementsAsk(session: session, announcements: people.announcements))
             // The pages open over the timeline, whose rows the store keeps while they are (#359).
             .modifier(PinsPages(session: session, pages: openPages))
@@ -371,8 +374,8 @@ public struct FediqoRootView: View {
                 // A walk a notice began is come back from by leaving it, and not by leaving
                 // the timeline some other way.
                 if accepted != .timeline { errand = nil }
-                // Nothing is asked for notices while their page is closed.
-                if old == .notices { session.noticeList.stop() }
+                // Nothing is asked for notices while their page is closed, and it opens on them.
+                if old == .notices { Self.leftNotices(session) }
                 // Closed on the stream it was opened over, before the session follows another.
                 if search.closes(leaving: old, for: accepted) { closeSearch() }
                 if let stream = ShellStream(accepted) { follow(stream) }
@@ -690,7 +693,12 @@ public struct FediqoRootView: View {
             // made the difference invisible: the two halves of one rule, written two ways, one of
             // them free to fall through. A fifth layer added to `DummyLayer` now has to say what
             // `q` does about it.
-            // Only what is on screen, as Escape reads it.
+            // Only what is on screen, as Escape reads it — and on Notices, the page of what is
+            // held back first, as Escape leaves it (#399).
+            if Self.leavesHeldPage(place: place, open: openLayers, held: noticesHeld) {
+                session.noticeList.acts.hideHeld()
+                return true
+            }
             switch DummyCommand.outermost(of: Self.escapeSees(openLayers, place: place)) {
             case .viewer: return closeViewer()
             // One step back, whichever kind of step it was. The two lines used to be two
@@ -766,8 +774,13 @@ public struct FediqoRootView: View {
             // So is a thread's next page on its way (#177), before the thread itself closes.
             // **The page in front's, and nobody else's** (decision 17).
             if place.isStream, stopInFront() { return true }
-            // On Notices: the read on the wire, then that page's own lamp.
-            if Self.noticesInFront(place: place, open: openLayers) {
+            // On Notices: the page of what is held back, left for the notices (#399) …
+            if Self.leavesHeldPage(place: place, open: openLayers, held: noticesHeld) {
+                session.noticeList.acts.hideHeld()
+                return true
+            }
+            // … the read on the wire, then that page's own lamp.
+            if Self.noticesInFront(place: place, open: openLayers, held: noticesHeld) {
                 // A reading-on goes on to its end, as the timeline's does (DESIGN-reload).
                 if session.noticeList.ask().stoppable, session.noticeList.stop() { return true }
                 if noticeSelectedID != nil {
@@ -1899,21 +1912,40 @@ public struct FediqoRootView: View {
     /// Whether the notices page is what the keys act on: it is in front, and nothing is drawn
     /// over it. The timeline's own layers are not on screen here (`escapeSees`), and its lamp
     /// is not this page's.
-    static func noticesInFront(place: ShellPlace, open: Set<DummyLayer>) -> Bool {
-        place == .notices && escapeSees(open, place: place).subtracting([.selection]).isEmpty
+    ///
+    /// **Not while what the sources hold back is open over it** (#399, `held`): its lamp, its
+    /// keys and its reads wait under that page until it is left.
+    static func noticesInFront(place: ShellPlace, open: Set<DummyLayer>, held: Bool = false) -> Bool {
+        !held && place == .notices && escapeSees(open, place: place).subtracting([.selection]).isEmpty
+    }
+
+    /// Whether `q` or Escape leaves the page of what the sources hold back, back to the notices:
+    /// it is open, and nothing is drawn over it.
+    static func leavesHeldPage(place: ShellPlace, open: Set<DummyLayer>, held: Bool) -> Bool {
+        held && noticesInFront(place: place, open: open)
+    }
+
+    /// Whether the page of what the sources hold back is open over the notices.
+    private var noticesHeld: Bool { session.noticeList.acts.heldShown }
+
+    /// Notices left for another place: nothing is asked for them while their page is closed, and
+    /// the page opens again on the notices, never on what the sources hold back (#399).
+    static func leftNotices(_ session: ShellSession) {
+        session.noticeList.stop()
+        session.noticeList.acts.hideHeld()
     }
 
     /// Whether `r` — and the page's reload mark, its touch path — has anybody to ask:
     /// `canReload`'s shape, for the page whose sources are those whose sign-in may read notices.
-    static func canReadNotices(place: ShellPlace, open: Set<DummyLayer>, asked: Bool) -> Bool {
-        noticesInFront(place: place, open: open) && asked
+    static func canReadNotices(place: ShellPlace, open: Set<DummyLayer>, asked: Bool, held: Bool = false) -> Bool {
+        noticesInFront(place: place, open: open, held: held) && asked
     }
 
     /// `r` on Notices: every source's newest stretch. A press while one is on the wire waits
     /// on that one and asks nothing twice (`ShellNoticeList.read`); Esc is what stops it.
     private func readNotices() -> Bool {
         guard Self.canReadNotices(
-            place: place, open: openLayers, asked: !ShellNoticeList.asked(in: session).isEmpty
+            place: place, open: openLayers, asked: !ShellNoticeList.asked(in: session).isEmpty, held: noticesHeld
         ) else { return false }
         noticeTooOld = nil
         Task { await session.noticeList.acts.readPage(in: session) }
@@ -1926,7 +1958,7 @@ public struct FediqoRootView: View {
     }
 
     private func moveInNotices(by step: Int) -> Bool {
-        guard Self.noticesInFront(place: place, open: openLayers) else { return false }
+        guard Self.noticesInFront(place: place, open: openLayers, held: noticesHeld) else { return false }
         let moved = Self.noticesStep(
             in: shownNotices.map(\.id), from: noticeSelectedID, by: step,
             hasMore: session.noticeList.hasMore(in: session)
@@ -1964,7 +1996,7 @@ public struct FediqoRootView: View {
     }
 
     private func jumpNoticesToTop() -> Bool {
-        guard Self.noticesInFront(place: place, open: openLayers), let first = shownNotices.first else { return false }
+        guard Self.noticesInFront(place: place, open: openLayers, held: noticesHeld), let first = shownNotices.first else { return false }
         noticeSelectedID = first.id
         noticeJump += 1
         return true
@@ -1987,14 +2019,14 @@ public struct FediqoRootView: View {
 
     /// `d` on the notices page: asks to dismiss the line the lamp is on, as its `…` asks.
     private func dismissFocusedNotice() -> Bool {
-        guard Self.noticesInFront(place: place, open: openLayers), let notice = focusedNotice else { return false }
+        guard Self.noticesInFront(place: place, open: openLayers, held: noticesHeld), let notice = focusedNotice else { return false }
         return NoticeActs.askToDismiss(notice, in: session)
     }
 
     /// A line opened: its post in its conversation, or the person — a step of the timeline
     /// place's walk, come back from by leaving it. A line that is only words opens nothing.
     private func openNotice(_ notice: Notice) -> Bool {
-        guard Self.noticesInFront(place: place, open: openLayers) else { return false }
+        guard Self.noticesInFront(place: place, open: openLayers, held: noticesHeld) else { return false }
         // A new report opens the server's reports, on it, where the reader may tend them (#381).
         if let page = Self.tendingOpened(by: notice, in: session) {
             guard setOutFromNotices(to: .server(page), for: notice, lighting: notice.report.map(TendingReportsSaid.rowID)) else {
@@ -2041,14 +2073,14 @@ public struct FediqoRootView: View {
 
     /// A face or a name on a line, pressed: that person, as a face on a post's row opens them.
     private func openNoticePerson(_ person: DummyPerson, of notice: Notice) -> Bool {
-        guard Self.noticesInFront(place: place, open: openLayers) else { return false }
+        guard Self.noticesInFront(place: place, open: openLayers, held: noticesHeld) else { return false }
         return setOutFromNotices(to: .person(person), for: notice, lighting: nil)
     }
 
     /// Who boosted or favourited a post a line is about (#375): that list, a step of the timeline
     /// place's walk, as from the post's own row.
     private func openNoticePeople(_ list: PeopleList, of notice: Notice) -> Bool {
-        guard Self.noticesInFront(place: place, open: openLayers) else { return false }
+        guard Self.noticesInFront(place: place, open: openLayers, held: noticesHeld) else { return false }
         return setOutFromNotices(to: .people(list), for: notice, lighting: nil)
     }
 
@@ -2060,7 +2092,7 @@ public struct FediqoRootView: View {
             return
         }
         // The reader went elsewhere while the store answered: nothing is opened under them.
-        guard Self.noticesInFront(place: place, open: openLayers) else { return }
+        guard Self.noticesInFront(place: place, open: openLayers, held: noticesHeld) else { return }
         _ = setOutFromNotices(to: .thread(row), for: notice, lighting: row)
     }
 
@@ -3105,7 +3137,7 @@ public struct FediqoRootView: View {
                 selectedID: $noticeSelectedID,
                 mark: noticeMark,
                 canReload: Self.canReadNotices(
-                    place: place, open: openLayers, asked: !ShellNoticeList.asked(in: session).isEmpty
+                    place: place, open: openLayers, asked: !ShellNoticeList.asked(in: session).isEmpty, held: noticesHeld
                 ),
                 onReload: { _ = readNotices() },
                 onOpen: { _ = openNotice($0) },
