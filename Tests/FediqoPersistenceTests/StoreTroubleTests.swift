@@ -549,12 +549,18 @@ struct StoreTroubleTests {
         try await store(4, in: dir)
         let file = dir.appendingPathComponent(index)
         #expect(StoreGlance.of(indexAt: file).posts == 4)
-        // Held, and let go from another task while the glance waits — given far longer than the
-        // letting go can take, so a slow machine is not what this measures.
+        // Held, and let go from another thread while the glance waits — given far longer than the
+        // letting go can take, so a slow machine is not what this measures. A thread of its own,
+        // not a task: the glance blocks the pool's thread it is on, and where that is the last one
+        // free, a task to let go waits behind it for the whole thirty seconds (#412).
         let other = try Holder(file.path)
-        let releasing = Task.detached { other.release() }
+        let (released, done) = AsyncStream<Void>.makeStream()
+        Thread.detachNewThread {
+            other.release()
+            done.finish()
+        }
         #expect(StoreGlance.of(indexAt: file, wait: 30).posts == 4, "busy for a moment, and said to be unreadable")
-        await releasing.value
+        for await _ in released {}
         // And one that is not a store at all is still said to be so.
         try Data(repeating: 0x5A, count: 9_000).write(to: file)
         #expect(StoreGlance.of(indexAt: file).posts == nil)
