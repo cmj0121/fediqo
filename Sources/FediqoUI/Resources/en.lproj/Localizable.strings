@@ -2877,3 +2877,10 @@
 "notices.held.title" = "Held back";
 "notices.held.empty" = "Nothing is held back now.";
 "notices.held.again.spoken" = "Read again what %@ is holding back";
+
+/* What is chosen for a joined source, behind a gear on its page (#400). */
+"source.settings" = "Settings for this source";
+"source.settings.title" = "Settings for %@";
+"source.settings.back" = "Back to the source";
+"source.settings.narrows" = "Something here narrows what is shown";
+"source.settings.plain" = "Nothing here narrows what is shown";

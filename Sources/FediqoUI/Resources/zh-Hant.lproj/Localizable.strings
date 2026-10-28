@@ -2817,3 +2817,10 @@
 "notices.held.title" = "擋下的通知";
 "notices.held.empty" = "目前沒有擋下的通知。";
 "notices.held.again.spoken" = "再讀一次 %@ 擋下的通知";
+
+/* What is chosen for a joined source, behind a gear on its page (#400). */
+"source.settings" = "這個來源的設定";
+"source.settings.title" = "%@ 的設定";
+"source.settings.back" = "回到來源";
+"source.settings.narrows" = "這裡有設定縮減了顯示的內容";
+"source.settings.plain" = "這裡沒有設定縮減顯示的內容";
