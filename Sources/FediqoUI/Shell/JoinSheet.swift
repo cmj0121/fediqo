@@ -622,6 +622,7 @@ struct JoinSheet: View {
                     if case .joined(let source) = origin {
                         LineControl(host: source.host, session: session)
                         NoticesToldControl(host: source.host, session: session)
+                        NoticePolicyBlock(host: source.host, session: session)
                     }
                     if case .joined(let source) = origin { ServerFiltersBlock(host: source.host, session: session) }
                     if case .joined(let source) = origin { YearBlock(host: source.host, session: session) }

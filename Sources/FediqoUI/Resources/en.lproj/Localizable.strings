@@ -1848,9 +1848,6 @@
 "notices.policy.drop" = "Let go";
 "notices.policy.drop.ask.title" = "Let go of notices from %1$@ on %2$@?";
 "notices.policy.drop.ask.line" = "%@ will throw them away: they will not be shown here, or held back for you to let through.";
-"notices.policy.opened" = "Open";
-"notices.policy.closed" = "Closed";
-"notices.policy.absent" = "%@ cannot hold notices back, so there is nothing to choose here.";
 "notices.policy.locked" = "This sign-in on %@ reads notices and cannot change them. Choosing what it holds back asks for acting and changing notices too.";
 "notices.act.letGo.unconfirmed" = "%@ did not confirm the notices were let go. Read again to see.";
 "notices.act.which.notice" = "%1$@ The notice: %2$@.";
