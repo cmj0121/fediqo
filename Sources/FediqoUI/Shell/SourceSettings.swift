@@ -21,6 +21,11 @@ enum SourceSettings {
         Part.allCases.filter { has($0, host: host, in: session) }
     }
 
+    /// Whether the source has any part at all: what draws its gear. Stops at the first.
+    static func hasAny(host: String, in session: ShellSession) -> Bool {
+        Part.allCases.contains { has($0, host: host, in: session) }
+    }
+
     private static func has(_ part: Part, host: String, in session: ShellSession) -> Bool {
         switch part {
         case .line:
@@ -74,10 +79,10 @@ struct SourceSettingsGear: View {
     let session: ShellSession
     let onOpen: () -> Void
 
-    static let symbol = "gearshape"
+    static let symbol = ShellGearLabel.symbol
 
     var body: some View {
-        if !SourceSettings.parts(host: host, in: session).isEmpty {
+        if SourceSettings.hasAny(host: host, in: session) {
             let narrows = SourceSettings.narrows(host: host, in: session)
             ShellIconButton(Self.symbol, name: "source.settings", tone: narrows ? .lit : .quiet, action: onOpen)
                 .accessibilityValue(SourceSettings.spoken(narrows: narrows))

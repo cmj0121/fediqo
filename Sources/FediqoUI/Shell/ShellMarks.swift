@@ -176,7 +176,7 @@ extension ShellSession {
     }
 }
 
-/// What whether a timeline's foot says its marks stand by publish time depends on (#317).
+/// What whether a timeline's head says, behind a (?), that its marks stand by publish time depends on (#317, #402).
 struct MarksOrderAsked: Equatable {
     let definition: TimelineDefinition
     let sources: [Source]

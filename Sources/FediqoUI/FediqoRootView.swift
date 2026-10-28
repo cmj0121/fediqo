@@ -695,10 +695,7 @@ public struct FediqoRootView: View {
             // `q` does about it.
             // Only what is on screen, as Escape reads it — and on Notices, the page of what is
             // held back first, as Escape leaves it (#399).
-            if Self.leavesHeldPage(place: place, open: openLayers, held: noticesHeld) {
-                session.noticeList.acts.hideHeld()
-                return true
-            }
+            if leaveHeldPage() { return true }
             switch DummyCommand.outermost(of: Self.escapeSees(openLayers, place: place)) {
             case .viewer: return closeViewer()
             // One step back, whichever kind of step it was. The two lines used to be two
@@ -775,10 +772,7 @@ public struct FediqoRootView: View {
             // **The page in front's, and nobody else's** (decision 17).
             if place.isStream, stopInFront() { return true }
             // On Notices: the page of what is held back, left for the notices (#399) …
-            if Self.leavesHeldPage(place: place, open: openLayers, held: noticesHeld) {
-                session.noticeList.acts.hideHeld()
-                return true
-            }
+            if leaveHeldPage() { return true }
             // … the read on the wire, then that page's own lamp.
             if Self.noticesInFront(place: place, open: openLayers, held: noticesHeld) {
                 // A reading-on goes on to its end, as the timeline's does (DESIGN-reload).
@@ -1923,6 +1917,13 @@ public struct FediqoRootView: View {
     /// it is open, and nothing is drawn over it.
     static func leavesHeldPage(place: ShellPlace, open: Set<DummyLayer>, held: Bool) -> Bool {
         held && noticesInFront(place: place, open: open)
+    }
+
+    /// Leaves the page of what the sources hold back where `q` or Escape would (`leavesHeldPage`).
+    private func leaveHeldPage() -> Bool {
+        guard Self.leavesHeldPage(place: place, open: openLayers, held: noticesHeld) else { return false }
+        session.noticeList.acts.hideHeld()
+        return true
     }
 
     /// Whether the page of what the sources hold back is open over the notices.

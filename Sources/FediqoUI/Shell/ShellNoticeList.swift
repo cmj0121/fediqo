@@ -132,7 +132,7 @@ final class ShellNoticeList {
         var isOnFirstStretch: Bool { standing == .reading && !answered }
 
         /// Whether this source holds as many lines as are held of one (`capacity`) and has
-        /// more below: it is not read on while it does, and the foot says why. **Derived from
+        /// more below: it is not read on while it does, and the status mark says why. **Derived from
         /// the count** (`bound`): once lines go — dismissed, or let go by the months limit —
         /// it is full no longer, and is read on from where it stopped.
         var full = false
@@ -169,7 +169,7 @@ final class ShellNoticeList {
     /// How many lines are held of one source, in this run and across them
     /// (`NoticeReach.capacity`). Without a months limit nothing lets a line go by age, so
     /// without a bound a source read on and on — or one that answers every ask with more — is
-    /// held whole. Past it the foot says the limit was reached, and a reload still reads the newest.
+    /// held whole. Past it the status mark says the limit was reached, and a reload still reads the newest.
     static let capacity = NoticeReach.capacity
 
     /// `capacity`, where a test wants a bound it can reach.
@@ -397,7 +397,7 @@ final class ShellNoticeList {
     }
 
     /// Whether a source has been read down to the months limit and has more below it: nothing
-    /// older is asked for, drawn or written, and the foot says the limit is why.
+    /// older is asked for, drawn or written, and the status mark says the limit is why.
     var isAtLimit: Bool {
         reaches.values.contains { $0.before != nil && !$0.full && pastLimit($0) }
     }
@@ -416,7 +416,7 @@ final class ShellNoticeList {
         epochs = await store.noticesEpochs()
     }
 
-    /// Whether a source is held to `capacity` and read on no further: what the foot says where
+    /// Whether a source is held to `capacity` and read on no further: what the status mark says where
     /// it would otherwise say every source has handed over all it has.
     var isFull: Bool { reaches.values.contains(where: \.full) }
 
@@ -922,7 +922,7 @@ final class ShellNoticeList {
                 reach.notices.removeAll { $0.at < limit }
                 // By its newest id, for `bound`'s reason. With nothing kept at all, from where
                 // this stretch was asked — or, a read from the top, from where the source says
-                // its next begins: it has more, and the foot says the limit is why none is read.
+                // its next begins: it has more, and the status mark says the limit is why none is read.
                 reach.before = reach.notices.last?.newestID ?? ask.before ?? page.before
                 reach.reached = limit.addingTimeInterval(-0.001)
             }

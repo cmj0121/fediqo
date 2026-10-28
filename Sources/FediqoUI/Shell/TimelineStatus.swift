@@ -21,11 +21,7 @@ enum TimelineStatus {
             guard let words = ShellReload.trendsEndLine([host], language: language) else { return nil }
             return StatusLine(
                 id: "trends:" + host, host: host, words: words, standsOut: true,
-                press: StatusPress(
-                    kind: .again,
-                    spoken: String(format: L10n.t("status.press.again.read.spoken", language: language), host),
-                    act: reload
-                )
+                press: .readAgain(host, language: language, act: reload)
             )
         }
     }
