@@ -149,8 +149,15 @@ struct SearchSourcesTests {
         let reach = try #require(session.reload.reach)
         #expect(reach.asked == [Self.one])
         #expect(reach.unasked == [Self.two, Self.forum])
-        #expect(reach.sentence
-            == "Also asked one.example. Not asked, as they cannot be searched from here: two.example, forum.example.")
+        #expect(reach.sentence == "Also asked one.example.")
+        let lines = reach.unaskedLines(language: .english)
+        #expect(lines.map(\.host) == [Self.two, Self.forum])
+        #expect(lines.allSatisfy { $0.needsReader && $0.standsOut && $0.press == nil })
+        #expect(StatusWords.count(lines) == 2)
+        #expect(lines[0].words == "Not asked, as it cannot be searched from here: two.example.")
+        #expect(!lines[0].words.contains(Self.forum))
+        let chinese = reach.unaskedLines(language: .taiwanese)
+        #expect(chinese[0].words.contains(Self.two) && chinese[0].words != lines[0].words)
         for key in ["search.asking", "search.failed", "search.reach.asked", "search.reach.notAsked", "work.purpose.search"] {
             for language in [DummyLanguage.english, .taiwanese] {
                 #expect(L10n.t(key, language: language) != key, "\(key) is missing in \(language)")
@@ -259,12 +266,13 @@ struct SearchSourcesTests {
         #expect(await session.store.note(Self.foundKey) == nil)
     }
 
-    @Test("The line saying who was asked is drawn under the field, whole, in light and in dark, at a phone's width")
+    @Test("Who was asked is a (?) and who was not is the status mark, not a sentence under the field")
     func reachIsDrawn() throws {
-        let reach = ShellReload.SearchReach(asked: [Self.one], unasked: [Self.two, Self.forum]).sentence
+        let lines = ShellReload.SearchReach(asked: [Self.one], unasked: [Self.two, Self.forum])
+            .unaskedLines(language: .english)
         func height(_ reach: String?, _ scheme: ColorScheme) throws -> CGFloat {
             let bar = SearchBar(
-                search: ShellSearch(), timeline: "All", found: 2, reach: reach,
+                search: ShellSearch(), timeline: "All", found: 2, reach: reach, status: lines,
                 onSubmit: {}, onCleared: {}, onClose: {}
             )
             .frame(width: 320)
@@ -272,9 +280,10 @@ struct SearchSourcesTests {
             let image = try #require(ImageRenderer(content: bar).cgImage)
             return CGFloat(image.height)
         }
+        let long = String(repeating: "Also asked one.example. ", count: 40)
         for scheme in [ColorScheme.light, .dark] {
-            let bare = try height(nil, scheme)
-            #expect(try height(reach, scheme) > bare + 20, "wrapped over lines rather than cut to one")
+            let short = try height("Also asked one.example.", scheme)
+            #expect(try height(long, scheme) == short, "a (?) keeps a long explanation off the row")
         }
     }
 

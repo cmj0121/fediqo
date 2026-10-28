@@ -272,23 +272,30 @@ final class ShellReload {
     }
 
     /// Which sources a search asked, and which of the timeline's it did not because they cannot be
-    /// searched from here (#176) — said under the field, so the results say where they came from.
+    /// searched from here (#176). Who was asked is a (?) by the field; who was not is a line of
+    /// the status mark, because their results are missing (#403).
     struct SearchReach: Equatable, Sendable {
         /// Asked, in the timeline's order.
         let asked: [String]
         /// The timeline's sources that cannot be searched from here, and so were not asked.
         let unasked: [String]
 
-        /// Nothing where the timeline has no source at all.
+        /// Who was asked, behind the field's (?). Nothing where nobody was.
         var sentence: String? {
-            var said: [String] = []
-            if !asked.isEmpty {
-                said.append(String(format: L10n.t("search.reach.asked"), asked.joined(separator: ", ")))
+            guard !asked.isEmpty else { return nil }
+            return String(format: L10n.t("search.reach.asked"), asked.joined(separator: ", "))
+        }
+
+        /// One counted line a source that was not asked. What it would have found is missing, and
+        /// there is no press: it cannot be searched from here.
+        func unaskedLines(language: DummyLanguage? = nil) -> [StatusLine] {
+            unasked.map { host in
+                StatusLine(
+                    id: "unasked:" + host, host: host,
+                    words: String(format: L10n.t("search.reach.notAsked", language: language), host),
+                    standsOut: true
+                )
             }
-            if !unasked.isEmpty {
-                said.append(String(format: L10n.t("search.reach.notAsked"), unasked.joined(separator: ", ")))
-            }
-            return said.isEmpty ? nil : said.joined(separator: " ")
         }
 
         /// **Only a Mastodon this device is signed in to can be searched.** Its server answers a

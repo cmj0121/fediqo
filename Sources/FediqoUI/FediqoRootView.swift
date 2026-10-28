@@ -3183,6 +3183,7 @@ public struct FediqoRootView: View {
                         found: search.isIndexed ? searchItems?.count : nil,
                         counted: session.searchCount(found: searchItems?.count ?? 0, searched: search.searchedCount),
                         reach: session.reload.reach?.sentence,
+                        status: session.reload.reach?.unaskedLines() ?? [],
                         lookUp: people.found.line(typed: search.text, in: session),
                         onLookUp: lookUpPressed,
                         onSubmit: searchSubmitted,

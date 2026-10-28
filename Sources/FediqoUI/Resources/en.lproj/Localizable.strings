@@ -345,7 +345,7 @@
 "search.failed" = "Could not search %@.";
 "search.scope" = "Could not search %@: sign in to it again to let Fediqo search there.";
 "search.reach.asked" = "Also asked %@.";
-"search.reach.notAsked" = "Not asked, as they cannot be searched from here: %@.";
+"search.reach.notAsked" = "Not asked, as it cannot be searched from here: %@.";
 "search.empty.title" = "Nothing in %@ matches";
 "search.empty.detail" = "Only the posts this timeline shows are searched: what this device holds, and what its sources sent back when asked. Try fewer characters, or * for any run of them.";
 "search.empty.line" = "Try fewer characters, or * for any run of them.";
@@ -925,7 +925,6 @@
 
 /* Unit 5 — one row per server, and what it is. */
 "account.sources.title"          = "Sources";
-"account.sources.line" = "Everything this device reads.";
 "account.sources.detail"         = "Everything this device reads. Press a row for what that server says about itself — its name, its size, its boards. Removing one takes its boards and its posts with it.";
 "account.sources.held"           = "What each one has left on this device is on Usage.";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
