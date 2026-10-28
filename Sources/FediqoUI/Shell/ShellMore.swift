@@ -214,22 +214,23 @@ extension ShellReload {
             }
             guard !Task.isCancelled else { return }
             self.record(hosts.filter(unread.contains), for: .more)
-            // Which sources have no more of what is rising to give, for the timeline's foot (#288).
+            // Which sources have no more of what is rising to give, for the head's status mark (#402).
             self.noteTrendsEnded()
         }
     }
 
     /// The sources of `query` whose trending list has been read to its end, in the order the
-    /// reader holds them — what the Trends timeline's foot names. None for a timeline that does
-    /// not read what is rising, and never a forum, whose ranking lists have no next.
+    /// reader holds them — what the Trends head's status mark names (#402). None for a timeline
+    /// that does not read what is rising, and never a forum, whose ranking lists have no next.
     func trendsEnded(of query: TimelineQuery, in session: ShellSession) -> [String] {
         guard !trendsEnded.isEmpty else { return [] }
         let asks = CompiledTimeline(query.definition(among: session.written), sources: session.sources).sourcesToAsk()
         return asks.filter { $0.categories?.contains(.trends) == true && trendsEnded.contains($0.host) }.map(\.host)
     }
 
-    /// What the foot says of sources that have no more of what is rising to give, naming each
-    /// and what reads from the top again; nothing where none has said so.
+    /// What is said of sources that have no more of what is rising to give, naming each and what
+    /// reads from the top again; nothing where none has said so. The status mark says it of one
+    /// source at a time (#402).
     static func trendsEndLine(_ hosts: [String], language: DummyLanguage? = nil) -> String? {
         guard !hosts.isEmpty else { return nil }
         return String(
@@ -477,31 +478,6 @@ extension ShellReload {
             return try await client.latest(source: stamp, page: further)
         default:
             return []
-        }
-    }
-}
-
-/// The foot of a timeline that reads what is rising (#288): which of its sources have no more
-/// of it to give, and that a reload reads from the top again. Nothing while none has said so.
-///
-/// **At the foot and not a passing line.** A source's end is true until the next reload, and a
-/// short Trends list reaches it by itself, with nobody watching the bottom of the screen for two
-/// seconds; so it is said where the list ends, for as long as it is so — as a thread says its own
-/// end at its foot (`ThreadFoot`). A failure is still the reload's line: it is news, and passes.
-struct TrendsEndFoot: View {
-    let timeline: TimelineQuery
-    let session: ShellSession
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        if let line = ShellReload.trendsEndLine(session.reload.trendsEnded(of: timeline, in: session)) {
-            Text(line)
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, ShellSpace.pad)
-                .padding(.vertical, ShellSpace.snug)
         }
     }
 }
