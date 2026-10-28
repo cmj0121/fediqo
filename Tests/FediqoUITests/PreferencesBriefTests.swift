@@ -24,6 +24,7 @@ struct PreferencesBriefTests {
     static let briefs: [(brief: String, long: String)] = [
         ("prefs.askEvery.brief", "prefs.askEvery.footer"),
         ("prefs.latest.brief", "prefs.latest.footer"),
+        ("prefs.filters.brief", "prefs.filters.footer"),
         ("about.brief", "about.footer"),
         ("work.brief", "work.footer"),
         ("allow.builtIn.brief", "allow.builtIn.footer"),

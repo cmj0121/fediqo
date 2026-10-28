@@ -80,7 +80,7 @@ struct SearchLampHostedTests {
                 jumpToTop: 0,
                 onBack: {},
                 ways: TimelineWays(canSearch: true, onSearch: {}, canReload: false, onReload: {}),
-                search: search
+                search: search, serverFilters: true
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // Where the root draws it (F10): not under a page drawn in front of the results.

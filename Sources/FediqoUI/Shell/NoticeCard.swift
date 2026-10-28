@@ -155,6 +155,7 @@ struct NoticeCard: View {
         let item = Self.item(post, in: session)
         let making = RowActing(
             session: session, people: people, linkPreviews: prefs.linkPreviews,
+            serverFilters: prefs.serverFilters,
             openThread: { _ in onOpen?() }, openPeople: { list, _ in onOpenPeople(list) }
         )
         return DummyItemRow(

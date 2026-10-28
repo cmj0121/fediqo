@@ -439,6 +439,7 @@ struct TrendsPageTests {
                 playback: playback, onPlayRow: { _ in }, onViewRow: { _ in }, onTurnRow: { _ in }, onOpenThread: { _ in },
                 jumpToTop: 0, onBack: {}, ways: TimelineWays(canSearch: true, onSearch: {}, canReload: true, onReload: {}),
                 search: ShellSearch(), people: pages,
+                serverFilters: true,
                 trends: FediqoRootView.trendsHead(tabs: TrendsTab.tabs(in: session), kept: front.tab) { front.tab = $0 }
             )
             .environment(prefs)

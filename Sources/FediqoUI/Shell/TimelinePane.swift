@@ -110,6 +110,11 @@ struct TimelinePane: View {
     /// Whether a post's link is drawn with its preview (#335): the person's preference, handed in
     /// by the root, so building a row's acts reads nothing of the environment.
     var linkPreviews = true
+    /// Whether a source's filters hide or cover a row (#406): the person's preference, handed in
+    /// by the root, so building a row's acts reads nothing of the environment. The timeline says
+    /// nothing of the choice. Off, a row is drawn plainly and no source is asked again.
+    /// No default: a caller that drops it does not compile.
+    var serverFilters: Bool
     /// The press about looking somebody up through a source, answered by the root.
     var onLookUp: (SearchLookUpLine.Press) -> Void = { _ in }
     /// Trends' tabs, where this pane is Trends: drawn in place of the timelines' names, and
@@ -1562,7 +1567,8 @@ struct TimelinePane: View {
     /// notices page builds a post's row by too (#375).
     func acting(_ item: DummyItem, inside root: DummyItem?) -> ItemActing {
         RowActing(
-            session: session, people: people, linkPreviews: linkPreviews, openThread: onOpenThread,
+            session: session, people: people, linkPreviews: linkPreviews, serverFilters: serverFilters,
+            openThread: onOpenThread,
             openPeople: onOpenPeople
         )(item, inside: root)
     }

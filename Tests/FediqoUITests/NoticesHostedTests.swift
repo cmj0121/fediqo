@@ -356,7 +356,7 @@ struct NoticesHostedTests {
             return
         }
         #expect(session.heldNote(key: post.key) == nil, "not held before the press")
-        let acting = NoticeCard.acting(post, in: session, making: RowActing(session: session, openThread: { _ in }))
+        let acting = NoticeCard.acting(post, in: session, making: RowActing(session: session, serverFilters: true, openThread: { _ in }))
         #expect(acting.acts.offers(.boost))
         acting.perform?(.boost)
         await met("the post is held") { session.heldNote(key: post.key) != nil }
@@ -377,7 +377,7 @@ struct NoticesHostedTests {
         }
         #expect(await session.landed(noticePost: post) == nil)
         session.noticeList.wouldNotHold(post.key)
-        let acting = NoticeCard.acting(post, in: session, making: RowActing(session: session, openThread: { _ in }))
+        let acting = NoticeCard.acting(post, in: session, making: RowActing(session: session, serverFilters: true, openThread: { _ in }))
         #expect(acting.acts.refused == .tooOld && acting.keep == nil)
         let marks = ItemActs.marks(on: DummyItem(post), acting: acting, language: .english)
         let boost = try #require(marks.first { $0.kind == .act(.boost) })
@@ -1311,7 +1311,7 @@ struct NoticesHostedTests {
                 playback: playback, onPlayRow: { _ in }, onViewRow: { _ in }, onTurnRow: { _ in },
                 onOpenThread: { _ in }, jumpToTop: 0, onBack: {},
                 ways: TimelineWays(canSearch: false, onSearch: {}, canReload: false, onReload: {}),
-                search: ShellSearch()
+                search: ShellSearch(), serverFilters: true
             )
             .environment(prefs)
         }

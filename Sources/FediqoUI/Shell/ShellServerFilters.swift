@@ -181,7 +181,10 @@ final class ShellServerFilters {
 extension ShellSession {
     /// The filter of the person's at `item`'s source that stands over it where a timeline shows
     /// it (#338), as its source said: a hiding one always, a warning not opened this run.
-    func serverFilter(over item: DummyItem, at now: Date = Date()) -> ServerFilterHit? {
+    /// Nothing where this device is not applying a source's filters (#406). The hit stays on
+    /// the post, and no source is asked.
+    func serverFilter(over item: DummyItem, at now: Date = Date(), applied: Bool = true) -> ServerFilterHit? {
+        guard applied else { return nil }
         guard let hit = item.serverFiltered.standing(in: ServerFilterHit.timelines, at: now) else { return nil }
         if hit.action != .hide, shownAnyway.contains(item.id) { return nil }
         return hit

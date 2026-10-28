@@ -13,6 +13,9 @@ struct RowActing {
     let session: ShellSession
     var people: ShellPersonPages?
     var linkPreviews = true
+    /// Whether a source's filters hide or cover the row (#406). On, as the source said.
+    /// No default: a caller that drops it does not compile, so a row cannot quietly keep hiding.
+    var serverFilters: Bool
     /// Opening the conversation of the row with this id.
     let openThread: (String) -> Void
     /// Opening who boosted or favourited it, from the row with this id.
@@ -21,7 +24,7 @@ struct RowActing {
     /// The acts of `item`, drawn inside the conversation around `root` where there is one —
     /// where the answer mark opens the answer rather than the conversation (#108).
     func callAsFunction(_ item: DummyItem, inside root: DummyItem? = nil) -> ItemActing {
-        var acting = session.acting(on: item)
+        var acting = session.acting(on: item, applied: serverFilters)
         acting.perform = { act in
             switch act {
             case .boost, .favourite, .bookmark:

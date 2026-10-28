@@ -604,6 +604,10 @@
 "prefs.previews.head" = "連結預覽";
 "prefs.previews.brief" = "貼文的連結會顯示它通往的網頁。";
 "prefs.previews.footer" = "預覽是貼文的來源抓取到的網頁內容：標題、簡介、通往哪裡，以及圖片。關閉後，所有貼文都不顯示預覽，也不會去要預覽的圖片。";
+"prefs.filters" = "套用來源的過濾器";
+"prefs.filters.head" = "來源的過濾器";
+"prefs.filters.brief" = "來源的過濾器會在這裡隱藏或蓋住貼文。";
+"prefs.filters.footer" = "依照來源的說法，過濾器會在每條時間軸隱藏或蓋住貼文。關閉後，不會因此隱藏或蓋住任何貼文，過濾器仍留在來源。這件事不會再去問來源。";
 "prefs.askEvery" = "再問一次來源";
 "prefs.askEvery.one" = "每分鐘";
 "prefs.askEvery.many" = "每 %d 分鐘";

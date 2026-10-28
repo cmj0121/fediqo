@@ -179,7 +179,7 @@ struct PagesHoldTogetherTests {
                 session: session, selectedID: $selected, standing: standing, onOpenPerson: { _ in }, decks: $decks,
                 playback: playback, onPlayRow: { _ in }, onViewRow: { _ in }, onTurnRow: { _ in }, onOpenThread: { _ in },
                 jumpToTop: 0, onBack: {}, ways: TimelineWays(canSearch: true, onSearch: {}, canReload: true, onReload: {}),
-                search: ShellSearch(), people: pages
+                search: ShellSearch(), people: pages, serverFilters: true
             )
             .environment(prefs)
         }
