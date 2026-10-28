@@ -1796,9 +1796,6 @@
 "notices.policy.drop" = "放掉";
 "notices.policy.drop.ask.title" = "在 %2$@ 放掉%1$@的通知？";
 "notices.policy.drop.ask.line" = "%@ 會把它們丟掉：不會出現在這裡，也不會攔下來讓你放行。";
-"notices.policy.opened" = "已展開";
-"notices.policy.closed" = "已收起";
-"notices.policy.absent" = "%@ 沒辦法攔下通知，所以這裡沒有可選的。";
 "notices.policy.locked" = "這個在 %@ 的登入只能讀通知、不能改。要選它攔下什麼，會一併請求操作和更改通知的權限。";
 "notices.act.letGo.declined" = "%@ 沒有放下通知。它擋下的仍然列著。";
 "notices.act.letGo.unconfirmed" = "%@ 沒有確認通知已放下。再讀取一次看看。";

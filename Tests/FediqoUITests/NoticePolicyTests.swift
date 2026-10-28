@@ -1,9 +1,13 @@
+#if os(macOS)
+import AppKit
+#endif
 import Foundation
+import SwiftUI
 import Testing
 @testable import FediqoCore
 @testable import FediqoUI
 
-/// #376: whose notices a source holds back is the person's to choose, from the notices page — read
+/// #376, #398: whose notices a source holds back is the person's to choose, on that source's own page — read
 /// with what it holds, changed with one press that shows at once, and the source's own answer
 /// once it lands, whatever a read on its way says after.
 @Suite("Whose notices a source holds back is chosen here")
@@ -44,9 +48,10 @@ struct NoticePolicyTests {
         let policy = try #require(acts.shownPolicy(host: F.a))
         #expect(policy.offered == NoticePolicy.Whose.allCases && policy.ways[.notFollowing] == .accept)
         #expect(NoticePolicyWords.stands(F.a, in: session) == .offered(policy))
-        // b answers 404: it cannot hold notices back, and the place says so.
+        // b answers 404: it cannot hold notices back, and its page draws nothing for it.
         #expect(acts.holdings[F.b] == .absent && NoticePolicyWords.stands(F.b, in: session) == .absent)
-        #expect(NoticePolicyWords.absent(F.b, language: .english) == "b.example cannot hold notices back, so there is nothing to choose here.")
+        #expect(NoticePolicyBlock.shows(.offered(policy)) && NoticePolicyBlock.shows(.locked))
+        #expect(!NoticePolicyBlock.shows(.absent) && !NoticePolicyBlock.shows(.unknown))
     }
 
     @Test("A choice shows at once, is sent as that one field, and once the source answers it is the source's own word")
@@ -102,6 +107,49 @@ struct NoticePolicyTests {
         #expect(acts.policies[F.a]?.ways[.newAccounts] == .drop, "and the other kind's, never put back")
         #expect(acts.choosing[F.a]?.isEmpty != false)
     }
+
+    @Test("On the source's page, letting go asks first: cancelled nothing is sent, and only its yes sends; letting in or holding back sends at once")
+    func theBlockAsksBeforeLettingGo() async throws {
+        let (session, server) = try await shell([
+            F.get(F.a, Self.path): .body(Self.policy("accept")),
+            Self.patch(F.a): .body(Self.policy("drop")),
+        ])
+        await session.noticeList.acts.look(host: F.a, in: session)
+        var asked: ShellMoreAsk?
+        NoticePolicyBlock.choose(.drop, for: .notFollowing, at: F.a, in: session) { asked = $0 }
+        let ask = try #require(asked, "letting go was sent without asking")
+        #expect(ask.question == NoticePolicyWords.letGoQuestion(.notFollowing, at: F.a))
+        ask.answered("cancel")
+        await Task.yield()
+        #expect(await server.count(Self.patch(F.a)) == 0, "a cancelled question sent the choice")
+        ask.answered(ShellQuestion.yes)
+        await met("the yes sent it") { await server.count(Self.patch(F.a)) == 1 }
+
+        asked = nil
+        await server.set(Self.patch(F.a), .body(Self.policy("filter")))
+        NoticePolicyBlock.choose(.filter, for: .notFollowing, at: F.a, in: session) { asked = $0 }
+        #expect(asked == nil, "holding back asked a question")
+        await met("holding back is sent at once") { await server.count(Self.patch(F.a)) == 2 }
+    }
+
+    #if os(macOS)
+    @Test("A source's page draws the choices for a source that has them, the ask where its sign-in cannot change them, and nothing for one that has none")
+    func theBlockIsDrawnOrAbsent() async throws {
+        let (session, _) = try await shell([F.get(F.a, Self.path): .body(Self.policy("accept"))])
+        await session.noticeList.acts.readPage(in: session)
+        func height(_ host: String) -> CGFloat {
+            NSHostingView(rootView: NoticePolicyBlock(host: host, session: session).frame(width: 400)).fittingSize.height
+        }
+        #expect(height(F.a) > 40, "a source with choices drew none")
+        #expect(height(F.b) < 1, "a source with no such thing drew something")
+
+        let (reads, _) = try await shell([F.get(F.a, Self.path): .body(Self.policy("accept"))], scopes: F.reads)
+        await reads.noticeList.acts.readPage(in: reads)
+        #expect(NoticePolicyWords.stands(F.a, in: reads) == .locked)
+        let locked = NSHostingView(rootView: NoticePolicyBlock(host: F.a, session: reads).frame(width: 400)).fittingSize.height
+        #expect(locked > 40, "a sign-in that cannot change them was not offered the ask")
+    }
+    #endif
 
     @Test("A choice that already stands is not sent")
     func aStandingChoiceIsNotSent() async throws {

@@ -437,13 +437,6 @@ struct NoticesPane: View {
             NoticesHeldRow(count: held) { Task { await acts.showHeld(in: session) } }
             ShellRule()
         }
-        // Whose notices each source holds back, and how (#376): a line a source that has said.
-        ForEach(ShellNoticeList.asked(in: session).map { $0.host.lowercased() }, id: \.self) { host in
-            if NoticePolicyWords.stands(host, in: session) != .unknown {
-                NoticePolicyLine(host: host, session: session)
-                ShellRule()
-            }
-        }
         if !shown.isEmpty {
             rows(shown)
         } else {

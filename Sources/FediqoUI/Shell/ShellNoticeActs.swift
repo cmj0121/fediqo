@@ -59,8 +59,6 @@ final class ShellNoticeActs {
     /// The choices pressed here and on their way to their source, by host: drawn at once over
     /// what the source last said, until its answer lands.
     private(set) var choosing: [String: [NoticePolicy.Whose: NoticePolicy.Way]] = [:]
-    /// The sources whose line of what they hold back is open.
-    private(set) var policyOpen: Set<String> = []
     /// When each source's answer to a choice landed, in the run's order of reads: a look at what
     /// it holds back sent before that names the policy as it stood before, and is not taken.
     @ObservationIgnored private var policyMoved: [String: UInt64] = [:]
@@ -225,7 +223,10 @@ final class ShellNoticeActs {
         }
     }
 
-    private func look(host: String, in session: ShellSession) async {
+    /// Asks one source what it holds back, as `look(in:)` asks each: what its page of
+    /// settings reads as it opens (#398).
+    func look(host raw: String, in session: ShellSession) async {
+        let host = raw.lowercased()
         let known = holdings[host] ?? .unasked
         guard known != .absent, looking.insert(host).inserted else { return }
         defer { looking.remove(host) }
@@ -260,11 +261,6 @@ final class ShellNoticeActs {
     /// Whether the sign-in on `host` may change what it holds back: it may change notices.
     func mayChoose(host: String, in session: ShellSession) -> Bool {
         session.mastodon.dismisses(host: host)
-    }
-
-    func togglePolicy(host raw: String) {
-        let host = raw.lowercased()
-        if policyOpen.contains(host) { policyOpen.remove(host) } else { policyOpen.insert(host) }
     }
 
     /// Sets how `host` holds back the notices of `whose`. **Drawn at once** (`choosing`), and
@@ -610,7 +606,6 @@ final class ShellNoticeActs {
         holdings[host] = nil
         policies[host] = nil
         choosing[host] = nil
-        policyOpen.remove(host)
         policyMoved[host] = nil
         requests[host] = nil
         onWay[host] = nil
