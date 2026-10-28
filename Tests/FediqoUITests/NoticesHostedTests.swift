@@ -296,7 +296,9 @@ struct NoticesHostedTests {
         _ = await session.store.setRetention(months: 3)
         await session.noticeList.read(in: session)
         let lines = session.noticeList.lines
-        #expect(lines.count == 6)
+        // Required, not expected: a read that came to nothing fails here, saying so, and the
+        // shapes below are not looked for in an empty list.
+        try #require(lines.count == 6, "the read held \(lines.count) lines")
         let shapes = lines.map { NoticeShape.of($0) }
         guard case .post(let mention) = shapes[0], case .faces(let own?) = shapes[1], case .follower(let cy) = shapes[2],
               case .request(let di) = shapes[3], case .post(let old) = shapes[5]
@@ -878,7 +880,8 @@ struct NoticesHostedTests {
 
         root.prefs.noticesHidden = ["favourite"]
         let (_, some) = await hosted(session, root: root)
-        #expect(rows(some) == [session.noticeList.lines[1].id])
+        let follow = try #require(session.noticeList.lines.dropFirst().first, "the read held \(session.noticeList.lines.count) lines")
+        #expect(rows(some) == [follow.id])
         #expect(some.says[.kindsMark] == "1 kind left out" && NoticeKindsMenu.lit(root.prefs.noticesHidden), "the gear is lit, and says so")
         #expect(some.frames[.head] != nil && some.says[.head] == nil, "the head carries no words about the kinds")
 
