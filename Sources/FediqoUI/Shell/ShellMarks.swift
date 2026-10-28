@@ -13,7 +13,7 @@ import SwiftUI
 // opens (`ShellSession.askFor`). Signed out, it is there and dim, as Lists is.
 //
 // **Rows stand at their publish time**, as in every timeline, and a timeline that reads them says
-// at its foot that this is not the order they were marked in (`MarksOrderFoot`).
+// so behind a (?) on its head (`TimelineStatus.marksKey`), not in a sentence at its foot.
 //
 // **A read that fails changes nothing.** `MastodonMarks.read` lands a category whole or not at
 // all, and what could not be read is the reload's to say, as for any timeline.
@@ -155,8 +155,8 @@ extension ShellSession {
         if !read, isAdded(host) { rowRefusal = (host: host, key: "account.source.marks.unread") }
     }
 
-    /// Whether `query` names a category of marks of a source that reads it (#317) — where its
-    /// foot says rows stand by when they were published, not when they were marked. Not a
+    /// Whether `query` names a category of marks of a source that reads it (#317) — where a (?)
+    /// on its head says rows stand by when they were published, not when they were marked. Not a
     /// timeline of everything, which names none: nothing there is said to stand by its mark.
     ///
     /// **Worked out once for what it depends on** — the timeline's rules, the sources, and what

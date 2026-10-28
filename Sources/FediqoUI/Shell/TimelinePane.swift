@@ -1398,11 +1398,6 @@ struct TimelinePane: View {
                         }
                         }
                     }
-                    // Which sources have no more of what is rising to give (#288). A search's
-                    // results are not a timeline, and end nowhere a source chose.
-                    if !searching { TrendsEndFoot(timeline: timeline, session: session) }
-                    // That the reader's marks stand by when they were published (#317).
-                    if !searching, session.readsMarks(timeline) { MarksOrderFoot() }
                     // The page below being read from this device (#357).
                     if !searching, session.timelineLoading(latest: prefs.latestDate) { TimelineReadingOn() }
                 }
@@ -1603,8 +1598,7 @@ struct TimelinePane: View {
                 trendsHead(trends)
             } else if shellLayout == .narrow, !session.queries.isEmpty {
                 TimelineNarrowHead(session: session, slide: slide) {
-                    searchMark
-                    reloadMark
+                    headMarks
                 }
             } else {
             HStack(alignment: .center, spacing: ShellSpace.step) {
@@ -1643,8 +1637,7 @@ struct TimelinePane: View {
                 // `TimelineNarrowHead`, above. This row is reached on a narrow page only when
                 // `queries` is empty, and then `timelineID` is nil, so the sentence could not
                 // be said here anyway.
-                searchMark
-                reloadMark
+                headMarks
             }
             }
             if trends == nil, session.timelinesUnreadable {
@@ -1674,9 +1667,26 @@ struct TimelinePane: View {
                 ShellTabs(trends.tabs, selected: trends.front, slide: slide, onSelect: trends.onTurn)
             }
             Spacer(minLength: 0)
-            searchMark
-            reloadMark
+            headMarks
         }
+    }
+
+    /// The marks at the head's trailing edge (#402): the order of a marks timeline, behind (?),
+    /// and a Trends source that has nothing more, in the status mark. Then search and reload.
+    @ViewBuilder
+    private var headMarks: some View {
+        if let key = TimelineStatus.marksKey(readsMarks: trends == nil && session.readsMarks(timeline)) {
+            ShellHelp(key, about: session.name(of: timeline))
+        }
+        let lines = TimelineStatus.ended(
+            searching ? [] : session.reload.trendsEnded(of: timeline, in: session),
+            reload: ways.onReload
+        )
+        if !lines.isEmpty {
+            StatusMark(lines: lines)
+        }
+        searchMark
+        reloadMark
     }
 
     /// Quiet word that newer posts are held back by the latest date in Preferences (#22), so a
