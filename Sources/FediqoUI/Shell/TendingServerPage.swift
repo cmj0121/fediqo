@@ -24,6 +24,11 @@ struct TendingServerActs {
 ///     How m.example is doing             (7 days | 30 days | 90 days)
 ///     Joined 51 · Active 49 · Reported 2
 ///     As m.example said it at 08:30
+///     Who stays, by month                               (over the same span)
+///     Joined in September 2026
+///       September 2026: 12 · 100%     October 2026: 5 · 42%
+///     By language
+///       English: 40   Japanese: 9          — or "Not given by m.example"
 ///     ─────────────────────────────────────────────────────────────────
 ///     Hashtags rising
 ///     #FediqoWaiting       Waiting for review · 12 people over 2 days   …
@@ -105,6 +110,85 @@ struct TendingServerList<Lead: View>: View {
         }
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.step)
+        if measures.quiet == nil {
+            retention(measures)
+            breakdowns(measures)
+        }
+    }
+
+    /// Who stays (#418): each month's joiners and how many of them were seen in each month after,
+    /// said plainly as by month — the server counts by day or by month, never by week.
+    @ViewBuilder
+    private func retention(_ measures: TendingServerSaid.Measures) -> some View {
+        if measures.retention != nil || measures.retentionQuiet != nil {
+            ShellRule()
+            VStack(alignment: .leading, spacing: ShellSpace.snug) {
+                head(L10n.t("tend.server.retention.title"))
+                quietLine(L10n.t("tend.server.retention.line"))
+                if let retention = measures.retention {
+                    if retention.cohorts.isEmpty { quietLine(L10n.t("tend.server.retention.none")) }
+                    ForEach(retention.cohorts) { cohort in
+                        VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                            Label(TendingServerSaid.cohortTitle(cohort), systemImage: "person.2")
+                                .shellFont(.reading)
+                                .foregroundStyle(ShellChrome.ink(colorScheme))
+                            ForEach(Array(cohort.points.enumerated()), id: \.offset) { _, point in
+                                figureLine(TendingServerSaid.pointLine(point))
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                    asOfLine(TendingServerSaid.asOf(retention.asOf, host: said.host))
+                }
+                if let quiet = measures.retentionQuiet { quietLine(quiet) }
+            }
+            .padding(.horizontal, ShellSpace.pad)
+            .padding(.vertical, ShellSpace.step)
+        }
+    }
+
+    /// What the server holds by language, by server, by software (#418): each its lines, or —
+    /// where the server did not give it — that it did not, never a zero.
+    @ViewBuilder
+    private func breakdowns(_ measures: TendingServerSaid.Measures) -> some View {
+        if let breakdowns = measures.breakdowns {
+            ForEach(breakdowns.asked, id: \.self) { key in
+                ShellRule()
+                VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                    Label(TendingServerSaid.breakdownTitle(key), systemImage: TendingServerSaid.breakdownSymbol(key))
+                        .shellFont(.name)
+                        .foregroundStyle(ShellChrome.ink(colorScheme))
+                        .accessibilityAddTraits(.isHeader)
+                    ForEach(TendingServerSaid.breakdownLines(key, of: breakdowns, host: said.host), id: \.self) { line in
+                        figureLine(line)
+                    }
+                }
+                .padding(.horizontal, ShellSpace.pad)
+                .padding(.vertical, ShellSpace.step)
+            }
+            asOfLine(TendingServerSaid.asOf(breakdowns.asOf, host: said.host))
+                .padding(.horizontal, ShellSpace.pad)
+                .padding(.bottom, ShellSpace.step)
+        } else if let quiet = measures.breakdownsQuiet {
+            ShellRule()
+            quietLine(quiet)
+                .padding(.horizontal, ShellSpace.pad)
+                .padding(.vertical, ShellSpace.step)
+        }
+    }
+
+    private func figureLine(_ words: String) -> some View {
+        Text(words)
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func asOfLine(_ words: String) -> some View {
+        Text(words)
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - What rises
@@ -257,6 +341,62 @@ extension TendingServerSaid {
             format: L10n.t("tend.server.measures.asOf", language: language), host,
             measures.asOf.formatted(date: .abbreviated, time: .shortened)
         )
+    }
+
+    /// Whose figures and as of when, for a breakdown or who stays (#418).
+    static func asOf(_ date: Date, host: String, language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t("tend.server.measures.asOf", language: language), host, date.formatted(date: .abbreviated, time: .shortened))
+    }
+
+    /// A month by its name and year, on the server's calendar (UTC).
+    static func month(_ date: Date, language: DummyLanguage? = nil) -> String {
+        var style = Date.FormatStyle().year().month(.wide).locale(L10n.locale(language))
+        style.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        return date.formatted(style)
+    }
+
+    /// Who joined in a month, as its head.
+    static func cohortTitle(_ cohort: RetentionCohort, language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t("tend.server.retention.cohort", language: language), month(cohort.month, language: language))
+    }
+
+    /// One month after joining: how many of them were seen in it or later, and their share.
+    static func pointLine(_ point: RetentionCohort.Point, language: DummyLanguage? = nil) -> String {
+        String(
+            format: L10n.t("tend.server.retention.point", language: language), month(point.month, language: language),
+            L10n.grouped(point.count, language: language),
+            point.rate.formatted(.percent.precision(.fractionLength(0)).locale(L10n.locale(language)))
+        )
+    }
+
+    static func breakdownTitle(_ key: ServerBreakdown.Key, language: DummyLanguage? = nil) -> String {
+        L10n.t("tend.server.breakdown.\(String(describing: key))", language: language)
+    }
+
+    static func breakdownSymbol(_ key: ServerBreakdown.Key) -> String {
+        switch key {
+        case .languages: "character.bubble"
+        case .servers: "network"
+        case .software: "shippingbox"
+        case .sources: "arrow.down.right.circle"
+        case .space: "internaldrive"
+        }
+    }
+
+    /// One breakdown's lines: each of its rows, the server's figure for it as the server says
+    /// it; none over the span, where it gave the breakdown empty; and **not given** where it left
+    /// it out — never a zero.
+    static func breakdownLines(_ key: ServerBreakdown.Key, of breakdowns: ServerBreakdowns, host: String, language: DummyLanguage? = nil)
+        -> [String]
+    {
+        guard let breakdown = breakdowns.breakdown(key) else {
+            return [String(format: L10n.t("tend.server.breakdown.notGiven", language: language), host)]
+        }
+        guard !breakdown.rows.isEmpty else { return [L10n.t("tend.server.breakdown.none", language: language)] }
+        return breakdown.rows.map { row in
+            let value = row.shown ?? row.figure.map { L10n.grouped($0, language: language) } ?? row.value
+            return String(format: L10n.t("tend.server.breakdown.row", language: language), row.name, value)
+        }
     }
 
     static func title(_ kind: RisingKind, language: DummyLanguage? = nil) -> String {

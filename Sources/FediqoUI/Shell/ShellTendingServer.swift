@@ -3,7 +3,8 @@ import Foundation
 import Observation
 
 // The Dashboard, Trends and Rules tabs of a host's page (#384, #416): how it is doing, as a few
-// of its own figures over a span the person chooses; what waits to rise on it — hashtags, links,
+// of its own figures over a span the person chooses — and, over the same span, who stays, month
+// by month, and what it holds by language, by server and by software (#418); what waits to rise on it — hashtags, links,
 // posts — each let rise or kept back; and its rules, read, with the way to its own page where
 // they are changed.
 //
@@ -49,6 +50,22 @@ struct TendingServerSaid: Equatable {
         /// What the server said of it, where it has answered for this span.
         var said: ServerMeasures?
         var quiet: String?
+        /// What it holds, broken down over the span (#418), where it has answered for it.
+        var breakdowns: ServerBreakdowns?
+        /// What stands where the breakdowns would: that they could not be read.
+        var breakdownsQuiet: String?
+        /// Who stayed, month by month over the span (#418), where it has answered for it.
+        var retention: ServerRetention?
+        var retentionQuiet: String?
+    }
+
+    /// The breakdowns asked of a server (#418): by language, by server, by software and version.
+    static let breakdownKeys: [ServerBreakdown.Key] = [.languages, .servers, .software]
+
+    /// The months of who stays a span of `days` covers: the month it ends in and each one it
+    /// reaches back into, at most the year the server counts.
+    static func months(days: Int) -> Int {
+        min(MastodonAdminDashboard.mostMonths, days / 30 + 1)
     }
 
     struct Rising: Equatable, Identifiable {
@@ -101,6 +118,10 @@ final class ShellTendingServer {
         var days = TendingServerSaid.spans[0]
         var measures: ServerMeasures?
         var measuresFailed = false
+        var breakdowns: ServerBreakdowns?
+        var breakdownsFailed = false
+        var retention: ServerRetention?
+        var retentionFailed = false
         /// The number of the last ask of the figures: a span asked before it does not land.
         var measuresErrand = 0
         var rising: [RisingKind: Read] = [:]
@@ -177,6 +198,11 @@ final class ShellTendingServer {
         return true
     }
 
+    /// The way to how the server is doing beyond its own figures (#418).
+    private func dashboard(at host: String, in session: ShellSession) -> MastodonAdminDashboard? {
+        session.mastodon.authorized(host: host, within: deadline, for: .tending).map(MastodonAdminDashboard.init(door:))
+    }
+
     private func door(at host: String, in session: ShellSession) -> MastodonAdminServer? {
         guard let door = session.mastodon.authorized(host: host, within: deadline, for: .tending) else { return nil }
         return reaching?(door) ?? MastodonAdminServer(door: door)
@@ -194,8 +220,14 @@ final class ShellTendingServer {
         said.acting = held?.acting ?? []
         let notAllowed = String(format: L10n.t("tend.act.notAllowed", language: language), host)
         if allowed.contains(.measures) {
-            var measures = TendingServerSaid.Measures(days: held?.days ?? TendingServerSaid.spans[0], said: held?.measures)
+            var measures = TendingServerSaid.Measures(
+                days: held?.days ?? TendingServerSaid.spans[0], said: held?.measures, breakdowns: held?.breakdowns,
+                retention: held?.retention
+            )
             if held?.notAllowed.contains(.measures) == true { measures.quiet = notAllowed }
+            let unread = String(format: L10n.t("tend.server.dashboard.failed", language: language), host)
+            if held?.breakdownsFailed == true { measures.breakdownsQuiet = unread }
+            if held?.retentionFailed == true { measures.retentionQuiet = unread }
             said.measures = measures
         }
         if allowed.contains(.rising) {
@@ -251,7 +283,8 @@ final class ShellTendingServer {
         let key = Self.key(page)
         guard let held = pages[key] else { return PageAsking() }
         let readingOn = held.rising.values.contains(where: \.readingOn)
-        let failed = held.rising.values.contains(where: \.failed) || held.measuresFailed || held.rulesFailed
+        let failed = held.rising.values.contains(where: \.failed) || held.measuresFailed || held.breakdownsFailed || held.retentionFailed
+            || held.rulesFailed
         let asking = held.asking || held.measuresAsking
         return PageAsking(
             asking: asking
@@ -320,8 +353,10 @@ final class ShellTendingServer {
         let task = Task {
             defer { if self.pages[key]?.awaits == errand { self.asks[key] = nil } }
             await withTaskGroup(of: Void.self) { group in
-                if allowed.contains(.measures) {
-                    group.addTask { await self.readMeasures(days, at: host, through: through, errand: measuresErrand, in: session) }
+                if allowed.contains(.measures), let dashboard = self.dashboard(at: host, in: session) {
+                    group.addTask {
+                        await self.readMeasures(days, at: host, through: through, dashboard: dashboard, errand: measuresErrand, in: session)
+                    }
                 }
                 if allowed.contains(.rising) {
                     for kind in RisingKind.allCases {
@@ -345,17 +380,19 @@ final class ShellTendingServer {
         let key = Self.key(host, .measures)
         guard TendingServerSaid.spans.contains(days), keepsStanding(at: host, in: session),
               Self.parts(at: host, in: session).contains(.measures), standing(host, .measures, in: session) != nil,
-              let through = door(at: host, in: session)
+              let through = door(at: host, in: session), let dashboard = dashboard(at: host, in: session)
         else { return }
         let errand = errands.next()
         pages[key]?.days = days
         pages[key]?.measures = nil
+        pages[key]?.breakdowns = nil
+        pages[key]?.retention = nil
         pages[key]?.measuresErrand = errand
         pages[key]?.measuresAsking = true
         halted.remove(key)
         spanAsks[key]?.cancel()
         let task = Task {
-            await self.readMeasures(days, at: host, through: through, errand: errand, in: session)
+            await self.readMeasures(days, at: host, through: through, dashboard: dashboard, errand: errand, in: session)
             if self.pages[key]?.measuresErrand == errand {
                 self.pages[key]?.measuresAsking = false
                 self.spanAsks[key] = nil
@@ -365,16 +402,62 @@ final class ShellTendingServer {
         await task.value
     }
 
-    private func readMeasures(_ days: Int, at host: String, through: MastodonAdminServer, errand: Int, in session: ShellSession) async {
+    /// The span's figures, and over the same span what the server holds broken down and who
+    /// stayed (#418), each asked at once and landing on its own: one not read says so on its
+    /// own, and keeps nothing it did not say. A span chosen since lands none of them.
+    private func readMeasures(
+        _ days: Int, at host: String, through: MastodonAdminServer, dashboard: MastodonAdminDashboard, errand: Int,
+        in session: ShellSession
+    ) async {
+        let now = now()
+        async let figures: Void = readFigures(days, now: now, at: host, through: through, errand: errand, in: session)
+        async let broken: Void = readBreakdowns(days, now: now, at: host, through: dashboard, errand: errand, in: session)
+        async let stayed: Void = readRetention(days, now: now, at: host, through: dashboard, errand: errand, in: session)
+        _ = await (figures, broken, stayed)
+    }
+
+    private func readFigures(
+        _ days: Int, now: Date, at host: String, through: MastodonAdminServer, errand: Int, in session: ShellSession
+    ) async {
         let key = Self.key(host, .measures)
         do {
-            let said = try await through.measures(days: days, now: now())
+            let said = try await through.measures(days: days, now: now)
             guard pages[key]?.measuresErrand == errand else { return }
             pages[key]?.measures = said
             pages[key]?.measuresFailed = false
         } catch {
             guard pages[key]?.measuresErrand == errand else { return }
             failed(error, .measures, at: host, in: session) { pages[key]?.measuresFailed = true }
+        }
+    }
+
+    private func readBreakdowns(
+        _ days: Int, now: Date, at host: String, through: MastodonAdminDashboard, errand: Int, in session: ShellSession
+    ) async {
+        let key = Self.key(host, .measures)
+        do {
+            let said = try await through.breakdowns(TendingServerSaid.breakdownKeys, days: days, now: now)
+            guard pages[key]?.measuresErrand == errand else { return }
+            pages[key]?.breakdowns = said
+            pages[key]?.breakdownsFailed = false
+        } catch {
+            guard pages[key]?.measuresErrand == errand else { return }
+            failed(error, .measures, at: host, in: session) { pages[key]?.breakdownsFailed = true }
+        }
+    }
+
+    private func readRetention(
+        _ days: Int, now: Date, at host: String, through: MastodonAdminDashboard, errand: Int, in session: ShellSession
+    ) async {
+        let key = Self.key(host, .measures)
+        do {
+            let said = try await through.retention(months: TendingServerSaid.months(days: days), now: now)
+            guard pages[key]?.measuresErrand == errand else { return }
+            pages[key]?.retention = said
+            pages[key]?.retentionFailed = false
+        } catch {
+            guard pages[key]?.measuresErrand == errand else { return }
+            failed(error, .measures, at: host, in: session) { pages[key]?.retentionFailed = true }
         }
     }
 

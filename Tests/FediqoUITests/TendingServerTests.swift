@@ -23,6 +23,8 @@ struct TendingServerTests {
     private static let links = "/api/v1/admin/trends/links?limit=20"
     private static let posts = "/api/v1/admin/trends/statuses?limit=20"
     private static let rules = "/api/v1/instance/rules"
+    private static let dimensions = "/api/v1/admin/dimensions"
+    private static let retention = "/api/v1/admin/retention"
     private static let admin = "2097148"
     private static let moderator = "1115420"
     private static let rulesOnly = "4096"
@@ -46,9 +48,22 @@ struct TendingServerTests {
     [{"key":"new_users","unit":null,"total":"51","previous_total":"4","data":[]},{"key":"active_users","unit":null,"total":"49","previous_total":"0","data":[]},{"key":"opened_reports","unit":null,"total":"2","data":[]}]
     """#
 
+    /// What a server holds, as #418 reads it: no languages given at all — the key left out — the
+    /// servers posts came from, and the software, a version as written.
+    private static let breakdowns = #"""
+    [{"key":"servers","data":[{"key":"m.example","human_key":"m.example","value":"85"},{"key":"elsewhere.example","human_key":"elsewhere.example","value":"3"}]},{"key":"software_versions","data":[{"key":"mastodon","human_key":"Mastodon","value":"4.6.6","human_value":"4.6.6"}]}]
+    """#
+
+    /// Who stays, by month: September's cohort and October's.
+    private static let stayed = #"""
+    [{"period":"2026-09-01T00:00:00+00:00","frequency":"month","data":[{"date":"2026-09-01T00:00:00+00:00","rate":1.0,"value":"12"},{"date":"2026-10-01T00:00:00+00:00","rate":0.4166,"value":"5"}]},{"period":"2026-10-01T00:00:00+00:00","frequency":"month","data":[{"date":"2026-10-01T00:00:00+00:00","rate":1.0,"value":"3"}]}]
+    """#
+
     private static func seeded(_ more: [String: PageServer.Answer] = [:]) -> [String: PageServer.Answer] {
         [
             measures: PageServer.Answer(body: figures),
+            dimensions: PageServer.Answer(body: breakdowns),
+            retention: PageServer.Answer(body: stayed),
             tags: PageServer.Answer(body: "[" + tag("23", "FediqoWaiting") + "," + tag("1", "FediqoRising", waiting: false, rises: true) + "]"),
             links: PageServer.Answer(body: #"[{"id":2,"url":"https://waiting.example/stories/waiting","title":"A story waiting","requires_review":true,"history":[]}]"#),
             posts: PageServer.Answer(body: "[]"),
@@ -107,7 +122,10 @@ struct TendingServerTests {
         #expect(rulSaid.measures == nil && rulSaid.rising == nil && rulSaid.rules?.rules.count == 2)
         let askedMeasures = await ruledServer.arrivals(of: Self.measures)
         let askedTags = await ruledServer.arrivals(of: Self.tags)
+        let askedDimensions = await ruledServer.arrivals(of: Self.dimensions)
+        let askedRetention = await ruledServer.arrivals(of: Self.retention)
         #expect(askedMeasures == 0 && askedTags == 0, "nothing asked of a part the role does not answer for")
+        #expect(askedDimensions == 0 && askedRetention == 0, "nor how the server is doing beyond its figures: no trace of it")
 
         let (reported, reportedServer, rep, _) = try await self.session(Self.seeded(), permissions: Self.reportsOnly)
         let repTabs = ShellTending.tabs(at: Self.host, in: reported)
@@ -149,6 +167,76 @@ struct TendingServerTests {
         ])
         #expect(tab.walked(Self.rulesPage, in: session) == [TendingServerSaid.ruleID("1"), TendingServerSaid.ruleID("2")])
         #expect(tab.walked(Self.dashboard, in: session).isEmpty)
+    }
+
+    @Test("Below the figures, who stays reads month by month — said plainly as by month — and what the server holds by language, by server and by software, each line the server's own and as of when it was read; a breakdown the server leaves out reads as not given, never as zero; a listener hears each line as it is drawn")
+    func whoStaysAndWhatItHolds() async throws {
+        let (session, server, tab, _) = try await session(Self.seeded())
+        await tab.opened(Self.dashboard, in: session)
+        let measures = try #require(tab.said(of: Self.dashboard, in: session, language: .english).measures)
+
+        // Seven days fall in one month: October's joiners alone.
+        let stayed = try #require(measures.retention)
+        #expect(stayed.months == 1 && stayed.asOf == Self.now)
+        #expect(stayed.cohorts.map { TendingServerSaid.cohortTitle($0, language: .english) } == ["Joined in October 2026"])
+        #expect(stayed.cohorts[0].points.map { TendingServerSaid.pointLine($0, language: .english) } == ["October 2026: 3 still here · 100%"])
+        #expect(L10n.t("tend.server.retention.line", language: .english).contains("by month, not by week"))
+        let retentionBody = try #require(await server.sent.first { $0.ask == Self.retention }?.body)
+        #expect(retentionBody.contains("frequency=month") && retentionBody.contains("start_at=2026-10-01"))
+        // Thirty reach back into September: its joiners, and how many of them October still saw.
+        await tab.choose(days: 30, on: Self.dashboard, in: session)
+        let month = try #require(tab.said(of: Self.dashboard, in: session).measures?.retention)
+        #expect(month.cohorts.map { TendingServerSaid.cohortTitle($0, language: .english) } == ["Joined in September 2026", "Joined in October 2026"])
+        #expect(month.cohorts[0].points.map { TendingServerSaid.pointLine($0, language: .english) } == [
+            "September 2026: 12 still here · 100%", "October 2026: 5 still here · 42%",
+        ])
+        #expect(TendingServerSaid.cohortTitle(month.cohorts[0], language: .taiwanese) == "2026年9月 加入")
+
+        let held = try #require(measures.breakdowns)
+        #expect(held.asked == [.languages, .servers, .software] && held.asOf == Self.now)
+        #expect(TendingServerSaid.breakdownLines(.languages, of: held, host: Self.host, language: .english) == ["Not given by m.example."])
+        #expect(TendingServerSaid.breakdownLines(.servers, of: held, host: Self.host, language: .english) == ["m.example: 85", "elsewhere.example: 3"])
+        #expect(TendingServerSaid.breakdownLines(.software, of: held, host: Self.host, language: .english) == ["Mastodon: 4.6.6"])
+        let empty = ServerBreakdowns(days: 7, asOf: Self.now, asked: [.languages], given: [ServerBreakdown(key: .languages, rows: [])])
+        #expect(
+            TendingServerSaid.breakdownLines(.languages, of: empty, host: Self.host, language: .english) == ["None over this span."],
+            "given with nothing in it is none, apart from not given"
+        )
+        #expect(TendingServerSaid.asOf(held.asOf, host: Self.host, language: .english).hasPrefix("As m.example counted them at "))
+        let dimensionsBody = try #require(await server.sent.first { $0.ask == Self.dimensions }?.body)
+        #expect(dimensionsBody.contains("keys%5B%5D=languages") && dimensionsBody.contains("keys%5B%5D=software_versions"))
+        #expect(!dimensionsBody.contains("space_usage"))
+    }
+
+    @Test("Another span reads who stays and what the server holds again, over that span")
+    func aSpanReadsTheBreakdownsAgain() async throws {
+        let (session, server, tab, _) = try await session(Self.seeded())
+        await tab.opened(Self.dashboard, in: session)
+        await tab.choose(days: 90, on: Self.dashboard, in: session)
+        let dimensionsAsked = await server.arrivals(of: Self.dimensions)
+        let retentionAsked = await server.arrivals(of: Self.retention)
+        #expect(dimensionsAsked == 2 && retentionAsked == 2)
+        let retentionBody = try #require(await server.sent.last { $0.ask == Self.retention }?.body)
+        #expect(retentionBody.contains("start_at=2026-07-01"), "ninety days reach back into four months")
+        let dimensionsBody = try #require(await server.sent.last { $0.ask == Self.dimensions }?.body)
+        #expect(dimensionsBody.contains("start_at=2026-07-25"))
+        let measures = try #require(tab.said(of: Self.dashboard, in: session).measures)
+        #expect(measures.days == 90 && measures.breakdowns?.days == 90 && measures.retention?.months == 4)
+        #expect(TendingServerSaid.months(days: 7) == 1 && TendingServerSaid.months(days: 30) == 2 && TendingServerSaid.months(days: 400) == 12)
+    }
+
+    @Test("What the server holds failing to be read says so on its own, and changes nothing else; the figures stand")
+    func aBreakdownFailing() async throws {
+        let (session, _, tab, _) = try await session(Self.seeded([
+            Self.dimensions: PageServer.Answer(body: "", status: 503),
+            Self.retention: PageServer.Answer(body: "", status: 503),
+        ]))
+        await tab.opened(Self.dashboard, in: session)
+        let measures = try #require(tab.said(of: Self.dashboard, in: session, language: .english).measures)
+        #expect(measures.said != nil && measures.quiet == nil, "the figures stand")
+        #expect(measures.breakdowns == nil && measures.retention == nil)
+        #expect(measures.breakdownsQuiet == "What m.example holds could not be read just now." && measures.retentionQuiet == measures.breakdownsQuiet)
+        #expect(tab.ask(of: Self.dashboard).failed == [Self.host])
     }
 
     @Test("Another span asks its figures; one chosen before it, answering after, is not drawn over it")
@@ -287,8 +375,11 @@ struct TendingServerTests {
             "tend.server.measures.days", "tend.server.measures.asOf", "tend.server.measure.line", "tend.server.measure.before",
             "tend.server.rising.waiting", "tend.server.rising.rises", "tend.server.rising.kept", "tend.server.rising.reviewed",
             "tend.server.rising.post", "tend.server.rising.people", "tend.server.rising.gone", "tend.server.rise", "tend.server.keep",
-            "tend.server.rules.title", "tend.server.rules.change", "tend.server.rules.none",
+            "tend.server.rules.title", "tend.server.rules.change", "tend.server.rules.none", "tend.server.dashboard.failed",
+            "tend.server.retention.title", "tend.server.retention.line", "tend.server.retention.none", "tend.server.retention.cohort",
+            "tend.server.retention.point", "tend.server.breakdown.row", "tend.server.breakdown.none", "tend.server.breakdown.notGiven",
         ]
+        keys += ServerBreakdown.Key.allCases.map { "tend.server.breakdown.\(String(describing: $0))" }
         keys += ServerMeasure.Key.allCases.map { "tend.server.measure.\($0)" }
         for kind in RisingKind.allCases { keys += ["tend.server.rising.\(kind.rawValue)", "tend.server.rising.none.\(kind.rawValue)"] }
         for language in DummyLanguage.allCases {
