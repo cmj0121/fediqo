@@ -3,8 +3,9 @@ import Foundation
 import Observation
 
 // The Federation and Blocks tabs of a host's page (#383, #416): on Federation the servers it
-// suspends, limits or allows — with what each is refused and why — and on Blocks the mail domains
-// and address ranges it refuses to let sign up. Each is added, changed or taken off.
+// suspends, limits or allows — with what each is refused and why — and on Blocks the mail domains,
+// the mailboxes however written (#417) and the address ranges it refuses to let sign up. Each is
+// added, changed or taken off; a mailbox is tried before it is added, which adds nothing.
 //
 // **Each tab's own state**, apart from each other's and from the other tabs'. **Each tab is its
 // flag's**: Federation `manage_federation`'s, Blocks `manage_blocks`'; a tab whose flag the role
@@ -25,12 +26,12 @@ import Observation
 
 /// One of the two tabs' lists, the tab it stands on, and so the flag of the role it needs.
 enum ServerList: String, CaseIterable, Sendable {
-    case blocks, allows, mail, addresses
+    case blocks, allows, mail, mailboxes, addresses
 
     var tab: AdminTab {
         switch self {
         case .blocks, .allows: .federation
-        case .mail, .addresses: .blocks
+        case .mail, .mailboxes, .addresses: .blocks
         }
     }
 
@@ -53,6 +54,8 @@ struct TendingServersSaid: Equatable {
     var blocks: ServerListSaid<ServerBlock>?
     var allows: ServerListSaid<ServerAllow>?
     var mail: ServerListSaid<RefusedMailDomain>?
+    /// The mailboxes refused however written (#417): each only the server's fingerprint of it.
+    var mailboxes: ServerListSaid<RefusedMailbox>?
     var addresses: ServerListSaid<RefusedAddress>?
     /// Whether the sign-in may change them: it holds tending's word that changes.
     var acts = false
@@ -63,6 +66,19 @@ struct TendingServersSaid: Equatable {
 
     /// The row id of one item of a list, as the lamp and the keys know it, and a write is told by.
     static func rowID(_ list: ServerList, _ id: String) -> String { "\(list.rawValue)\u{1e}\(id)" }
+
+    /// A fingerprint as a row shows it: its first twelve letters — enough to tell rows apart —
+    /// never the whole, which says nothing more to a reader.
+    static func shortHash(_ mailbox: RefusedMailbox) -> String {
+        String(mailbox.hash.prefix(12))
+    }
+}
+
+/// What trying a mailbox said (#417): whether the server would refuse it, for the address as it
+/// was written when it was tried.
+struct MailboxTried: Equatable {
+    let address: String
+    let refused: Bool
 }
 
 /// A change to the servers or the addresses being written on its sheet (#383).
@@ -72,6 +88,8 @@ struct FederationAsk: Equatable, Identifiable {
         case block(ServerBlock?)
         case allow
         case mail
+        /// A mailbox refused however it is written (#417).
+        case mailbox
         case address
     }
 
@@ -90,6 +108,12 @@ struct FederationAsk: Equatable, Identifiable {
     var ip = ""
     var addressSeverity = AddressSeverity.signUp
     var words = ""
+    /// The mailbox written, to try or to refuse (#417).
+    var mailbox = ""
+    /// What the last try said, and of which address. **Trying adds nothing.**
+    var tried: MailboxTried?
+    /// Whether a try is on the wire.
+    var trying = false
     var stage = Stage.writing
 
     var id: String { host + "\u{1e}" + String(describing: kind) }
@@ -103,8 +127,15 @@ struct FederationAsk: Equatable, Identifiable {
         case .block: .blocks
         case .allow: .allows
         case .mail: .mail
+        case .mailbox: .mailboxes
         case .address: .addresses
         }
+    }
+
+    /// What the last try said of the mailbox as it is written now: nothing where it was not
+    /// tried, or has been written otherwise since.
+    var triedNow: Bool? {
+        tried.flatMap { $0.address == mailbox ? $0.refused : nil }
     }
 
     /// The page it is sent on: the host's, at the tab its list stands on.
@@ -116,7 +147,7 @@ struct FederationAsk: Equatable, Identifiable {
         switch kind {
         case .block(let held): draft.severity == .suspend && held?.severity != .suspend
         case .address: addressSeverity == .noAccess || MastodonAdminFederation.range(ip)?.isWide == true
-        case .allow, .mail: false
+        case .allow, .mail, .mailbox: false
         }
     }
 
@@ -126,6 +157,7 @@ struct FederationAsk: Equatable, Identifiable {
         switch kind {
         case .block(let held): draft.sendable && (held == nil || held?.domain == draft.domain)
         case .allow, .mail: MastodonAdminFederation.wireDomain(domain) != nil
+        case .mailbox: MastodonAdminFederation.wireMailbox(mailbox) != nil
         case .address: MastodonAdminFederation.isAddress(ip) && words.unicodeScalars.count <= MastodonAdminFederation.wordsLength
         }
     }
@@ -136,7 +168,7 @@ struct FederationAsk: Equatable, Identifiable {
         let written: String = switch kind {
         case .block(let held): held == nil ? draft.domain : ""
         case .allow, .mail: domain
-        case .address: ""
+        case .mailbox, .address: ""
         }
         guard let wire = MastodonAdminFederation.wireDomain(written), wire != written else { return nil }
         return wire
@@ -148,11 +180,13 @@ struct FederationAsk: Equatable, Identifiable {
         let (written, key): (String, String) = switch kind {
         case .block(let held): (held == nil ? draft.domain : "", "tend.servers.notDomain")
         case .allow, .mail: (domain, "tend.servers.notDomain")
+        case .mailbox: (mailbox, "tend.servers.notMailbox")
         case .address: (ip, "tend.servers.notAddress")
         }
         let trimmed = written.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let names = switch kind {
+        case .mailbox: MastodonAdminFederation.wireMailbox(trimmed) != nil
         case .address: MastodonAdminFederation.isAddress(trimmed)
         default: MastodonAdminFederation.wireDomain(trimmed) != nil
         }
@@ -177,6 +211,7 @@ final class ShellTendingServers {
         var blocks = Read<ServerBlock>()
         var allows = Read<ServerAllow>()
         var mail = Read<RefusedMailDomain>()
+        var mailboxes = Read<RefusedMailbox>()
         var addresses = Read<RefusedAddress>()
         var asking = false
         var notAllowed = false
@@ -186,7 +221,7 @@ final class ShellTendingServers {
         var acting: Set<String> = []
         var under = 0
 
-        var answered: Bool { blocks.answered || allows.answered || mail.answered || addresses.answered }
+        var answered: Bool { blocks.answered || allows.answered || mail.answered || mailboxes.answered || addresses.answered }
     }
 
     /// Each tab's lists, by `key`: a tab's ask is its own, so turning to the other neither waits
@@ -248,6 +283,7 @@ final class ShellTendingServers {
             if !allowed.contains(.blocks) { pages[key]?.blocks = Read() }
             if !allowed.contains(.allows) { pages[key]?.allows = Read() }
             if !allowed.contains(.mail) { pages[key]?.mail = Read() }
+            if !allowed.contains(.mailboxes) { pages[key]?.mailboxes = Read() }
             if !allowed.contains(.addresses) { pages[key]?.addresses = Read() }
         }
         return true
@@ -291,6 +327,7 @@ final class ShellTendingServers {
         said.blocks = list(.blocks, lists?.blocks)
         said.allows = list(.allows, lists?.allows)
         said.mail = list(.mail, lists?.mail)
+        said.mailboxes = list(.mailboxes, lists?.mailboxes)
         said.addresses = list(.addresses, lists?.addresses)
         return said
     }
@@ -302,6 +339,7 @@ final class ShellTendingServers {
         if allowed.contains(.blocks) { ids += lists.blocks.rows.map { TendingServersSaid.rowID(.blocks, $0.id) } }
         if allowed.contains(.allows) { ids += lists.allows.rows.map { TendingServersSaid.rowID(.allows, $0.id) } }
         if allowed.contains(.mail) { ids += lists.mail.rows.map { TendingServersSaid.rowID(.mail, $0.id) } }
+        if allowed.contains(.mailboxes) { ids += lists.mailboxes.rows.map { TendingServersSaid.rowID(.mailboxes, $0.id) } }
         if allowed.contains(.addresses) { ids += lists.addresses.rows.map { TendingServersSaid.rowID(.addresses, $0.id) } }
         return ids
     }
@@ -309,8 +347,9 @@ final class ShellTendingServers {
     func ask(of page: Tending, language: DummyLanguage? = nil) -> PageAsking {
         let key = Self.key(page)
         guard let lists = pages[key] else { return PageAsking() }
-        let readingOn = lists.blocks.readingOn || lists.allows.readingOn || lists.mail.readingOn || lists.addresses.readingOn
-        let failed = lists.blocks.failed || lists.allows.failed || lists.mail.failed || lists.addresses.failed
+        let readingOn = lists.blocks.readingOn || lists.allows.readingOn || lists.mail.readingOn || lists.mailboxes.readingOn
+            || lists.addresses.readingOn
+        let failed = lists.blocks.failed || lists.allows.failed || lists.mail.failed || lists.mailboxes.failed || lists.addresses.failed
         return PageAsking(
             asking: lists.asking
                 ? String(format: L10n.t("tend.servers.asking", language: language), page.host)
@@ -393,6 +432,7 @@ final class ShellTendingServers {
         case .blocks: next = lists.blocks.readingOn ? nil : lists.blocks.next
         case .allows: next = lists.allows.readingOn ? nil : lists.allows.next
         case .mail: next = lists.mail.readingOn ? nil : lists.mail.next
+        case .mailboxes: next = lists.mailboxes.readingOn ? nil : lists.mailboxes.next
         case .addresses: next = lists.addresses.readingOn ? nil : lists.addresses.next
         }
         guard let next else { return }
@@ -407,6 +447,7 @@ final class ShellTendingServers {
         case .blocks: pages[key]?.blocks.readingOn = on
         case .allows: pages[key]?.allows.readingOn = on
         case .mail: pages[key]?.mail.readingOn = on
+        case .mailboxes: pages[key]?.mailboxes.readingOn = on
         case .addresses: pages[key]?.addresses.readingOn = on
         }
     }
@@ -425,6 +466,9 @@ final class ShellTendingServers {
             case .mail:
                 let stretch = try await through.mailDomains(after: next)
                 land(stretch, into: \.mail, list, at: host, after: next, errand: errand)
+            case .mailboxes:
+                let stretch = try await through.mailboxes(after: next)
+                land(stretch, into: \.mailboxes, list, at: host, after: next, errand: errand)
             case .addresses:
                 let stretch = try await through.addresses(after: next)
                 land(stretch, into: \.addresses, list, at: host, after: next, errand: errand)
@@ -450,6 +494,7 @@ final class ShellTendingServers {
         case .blocks: if paging { pages[key]?.blocks.notPaging = true } else { pages[key]?.blocks.failed = true }
         case .allows: if paging { pages[key]?.allows.notPaging = true } else { pages[key]?.allows.failed = true }
         case .mail: if paging { pages[key]?.mail.notPaging = true } else { pages[key]?.mail.failed = true }
+        case .mailboxes: if paging { pages[key]?.mailboxes.notPaging = true } else { pages[key]?.mailboxes.failed = true }
         case .addresses: if paging { pages[key]?.addresses.notPaging = true } else { pages[key]?.addresses.failed = true }
         }
     }
@@ -501,7 +546,7 @@ final class ShellTendingServers {
     /// The sheet's Send. What cuts the server off asks once more first, and is sent only from
     /// that question. The row is the server's answer; a refusal stays on the sheet.
     func send(on page: Tending, in session: ShellSession, confirmed: Bool = false) async {
-        guard var ask = asking, ask.stage != .sending, ask.sendable, ask.host == page.host else { return }
+        guard var ask = asking, ask.stage != .sending, !ask.trying, ask.sendable, ask.host == page.host else { return }
         if ask.cutsOff {
             guard confirmed, ask.stage == .asking else {
                 ask.stage = .asking
@@ -520,6 +565,7 @@ final class ShellTendingServers {
             }
         case .allow: await write(.allows, id: nil, on: page, in: session) { try await $0.addAllow(ask.domain) }
         case .mail: await write(.mail, id: nil, on: page, in: session) { try await $0.addMailDomain(ask.domain) }
+        case .mailbox: await write(.mailboxes, id: nil, on: page, in: session) { try await $0.addMailbox(ask.mailbox) }
         case .address:
             await write(.addresses, id: nil, on: page, in: session) {
                 try await $0.addAddress(ask.ip, severity: ask.addressSeverity, words: ask.words)
@@ -534,12 +580,61 @@ final class ShellTendingServers {
         }
     }
 
+    /// The sheet's Try (#417): whether the server would refuse the mailbox written — said on the
+    /// sheet, for that address. **Nothing is added**, and nothing here changes: the list stays as
+    /// the server last gave it. A refusal or a failure stays on the sheet, in words.
+    func tryMailbox(on page: Tending, in session: ShellSession) async {
+        guard var ask = asking, case .mailbox = ask.kind, ask.host == page.host, ask.sendable, !ask.trying,
+              ask.stage != .sending
+        else { return }
+        let host = ask.host
+        let address = ask.mailbox
+        guard keepsStanding(at: host, in: session), Self.lists(at: host, in: session).contains(.mailboxes),
+              ShellTending.acts(at: host, in: session)
+        else {
+            ask.stage = .failed(String(format: L10n.t("tend.act.notAllowed"), host))
+            if asking?.id == ask.id { asking = ask }
+            return
+        }
+        guard let through = door(at: host, in: session) else {
+            ask.stage = .failed(String(format: L10n.t("tend.act.failed"), host))
+            asking = ask
+            return
+        }
+        ask.trying = true
+        ask.stage = .writing
+        asking = ask
+        let said: Result<Bool, any Error>
+        do {
+            said = .success(!(try await through.tryMailbox(address)).isEmpty)
+        } catch {
+            said = .failure(error)
+        }
+        guard var now = asking, now.id == ask.id else { return }
+        now.trying = false
+        switch said {
+        case .success(let refused): now.tried = MailboxTried(address: address, refused: refused)
+        case .failure(let error):
+            switch error {
+            case _ where Cancellation.happened(error): break
+            case MastodonAdminError.notAllowed: now.stage = .failed(String(format: L10n.t("tend.act.notAllowed"), host))
+            case MastodonAdminError.refused(let sentence): now.stage = .failed(String(format: L10n.t("tend.act.refused"), host, sentence))
+            case MastodonAuthError.signedOut:
+                session.mastodon.endedByServer(host: host)
+                now.stage = .failed(String(format: L10n.t("tend.act.failed"), host))
+            default: now.stage = .failed(String(format: L10n.t("tend.act.failed"), host))
+            }
+        }
+        asking = now
+    }
+
     /// One row taken off — after the question its item put, where taking it off cuts the server off.
     func remove(_ list: ServerList, id: String, on page: Tending, in session: ShellSession) async {
         let failure: String? = switch list {
         case .blocks: await write(list, id: id, on: page, in: session) { through -> ServerBlock? in try await through.removeBlock(id); return nil }
         case .allows: await write(list, id: id, on: page, in: session) { through -> ServerAllow? in try await through.removeAllow(id); return nil }
         case .mail: await write(list, id: id, on: page, in: session) { through -> RefusedMailDomain? in try await through.removeMailDomain(id); return nil }
+        case .mailboxes: await write(list, id: id, on: page, in: session) { through -> RefusedMailbox? in try await through.removeMailbox(id); return nil }
         case .addresses: await write(list, id: id, on: page, in: session) { through -> RefusedAddress? in try await through.removeAddress(id); return nil }
         }
         if let failure { session.showToast(failure) }
@@ -578,6 +673,7 @@ final class ShellTendingServers {
             case .blocks: apply(item as? ServerBlock, id: id, to: \.blocks, at: at)
             case .allows: apply(item as? ServerAllow, id: id, to: \.allows, at: at)
             case .mail: apply(item as? RefusedMailDomain, id: id, to: \.mail, at: at)
+            case .mailboxes: apply(item as? RefusedMailbox, id: id, to: \.mailboxes, at: at)
             case .addresses: apply(item as? RefusedAddress, id: id, to: \.addresses, at: at)
             }
             return nil

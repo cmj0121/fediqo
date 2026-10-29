@@ -22,6 +22,8 @@ struct TendingServersTests {
     private static let allows = "/api/v1/admin/domain_allows"
     private static let mail = "/api/v1/admin/email_domain_blocks"
     private static let addresses = "/api/v1/admin/ip_blocks"
+    private static let mailboxes = "/api/v1/admin/canonical_email_blocks"
+    private static let hash = "775b10bf7772d11d49e38f382b2cab84ee93161169491aaf49bdaeb1a20b33e0"
     /// The seed's Admin: every flag but the administrator's.
     private static let admin = "2097148"
     private static let moderator = "1115420"
@@ -52,6 +54,10 @@ struct TendingServersTests {
         #"{"id":"\#(id)","ip":"\#(ip)","severity":"\#(severity)","comment":"range","created_at":"2026-10-22T02:00:00.000Z","expires_at":null}"#
     }
 
+    private static func mailbox(_ id: String, _ hash: String = hash) -> String {
+        #"{"id":"\#(id)","canonical_email_hash":"\#(hash)"}"#
+    }
+
     private static func list(_ items: [String], at path: String, next: String? = nil) -> PageServer.Answer {
         PageServer.Answer(
             body: "[" + items.joined(separator: ",") + "]",
@@ -64,6 +70,7 @@ struct TendingServersTests {
             blocks: list([block("2", "limited.example", "silence", media: true, said: "Too loud"), block("1", "suspended.example")], at: blocks),
             allows: list([named("1", "allowed.example")], at: allows),
             mail: list([named("1", "spam.example")], at: mail),
+            mailboxes: list([mailbox("1")], at: mailboxes),
             addresses: list([address("1", "192.0.2.0/24")], at: addresses),
         ].merging(more) { $1 }
     }
@@ -114,8 +121,11 @@ struct TendingServersTests {
         await fed.opened(Self.blocking, in: federation)
         let askedMail = await fedServer.arrivals(of: Self.mail)
         let askedAddresses = await fedServer.arrivals(of: Self.addresses)
-        #expect(askedMail == 0 && askedAddresses == 0, "nothing asked of a tab the role does not answer for")
-        #expect(fed.said(of: Self.blocking, in: federation).mail == nil)
+        let askedMailboxes = await fedServer.arrivals(of: Self.mailboxes)
+        #expect(askedMail == 0 && askedAddresses == 0 && askedMailboxes == 0, "nothing asked of a tab the role does not answer for")
+        #expect(fed.said(of: Self.blocking, in: federation).mail == nil && fed.said(of: Self.blocking, in: federation).mailboxes == nil)
+        fed.open(.mailbox, at: Self.host, in: federation)
+        #expect(fed.asking == nil, "no trace of the mailboxes without the flag for blocks")
         fed.open(.mail, at: Self.host, in: federation)
         #expect(fed.asking == nil)
 
@@ -128,6 +138,7 @@ struct TendingServersTests {
         #expect(askedBlocks == 0 && askedAllows == 0, "nothing asked of a tab the role does not answer for")
         let blkSaid = blk.said(of: Self.blocking, in: blocking)
         #expect(blkSaid.blocks == nil && blkSaid.allows == nil && blkSaid.mail != nil && blkSaid.addresses != nil)
+        #expect(blkSaid.mailboxes?.items.map(\.id) == ["1"])
 
         let (moderated, modServer, mod) = try await self.session(Self.seeded(), permissions: Self.moderator)
         let modTabs = ShellTending.tabs(at: Self.host, in: moderated)
@@ -162,7 +173,7 @@ struct TendingServersTests {
         #expect(await server.arrivals(of: "\(Self.allows)?max_id=2") == 1)
         #expect(servers.walked(Self.federation, in: session).first == TendingServersSaid.rowID(.blocks, "2"))
         #expect(servers.walked(Self.federation, in: session).count == 4)
-        #expect(servers.walked(Self.blocking, in: session) == [TendingServersSaid.rowID(.addresses, "1")])
+        #expect(servers.walked(Self.blocking, in: session) == [TendingServersSaid.rowID(.mailboxes, "1"), TendingServersSaid.rowID(.addresses, "1")])
 
         let (refused, _, others) = try await self.session([
             Self.blocks: PageServer.Answer(body: #"{"error":"This action is not allowed"}"#, status: 403),
@@ -379,6 +390,101 @@ struct TendingServersTests {
         #expect(await server.arrivals(of: Self.mail) == 1, "only the first read: nothing sent")
     }
 
+    // MARK: - Mailboxes, however written (#417)
+
+    @Test("A mailbox refused however written reads as a refused address and the first letters of its fingerprint, on screen and to a listener; the list reads on by its own press; taking one off asks first, in its own `…`, and the row goes as the server answers")
+    func mailboxesRead() async throws {
+        let (session, server, servers) = try await session(Self.seeded([
+            Self.mailboxes: Self.list([Self.mailbox("2", String(repeating: "ab", count: 32))], at: Self.mailboxes, next: "2"),
+            "\(Self.mailboxes)?max_id=2": Self.list([Self.mailbox("1")], at: Self.mailboxes),
+            "\(Self.mailboxes)/1": PageServer.Answer(body: "{}"),
+        ]))
+        await servers.opened(Self.blocking, in: session)
+        var said = servers.said(of: Self.blocking, in: session, language: .english)
+        let first = try #require(said.mailboxes?.items.first)
+        #expect(TendingServersSaid.lines(of: first, language: .english) == ["Fingerprint abababababab"])
+        #expect(L10n.t("tend.servers.mailbox.row", language: .english) == "A refused address")
+        #expect(said.mailboxes?.more == true)
+        await servers.readOn(.mailboxes, of: Self.blocking, in: session)
+        said = servers.said(of: Self.blocking, in: session, language: .english)
+        #expect(said.mailboxes?.items.map(\.id) == ["2", "1"] && said.mailboxes?.more == false)
+        #expect(await server.arrivals(of: "\(Self.mailboxes)?max_id=2") == 1)
+
+        let held = try #require(said.mailboxes?.items.last)
+        let short = TendingServersSaid.shortHash(held)
+        #expect(short == "775b10bf7772")
+        let more = TendingServersSaid.more(.mailboxes, id: held.id, name: short, said: said, actions: TendingServersActs(), language: .english)
+        #expect(more.items.map(\.isDanger) == [true])
+        #expect(more.items.first?.question?.line == "The address whose fingerprint begins 775b10bf7772 can ask to join m.example again, however it is written.")
+        await servers.remove(.mailboxes, id: "1", on: Self.blocking, in: session)
+        #expect(servers.said(of: Self.blocking, in: session).mailboxes?.items.map(\.id) == ["2"])
+        #expect(await server.arrivals(of: "\(Self.mailboxes)/1") == 1)
+    }
+
+    @Test("Trying an address says whether the server would refuse it — for the address as written, said again once it is written otherwise — and adds nothing; adding it puts the server's row at the top; one that is no address says why and is asked nothing")
+    func mailboxesTriedAndAdded() async throws {
+        let tried = "\(Self.mailboxes)/test"
+        let (session, server, servers) = try await session(Self.seeded([
+            tried: PageServer.Answer(body: "[" + Self.mailbox("1") + "]"),
+        ]))
+        await servers.opened(Self.blocking, in: session)
+        servers.open(.mailbox, at: Self.host, in: session)
+        servers.asking?.mailbox = "not an address"
+        #expect(servers.asking?.sendable == false && servers.asking?.whyNot == L10n.t("tend.servers.notMailbox"))
+        await servers.tryMailbox(on: Self.blocking, in: session)
+        #expect(await server.arrivals(of: tried) == 0, "no address is asked nothing")
+
+        servers.asking?.mailbox = " Ada.Lovelace+join@Example.COM "
+        let ask = try #require(servers.asking)
+        await servers.tryMailbox(on: ask.page, in: session)
+        #expect(servers.asking?.triedNow == true)
+        #expect(TendingServersSaid.triedLine(try #require(servers.asking), language: .english) == "m.example would refuse Ada.Lovelace+join@Example.COM.")
+        #expect(await server.sent.last?.body == "email=Ada.Lovelace%2Bjoin%40example.com")
+        #expect(servers.said(of: Self.blocking, in: session).mailboxes?.items.map(\.id) == ["1"], "trying added nothing")
+        #expect(await server.sent.filter { $0.ask == Self.mailboxes }.isEmpty)
+
+        servers.asking?.mailbox = "grace@example.com"
+        #expect(servers.asking?.triedNow == nil, "written otherwise, the try says nothing of it")
+        await server.answer(tried, PageServer.Answer(body: "[]"))
+        await servers.tryMailbox(on: Self.blocking, in: session)
+        #expect(servers.asking?.triedNow == false)
+        #expect(TendingServersSaid.triedLine(try #require(servers.asking), language: .english) == "m.example would let grace@example.com ask to join.")
+
+        await server.answer(Self.mailboxes, PageServer.Answer(body: Self.mailbox("5", String(repeating: "cd", count: 32))))
+        await servers.send(on: Self.blocking, in: session)
+        #expect(servers.asking == nil)
+        #expect(servers.said(of: Self.blocking, in: session).mailboxes?.items.map(\.id) == ["5", "1"])
+        let added = try #require(await server.sent.last)
+        #expect(added.method == "POST" && added.ask == Self.mailboxes && added.body == "email=grace%40example.com")
+    }
+
+    @Test("A mailbox the server refuses to add, a try it fails, or one the standing does not allow says so on the sheet and changes nothing here; without the word that changes, nothing is offered")
+    func mailboxesRefused() async throws {
+        let tried = "\(Self.mailboxes)/test"
+        let (session, server, servers) = try await session(Self.seeded([tried: PageServer.Answer(body: "", status: 503)]))
+        await servers.opened(Self.blocking, in: session)
+        await server.answer(Self.mailboxes, PageServer.Answer(body: #"{"error":"Validation failed: Canonical email hash has already been taken"}"#, status: 422))
+        servers.open(.mailbox, at: Self.host, in: session)
+        servers.asking?.mailbox = "ada@example.com"
+        await servers.tryMailbox(on: Self.blocking, in: session)
+        #expect(servers.asking?.stage == .failed(String(format: L10n.t("tend.act.failed"), Self.host)) && servers.asking?.triedNow == nil)
+        await servers.send(on: Self.blocking, in: session)
+        #expect(servers.asking?.stage == .failed(String(format: L10n.t("tend.act.refused"), Self.host, "Validation failed: Canonical email hash has already been taken")))
+        #expect(servers.said(of: Self.blocking, in: session).mailboxes?.items.map(\.id) == ["1"], "nothing changed here")
+        servers.close()
+
+        await server.answer("\(Self.mailboxes)/1", PageServer.Answer(body: #"{"error":"This action is not allowed"}"#, status: 403))
+        await servers.remove(.mailboxes, id: "1", on: Self.blocking, in: session)
+        #expect(session.toast?.text == String(format: L10n.t("tend.act.notAllowed"), Self.host))
+        #expect(servers.said(of: Self.blocking, in: session).mailboxes?.items.map(\.id) == ["1"])
+
+        let (reading, _, readOnly) = try await self.session(Self.seeded(), holding: "\(Self.reads) admin:read")
+        await readOnly.opened(Self.blocking, in: reading)
+        #expect(readOnly.said(of: Self.blocking, in: reading).mailboxes?.items.count == 1)
+        readOnly.open(.mailbox, at: Self.host, in: reading)
+        #expect(readOnly.asking == nil)
+    }
+
     @Test("A sheet's write lands on the state of the tab its list stands on, as the sheet sends it, and leaves the other tab's as it was")
     func aSheetWritesOnItsOwnTab() async throws {
         let (session, server, servers) = try await session(Self.seeded())
@@ -456,7 +562,9 @@ struct TendingServersTests {
             "tend.servers.mailDomain", "tend.servers.ip", "tend.servers.publicWords", "tend.servers.privateWords",
             "tend.servers.addressWords", "tend.servers.tooLong", "tend.servers.send", "tend.servers.suspend", "tend.servers.suspend.ask",
             "tend.servers.notDomain", "tend.servers.notAddress", "tend.servers.gone", "tend.servers.busy", "tend.servers.address.ask",
-            "tend.servers.refuse", "tend.servers.sentAs",
+            "tend.servers.refuse", "tend.servers.sentAs", "tend.servers.mailbox", "tend.servers.mailbox.line",
+            "tend.servers.mailbox.row", "tend.servers.mailbox.hash", "tend.servers.mailbox.try", "tend.servers.mailbox.trying",
+            "tend.servers.mailbox.refused", "tend.servers.mailbox.free", "tend.servers.notMailbox",
         ]
         for list in ServerList.allCases {
             let name = list.rawValue
