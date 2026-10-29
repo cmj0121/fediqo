@@ -13,13 +13,18 @@ import Foundation
 /// **The thread's own time, not the wall's.** Both sides count only the time this thread spent
 /// running. A runner with more work than cores hands a thread its core in slices, and waiting for
 /// the next slice lands on whichever measurement is longer — here, with seventy threads wanting
-/// ten cores, it made one index sixteen plain reads by the wall. What is left, a slower core or
-/// a colder cache, slows both sides alike.
+/// ten cores, it made one index sixteen plain reads by the wall.
 ///
-/// **Taken in turns.** Each of three rounds reads the notes plainly and then does the work, and
-/// each side keeps its fastest. Time the machine spent elsewhere only ever adds to a measurement,
-/// so the fastest is the one closest to the cost — and a runner that turns busy halfway, as when
-/// another suite starts beside this one, slows both sides rather than the one measured second.
+/// **Each round its own ratio, and the middle round kept.** Even the thread's own time swells on
+/// a busy machine, and not evenly: when every core is in use the clock drops for all of them and
+/// the caches are shared with whatever else runs, so one measurement may take a few per cent
+/// longer and the next nearly half again, with nothing about the work changed (#414). Keeping the
+/// fastest of each side on its own paired a lucky read from one round with an unlucky piece of
+/// work from another, and a check that added two such paces doubled the error. So each of five
+/// rounds reads the notes plainly, does the work, and reads them again; the work is set against
+/// the mean of the reads on either side of it, taken moments apart, and the check keeps the
+/// middle of the five ratios. One or two rounds caught by the machine at a bad moment fall to the
+/// ends, whichever side they slowed, while work made dearer is dearer in every round.
 struct Pace: CustomStringConvertible {
     let work: Duration
     let plain: Duration
@@ -31,26 +36,26 @@ struct Pace: CustomStringConvertible {
         "\(reads.formatted(.number.precision(.fractionLength(2)))) plain reads (\(work) against \(plain))"
     }
 
-    init(_ notes: [Note], runs: Int = 3, _ work: () -> Void) {
+    init(_ notes: [Note], runs: Int = 5, _ work: () -> Void) {
         self = withoutActuallyEscaping(work) { Self.each(notes, runs: runs, [$0])[0] }
     }
 
-    /// Several pieces of work, each round reading once and then doing each of them once — so
-    /// six searches cost three plain reads rather than eighteen, and the checks hold a thread
-    /// that other suites are waiting on for no longer than they must.
-    static func each(_ notes: [Note], runs: Int = 3, _ works: [() -> Void]) -> [Pace] {
+    /// Several pieces of work, each round reading once before the first, once after each, and
+    /// doing each of them once in between — so every piece sits between two reads of its own
+    /// round, and six searches cost seven plain reads a round rather than twelve.
+    static func each(_ notes: [Note], runs: Int = 5, _ works: [() -> Void]) -> [Pace] {
         precondition(runs >= 1, "a pace needs at least one round")
-        var plain = Duration.zero
-        var took = [Duration](repeating: .zero, count: works.count)
-        for run in 0 ..< runs {
-            let read = running { Self.read(notes) }
-            plain = run == 0 ? read : min(plain, read)
+        var rounds = [[Pace]](repeating: [], count: works.count)
+        for _ in 0 ..< runs {
+            var before = running { Self.read(notes) }
             for (i, work) in works.enumerated() {
-                let measured = running(work)
-                took[i] = run == 0 ? measured : min(took[i], measured)
+                let took = running(work)
+                let after = running { Self.read(notes) }
+                rounds[i].append(Pace(work: took, plain: (before + after) / 2))
+                before = after
             }
         }
-        return took.map { Pace(work: $0, plain: plain) }
+        return rounds.map { $0.sorted { $0.reads < $1.reads }[runs / 2] }
     }
 
     private init(work: Duration, plain: Duration) {

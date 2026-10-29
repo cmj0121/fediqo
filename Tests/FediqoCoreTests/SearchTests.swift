@@ -342,12 +342,12 @@ struct SearchTests {
         #expect(counts[0] == 0 && counts[1] == 1_000 && counts[2] == 1_000 && counts[3] == 10_000)
         let (slowest, searching) = try #require(zip(patterns, paces).max { $0.1.reads < $1.1.reads })
         // Each against plain reads of the same notes (`Pace`), and printed so a runner's log
-        // shows them. Debug measured about 3.0 to index and 1.2 for the slowest search
-        // (`*d?y*zzz`, which walks every body); across seventy-one runs at normal and background
-        // priority, counting coverage, and beside twice as many busy threads as cores, at most
-        // 4.8 and 2.1. The lines are about twice those: an index or a search made five times
-        // dearer fails, three times may not. They are drawn for the debug build `swift test`
-        // makes; release measured 1.35 and 0.22, as the plain read is library code either way.
+        // shows them. Debug measured 3.9 to 4.0 to index and 1.42 to 1.47 for the slowest search
+        // (`*d?y*zzz`, which walks every body) on a quiet machine, and 3.3 to 3.7 and 1.25 to
+        // 1.47 beside twelve busy threads on ten cores. The lines are two and a half times
+        // those: an index or a search made three times dearer measured 12.6 and 4.2 and fails.
+        // They are drawn for the debug build `swift test` makes; release measured 1.35 and 0.22,
+        // as the plain read is library code either way.
         print("Search index: \(indexing)")
         print("Slowest search, `\(slowest)`: \(searching)")
         #expect(indexing.reads < 10, "indexing took \(indexing)")
