@@ -108,6 +108,9 @@ struct AdminPane: View {
                 onSpan: { days in Task { await tending.server.choose(days: days, on: page, in: session) } },
                 onReview: { item, rise in Task { await tending.server.review(item, rise: rise, on: page, in: session) } },
                 onReadOn: { kind in Task { await tending.server.readOn(kind, of: page, in: session) } },
+                onTag: { tag, change in Task { await tending.server.change(tag, change, on: page, in: session) } },
+                onSite: { site, rise in Task { await tending.server.review(site, rise: rise, on: page, in: session) } },
+                onReadOnKnown: { list in Task { await tending.server.readOnKnown(list, of: page, in: session) } },
                 onOpenRules: { url in onOpenServerPage(url, page.host) },
                 onAskWords: askWords
             ),

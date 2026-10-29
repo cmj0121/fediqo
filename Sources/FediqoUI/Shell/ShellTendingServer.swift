@@ -4,7 +4,9 @@ import Observation
 
 // The Dashboard, Trends and Rules tabs of a host's page (#384, #416): how it is doing, as a few
 // of its own figures over a span the person chooses — and, over the same span, who stays, month
-// by month, and what it holds by language, by server and by software (#418); what waits to rise on it — hashtags, links,
+// by month, and what it holds by language, by server and by software (#418); every hashtag it
+// knows, let rise or kept back and let be used or not, and the sites its links come from, each
+// let rise or kept back for all its links (#419); what waits to rise on it — hashtags, links,
 // posts — each let rise or kept back; and its rules, read, with the way to its own page where
 // they are changed.
 //
@@ -39,6 +41,12 @@ enum ServerPart: String, CaseIterable, Sendable {
     }
 
     var flag: MastodonStaff { tab.flag }
+}
+
+/// The two lists of the Trends tab beside what waits to rise (#419): every hashtag the server
+/// knows, and the sites its links come from.
+enum KnownList: String, CaseIterable, Sendable {
+    case tags, sites
 }
 
 /// What the Dashboard, Trends or Rules tab is handed: its own part, where the role allows it, and
@@ -86,6 +94,10 @@ struct TendingServerSaid: Equatable {
     let host: String
     var measures: Measures?
     var rising: [Rising]?
+    /// Every hashtag the server knows (#419), beside what waits to rise.
+    var tags: ServerListSaid<AdminTag>?
+    /// The sites its links come from (#419).
+    var sites: ServerListSaid<LinkSite>?
     var rules: Rules?
     /// Whether the sign-in may review what rises: it holds tending's word that changes.
     var acts = false
@@ -99,6 +111,13 @@ struct TendingServerSaid: Equatable {
 
     static func rowID(_ kind: RisingKind, _ id: String) -> String { "rising.\(kind.rawValue)\u{1e}\(id)" }
     static func ruleID(_ id: String) -> String { "rule\u{1e}\(id)" }
+    static func knownID(_ list: KnownList, _ id: String) -> String { "known.\(list.rawValue)\u{1e}\(id)" }
+
+    /// A change to a hashtag the server knows (#419): let rise or kept back, let be used or not.
+    enum TagChange: Equatable {
+        case rises(Bool)
+        case usable(Bool)
+    }
 }
 
 @MainActor
@@ -108,6 +127,15 @@ final class ShellTendingServer {
     private struct Read: Equatable {
         var rows: [RisingReview] = []
         var next: Int?
+        var answered = false
+        var failed = false
+        var readingOn = false
+    }
+
+    /// One list of what the server knows as far as it has been read, by the server's own next.
+    private struct Known<Item: Equatable>: Equatable {
+        var rows: [Item] = []
+        var next: String?
         var answered = false
         var failed = false
         var readingOn = false
@@ -125,6 +153,8 @@ final class ShellTendingServer {
         /// The number of the last ask of the figures: a span asked before it does not land.
         var measuresErrand = 0
         var rising: [RisingKind: Read] = [:]
+        var tags = Known<AdminTag>()
+        var sites = Known<LinkSite>()
         var rules: [ServerRule]?
         var rulesFailed = false
         var asking = false
@@ -198,6 +228,11 @@ final class ShellTendingServer {
         return true
     }
 
+    /// The way to the hashtags the server knows and the sites its links come from (#419).
+    private func taxonomies(at host: String, in session: ShellSession) -> MastodonAdminTaxonomies? {
+        session.mastodon.authorized(host: host, within: deadline, for: .tending).map(MastodonAdminTaxonomies.init(door:))
+    }
+
     /// The way to how the server is doing beyond its own figures (#418).
     private func dashboard(at host: String, in session: ShellSession) -> MastodonAdminDashboard? {
         session.mastodon.authorized(host: host, within: deadline, for: .tending).map(MastodonAdminDashboard.init(door:))
@@ -245,6 +280,19 @@ final class ShellTendingServer {
                 return shown
             }
         }
+        if allowed.contains(.rising) {
+            func known<Item: Equatable>(_ list: KnownList, _ read: Known<Item>?) -> ServerListSaid<Item> {
+                var shown = ServerListSaid(items: read?.rows ?? [], more: read.map { $0.answered && ($0.next != nil || $0.failed) && !$0.readingOn } ?? false)
+                if held?.notAllowed.contains(.rising) == true {
+                    shown.quiet = notAllowed
+                } else if let read, read.answered, read.rows.isEmpty, read.next == nil {
+                    shown.quiet = L10n.t("tend.server.known.none.\(list.rawValue)", language: language)
+                }
+                return shown
+            }
+            said.tags = known(.tags, held?.tags)
+            said.sites = known(.sites, held?.sites)
+        }
         if allowed.contains(.rules) {
             var rules = TendingServerSaid.Rules(rules: held?.rules ?? [], page: MastodonAdminServer.rulesPage(host: host))
             if held?.notAllowed.contains(.rules) == true {
@@ -265,6 +313,8 @@ final class ShellTendingServer {
             for kind in RisingKind.allCases {
                 ids += (held.rising[kind]?.rows ?? []).map { TendingServerSaid.rowID(kind, $0.id) }
             }
+            ids += held.tags.rows.map { TendingServerSaid.knownID(.tags, $0.id) }
+            ids += held.sites.rows.map { TendingServerSaid.knownID(.sites, $0.id) }
         }
         if allowed.contains(.rules) { ids += (held.rules ?? []).map { TendingServerSaid.ruleID($0.id) } }
         return ids
@@ -282,8 +332,8 @@ final class ShellTendingServer {
     func ask(of page: Tending, language: DummyLanguage? = nil) -> PageAsking {
         let key = Self.key(page)
         guard let held = pages[key] else { return PageAsking() }
-        let readingOn = held.rising.values.contains(where: \.readingOn)
-        let failed = held.rising.values.contains(where: \.failed) || held.measuresFailed || held.breakdownsFailed || held.retentionFailed
+        let readingOn = held.rising.values.contains(where: \.readingOn) || held.tags.readingOn || held.sites.readingOn
+        let failed = held.rising.values.contains(where: \.failed) || held.tags.failed || held.sites.failed || held.measuresFailed || held.breakdownsFailed || held.retentionFailed
             || held.rulesFailed
         let asking = held.asking || held.measuresAsking
         return PageAsking(
@@ -321,7 +371,9 @@ final class ShellTendingServer {
                 await asks[Self.key(page)]?.value
                 return
             }
-            if held.measures != nil || held.rules != nil || !held.rising.isEmpty || !held.notAllowed.isEmpty { return }
+            if held.measures != nil || held.rules != nil || !held.rising.isEmpty || held.tags.answered || !held.notAllowed.isEmpty {
+                return
+            }
         }
         await begin(page, in: session)?.value
     }
@@ -361,6 +413,11 @@ final class ShellTendingServer {
                 if allowed.contains(.rising) {
                     for kind in RisingKind.allCases {
                         group.addTask { await self.read(kind, at: host, from: 0, through: through, errand: errand, in: session) }
+                    }
+                    if let known = self.taxonomies(at: host, in: session) {
+                        for list in KnownList.allCases {
+                            group.addTask { await self.read(list, at: host, after: nil, through: known, errand: errand, in: session) }
+                        }
                     }
                 }
                 if allowed.contains(.rules) {
@@ -527,6 +584,144 @@ final class ShellTendingServer {
             mark()
         default:
             if !Cancellation.happened(error) { mark() }
+        }
+    }
+
+    // MARK: - What the server knows (#419)
+
+    /// One of the two lists' foot pressed: its next stretch, or again the one that did not come.
+    func readOnKnown(_ list: KnownList, of page: Tending, in session: ShellSession) async {
+        let host = page.host
+        let key = Self.key(host, .rising)
+        guard keepsStanding(at: host, in: session), Self.parts(at: host, in: session).contains(.rising),
+              let held = standing(host, .rising, in: session), !held.asking, let through = taxonomies(at: host, in: session)
+        else { return }
+        let next: String?
+        switch list {
+        case .tags: next = held.tags.readingOn || !held.tags.answered ? nil : held.tags.next
+        case .sites: next = held.sites.readingOn || !held.sites.answered ? nil : held.sites.next
+        }
+        guard let next else { return }
+        setReadingOn(list, at: key, true)
+        await read(list, at: host, after: next, through: through, errand: held.awaits, in: session)
+        setReadingOn(list, at: key, false)
+    }
+
+    private func setReadingOn(_ list: KnownList, at key: String, _ on: Bool) {
+        switch list {
+        case .tags: pages[key]?.tags.readingOn = on
+        case .sites: pages[key]?.sites.readingOn = on
+        }
+    }
+
+    private func read(
+        _ list: KnownList, at host: String, after next: String?, through: MastodonAdminTaxonomies, errand: Int, in session: ShellSession
+    ) async {
+        let key = Self.key(host, .rising)
+        do {
+            switch list {
+            case .tags: land(try await through.tags(after: next), into: \.tags, list, at: key, after: next, errand: errand)
+            case .sites: land(try await through.sites(after: next), into: \.sites, list, at: key, after: next, errand: errand)
+            }
+        } catch {
+            guard pages[key]?.awaits == errand else { return }
+            failed(error, .rising, at: host, in: session) {
+                switch list {
+                case .tags: pages[key]?.tags.failed = true
+                case .sites: pages[key]?.sites.failed = true
+                }
+            }
+        }
+    }
+
+    /// A stretch landed, **under the rule every change keeps**: a row a change answered for after
+    /// this read set out stands as the change left it.
+    private func land<Item: Identifiable & Equatable>(
+        _ stretch: FederationStretch<Item>, into path: WritableKeyPath<Page, Known<Item>>, _ list: KnownList, at key: String,
+        after next: String?, errand: Int
+    ) where Item.ID == String {
+        guard var held = pages[key], held.awaits == errand else { return }
+        var read = held[keyPath: path]
+        let current = Dictionary(read.rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let landed = stretch.items.map { item in
+            (held.acted[TendingServerSaid.knownID(list, item.id)] ?? 0) > errand ? current[item.id] ?? item : item
+        }
+        var rows = next == nil ? [] : read.rows
+        var seen = Set(rows.map(\.id))
+        rows += landed.filter { seen.insert($0.id).inserted }
+        read.rows = rows
+        read.next = stretch.next
+        read.answered = true
+        read.failed = false
+        held[keyPath: path] = read
+        held.notAllowed.remove(.rising)
+        pages[key] = held
+    }
+
+    /// A hashtag the server knows let rise or kept back, let be used or not: sent once — a
+    /// press while it is on the wire sends nothing — and its row the server's answer. Every way
+    /// it does not send, and every refusal, is said; nothing here changes by a failure.
+    func change(_ tag: AdminTag, _ change: TendingServerSaid.TagChange, on page: Tending, in session: ShellSession) async {
+        let failure = await act(.tags, tag.id, on: page, in: session) { through in
+            let answered = switch change {
+            case .rises(let rises): try await through.changeTag(tag.id, rises: rises)
+            case .usable(let usable): try await through.changeTag(tag.id, usable: usable)
+            }
+            return { (held: inout Page) in
+                if let index = held.tags.rows.firstIndex(where: { $0.id == tag.id }) { held.tags.rows[index] = answered }
+            }
+        }
+        if let failure { session.showToast(failure) }
+    }
+
+    /// A site let rise — or kept back, and every link from it with it — as `change` is sent.
+    func review(_ site: LinkSite, rise: Bool, on page: Tending, in session: ShellSession) async {
+        let failure = await act(.sites, site.id, on: page, in: session) { through in
+            let answered = try await through.reviewSite(site.id, rise: rise)
+            return { (held: inout Page) in
+                if let index = held.sites.rows.firstIndex(where: { $0.id == site.id }) { held.sites.rows[index] = answered }
+            }
+        }
+        if let failure { session.showToast(failure) }
+    }
+
+    private func act(
+        _ list: KnownList, _ id: String, on page: Tending, in session: ShellSession,
+        _ send: (MastodonAdminTaxonomies) async throws -> (inout Page) -> Void
+    ) async -> String? {
+        let host = page.host
+        let key = TendingServerSaid.knownID(list, id)
+        let at = Self.key(host, .rising)
+        let notAllowed = String(format: L10n.t("tend.act.notAllowed"), host)
+        guard keepsStanding(at: host, in: session), Self.parts(at: host, in: session).contains(.rising),
+              ShellTending.acts(at: host, in: session)
+        else { return notAllowed }
+        guard let held = standing(host, .rising, in: session) else { return String(format: L10n.t("tend.act.failed"), host) }
+        guard !held.acting.contains(key) else { return nil }
+        guard let through = taxonomies(at: host, in: session) else { return String(format: L10n.t("tend.act.failed"), host) }
+        let under = held.under
+        pages[at]?.acting.insert(key)
+        defer { if pages[at]?.under == under { pages[at]?.acting.remove(key) } }
+        do {
+            let apply = try await send(through)
+            // **Numbered as it answers**: a read sent while this was on the wire does not undo it.
+            let errand = errands.next()
+            guard pages[at]?.under == under, var now = pages[at] else { return nil }
+            now.acted[key] = errand
+            apply(&now)
+            pages[at] = now
+            return nil
+        } catch {
+            guard !Cancellation.happened(error) else { return nil }
+            switch error {
+            case MastodonAdminError.notAllowed: return notAllowed
+            case MastodonAdminError.refused(let sentence): return String(format: L10n.t("tend.act.refused"), host, sentence)
+            case MastodonAuthError.http(404): return String(format: L10n.t("tend.server.rising.gone"), host)
+            case MastodonAuthError.signedOut:
+                session.mastodon.endedByServer(host: host)
+                return String(format: L10n.t("tend.act.failed"), host)
+            default: return String(format: L10n.t("tend.act.failed"), host)
+            }
         }
     }
 

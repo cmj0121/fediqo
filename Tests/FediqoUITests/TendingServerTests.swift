@@ -24,6 +24,17 @@ struct TendingServerTests {
     private static let posts = "/api/v1/admin/trends/statuses?limit=20"
     private static let rules = "/api/v1/instance/rules"
     private static let dimensions = "/api/v1/admin/dimensions"
+    private static let knownTags = "/api/v1/admin/tags"
+    private static let sites = "/api/v1/admin/trends/links/publishers"
+
+    private static func adminTag(_ id: String, _ name: String, rises: Bool = false, usable: Bool = true, waiting: Bool = false) -> String {
+        #"{"id":"\#(id)","name":"\#(name)","url":"https://m.example/tags/\#(name)","history":[{"day":"1792627200","accounts":"4","uses":"4"}],"trendable":\#(rises),"usable":\#(usable),"listable":true,"requires_review":\#(waiting)}"#
+    }
+
+    private static func site(_ id: Int, _ domain: String, rises: Bool?, waiting: Bool = false) -> String {
+        let trendable = rises.map(String.init) ?? "null"
+        return #"{"id":\#(id),"domain":"\#(domain)","trendable":\#(trendable),"requires_review":\#(waiting),"reviewed_at":null}"#
+    }
     private static let retention = "/api/v1/admin/retention"
     private static let admin = "2097148"
     private static let moderator = "1115420"
@@ -68,6 +79,8 @@ struct TendingServerTests {
             links: PageServer.Answer(body: #"[{"id":2,"url":"https://waiting.example/stories/waiting","title":"A story waiting","requires_review":true,"history":[]}]"#),
             posts: PageServer.Answer(body: "[]"),
             rules: PageServer.Answer(body: #"[{"id":"1","text":"Be kind","hint":""},{"id":"2","text":"No spam","hint":"None at all"}]"#),
+            knownTags: PageServer.Answer(body: "[" + adminTag("3", "Fediqo419", waiting: true) + "," + adminTag("1", "FediqoRising", rises: true) + "]"),
+            sites: PageServer.Answer(body: "[" + site(2, "fediqo419.example", rises: nil, waiting: true) + "," + site(1, "kept.example", rises: false) + "]"),
         ].merging(more) { $1 }
     }
 
@@ -162,7 +175,7 @@ struct TendingServerTests {
         let rules = try #require(tab.said(of: Self.rulesPage, in: session, language: .english).rules)
         #expect(rules.rules.enumerated().map { TendingServerSaid.rule($1, at: $0, language: .english) } == ["1. Be kind", "2. No spam — None at all"])
         #expect(rules.page?.absoluteString == "https://m.example/admin/rules")
-        #expect(tab.walked(Self.risingPage, in: session) == [
+        #expect(tab.walked(Self.risingPage, in: session).prefix(3) == [
             TendingServerSaid.rowID(.tags, "23"), TendingServerSaid.rowID(.tags, "1"), TendingServerSaid.rowID(.links, "2"),
         ])
         #expect(tab.walked(Self.rulesPage, in: session) == [TendingServerSaid.ruleID("1"), TendingServerSaid.ruleID("2")])
@@ -347,6 +360,103 @@ struct TendingServerTests {
         #expect(tab.said(of: Self.risingPage, in: session).rising?[0].items.first?.waiting == false, "the read sent before the review answered did not undo it")
     }
 
+    // MARK: - What the server knows (#419)
+
+    @Test("Beside what waits to rise, the Trends tab reads every hashtag the server knows — whether it may rise and be used, and whether it waits — and the sites its links come from, a site nobody has decided read as such; each list reads on by its own foot")
+    func whatTheServerKnows() async throws {
+        let (session, server, tab, _) = try await session(Self.seeded([
+            Self.knownTags: PageServer.Answer(
+                body: "[" + Self.adminTag("3", "Fediqo419", waiting: true) + "]",
+                link: #"<https://m.example/api/v1/admin/tags?max_id=3>; rel="next""#
+            ),
+            "\(Self.knownTags)?max_id=3": PageServer.Answer(body: "[" + Self.adminTag("1", "FediqoRising", rises: true, usable: false) + "]"),
+        ]))
+        await tab.opened(Self.risingPage, in: session)
+        var said = tab.said(of: Self.risingPage, in: session, language: .english)
+        let waiting = try #require(said.tags?.items.first)
+        #expect(TendingServerSaid.lines(of: waiting, language: .english) == ["#Fediqo419", "Waiting for review · Kept back · May be used · 4 people over two days"])
+        #expect(said.tags?.more == true)
+        await tab.readOnKnown(.tags, of: Self.risingPage, in: session)
+        said = tab.said(of: Self.risingPage, in: session, language: .english)
+        let rising = try #require(said.tags?.items.last)
+        #expect(said.tags?.items.map(\.id) == ["3", "1"] && said.tags?.more == false)
+        #expect(TendingServerSaid.lines(of: rising, language: .english).last?.hasPrefix("Let rise · Kept from use") == true)
+        #expect(await server.arrivals(of: "\(Self.knownTags)?max_id=3") == 1)
+
+        let sites = try #require(said.sites?.items)
+        #expect(sites.map { TendingServerSaid.lines(of: $0, language: .english) } == [
+            ["fediqo419.example", "Not yet decided"], ["kept.example", "Its links are kept back"],
+        ])
+        #expect(TendingServerSaid.more(sites[0], said: said, actions: TendingServerActs(), language: .english).items.map(\.name) == [
+            "Let its links rise", "Keep its links back",
+        ], "undecided: both offered")
+        #expect(TendingServerSaid.more(sites[1], said: said, actions: TendingServerActs(), language: .english).items.map(\.name) == ["Let its links rise"])
+        #expect(TendingServerSaid.more(waiting, said: said, actions: TendingServerActs(), language: .english).items.map(\.name) == [
+            "Let it rise", "Keep it from use",
+        ])
+        #expect(tab.walked(Self.risingPage, in: session).suffix(4) == [
+            TendingServerSaid.knownID(.tags, "3"), TendingServerSaid.knownID(.tags, "1"),
+            TendingServerSaid.knownID(.sites, "2"), TendingServerSaid.knownID(.sites, "1"),
+        ])
+    }
+
+    @Test("A hashtag kept back, kept from use, or let rise, and a site kept back for all its links, are each sent once and the row is the server's answer — the very thing its own pages then show")
+    func whatTheServerKnowsIsChanged() async throws {
+        let tag = "\(Self.knownTags)/3"
+        let reject = "\(Self.sites)/2/reject"
+        let (session, server, tab, _) = try await session(Self.seeded([
+            tag: PageServer.Answer(body: Self.adminTag("3", "Fediqo419", rises: true)),
+            reject: PageServer.Answer(body: Self.site(2, "fediqo419.example", rises: false)),
+        ]))
+        await tab.opened(Self.risingPage, in: session)
+        let waiting = try #require(tab.said(of: Self.risingPage, in: session).tags?.items.first)
+        await tab.change(waiting, .rises(true), on: Self.risingPage, in: session)
+        let risen = try #require(tab.said(of: Self.risingPage, in: session).tags?.items.first)
+        #expect(risen.rises && !risen.waiting)
+        let sent = try #require(await server.sent.last)
+        #expect(sent.method == "PUT" && sent.ask == tag && sent.body == "trendable=true", "only what was changed is named")
+
+        await server.answer(tag, PageServer.Answer(body: Self.adminTag("3", "Fediqo419", rises: true, usable: false)))
+        await tab.change(risen, .usable(false), on: Self.risingPage, in: session)
+        #expect(await server.sent.last?.body == "usable=false")
+        #expect(tab.said(of: Self.risingPage, in: session).tags?.items.first?.usable == false)
+
+        let undecided = try #require(tab.said(of: Self.risingPage, in: session).sites?.items.first)
+        await tab.review(undecided, rise: false, on: Self.risingPage, in: session)
+        #expect(tab.said(of: Self.risingPage, in: session).sites?.items.first?.rises == false)
+        let reviewed = try #require(await server.sent.last)
+        #expect(reviewed.ask == reject && reviewed.method == "POST")
+    }
+
+    @Test("A change the server refuses, or fails, says so and changes nothing here; without the word that changes nothing is sent; a role without the flag for hashtags asks nothing of either list")
+    func whatTheServerKnowsRefused() async throws {
+        let tag = "\(Self.knownTags)/3"
+        let (session, server, tab, _) = try await session(Self.seeded([
+            tag: PageServer.Answer(body: #"{"error":"This action is not allowed"}"#, status: 403),
+            "\(Self.sites)/2/approve": PageServer.Answer(body: "", status: 503),
+        ]))
+        await tab.opened(Self.risingPage, in: session)
+        let before = tab.said(of: Self.risingPage, in: session)
+        await tab.change(try #require(before.tags?.items.first), .rises(true), on: Self.risingPage, in: session)
+        #expect(session.toast?.text == String(format: L10n.t("tend.act.notAllowed"), Self.host))
+        await tab.review(try #require(before.sites?.items.first), rise: true, on: Self.risingPage, in: session)
+        #expect(session.toast?.text == String(format: L10n.t("tend.act.failed"), Self.host))
+        #expect(tab.said(of: Self.risingPage, in: session) == before, "nothing changed here")
+
+        let (locked, lockedServer, lockedTab, _) = try await self.session(Self.seeded(), holding: "\(Self.reads) admin:read")
+        await lockedTab.opened(Self.risingPage, in: locked)
+        await lockedTab.change(try #require(lockedTab.said(of: Self.risingPage, in: locked).tags?.items.first), .rises(true), on: Self.risingPage, in: locked)
+        #expect(await lockedServer.arrivals(of: tag) == 0)
+
+        let (ruled, ruledServer, rul, _) = try await self.session(Self.seeded(), permissions: Self.rulesOnly)
+        await rul.opened(Self.risingPage, in: ruled)
+        await rul.opened(Self.rulesPage, in: ruled)
+        let askedTags = await ruledServer.arrivals(of: Self.knownTags)
+        let askedSites = await ruledServer.arrivals(of: Self.sites)
+        #expect(askedTags == 0 && askedSites == 0 && rul.said(of: Self.risingPage, in: ruled).tags == nil, "no trace without the flag")
+        _ = server
+    }
+
     // MARK: - Let go
 
     @Test("What each tab said is let go when the page leaves; what rises is let go on its own when the role no longer answers for it, while the rules it still answers for are kept")
@@ -378,7 +488,10 @@ struct TendingServerTests {
             "tend.server.rules.title", "tend.server.rules.change", "tend.server.rules.none", "tend.server.dashboard.failed",
             "tend.server.retention.title", "tend.server.retention.line", "tend.server.retention.none", "tend.server.retention.cohort",
             "tend.server.retention.point", "tend.server.breakdown.row", "tend.server.breakdown.none", "tend.server.breakdown.notGiven",
+            "tend.server.tag.usable", "tend.server.tag.unusable", "tend.server.tag.use", "tend.server.tag.unuse",
+            "tend.server.site.rises", "tend.server.site.kept", "tend.server.site.undecided", "tend.server.site.rise", "tend.server.site.keep",
         ]
+        for list in KnownList.allCases { keys += ["tend.server.known.\(list.rawValue)", "tend.server.known.none.\(list.rawValue)"] }
         keys += ServerBreakdown.Key.allCases.map { "tend.server.breakdown.\(String(describing: $0))" }
         keys += ServerMeasure.Key.allCases.map { "tend.server.measure.\($0)" }
         for kind in RisingKind.allCases { keys += ["tend.server.rising.\(kind.rawValue)", "tend.server.rising.none.\(kind.rawValue)"] }

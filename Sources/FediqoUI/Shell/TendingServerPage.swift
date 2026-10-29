@@ -9,6 +9,12 @@ struct TendingServerActs {
     var onReview: (RisingReview, Bool) -> Void = { _, _ in }
     /// A list of what rises pressed at its foot.
     var onReadOn: (RisingKind) -> Void = { _ in }
+    /// A hashtag the server knows let rise or kept back, let be used or not (#419).
+    var onTag: (AdminTag, TendingServerSaid.TagChange) -> Void = { _, _ in }
+    /// A site let rise — `true` — or kept back, its links with it (#419).
+    var onSite: (LinkSite, Bool) -> Void = { _, _ in }
+    /// The hashtags known, or the sites, pressed at their foot.
+    var onReadOnKnown: (KnownList) -> Void = { _ in }
     /// The server's own page of its rules, where they are changed.
     var onOpenRules: (URL) -> Void = { _ in }
     /// Tending's lock pressed, where the sign-in may not review.
@@ -32,6 +38,11 @@ struct TendingServerActs {
 ///     ─────────────────────────────────────────────────────────────────
 ///     Hashtags rising
 ///     #FediqoWaiting       Waiting for review · 12 people over 2 days   …
+///     ─────────────────────────────────────────────────────────────────
+///     Hashtags it knows                                  (#419, beside them)
+///     #Fediqo419           Kept back · May be used                     …
+///     Sites its links come from
+///     fediqo419.example    Not yet decided                              …
 ///     ─────────────────────────────────────────────────────────────────
 ///     Rules                                        Change on m.example’s page
 ///     1. Be kind — hint
@@ -60,6 +71,18 @@ struct TendingServerList<Lead: View>: View {
                     if let measures = said.measures { figures(measures) }
                     if let rising = said.rising {
                         ForEach(rising) { list in risingList(list) }
+                    }
+                    if let tags = said.tags {
+                        knownList(.tags, tags) { tag in
+                            knownRow(TendingServerSaid.knownID(.tags, tag.id), lines: TendingServerSaid.lines(of: tag),
+                                     more: TendingServerSaid.more(tag, said: said, actions: acts))
+                        }
+                    }
+                    if let sites = said.sites {
+                        knownList(.sites, sites) { site in
+                            knownRow(TendingServerSaid.knownID(.sites, site.id), lines: TendingServerSaid.lines(of: site),
+                                     more: TendingServerSaid.more(site, said: said, actions: acts))
+                        }
                     }
                     if let rules = said.rules { rulesList(rules) }
                 }
@@ -255,6 +278,74 @@ struct TendingServerList<Lead: View>: View {
             }
         }
         .padding(.vertical, ShellSpace.step)
+        .background(selected ? ShellChrome.floatFill(colorScheme) : .clear)
+        .overlay(alignment: .leading) {
+            if selected {
+                Rectangle().fill(ShellChrome.phosphor(colorScheme)).frame(width: DummyItemRow.Box.lamp)
+            }
+        }
+    }
+
+    // MARK: - What the server knows (#419)
+
+    /// Every hashtag the server knows, or the sites its links come from: the head, a row each,
+    /// the sentence where there are none, and the foot that reads on.
+    @ViewBuilder
+    private func knownList<Item: Identifiable & Equatable, Row: View>(
+        _ list: KnownList, _ shown: ServerListSaid<Item>, @ViewBuilder row: @escaping (Item) -> Row
+    ) -> some View where Item.ID == String {
+        ShellRule()
+        head(TendingServerSaid.title(list))
+            .padding(.horizontal, ShellSpace.pad)
+            .padding(.vertical, ShellSpace.snug)
+        ForEach(shown.items) { item in
+            ShellRule()
+            row(item)
+                .id(TendingServerSaid.knownID(list, item.id))
+        }
+        if let quiet = shown.quiet {
+            quietLine(quiet)
+                .padding(.horizontal, ShellSpace.pad)
+                .padding(.vertical, ShellSpace.snug)
+        }
+        if shown.more {
+            ShellRule()
+            PersonFootRow(
+                symbol: PersonSaid.Foot.more.symbol, words: L10n.t("person.foot.more"), presses: true,
+                onPress: { acts.onReadOnKnown(list) }
+            )
+        }
+    }
+
+    private func knownRow(_ id: String, lines: [String], more: ShellMore) -> some View {
+        let menu = NoticeRow.Menu(more: { more }, asks: $asked)
+        let selected = selectedID == id
+        return HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                    Text(verbatim: line)
+                        .shellFont(index == 0 ? .reading : .meta)
+                        .foregroundStyle(index == 0 ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            ShellMoreButton(label: L10n.t("tend.more.label"), asks: menu.asks, more: menu.more)
+                .fixedSize()
+        }
+        .padding(.horizontal, ShellSpace.pad)
+        .padding(.vertical, ShellSpace.step)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            switch DummyCommand.tapped(id, selected: selectedID, touch: touch) {
+            case .select, .open: selectedID = id
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(lines.joined(separator: L10n.t("people.row.between")))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityActions { NoticeMenuActions(more: menu.more, asks: menu.asks) }
+        .modifier(NoticeRowMenu(menu: menu, label: L10n.t("tend.more.label")))
         .background(selected ? ShellChrome.floatFill(colorScheme) : .clear)
         .overlay(alignment: .leading) {
             if selected {
@@ -460,6 +551,83 @@ extension TendingServerSaid {
             }.because(why))
         }
         return ShellMore(items: items)
+    }
+
+    static func title(_ list: KnownList, language: DummyLanguage? = nil) -> String {
+        L10n.t("tend.server.known.\(list.rawValue)", language: language)
+    }
+
+    /// A hashtag the server knows: the hashtag; whether it may rise and be used — and whether it
+    /// waits for somebody to say — and how many used it.
+    static func lines(of tag: AdminTag, language: DummyLanguage? = nil) -> [String] {
+        let people = tag.tag.use.people.map {
+            String(format: L10n.t("tend.server.rising.people", language: language), L10n.grouped($0, language: language))
+        }
+        let state = [
+            tag.waiting ? L10n.t("tend.server.rising.waiting", language: language) : nil,
+            L10n.t(tag.rises ? "tend.server.rising.rises" : "tend.server.rising.kept", language: language),
+            L10n.t(tag.usable ? "tend.server.tag.usable" : "tend.server.tag.unusable", language: language),
+            people,
+        ].compactMap { $0 }.joined(separator: " · ")
+        return [tag.tag.tag.text, state]
+    }
+
+    /// A site its links come from: its name, and whether its links may rise — or that nobody
+    /// has said yet.
+    static func lines(of site: LinkSite, language: DummyLanguage? = nil) -> [String] {
+        let key = switch site.rises {
+        case true?: "tend.server.site.rises"
+        case false?: "tend.server.site.kept"
+        case nil: "tend.server.site.undecided"
+        }
+        return [site.domain, L10n.t(key, language: language)]
+    }
+
+    /// A hashtag's `…`: let rise or kept back, and let be used or kept from use — each the way it
+    /// does not stand already. Where the sign-in may not change it, tending's lock, or dim.
+    @MainActor
+    static func more(_ tag: AdminTag, said: Self, actions: TendingServerActs, language: DummyLanguage? = nil) -> ShellMore {
+        if let locked = locked(said, actions: actions, language: language) { return locked }
+        let look = look(knownID(.tags, tag.id), said: said)
+        let why = said.acts ? nil : L10n.t("tend.readOnly", language: language)
+        let rise: ShellMoreItem = tag.rises
+            ? .plain(ShellMark("hand.raised", L10n.t("tend.server.keep", language: language), look: look)) { actions.onTag(tag, .rises(false)) }
+            : .plain(ShellMark("arrow.up.right.circle", L10n.t("tend.server.rise", language: language), look: look)) { actions.onTag(tag, .rises(true)) }
+        let use: ShellMoreItem = tag.usable
+            ? .plain(ShellMark("nosign", L10n.t("tend.server.tag.unuse", language: language), look: look)) { actions.onTag(tag, .usable(false)) }
+            : .plain(ShellMark("number", L10n.t("tend.server.tag.use", language: language), look: look)) { actions.onTag(tag, .usable(true)) }
+        return ShellMore(items: [rise.because(why), use.because(why)])
+    }
+
+    /// A site's `…`: let rise or kept back, its links with it — both where nobody has said yet.
+    @MainActor
+    static func more(_ site: LinkSite, said: Self, actions: TendingServerActs, language: DummyLanguage? = nil) -> ShellMore {
+        if let locked = locked(said, actions: actions, language: language) { return locked }
+        let look = look(knownID(.sites, site.id), said: said)
+        let why = said.acts ? nil : L10n.t("tend.readOnly", language: language)
+        var items: [ShellMoreItem] = []
+        if site.rises != true {
+            items.append(ShellMoreItem.plain(ShellMark("arrow.up.right.circle", L10n.t("tend.server.site.rise", language: language), look: look)) {
+                actions.onSite(site, true)
+            }.because(why))
+        }
+        if site.rises != false {
+            items.append(ShellMoreItem.plain(ShellMark("hand.raised", L10n.t("tend.server.site.keep", language: language), look: look)) {
+                actions.onSite(site, false)
+            }.because(why))
+        }
+        return ShellMore(items: items)
+    }
+
+    private static func look(_ id: String, said: Self) -> MarkLook {
+        !said.acts ? .dim(.never) : said.acting.contains(id) ? .dim(.notNow) : .live
+    }
+
+    @MainActor
+    private static func locked(_ said: Self, actions: TendingServerActs, language: DummyLanguage?) -> ShellMore? {
+        guard !said.acts, let lock = said.lock, lock.asks else { return nil }
+        let line = String(format: L10n.t(lock.key, language: language), said.host)
+        return ShellMore(items: [.plain(ShellMark(SourceRow.permissionSymbol, line, look: .live), act: actions.onAskWords)])
     }
 
     /// A rule in its place: its number, its words, and its hint after them.
