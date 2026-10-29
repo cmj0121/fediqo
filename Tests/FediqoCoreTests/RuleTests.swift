@@ -515,12 +515,11 @@ struct RuleTests {
         }
         #expect(!shown.isEmpty)
         // Each against plain reads of the same notes (`Pace`), and printed so a runner's log
-        // shows them. Debug measured about 2.2 to index and 0.67 to evaluate; across seventy-one
-        // runs at normal and background priority, counting coverage, and beside twice as many
-        // busy threads as cores, at most 2.9 and 1.2. The lines are about twice those: an index
-        // or a timeline made five times dearer fails, three times may not. They are drawn for
-        // the debug build `swift test` makes; release measured 0.83 and 0.26, as the plain read
-        // is library code either way.
+        // shows them. Debug measured 2.4 to 2.7 to index and 1.24 to 1.29 to evaluate on a quiet
+        // machine, and 1.8 to 2.1 and 1.19 to 1.30 beside twelve busy threads on ten cores. The
+        // lines are about twice those: an index or a timeline made three times dearer measured
+        // 7.5 and 4.1 and fails. They are drawn for the debug build `swift test` makes; release
+        // measured 0.83 and 0.26, as the plain read is library code either way.
         print("Rules index: \(indexing)")
         print("Rules evaluated: \(evaluating)")
         #expect(indexing.reads < 6, "indexing took \(indexing)")

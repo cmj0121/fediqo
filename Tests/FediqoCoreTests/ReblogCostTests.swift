@@ -67,17 +67,26 @@ struct ReblogCostTests {
         var targets = ReblogTargets([])
         var shown: [Note] = []
         var alone: [Note] = []
+        // The lookup and the evaluation it feeds are timed as one piece of work for the sum,
+        // so the line holds one ratio rather than two added together. Debug measured 1.84 to 1.91
+        // on a quiet machine and 1.66 to 1.82 beside twelve busy threads on ten cores; a lookup
+        // made 2.3 times dearer measured 2.45 to 2.54 and fails.
         let paces = Pace.each(notes, [
             { targets = ReblogTargets(notes) },
             { shown = timeline.shown(notes, index, targets: targets) },
+            {
+                targets = ReblogTargets(notes)
+                shown = timeline.shown(notes, index, targets: targets)
+            },
             { alone = timeline.shown(notes, index) },
         ])
         #expect(shown == alone && shown.contains { $0.isReblog } && shown.contains { !$0.isReblog })
         print("Reblog lookup built: \(paces[0])")
         print("Rules evaluated, one in five a reblog, lookup handed in: \(paces[1])")
-        print("Rules evaluated, one in five a reblog, building its own lookup: \(paces[2])")
+        print("Reblog lookup built and rules evaluated with it: \(paces[2])")
+        print("Rules evaluated, one in five a reblog, building its own lookup: \(paces[3])")
         #expect(paces[1].reads < 2.4, "evaluating took \(paces[1])")
-        #expect(paces[0].reads + paces[1].reads < 2.4, "the lookup and one evaluation together took \(paces[0]) and \(paces[1])")
+        #expect(paces[2].reads < 2.4, "the lookup and one evaluation together took \(paces[2])")
     }
 
     @Test("10,000 notes, one in five a reblog, are searched inside the budget the search already had")
