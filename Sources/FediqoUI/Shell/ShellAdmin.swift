@@ -106,9 +106,9 @@ struct AdminFront: Equatable {
     @MainActor
     mutating func settle(in session: ShellSession) -> Tending? {
         guard let page, !ShellTending.hosts(in: session).contains(page.host) else { return nil }
-        let left = back()
+        self.page = nil
         lamp = nil
-        return left
+        return page
     }
 
     /// Where a notice of the Admin place lands (#381, #382).
@@ -244,8 +244,16 @@ struct AdminFront: Equatable {
         return .host
     }
 
-    /// Whether a notice is one of those the Admin place opens.
-    static func isAdmin(_ notice: Notice) -> Bool {
-        notice.kind == .server("admin.report") || notice.kind == .server("admin.sign_up")
+    /// The tab a notice of the Admin place opens: a new report the reports (#381), a new
+    /// sign-up those waiting (#382). Nothing for any other notice.
+    static func tab(of notice: Notice) -> AdminTab? {
+        switch notice.kind {
+        case .server("admin.report"): .reports
+        case .server("admin.sign_up"): .people
+        default: nil
+        }
     }
+
+    /// Whether a notice is one of those the Admin place opens.
+    static func isAdmin(_ notice: Notice) -> Bool { tab(of: notice) != nil }
 }

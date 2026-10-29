@@ -137,7 +137,7 @@ public struct MastodonAdminServer: Sendable {
         guard offset >= 0, offset < 10_000 else { throw MastodonAdminError.invalid }
         var query = [URLQueryItem(name: "limit", value: String(Self.stretch))]
         if offset > 0 { query.append(URLQueryItem(name: "offset", value: String(offset))) }
-        let body = try await asked { try await door.get(path: "\(Self.trendsPath)/\(kind.path)", query: query) }
+        let body = try await door.adminAsked { try await door.get(path: "\(Self.trendsPath)/\(kind.path)", query: query) }
         guard let reviews = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<ReviewDTO>].self, from: body) else {
             throw MastodonAdminError.unreadable
         }
@@ -173,18 +173,7 @@ public struct MastodonAdminServer: Sendable {
     public func review(_ kind: RisingKind, _ id: String, rise: Bool) async throws -> RisingReview {
         guard ListSubscription.isPathSegment(id) else { throw MastodonAdminError.invalid }
         let path = "\(Self.trendsPath)/\(kind.path)/\(id)/\(rise ? "approve" : "reject")"
-        let body = try await asked {
-            do {
-                return try await door.actAtAddress(path: path, method: "POST", form: [])
-            } catch let refused as MastodonUnprocessable {
-                guard case .refused(let sentence) = AccountPartError.refusal(from: refused.body) else {
-                    throw MastodonAdminError.unreadable
-                }
-                throw MastodonAdminError.refused(sentence: sentence)
-            } catch MastodonHostMoreError.noSuchAddress {
-                throw MastodonAuthError.http(404)
-            }
-        }
+        let body = try await door.adminWrite(path, "POST", form: [])
         guard let review = try? MastodonJSON.decoder.decode(ReviewDTO.self, from: body), review.named == id else {
             throw MastodonAdminError.unreadable
         }
@@ -209,13 +198,7 @@ public struct MastodonAdminServer: Sendable {
     public func measures(days: Int, now: Date = Date()) async throws -> ServerMeasures {
         guard let span = Self.span(days: days, now: now) else { throw MastodonAdminError.invalid }
         let form = ServerMeasure.Key.allCases.map { ("keys[]", $0.rawValue) } + [("start_at", span.start), ("end_at", span.end)]
-        let body = try await asked {
-            do {
-                return try await door.actAtAddress(path: Self.measuresPath, method: "POST", form: form)
-            } catch MastodonHostMoreError.noSuchAddress {
-                throw MastodonAuthError.http(404)
-            }
-        }
+        let body = try await door.adminFigures(Self.measuresPath, form: form)
         guard let read = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<MeasureDTO>].self, from: body) else {
             throw MastodonAdminError.unreadable
         }
@@ -266,14 +249,6 @@ public struct MastodonAdminServer: Sendable {
     }
 
     // MARK: - The wire
-
-    private func asked<T>(_ ask: () async throws -> T) async throws -> T {
-        do {
-            return try await ask()
-        } catch MastodonAuthError.http(403) {
-            throw MastodonAdminError.notAllowed
-        }
-    }
 
     /// What every one of the three says of its review: its id — a number for a link — whether
     /// it waits, and, of a hashtag, whether it may rise.

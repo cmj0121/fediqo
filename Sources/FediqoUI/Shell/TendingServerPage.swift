@@ -124,10 +124,7 @@ struct TendingServerList<Lead: View>: View {
                         .foregroundStyle(ShellChrome.ink(colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Text(TendingServerSaid.asOf(figures, host: said.host))
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
+                asOfLine(TendingServerSaid.asOf(figures, host: said.host))
             }
             if let quiet = measures.quiet { quietLine(quiet) }
         }
@@ -428,10 +425,7 @@ extension TendingServerSaid {
 
     /// Whose the figures are and as of when: the server's, as it said them then.
     static func asOf(_ measures: ServerMeasures, host: String, language: DummyLanguage? = nil) -> String {
-        String(
-            format: L10n.t("tend.server.measures.asOf", language: language), host,
-            measures.asOf.formatted(date: .abbreviated, time: .shortened)
-        )
+        asOf(measures.asOf, host: host, language: language)
     }
 
     /// Whose figures and as of when, for a breakdown or who stays (#418).
@@ -533,11 +527,8 @@ extension TendingServerSaid {
     /// offered. Where the sign-in may not review, tending's lock in their place, or both dim.
     @MainActor
     static func more(_ item: RisingReview, said: Self, actions: TendingServerActs, language: DummyLanguage? = nil) -> ShellMore {
-        if !said.acts, let lock = said.lock, lock.asks {
-            let line = String(format: L10n.t(lock.key, language: language), said.host)
-            return ShellMore(items: [.plain(ShellMark(SourceRow.permissionSymbol, line, look: .live), act: actions.onAskWords)])
-        }
-        let look: MarkLook = !said.acts ? .dim(.never) : said.acting.contains(rowID(item.kind, item.id)) ? .dim(.notNow) : .live
+        if let lock = locked(said, actions: actions, language: language) { return lock }
+        let look = Self.look(rowID(item.kind, item.id), said: said)
         let why = said.acts ? nil : L10n.t("tend.readOnly", language: language)
         var items: [ShellMoreItem] = []
         if item.waiting || item.rises != true {

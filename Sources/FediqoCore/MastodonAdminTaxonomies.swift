@@ -75,13 +75,13 @@ public struct MastodonAdminTaxonomies: Sendable {
 
     /// A stretch of the hashtags the server knows, newest first.
     public func tags(after next: String? = nil) async throws -> FederationStretch<AdminTag> {
-        try await list(Self.tagsPath, after: next) { (said: TagDTO) in said.tag }
+        try await door.adminList(Self.tagsPath, after: next) { (said: TagDTO) in said.tag }
     }
 
     public func tag(_ id: String) async throws -> AdminTag {
         guard ListSubscription.isPathSegment(id) else { throw MastodonAdminError.invalid }
-        let body = try await asked { try await door.get(path: "\(Self.tagsPath)/\(id)", query: []) }
-        return try read(body) { (said: TagDTO) in said.tag }
+        let body = try await door.adminAsked { try await door.get(path: "\(Self.tagsPath)/\(id)", query: []) }
+        return try door.adminRead(body) { (said: TagDTO) in said.tag }
     }
 
     /// The hashtag `id` let rise or kept back, let be used or not, let be listed or not — each
@@ -90,72 +90,25 @@ public struct MastodonAdminTaxonomies: Sendable {
         let form = [("trendable", rises), ("usable", usable), ("listable", listable)]
             .compactMap { name, value in value.map { (name, String($0)) } }
         guard ListSubscription.isPathSegment(id), !form.isEmpty else { throw MastodonAdminError.invalid }
-        return try read(try await write("\(Self.tagsPath)/\(id)", "PUT", form: form)) { (said: TagDTO) in said.tag }
+        return try door.adminRead(try await door.adminWrite("\(Self.tagsPath)/\(id)", "PUT", form: form)) { (said: TagDTO) in said.tag }
     }
 
     // MARK: - Sites
 
     /// A stretch of the sites the server's links come from, newest first.
     public func sites(after next: String? = nil) async throws -> FederationStretch<LinkSite> {
-        try await list(Self.sitesPath, after: next) { (said: SiteDTO) in said.site }
+        try await door.adminList(Self.sitesPath, after: next) { (said: SiteDTO) in said.site }
     }
 
     /// The site `id` let rise — or, with `rise` false, kept back, and every link from it with
     /// it: what the server holds of it after.
     public func reviewSite(_ id: String, rise: Bool) async throws -> LinkSite {
         guard ListSubscription.isPathSegment(id) else { throw MastodonAdminError.invalid }
-        let body = try await write("\(Self.sitesPath)/\(id)/\(rise ? "approve" : "reject")", "POST", form: [])
-        return try read(body) { (said: SiteDTO) in said.site }
+        let body = try await door.adminWrite("\(Self.sitesPath)/\(id)/\(rise ? "approve" : "reject")", "POST", form: [])
+        return try door.adminRead(body) { (said: SiteDTO) in said.site }
     }
 
     // MARK: - The wire
-
-    private func list<DTO: Decodable & Sendable, Item: Sendable & Equatable>(
-        _ path: String, after next: String?, _ made: (DTO) -> Item?
-    ) async throws -> FederationStretch<Item> {
-        let (body, link) = try await asked { try await door.getLinked(path: path, query: try MastodonPage.older(than: next)) }
-        guard let read = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<DTO>].self, from: body) else {
-            throw MastodonAdminError.unreadable
-        }
-        let onward: String?
-        do {
-            onward = try MastodonLink.next(in: link)
-        } catch {
-            throw MastodonAdminError.unreadable
-        }
-        guard onward == nil || onward != next else { throw PagingError.notPaging }
-        return FederationStretch(items: read.compactMap { $0.value.flatMap(made) }, next: onward)
-    }
-
-    private func read<DTO: Decodable, Item>(_ body: Data, _ made: (DTO) -> Item?) throws -> Item {
-        guard let said = try? MastodonJSON.decoder.decode(DTO.self, from: body), let item = made(said) else {
-            throw MastodonAdminError.unreadable
-        }
-        return item
-    }
-
-    private func write(_ path: String, _ method: String, form: [(String, String)]) async throws -> Data {
-        try await asked {
-            do {
-                return try await door.actAtAddress(path: path, method: method, form: form)
-            } catch let refused as MastodonUnprocessable {
-                guard case .refused(let sentence) = AccountPartError.refusal(from: refused.body) else {
-                    throw MastodonAdminError.unreadable
-                }
-                throw MastodonAdminError.refused(sentence: sentence)
-            } catch MastodonHostMoreError.noSuchAddress {
-                throw MastodonAuthError.http(404)
-            }
-        }
-    }
-
-    private func asked<T>(_ ask: () async throws -> T) async throws -> T {
-        do {
-            return try await ask()
-        } catch MastodonAuthError.http(403) {
-            throw MastodonAdminError.notAllowed
-        }
-    }
 
     struct TagDTO: Decodable, Sendable {
         typealias Lenient = StatusDTO.Lenient

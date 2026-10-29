@@ -165,7 +165,7 @@ public struct MastodonAdminDashboard: Sendable {
         for key in keys where !asked.contains(key) { asked.append(key) }
         let form = asked.map { ("keys[]", $0.rawValue) }
             + [("start_at", span.start), ("end_at", span.end), ("limit", String(Self.rows))]
-        let body = try await ask(Self.dimensionsPath, form: form)
+        let body = try await door.adminFigures(Self.dimensionsPath, form: form)
         guard let read = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<DimensionDTO>].self, from: body) else {
             throw MastodonAdminError.unreadable
         }
@@ -188,24 +188,12 @@ public struct MastodonAdminDashboard: Sendable {
             ("start_at", MastodonAdminServer.day(first)), ("end_at", MastodonAdminServer.day(calendar.startOfDay(for: now))),
             ("frequency", "month"),
         ]
-        let body = try await ask(Self.retentionPath, form: form)
+        let body = try await door.adminFigures(Self.retentionPath, form: form)
         guard let read = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<CohortDTO>].self, from: body) else {
             throw MastodonAdminError.unreadable
         }
         let cohorts = read.compactMap { $0.value?.cohort }.filter { $0.month >= first && $0.month <= thisMonth }
         return ServerRetention(months: months, asOf: now, cohorts: cohorts.sorted { $0.month < $1.month })
-    }
-
-    // MARK: - The wire
-
-    private func ask(_ path: String, form: [(String, String)]) async throws -> Data {
-        do {
-            return try await door.actAtAddress(path: path, method: "POST", form: form)
-        } catch MastodonAuthError.http(403) {
-            throw MastodonAdminError.notAllowed
-        } catch MastodonHostMoreError.noSuchAddress {
-            throw MastodonAuthError.http(404)
-        }
     }
 
     struct DimensionDTO: Decodable, Sendable {

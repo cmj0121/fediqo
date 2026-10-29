@@ -312,19 +312,19 @@ public struct MastodonAdminFederation: Sendable {
     // MARK: - Servers refused
 
     public func blocks(after next: String? = nil) async throws -> FederationStretch<ServerBlock> {
-        try await list(Self.blocksPath, after: next) { (said: BlockDTO) in said.block }
+        try await door.adminList(Self.blocksPath, after: next) { (said: BlockDTO) in said.block }
     }
 
     public func addBlock(_ draft: ServerBlockDraft) async throws -> ServerBlock {
         guard draft.sendable, let domain = Self.wireDomain(draft.domain) else { throw MastodonAdminError.invalid }
-        let body = try await write(Self.blocksPath, "POST", form: [("domain", domain)] + draft.form)
-        return try read(body) { (said: BlockDTO) in said.block }
+        let body = try await door.adminWrite(Self.blocksPath, "POST", form: [("domain", domain)] + draft.form)
+        return try door.adminRead(body) { (said: BlockDTO) in said.block }
     }
 
     public func changeBlock(_ id: String, to draft: ServerBlockDraft) async throws -> ServerBlock {
         guard ListSubscription.isPathSegment(id), draft.sendable else { throw MastodonAdminError.invalid }
-        let body = try await write("\(Self.blocksPath)/\(id)", "PUT", form: draft.form)
-        return try read(body) { (said: BlockDTO) in said.block }
+        let body = try await door.adminWrite("\(Self.blocksPath)/\(id)", "PUT", form: draft.form)
+        return try door.adminRead(body) { (said: BlockDTO) in said.block }
     }
 
     public func removeBlock(_ id: String) async throws {
@@ -334,12 +334,12 @@ public struct MastodonAdminFederation: Sendable {
     // MARK: - Servers allowed
 
     public func allows(after next: String? = nil) async throws -> FederationStretch<ServerAllow> {
-        try await list(Self.allowsPath, after: next) { (said: NamedDTO) in said.allow }
+        try await door.adminList(Self.allowsPath, after: next) { (said: NamedDTO) in said.allow }
     }
 
     public func addAllow(_ domain: String) async throws -> ServerAllow {
         guard let domain = Self.wireDomain(domain) else { throw MastodonAdminError.invalid }
-        return try read(try await write(Self.allowsPath, "POST", form: [("domain", domain)])) { (said: NamedDTO) in said.allow }
+        return try door.adminRead(try await door.adminWrite(Self.allowsPath, "POST", form: [("domain", domain)])) { (said: NamedDTO) in said.allow }
     }
 
     public func removeAllow(_ id: String) async throws {
@@ -349,12 +349,12 @@ public struct MastodonAdminFederation: Sendable {
     // MARK: - Mail domains
 
     public func mailDomains(after next: String? = nil) async throws -> FederationStretch<RefusedMailDomain> {
-        try await list(Self.mailPath, after: next) { (said: NamedDTO) in said.mail }
+        try await door.adminList(Self.mailPath, after: next) { (said: NamedDTO) in said.mail }
     }
 
     public func addMailDomain(_ domain: String) async throws -> RefusedMailDomain {
         guard let domain = Self.wireDomain(domain) else { throw MastodonAdminError.invalid }
-        return try read(try await write(Self.mailPath, "POST", form: [("domain", domain)])) { (said: NamedDTO) in said.mail }
+        return try door.adminRead(try await door.adminWrite(Self.mailPath, "POST", form: [("domain", domain)])) { (said: NamedDTO) in said.mail }
     }
 
     public func removeMailDomain(_ id: String) async throws {
@@ -364,13 +364,13 @@ public struct MastodonAdminFederation: Sendable {
     // MARK: - Addresses
 
     public func addresses(after next: String? = nil) async throws -> FederationStretch<RefusedAddress> {
-        try await list(Self.addressesPath, after: next) { (said: AddressDTO) in said.address }
+        try await door.adminList(Self.addressesPath, after: next) { (said: AddressDTO) in said.address }
     }
 
     public func addAddress(_ ip: String, severity: AddressSeverity, words: String) async throws -> RefusedAddress {
         guard let range = Self.range(ip), words.unicodeScalars.count <= Self.wordsLength else { throw MastodonAdminError.invalid }
         let form = [("ip", range.wire), ("severity", severity.rawValue), ("comment", words)]
-        return try read(try await write(Self.addressesPath, "POST", form: form)) { (said: AddressDTO) in said.address }
+        return try door.adminRead(try await door.adminWrite(Self.addressesPath, "POST", form: form)) { (said: AddressDTO) in said.address }
     }
 
     public func removeAddress(_ id: String) async throws {
@@ -380,14 +380,14 @@ public struct MastodonAdminFederation: Sendable {
     // MARK: - Mailboxes, however written
 
     public func mailboxes(after next: String? = nil) async throws -> FederationStretch<RefusedMailbox> {
-        try await list(Self.mailboxesPath, after: next) { (said: MailboxDTO) in said.mailbox }
+        try await door.adminList(Self.mailboxesPath, after: next) { (said: MailboxDTO) in said.mailbox }
     }
 
     /// The refused mailboxes `address` is, in any spelling the server counts as the same: none
     /// where it would be let sign up. **Adds nothing.**
     public func tryMailbox(_ address: String) async throws -> [RefusedMailbox] {
         guard let address = Self.wireMailbox(address) else { throw MastodonAdminError.invalid }
-        let body = try await write("\(Self.mailboxesPath)/test", "POST", form: [("email", address)])
+        let body = try await door.adminWrite("\(Self.mailboxesPath)/test", "POST", form: [("email", address)])
         guard let read = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<MailboxDTO>].self, from: body) else {
             throw MastodonAdminError.unreadable
         }
@@ -396,7 +396,7 @@ public struct MastodonAdminFederation: Sendable {
 
     public func addMailbox(_ address: String) async throws -> RefusedMailbox {
         guard let address = Self.wireMailbox(address) else { throw MastodonAdminError.invalid }
-        return try read(try await write(Self.mailboxesPath, "POST", form: [("email", address)])) { (said: MailboxDTO) in said.mailbox }
+        return try door.adminRead(try await door.adminWrite(Self.mailboxesPath, "POST", form: [("email", address)])) { (said: MailboxDTO) in said.mailbox }
     }
 
     public func removeMailbox(_ id: String) async throws {
@@ -405,56 +405,9 @@ public struct MastodonAdminFederation: Sendable {
 
     // MARK: - The wire
 
-    private func list<DTO: Decodable & Sendable, Item: Sendable & Equatable>(
-        _ path: String, after next: String?, _ made: (DTO) -> Item?
-    ) async throws -> FederationStretch<Item> {
-        let (body, link) = try await asked { try await door.getLinked(path: path, query: try MastodonPage.older(than: next)) }
-        guard let read = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<DTO>].self, from: body) else {
-            throw MastodonAdminError.unreadable
-        }
-        let onward: String?
-        do {
-            onward = try MastodonLink.next(in: link)
-        } catch {
-            throw MastodonAdminError.unreadable
-        }
-        guard onward == nil || onward != next else { throw PagingError.notPaging }
-        return FederationStretch(items: read.compactMap { $0.value.flatMap(made) }, next: onward)
-    }
-
-    private func read<DTO: Decodable, Item>(_ body: Data, _ made: (DTO) -> Item?) throws -> Item {
-        guard let said = try? MastodonJSON.decoder.decode(DTO.self, from: body), let item = made(said) else {
-            throw MastodonAdminError.unreadable
-        }
-        return item
-    }
-
     private func remove(_ path: String, _ id: String) async throws {
         guard ListSubscription.isPathSegment(id) else { throw MastodonAdminError.invalid }
-        _ = try await write(path, "DELETE", form: nil)
-    }
-
-    private func write(_ path: String, _ method: String, form: [(String, String)]?) async throws -> Data {
-        try await asked {
-            do {
-                return try await door.actAtAddress(path: path, method: method, form: form)
-            } catch let refused as MastodonUnprocessable {
-                guard case .refused(let sentence) = AccountPartError.refusal(from: refused.body) else {
-                    throw MastodonAdminError.unreadable
-                }
-                throw MastodonAdminError.refused(sentence: sentence)
-            } catch MastodonHostMoreError.noSuchAddress {
-                throw MastodonAuthError.http(404)
-            }
-        }
-    }
-
-    private func asked<T>(_ ask: () async throws -> T) async throws -> T {
-        do {
-            return try await ask()
-        } catch MastodonAuthError.http(403) {
-            throw MastodonAdminError.notAllowed
-        }
+        _ = try await door.adminWrite(path, "DELETE", form: nil)
     }
 
     /// A line of ours of what the server says, or empty.

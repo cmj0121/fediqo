@@ -2046,13 +2046,7 @@ public struct FediqoRootView: View {
     /// Admin place (#416): where the reader's standing at its source allows that tab and the
     /// sign-in holds what reads it. Nothing otherwise, and the line opens what it always did.
     static func tendingOpened(by notice: Notice, in session: ShellSession) -> Tending? {
-        // A new report opens the reports (#381); a new sign-up, those waiting (#382).
-        let tab: AdminTab? = switch notice.kind {
-        case .server("admin.report"): .reports
-        case .server("admin.sign_up"): .people
-        default: nil
-        }
-        guard let tab, ShellTending.tabs(at: notice.source.host, in: session).contains(tab),
+        guard let tab = AdminFront.tab(of: notice), ShellTending.tabs(at: notice.source.host, in: session).contains(tab),
               case .open(var page) = ShellTending.entry(at: notice.source.host, in: session)
         else { return nil }
         page.tab = tab

@@ -216,31 +216,38 @@ final class ShellTendingServer {
             letGo(at: host)
             return false
         }
-        for part in ServerPart.allCases where !allowed.contains(part) {
-            let key = Self.key(host, part)
-            asks[key]?.cancel()
-            asks[key] = nil
-            spanAsks[key]?.cancel()
-            spanAsks[key] = nil
-            pages[key] = nil
-            halted.remove(key)
-        }
+        for part in ServerPart.allCases where !allowed.contains(part) { drop(Self.key(host, part)) }
         return true
     }
 
-    /// The way to the hashtags the server knows and the sites its links come from (#419).
-    private func taxonomies(at host: String, in session: ShellSession) -> MastodonAdminTaxonomies? {
-        session.mastodon.authorized(host: host, within: deadline, for: .tending).map(MastodonAdminTaxonomies.init(door:))
+    /// What one tab of a host held let go: its asks stopped, its page and its halt forgotten.
+    private func drop(_ key: String) {
+        asks[key]?.cancel()
+        asks[key] = nil
+        spanAsks[key]?.cancel()
+        spanAsks[key] = nil
+        pages[key] = nil
+        halted.remove(key)
     }
 
-    /// The way to how the server is doing beyond its own figures (#418).
-    private func dashboard(at host: String, in session: ShellSession) -> MastodonAdminDashboard? {
-        session.mastodon.authorized(host: host, within: deadline, for: .tending).map(MastodonAdminDashboard.init(door:))
+    /// The ways into a server's own admin parts, each its own door through the one token read.
+    private struct Ways {
+        let server: MastodonAdminServer
+        /// How the server is doing beyond its own figures (#418).
+        let dashboard: MastodonAdminDashboard
+        /// The hashtags the server knows and the sites its links come from (#419).
+        let taxonomies: MastodonAdminTaxonomies
     }
 
-    private func door(at host: String, in session: ShellSession) -> MastodonAdminServer? {
-        guard let door = session.mastodon.authorized(host: host, within: deadline, for: .tending) else { return nil }
-        return reaching?(door) ?? MastodonAdminServer(door: door)
+    /// The ways in at `host`, or nothing where no token can be read: one Keychain read for all.
+    private func ways(at host: String, in session: ShellSession) -> Ways? {
+        guard let token = session.mastodon.token(host: host) else { return nil }
+        let door = { session.mastodon.authorized(token: token, within: self.deadline, for: .tending) }
+        let server = door()
+        return Ways(
+            server: reaching?(server) ?? MastodonAdminServer(door: server),
+            dashboard: MastodonAdminDashboard(door: door()), taxonomies: MastodonAdminTaxonomies(door: door())
+        )
     }
 
     // MARK: - What the tab is handed
@@ -388,7 +395,8 @@ final class ShellTendingServer {
         let host = page.host
         let key = Self.key(page)
         let allowed = Self.parts(of: page, in: session)
-        guard !allowed.isEmpty, ShellTending.drawn(page, in: session), let through = door(at: host, in: session) else { return nil }
+        guard !allowed.isEmpty, ShellTending.drawn(page, in: session), let ways = ways(at: host, in: session) else { return nil }
+        let through = ways.server
         let under = ShellPersonPages.signIns(at: host, in: session)
         if pages[key]?.under != under {
             asks[key]?.cancel()
@@ -405,19 +413,17 @@ final class ShellTendingServer {
         let task = Task {
             defer { if self.pages[key]?.awaits == errand { self.asks[key] = nil } }
             await withTaskGroup(of: Void.self) { group in
-                if allowed.contains(.measures), let dashboard = self.dashboard(at: host, in: session) {
+                if allowed.contains(.measures) {
                     group.addTask {
-                        await self.readMeasures(days, at: host, through: through, dashboard: dashboard, errand: measuresErrand, in: session)
+                        await self.readMeasures(days, at: host, through: through, dashboard: ways.dashboard, errand: measuresErrand, in: session)
                     }
                 }
                 if allowed.contains(.rising) {
                     for kind in RisingKind.allCases {
                         group.addTask { await self.read(kind, at: host, from: 0, through: through, errand: errand, in: session) }
                     }
-                    if let known = self.taxonomies(at: host, in: session) {
-                        for list in KnownList.allCases {
-                            group.addTask { await self.read(list, at: host, after: nil, through: known, errand: errand, in: session) }
-                        }
+                    for list in KnownList.allCases {
+                        group.addTask { await self.read(list, at: host, after: nil, through: ways.taxonomies, errand: errand, in: session) }
                     }
                 }
                 if allowed.contains(.rules) {
@@ -437,7 +443,7 @@ final class ShellTendingServer {
         let key = Self.key(host, .measures)
         guard TendingServerSaid.spans.contains(days), keepsStanding(at: host, in: session),
               Self.parts(at: host, in: session).contains(.measures), standing(host, .measures, in: session) != nil,
-              let through = door(at: host, in: session), let dashboard = dashboard(at: host, in: session)
+              let ways = ways(at: host, in: session)
         else { return }
         let errand = errands.next()
         pages[key]?.days = days
@@ -449,7 +455,7 @@ final class ShellTendingServer {
         halted.remove(key)
         spanAsks[key]?.cancel()
         let task = Task {
-            await self.readMeasures(days, at: host, through: through, dashboard: dashboard, errand: errand, in: session)
+            await self.readMeasures(days, at: host, through: ways.server, dashboard: ways.dashboard, errand: errand, in: session)
             if self.pages[key]?.measuresErrand == errand {
                 self.pages[key]?.measuresAsking = false
                 self.spanAsks[key] = nil
@@ -537,7 +543,7 @@ final class ShellTendingServer {
         let key = Self.key(host, .rising)
         guard keepsStanding(at: host, in: session), Self.parts(at: host, in: session).contains(.rising),
               let held = standing(host, .rising, in: session), !held.asking, let read = held.rising[kind], !read.readingOn,
-              let next = read.next ?? (read.failed ? read.rows.count : nil), let through = door(at: host, in: session)
+              let next = read.next ?? (read.failed ? read.rows.count : nil), let through = ways(at: host, in: session)?.server
         else { return }
         pages[key]?.rising[kind]?.readingOn = true
         await self.read(kind, at: host, from: next, through: through, errand: held.awaits, in: session)
@@ -594,7 +600,7 @@ final class ShellTendingServer {
         let host = page.host
         let key = Self.key(host, .rising)
         guard keepsStanding(at: host, in: session), Self.parts(at: host, in: session).contains(.rising),
-              let held = standing(host, .rising, in: session), !held.asking, let through = taxonomies(at: host, in: session)
+              let held = standing(host, .rising, in: session), !held.asking, let through = ways(at: host, in: session)?.taxonomies
         else { return }
         let next: String?
         switch list {
@@ -698,7 +704,7 @@ final class ShellTendingServer {
         else { return notAllowed }
         guard let held = standing(host, .rising, in: session) else { return String(format: L10n.t("tend.act.failed"), host) }
         guard !held.acting.contains(key) else { return nil }
-        guard let through = taxonomies(at: host, in: session) else { return String(format: L10n.t("tend.act.failed"), host) }
+        guard let through = ways(at: host, in: session)?.taxonomies else { return String(format: L10n.t("tend.act.failed"), host) }
         let under = held.under
         pages[at]?.acting.insert(key)
         defer { if pages[at]?.under == under { pages[at]?.acting.remove(key) } }
@@ -745,7 +751,7 @@ final class ShellTendingServer {
         else { return notAllowed }
         guard let held = standing(host, .rising, in: session) else { return String(format: L10n.t("tend.act.failed"), host) }
         guard !held.acting.contains(key) else { return nil }
-        guard let through = door(at: host, in: session) else { return String(format: L10n.t("tend.act.failed"), host) }
+        guard let through = ways(at: host, in: session)?.server else { return String(format: L10n.t("tend.act.failed"), host) }
         let under = held.under
         pages[at]?.acting.insert(key)
         defer { if pages[at]?.under == under { pages[at]?.acting.remove(key) } }
@@ -776,14 +782,6 @@ final class ShellTendingServer {
     /// Everything of `host` let go: the page left, who reads it changed, or the role lost.
     func letGo(at host: String) {
         let host = host.lowercased()
-        for part in ServerPart.allCases {
-            let key = Self.key(host, part)
-            asks[key]?.cancel()
-            asks[key] = nil
-            spanAsks[key]?.cancel()
-            spanAsks[key] = nil
-            pages[key] = nil
-            halted.remove(key)
-        }
+        for part in ServerPart.allCases { drop(Self.key(host, part)) }
     }
 }
