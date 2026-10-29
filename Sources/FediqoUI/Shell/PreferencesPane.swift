@@ -237,6 +237,11 @@ struct PreferencesPane: View {
         } header: {
             ShellSectionHead(title: "prefs.previews.head", line: "prefs.previews.brief", help: "prefs.previews.footer")
         }
+        Section {
+            Toggle(L10n.t("prefs.filters"), isOn: $prefs.serverFilters)
+        } header: {
+            ShellSectionHead(title: "prefs.filters.head", line: "prefs.filters.brief", help: "prefs.filters.footer")
+        }
     }
 
     /// Moving what this device holds (#247, #253): taken away and read back, then sent to a

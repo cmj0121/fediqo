@@ -345,7 +345,7 @@
 "search.failed" = "Could not search %@.";
 "search.scope" = "Could not search %@: sign in to it again to let Fediqo search there.";
 "search.reach.asked" = "Also asked %@.";
-"search.reach.notAsked" = "Not asked, as they cannot be searched from here: %@.";
+"search.reach.notAsked" = "Not asked, as it cannot be searched from here: %@.";
 "search.empty.title" = "Nothing in %@ matches";
 "search.empty.detail" = "Only the posts this timeline shows are searched: what this device holds, and what its sources sent back when asked. Try fewer characters, or * for any run of them.";
 "search.empty.line" = "Try fewer characters, or * for any run of them.";
@@ -608,6 +608,10 @@
 "prefs.previews.head" = "Link previews";
 "prefs.previews.brief" = "A post's link shows the page it leads to.";
 "prefs.previews.footer" = "The preview is what the post's source fetched of the page: its title, what it is about, where it leads, and its picture. Off, no post shows one and no preview's picture is asked for.";
+"prefs.filters" = "Apply a source's filters";
+"prefs.filters.head" = "Source filters";
+"prefs.filters.brief" = "A source's filters hide or cover posts here.";
+"prefs.filters.footer" = "As the source says, a filter hides or covers a post on every timeline. Off, no post is hidden or covered by one, and the filters stay at the source. Nothing is asked of a source for this.";
 "prefs.askEvery" = "Ask the sources again";
 "prefs.askEvery.one" = "Every minute";
 "prefs.askEvery.many" = "Every %d minutes";
@@ -921,7 +925,6 @@
 
 /* Unit 5 — one row per server, and what it is. */
 "account.sources.title"          = "Sources";
-"account.sources.line" = "Everything this device reads.";
 "account.sources.detail"         = "Everything this device reads. Press a row for what that server says about itself — its name, its size, its boards. Removing one takes its boards and its posts with it.";
 "account.sources.held"           = "What each one has left on this device is on Usage.";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
@@ -1758,7 +1761,6 @@
 "notices.foot.reading" = "Reading older notices…";
 "notices.foot.held" = "Older notices wait until the source that could not be read answers. Reload to ask it again.";
 "notices.foot.limit" = "Older notices are not read: they are older than the latest months Keep posts holds.";
-"notices.foot.end" = "No older notices: every source has sent all it has.";
 "notices.server.admin.sign_up.by" = "signed up on this server";
 "notices.server.admin.report.by" = "filed a report on this server";
 "notices.spoken.named" = "%2$@ (%1$@)";
@@ -1807,10 +1809,6 @@
 "notices.act.letGo.refused" = "%@ would not let this sign-in let notices go. What it holds is still held.";
 "notices.held" = "%2$@ is holding back %1$d notices.";
 "notices.held.one" = "%2$@ is holding back %1$d notice.";
-"notices.held.show" = "Show";
-"notices.held.show.spoken" = "Show what %@ is holding back";
-"notices.held.hide" = "Hide";
-"notices.held.hide.spoken" = "Hide what %@ is holding back";
 "notices.held.reading" = "Reading what %@ is holding back…";
 "notices.held.partial" = "%@ is holding back more people's notices than are listed here.";
 "notices.held.count" = "%d notices held";
@@ -1850,9 +1848,6 @@
 "notices.policy.drop" = "Let go";
 "notices.policy.drop.ask.title" = "Let go of notices from %1$@ on %2$@?";
 "notices.policy.drop.ask.line" = "%@ will throw them away: they will not be shown here, or held back for you to let through.";
-"notices.policy.opened" = "Open";
-"notices.policy.closed" = "Closed";
-"notices.policy.absent" = "%@ cannot hold notices back, so there is nothing to choose here.";
 "notices.policy.locked" = "This sign-in on %@ reads notices and cannot change them. Choosing what it holds back asks for acting and changing notices too.";
 "notices.act.letGo.unconfirmed" = "%@ did not confirm the notices were let go. Read again to see.";
 "notices.act.which.notice" = "%1$@ The notice: %2$@.";
@@ -1861,7 +1856,6 @@
 "notices.act.letThrough.many" = "%2$d people's notices held on %1$@ were not let through. Read again to see where each stands.";
 "notices.act.letGo.many" = "%2$d people's notices held on %1$@ were not let go. Read again to see where each stands.";
 "notices.person.named" = "%1$@ (%2$@)";
-"notices.foot.full" = "Older notices are not read: Fediqo holds as many of one source as it keeps. They are read again once there is room — when notices are dismissed, or the months limit lets old ones go.";
 "notices.ask.signin.detail" = "%@'s own page opens and asks again for what this sign-in has, your notices among it. Sign in to read asks to read, your notices among it. Sign in to read and write asks to post, reply, boost, favourite and bookmark as well, and to dismiss notices. Nothing is signed out first: close the page and the sign-in you have goes on as it is.";
 "said.act.boost.failed" = "%@ could not be reached, so the boost did not change. It is as it was.";
 "said.act.boost.refused" = "%@ would not let this sign-in change the boost. It is as it was.";
@@ -2864,3 +2858,29 @@
 "people.collection.absent" = "%@ does not keep collections of people.";
 "people.collection.none" = "%@ gave nobody in this collection.";
 "thread.gathering" = "Still gathering answers from elsewhere. More show here as they arrive.";
+
+/* A page's status mark (#396): every source's state behind one count. */
+"status.mark.spoken" = "%d sources need you. Opens what each one needs.";
+"status.mark.spoken.one" = "%d source needs you. Opens what it needs.";
+"status.press.ask" = "Ask";
+"status.press.again" = "Again";
+"status.press.again.ask.spoken" = "Ask %@ again for your notices";
+"status.press.again.read.spoken" = "Read %@ again";
+"status.press.again.notices.spoken" = "Read the notices again";
+"notices.foot.endMark" = "End of notices";
+"status.mark.quiet.spoken" = "No source needs you. Opens what there is to know of them.";
+
+/* What the sources hold back, as one row that opens a page of its own (#399). */
+"notices.held.row" = "%d held back";
+"notices.held.row.spoken" = "%d notices held back by your sources. Opens them.";
+"notices.held.row.spoken.one" = "%d notice held back by your sources. Opens it.";
+"notices.held.title" = "Held back";
+"notices.held.empty" = "Nothing is held back now.";
+"notices.held.again.spoken" = "Read again what %@ is holding back";
+
+/* What is chosen for a joined source, behind a gear on its page (#400). */
+"source.settings" = "Settings for this source";
+"source.settings.title" = "Settings for %@";
+"source.settings.back" = "Back to the source";
+"source.settings.narrows" = "Something here narrows what is shown";
+"source.settings.plain" = "Nothing here narrows what is shown";

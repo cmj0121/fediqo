@@ -301,7 +301,8 @@ struct FoundPageTests {
             }
         }
         // The people a search found say no line of their own any more: the head says it once.
-        #expect(PeopleSaid(list: at.people).line() == nil)
+        let found = PeopleSaid(list: at.people)
+        #expect(found.sorting.map { PeopleSaid.sortingLine($0, source: found.source) } == nil)
     }
 
     // MARK: - Hosted
@@ -330,7 +331,8 @@ struct FoundPageTests {
                 playback: playback, onPlayRow: { _ in }, onViewRow: { _ in }, onTurnRow: { _ in }, onOpenThread: { _ in },
                 jumpToTop: 0, onBack: {}, ways: TimelineWays(canSearch: true, onSearch: {}, canReload: true, onReload: {}),
                 search: ShellSearch(), people: pages,
-                onTurnFound: { which in pages.found.turn(&standing.walk, to: which, lamp: &standing.lamp, in: session) }
+                onTurnFound: { which in pages.found.turn(&standing.walk, to: which, lamp: &standing.lamp, in: session) },
+                serverFilters: true
             )
             .environment(prefs)
         }

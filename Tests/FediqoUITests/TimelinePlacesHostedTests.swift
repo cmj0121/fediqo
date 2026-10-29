@@ -70,7 +70,7 @@ struct TimelinePlacesHostedTests {
                 jumpToTop: 0,
                 onBack: {},
                 ways: TimelineWays(canSearch: true, onSearch: {}, canReload: false, onReload: {}),
-                search: search
+                search: search, serverFilters: true
             )
             .environment(prefs)
             .onChange(of: lamp.tick) { _, _ in selected = lamp.wanted }

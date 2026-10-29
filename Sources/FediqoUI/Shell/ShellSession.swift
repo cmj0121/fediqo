@@ -1525,23 +1525,15 @@ final class ShellSession {
     /// Each copy's own acts are worked out once, and both the offer and each act's copy are read
     /// off them — `acts(on:)` and `actingCopy(of:for:)` asked separately would ask every copy
     /// again for every act.
-    func acting(on item: DummyItem) -> ItemActing {
+    func acting(on item: DummyItem, applied: Bool = true) -> ItemActing {
         let each = actsByCopy(of: item)
         var acting = ItemActing(acts: Self.acts(from: each.map(\.acts)))
         // Hidden here, saying why, where the person muted or blocked whoever made it (#314).
         acting.hidden = hides.hide(of: item).map { HiddenHere($0) }
         // Or where the person's filter at its source caught it (#338), as the source said — a
-        // warning not already opened this run.
-        if acting.hidden == nil, let hit = serverFilter(over: item) {
-            acting.hidden = HiddenHere(filter: hit, host: item.source.host)
-            if acting.hidden?.opens == true {
-                let id = item.id
-                acting.showAnyway = { [weak self] in self?.shownAnyway.insert(id) }
-            }
-        }
-        // Or where the person's filter at its source caught it (#338), as the source said, where
-        // it stands over a timeline — and a warning not already opened this run.
-        if acting.hidden == nil, let hit = serverFilter(over: item) {
+        // warning not already opened this run. Nothing where this device is not applying a
+        // source's filters (#406): the post stays as it is, and no source is asked.
+        if acting.hidden == nil, let hit = serverFilter(over: item, applied: applied) {
             acting.hidden = HiddenHere(filter: hit, host: item.source.host)
             if acting.hidden?.opens == true {
                 let id = item.id

@@ -344,7 +344,7 @@
 "search.failed" = "無法搜尋 %@。";
 "search.scope" = "無法搜尋 %@：請重新登入，讓 Fediqo 能在那裡搜尋。";
 "search.reach.asked" = "也問了 %@。";
-"search.reach.notAsked" = "沒有問，因為從這裡無法搜尋：%@。";
+"search.reach.notAsked" = "沒有問，因為從這裡無法搜尋它：%@。";
 "search.empty.title" = "「%@」裡沒有相符的貼文";
 "search.empty.detail" = "只會搜尋這個時間軸會顯示的貼文：這台裝置上有的，以及問過的來源送回來的。試著少打幾個字，或用 * 代表任意多字。";
 "search.empty.line" = "試著少打幾個字，或用 * 代表任意多字。";
@@ -604,6 +604,10 @@
 "prefs.previews.head" = "連結預覽";
 "prefs.previews.brief" = "貼文的連結會顯示它通往的網頁。";
 "prefs.previews.footer" = "預覽是貼文的來源抓取到的網頁內容：標題、簡介、通往哪裡，以及圖片。關閉後，所有貼文都不顯示預覽，也不會去要預覽的圖片。";
+"prefs.filters" = "套用來源的過濾器";
+"prefs.filters.head" = "來源的過濾器";
+"prefs.filters.brief" = "來源的過濾器會在這裡隱藏或蓋住貼文。";
+"prefs.filters.footer" = "依照來源的說法，過濾器會在每條時間軸隱藏或蓋住貼文。關閉後，不會因此隱藏或蓋住任何貼文，過濾器仍留在來源。這件事不會再去問來源。";
 "prefs.askEvery" = "再問一次來源";
 "prefs.askEvery.one" = "每分鐘";
 "prefs.askEvery.many" = "每 %d 分鐘";
@@ -896,7 +900,6 @@
 
 /* Unit 5 — one row per server, and what it is. */
 "account.sources.title"          = "來源";
-"account.sources.line" = "這個裝置讀的全部。";
 "account.sources.detail"         = "這個裝置讀的全部。按一列，看那個來源怎麼說它自己——它的名字、它的規模、它的版塊。移除其中一個，它的版塊和它的文章都會跟著走。";
 "account.sources.held"           = "每一個在這個裝置上還留著什麼，在「用量」裡。";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
@@ -1711,7 +1714,6 @@
 "notices.foot.reading" = "正在讀取更早的通知…";
 "notices.foot.held" = "更早的通知要等讀不到的那個來源回應才會顯示。重新載入就會再問它一次。";
 "notices.foot.limit" = "不再讀取更早的通知：它們比「保留貼文」留下的月數還舊。";
-"notices.foot.end" = "沒有更早的通知了：每個來源都把有的送來了。";
 "notices.server.admin.sign_up.by" = "在這個來源註冊了";
 "notices.server.admin.report.by" = "在這個來源提出了一則檢舉";
 "notices.spoken.named" = "%2$@（%1$@）";
@@ -1757,10 +1759,6 @@
 "notices.act.letGo.failed" = "連不上 %@，所以沒有放下。它擋下的仍然擋著。";
 "notices.act.letGo.refused" = "%@ 不讓這個登入放下通知。它擋下的仍然擋著。";
 "notices.held" = "%2$@ 擋下了 %1$d 則通知。";
-"notices.held.show" = "顯示";
-"notices.held.show.spoken" = "顯示 %@ 擋下的通知";
-"notices.held.hide" = "隱藏";
-"notices.held.hide.spoken" = "隱藏 %@ 擋下的通知";
 "notices.held.reading" = "正在讀取 %@ 擋下的通知…";
 "notices.held.partial" = "%@ 擋下的通知，來自比這裡列出的更多人。";
 "notices.held.count" = "擋下 %d 則通知";
@@ -1798,9 +1796,6 @@
 "notices.policy.drop" = "放掉";
 "notices.policy.drop.ask.title" = "在 %2$@ 放掉%1$@的通知？";
 "notices.policy.drop.ask.line" = "%@ 會把它們丟掉：不會出現在這裡，也不會攔下來讓你放行。";
-"notices.policy.opened" = "已展開";
-"notices.policy.closed" = "已收起";
-"notices.policy.absent" = "%@ 沒辦法攔下通知，所以這裡沒有可選的。";
 "notices.policy.locked" = "這個在 %@ 的登入只能讀通知、不能改。要選它攔下什麼，會一併請求操作和更改通知的權限。";
 "notices.act.letGo.declined" = "%@ 沒有放下通知。它擋下的仍然列著。";
 "notices.act.letGo.unconfirmed" = "%@ 沒有確認通知已放下。再讀取一次看看。";
@@ -1810,7 +1805,6 @@
 "notices.act.letThrough.many" = "%1$@ 擋下的通知中，有 %2$d 個人的沒有放行。再讀取一次看看各自的狀況。";
 "notices.act.letGo.many" = "%1$@ 擋下的通知中，有 %2$d 個人的沒有放下。再讀取一次看看各自的狀況。";
 "notices.person.named" = "%1$@（%2$@）";
-"notices.foot.full" = "不再讀取更早的通知：Fediqo 為單一來源保留的通知已達上限。等有空位就會再讀——移除通知，或保留期限讓舊的離開之後。";
 "notices.ask.signin.detail" = "%@ 自己的頁面會打開，再問一次這個登入已經有的，包含你的通知。「登入來讀」問讀取，包含你的通知。「登入來讀與寫」另外問發文、回覆、轉發、收藏與加書籤，以及移除通知。不會先登出：關掉那一頁，你原有的登入照舊。";
 "said.act.boost.failed" = "連不上 %@，所以轉發沒有變動。它和原來一樣。";
 "said.act.boost.refused" = "%@ 不讓這個登入變動轉發。它和原來一樣。";
@@ -2806,3 +2800,27 @@
 "people.collection.absent" = "%@ 沒有人的收藏集。";
 "people.collection.none" = "%@ 沒有給出這個收藏集裡的任何人。";
 "thread.gathering" = "還在向其他地方收集回覆。有更多時會出現在這裡。";
+
+/* A page's status mark (#396): every source's state behind one count. */
+"status.mark.spoken" = "%d 個來源需要你處理。打開可看各自需要什麼。";
+"status.press.ask" = "詢問";
+"status.press.again" = "再試";
+"status.press.again.ask.spoken" = "再次向 %@ 詢問你的通知";
+"status.press.again.read.spoken" = "再讀一次 %@";
+"status.press.again.notices.spoken" = "再讀一次通知";
+"notices.foot.endMark" = "通知到此為止";
+"status.mark.quiet.spoken" = "沒有來源需要你處理。打開可看關於它們的消息。";
+
+/* What the sources hold back, as one row that opens a page of its own (#399). */
+"notices.held.row" = "擋下 %d 則";
+"notices.held.row.spoken" = "你的來源擋下了 %d 則通知。打開來看。";
+"notices.held.title" = "擋下的通知";
+"notices.held.empty" = "目前沒有擋下的通知。";
+"notices.held.again.spoken" = "再讀一次 %@ 擋下的通知";
+
+/* What is chosen for a joined source, behind a gear on its page (#400). */
+"source.settings" = "這個來源的設定";
+"source.settings.title" = "%@ 的設定";
+"source.settings.back" = "回到來源";
+"source.settings.narrows" = "這裡有設定縮減了顯示的內容";
+"source.settings.plain" = "這裡沒有設定縮減顯示的內容";

@@ -144,8 +144,16 @@ struct OneHeightTests {
 
     @Test("The adding field's heading says the first thing to do, or how to add another")
     func addingHeading() {
-        #expect(AccountPane.addingKeys(tabbed: false) == ("account.hero.line", "account.hero.detail"))
-        #expect(AccountPane.addingKeys(tabbed: true) == ("account.add.line", "account.add.detail"))
+        #expect(AccountPane.addingKeys(tabbed: false)
+            == ("account.hero.line", ["account.hero.promise", "account.hero.detail"]))
+        #expect(AccountPane.addingKeys(tabbed: true) == ("account.add.line", ["account.add.detail"]))
+        let empty = AccountPane.addingHelp(tabbed: false, language: .english)
+        #expect(empty.contains(L10n.t("account.hero.promise", language: .english)))
+        #expect(empty.contains(L10n.t("account.hero.detail", language: .english)))
+        #expect(AccountPane.addingHelp(tabbed: true, language: .english)
+            == L10n.t("account.add.detail", language: .english))
+        #expect(AccountPane.addingHelp(tabbed: false, language: .taiwanese)
+            != AccountPane.addingHelp(tabbed: false, language: .english))
     }
 
     @Test("The sources list's (?) holds what stood under the list")

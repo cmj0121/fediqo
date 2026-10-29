@@ -156,6 +156,13 @@ final class DummyPrefs {
         didSet { write("linkPreviews", linkPreviews ? "" : "0") }
     }
 
+    /// Whether a source's filters hide or cover posts on this device (#406); true, the default,
+    /// as the source says. Off, no row is hidden or covered for them on any timeline, and nothing
+    /// is asked of a source for it. The filters themselves stay at the source.
+    var serverFilters: Bool {
+        didSet { write("serverFilters", serverFilters ? "" : "0") }
+    }
+
     /// The waits a person picks from, in minutes.
     static let waits = [1, 5, 15, 30, 60]
 
@@ -165,6 +172,7 @@ final class DummyPrefs {
         self.defaults = defaults
         (keepMonths, goneDays, roomBytes, removedPostsStay, latestDate, askMinutes, noticesHidden, language, theme, fontSize) = Self.read(defaults)
         linkPreviews = defaults.string(forKey: Self.prefix + "linkPreviews") != "0"
+        serverFilters = defaults.string(forKey: Self.prefix + "serverFilters") != "0"
         L10n.language = language
     }
 
@@ -183,6 +191,8 @@ final class DummyPrefs {
         if fontSize != read.fontSize { fontSize = read.fontSize }
         let previews = defaults.string(forKey: Self.prefix + "linkPreviews") != "0"
         if linkPreviews != previews { linkPreviews = previews }
+        let filters = defaults.string(forKey: Self.prefix + "serverFilters") != "0"
+        if serverFilters != filters { serverFilters = filters }
     }
 
     private static func read(_ defaults: UserDefaults) -> (

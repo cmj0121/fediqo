@@ -296,6 +296,28 @@ struct TimelineHeadTests {
 
     // MARK: - What is said
 
+    @Test("The list names each timeline's rule, and the editor opens on that timeline's description and rules")
+    func theListAndTheEditorKeepTheRule() throws {
+        let session = try session(timelines: ["Ada"])
+        #expect(session.timelineList.entries.map(\.rule) == [
+            L10n.t("timeline.rule.all"),
+            L10n.count("timeline.rule.written", 1),
+        ])
+        let own = try #require(session.queries.last)
+        session.goToTimeline(own)
+        #expect(session.editCurrentTimeline())
+        var draft = try #require(session.editing)
+        let kept = try #require(session.written.first { TimelineQuery.written($0.id) == own })
+        #expect(draft.desc.isEmpty)
+        #expect(draft.rules == kept.rules && !draft.rules.isEmpty)
+        draft.desc = "Friends posting about Swift"
+        session.commit(draft)
+        #expect(session.timelineList.entries.first { $0.query == own }?.rule == draft.desc)
+        #expect(session.editCurrentTimeline())
+        let again = try #require(session.editing)
+        #expect(again.desc == draft.desc && again.rules == kept.rules)
+    }
+
     @Test("The line under the name is heard as the rules and then the place, in both languages; one timeline says its rules alone")
     func theSecondLineSpoken() {
         typealias Head = TimelineNarrowHead<EmptyView>
@@ -432,7 +454,7 @@ struct TimelineHeadTests {
                 decks: $decks, playback: playback, onPlayRow: { _ in }, onViewRow: { _ in },
                 onTurnRow: { _ in }, onOpenThread: { _ in }, jumpToTop: 0, onBack: {},
                 ways: TimelineWays(canSearch: true, onSearch: {}, canReload: true, onReload: {}),
-                search: ShellSearch()
+                search: ShellSearch(), serverFilters: true
             )
             .environment(prefs)
             .environment(\.shellLayout, layout)

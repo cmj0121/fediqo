@@ -2,8 +2,8 @@ import AuthenticationServices
 import FediqoCore
 import SwiftUI
 
-/// The sources this device reads. Empty, it is the first thing anyone sees, so it says
-/// what the app is for before it asks for anything. Joined, it gets out of the way.
+/// The sources this device reads. Empty, it is the first thing anyone sees: one line says
+/// how to start, and what the app is for is one press away (#403). Joined, it gets out of the way.
 ///
 /// **Two tabs once anything is joined (#235)**: the list of sources, and adding one — a list and
 /// a form are two styles, and a page holds one (#231's fourth rule). Tab and ⇧Tab rotate them
@@ -79,8 +79,6 @@ struct AccountPane: View {
         static let mark: CGFloat = 72
         /// A field the width of a hostname. A pane is wider than anything typed into it.
         static let field: CGFloat = 520
-        /// The promise is a sentence, not a row: it wraps where a sentence should.
-        static let saying: CGFloat = 560
         static let fieldRadius = ShellRadius.field
         static let icon: CGFloat = 18
         /// The one orchestrated moment on this page, and it answers the reader's own press: it
@@ -244,9 +242,9 @@ struct AccountPane: View {
         if session.sources.isEmpty { hero } else { standing }
     }
 
-    /// **No tabs and no list where nothing is joined** — not a hairline, not a header, not an
-    /// empty state. The hero already says what the app is for and names the next act; a second
-    /// invitation would argue with the mascot.
+    /// **No tabs and no list where nothing is joined** — not a hairline, not a header, not a
+    /// second empty state. The adding heading says, in one line, how to start; what the app is
+    /// for is behind its (?). A second invitation would argue with the mascot.
     @ViewBuilder
     private var page: some View {
         if Self.tabbed(sources: session.sources.count) {
@@ -297,23 +295,14 @@ struct AccountPane: View {
         }
     }
 
-    /// Nothing has been joined yet. The octopus and the promise — and then the one control that
-    /// does anything about it, whose own heading says what to do (#244).
+    /// Nothing has been joined yet. The octopus stays; what the app is for sits behind the
+    /// adding heading's (?) (#403), and that heading's own line says how to start.
     private var hero: some View {
-        HStack(alignment: .top, spacing: ShellSpace.pad) {
-            Image("Mascot", bundle: .module)
-                .resizable()
-                .scaledToFit()
-                .frame(width: Metrics.mark, height: Metrics.mark)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: ShellSpace.snug) {
-                Text(L10n.t("account.hero.promise"))
-                    .shellFont(.display)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: Metrics.saying, alignment: .leading)
-        }
+        Image("Mascot", bundle: .module)
+            .resizable()
+            .scaledToFit()
+            .frame(width: Metrics.mark, height: Metrics.mark)
+            .accessibilityHidden(true)
     }
 
     /// Something is joined. The page says which, and stops selling itself.
@@ -353,19 +342,30 @@ struct AccountPane: View {
 
     private var adding: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
-            // The field's own heading, with what it is for and the rest behind its (?) (#244):
-            // before any source, the first thing to do; after, how to add another.
-            let keys = Self.addingKeys(tabbed: Self.tabbed(sources: session.sources.count))
-            ShellSectionHead(title: "account.add.title", line: keys.line, help: keys.help)
+            // The field's own heading (#244, #403): before any source, the one line that says
+            // how to start, with the promise and the rest behind its (?); after, how to add another.
+            let tabbed = Self.tabbed(sources: session.sources.count)
+            let keys = Self.addingKeys(tabbed: tabbed)
+            ShellSectionHead(
+                L10n.t("account.add.title"), line: L10n.t(keys.line), help: Self.addingHelp(tabbed: tabbed)
+            )
             fieldRow
             if statusVisible { status }
         }
     }
 
     /// What the adding field's heading says: the first thing to do on a page with no source yet,
-    /// and how to add another on the tab beside the list.
-    static func addingKeys(tabbed: Bool) -> (line: String, help: String) {
-        tabbed ? ("account.add.line", "account.add.detail") : ("account.hero.line", "account.hero.detail")
+    /// and how to add another on the tab beside the list. The empty page's (?) also carries the
+    /// promise, which used to be a caption of its own (#403).
+    static func addingKeys(tabbed: Bool) -> (line: String, help: [String]) {
+        tabbed
+            ? ("account.add.line", ["account.add.detail"])
+            : ("account.hero.line", ["account.hero.promise", "account.hero.detail"])
+    }
+
+    /// The adding heading's (?), the keys of `addingKeys` joined as one bubble.
+    static func addingHelp(tabbed: Bool, language: DummyLanguage? = nil) -> String {
+        addingKeys(tabbed: tabbed).help.map { L10n.t($0, language: language) }.joined(separator: "\n\n")
     }
 
     /// The field, and the way in for a reader who does not have a hostname to type.
@@ -597,12 +597,10 @@ struct AccountPane: View {
     /// largest single loss and it is not recoverable inside decision 34.
     private var sources: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
-            // The list's heading (#244): one short line, and behind its (?) which question this
-            // list answers, what Remove costs, what the marks on a row mean, and where what a
-            // source left is counted — the lines that stood under the list.
-            ShellSectionHead(
-                L10n.t("account.sources.title"), line: L10n.t("account.sources.line"), help: Self.sourcesHelp()
-            )
+            // The list's heading (#244, #403): the title, and behind its (?) what the list is,
+            // which question it answers, what Remove costs, what the marks on a row mean, and
+            // where what a source left is counted — the lines that stood under the list.
+            ShellSectionHead(L10n.t("account.sources.title"), help: Self.sourcesHelp())
             // **A plain stack, because the page is the thing that scrolls.** A `ScrollView` here
             // would be the inner one the page comment above is about.
             // Row-independent — `stage == nil && !checking` names no host — so it is asked once

@@ -28,6 +28,12 @@ extension ShellSession {
         let bookmarks = mastodon.bookmarks(host: host) == .unasked && mastodon.standing(.bookmarks, host: host) == .unasked
         return askFor([.notices], with: bookmarks ? [.bookmarks] : [], host: host)
     }
+
+    /// Whether the sign-in at `host` is being asked for something now: nothing more is asked,
+    /// or read in its place, until that lands.
+    func isAsking(host raw: String) -> Bool {
+        mastodon.asking.contains(raw.lowercased())
+    }
 }
 
 extension PartWords {

@@ -426,6 +426,13 @@ struct JoinSheet: View {
     @Environment(\.displayScale) private var displayScale
 
     @AccessibilityFocusState private var headerFocused: Bool
+    /// Whether what is chosen for the joined source on show is open behind its gear (#400).
+    @State private var settingsOpen = false
+
+    /// The joined source whose page is on show, where one is.
+    private var joinedHost: String? {
+        if case .previewing(_, .joined(let source), _) = session.stage { source.host } else { nil }
+    }
 
     private enum Metrics {
         /// A protocol's mark, at **the source row's own constant** rather than a second 24 written
@@ -473,7 +480,17 @@ struct JoinSheet: View {
         // change of it — and focus moved on every change would throw a VoiceOver reader back to
         // the header each time they ticked a board. `id` names the stage and the forum and nothing
         // else, so it moves exactly when the reader has arrived somewhere new.
-        .onChange(of: session.stage?.id) { _, _ in headerFocused = true }
+        .onChange(of: session.stage?.id) { _, _ in
+            headerFocused = true
+            settingsOpen = false
+        }
+        // Back from a source's settings, a listener lands where they left: the page's head.
+        .onChange(of: settingsOpen) { _, open in if !open { headerFocused = true } }
+        // What a joined source's settings depend on, asked once as its page opens (#400) — and
+        // not again each time its gear is pressed and left.
+        .task(id: joinedHost) {
+            if let host = joinedHost { await SourceSettings.read(host: host, in: session) }
+        }
         // **And on the way in, because `.onChange` does not fire on a first presentation.** Every
         // entrance that mounts this sheet already at its stage would otherwise never move focus:
         // the restate opens straight into `.choosingBoards` from no stage at all, and a typed
@@ -501,8 +518,14 @@ struct JoinSheet: View {
             // It stays pinned above the hairline here and scrolls with the block there, which is
             // why it is placed by each surface rather than carried inside the shared body.
             case .previewing(let preview, let origin, _):
-                SourcePreviewView.Header(preview: preview, surface: .sheet, origin: origin)
-                    .accessibilityFocused($headerFocused)
+                HStack(alignment: .top, spacing: ShellSpace.step) {
+                    SourcePreviewView.Header(preview: preview, surface: .sheet, origin: origin)
+                        .accessibilityFocused($headerFocused)
+                    // What is chosen for a joined source, one press away (#400).
+                    if case .joined(let source) = origin, !settingsOpen {
+                        SourceSettingsGear(host: source.host, session: session) { settingsOpen = true }
+                    }
+                }
             case .choosingBoards(let offer, _):
                 titled(String(format: L10n.t("board.choose.title"), offer.host))
             case .choosingLists(let choice):
@@ -604,6 +627,8 @@ struct JoinSheet: View {
             protocolList
         case .browsingServers(let kind):
             servers(of: kind)
+        case .previewing(_, .joined(let source), _) where settingsOpen:
+            SourceSettingsPage(host: source.host, session: session) { settingsOpen = false }
         case .previewing(let preview, let origin, _):
             // **The `ScrollView` is the sheet's and not the shared view's.** `AccountPane` is
             // already one scroller and nesting a second inside it is the failure that pane's own
@@ -619,11 +644,8 @@ struct JoinSheet: View {
                     }
                     SourcePreviewView(preview: preview, surface: .sheet, origin: origin)
                     if case .joined(let source) = origin, let you { YouThereBlock(host: source.host, you: you, session: session) }
-                    if case .joined(let source) = origin {
-                        LineControl(host: source.host, session: session)
-                        NoticesToldControl(host: source.host, session: session)
-                    }
-                    if case .joined(let source) = origin { ServerFiltersBlock(host: source.host, session: session) }
+                    // What is chosen for it is behind the gear in the head (#400): the page opens
+                    // on what the server says.
                     if case .joined(let source) = origin { YearBlock(host: source.host, session: session) }
                     if case .joined(let source) = origin, let serverLists {
                         ServerListsBlock(host: source.host, lists: serverLists, session: session)

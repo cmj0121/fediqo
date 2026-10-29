@@ -420,9 +420,9 @@ struct NoticeWordsTests {
         #expect(NoticesFoot.foot(hasMore: false, floor: floor) == .held)
         #expect(NoticesFoot.foot(hasMore: false, floor: nil) == .end)
         #expect(NoticesFoot.more.words(language: .english) == "Older notices can be read. Press here, or scroll to here, to read them.")
-        #expect(NoticesFoot.end.words(language: .english) == "No older notices: every source has sent all it has.")
-        for foot in [NoticesFoot.more, .held, .end] {
-            #expect(!foot.words(language: .taiwanese).hasPrefix("notices."))
+        #expect(NoticesFoot.end.words(language: .english) == nil, "the end is a plain mark, with nothing to say")
+        for foot in [NoticesFoot.more, .held, .limit] {
+            #expect(foot.words(language: .taiwanese)?.hasPrefix("notices.") == false)
         }
     }
 
@@ -451,6 +451,11 @@ struct NoticeWordsTests {
         #expect(NoticeKindsMenu.choosing("favourite", shown: false, among: []) == ["favourite"])
         #expect(NoticeKindsMenu.choosing("favourite", shown: true, among: ["favourite", "poll"]) == ["poll"])
         #expect(NoticeWords.narrowed([], language: .english) == "Every kind")
+        // The gear is lit while any kind is left out, and put out by showing every kind.
+        #expect(!NoticeKindsMenu.lit([]) && NoticeKindsMenu.lit(["poll"]))
+        #expect(!NoticeKindsMenu.lit(NoticeKindsMenu.choosing("poll", shown: true, among: ["poll"])))
+        #expect(NoticeKindsMenu.spoken(["poll"], language: .english) == "1 kind left out")
+        #expect(NoticeKindsMenu.symbol == "gearshape")
         #expect(NoticeWords.narrowed(["poll"], language: .english) == "1 kind left out")
         #expect(NoticeWords.narrowed(["poll", "favourite"], language: .english) == "2 kinds left out")
         #expect(NoticeWords.narrowed(["poll", "favourite"], language: .taiwanese) == "略過 2 種")
@@ -466,6 +471,12 @@ struct NoticeWordsTests {
         #expect(!FediqoRootView.noticesInFront(place: .notices, open: [.shortcuts]))
         #expect(!FediqoRootView.noticesInFront(place: .notices, open: [.viewer]))
         #expect(!FediqoRootView.noticesInFront(place: .timeline, open: []))
+        // Under the page of what is held back (#399) the notices take no key; q and Escape leave it.
+        #expect(!FediqoRootView.noticesInFront(place: .notices, open: [], held: true))
+        #expect(!FediqoRootView.canReadNotices(place: .notices, open: [], asked: true, held: true))
+        #expect(FediqoRootView.leavesHeldPage(place: .notices, open: [.selection], held: true))
+        #expect(!FediqoRootView.leavesHeldPage(place: .notices, open: [], held: false))
+        #expect(!FediqoRootView.leavesHeldPage(place: .notices, open: [.viewer], held: true), "what is drawn over it goes first")
         #expect(FediqoRootView.canReadNotices(place: .notices, open: [], asked: true))
         #expect(!FediqoRootView.canReadNotices(place: .notices, open: [], asked: false))
         #expect(!FediqoRootView.canReadNotices(place: .notices, open: [.shortcuts], asked: true))
@@ -529,11 +540,7 @@ struct NoticeWordsTests {
         // What is still to be read, or held up by a source the toast named, is said first.
         #expect(NoticesFoot.foot(hasMore: true, floor: nil, full: true) == .more)
         #expect(NoticesFoot.foot(hasMore: false, floor: Self.at, full: true) == .held)
-        #expect(NoticesFoot.full.words(language: .english)
-            == "Older notices are not read: Fediqo holds as many of one source as it keeps. They are read again once there is room — when notices are dismissed, or the months limit lets old ones go.")
-        #expect(NoticesFoot.full.words(language: .english) != NoticesFoot.end.words(language: .english))
-        let ours = NoticesFoot.full.words(language: .taiwanese)
-        #expect(!ours.hasPrefix("notices.") && ours != NoticesFoot.end.words(language: .taiwanese))
+        #expect(NoticesFoot.full.words(language: .english) == nil, "the source held names itself, in its own line")
         #expect(!NoticesFoot.full.symbol.isEmpty && NoticesFoot.full.symbol != NoticesFoot.end.symbol)
     }
 

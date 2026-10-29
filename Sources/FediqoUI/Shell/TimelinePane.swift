@@ -110,6 +110,11 @@ struct TimelinePane: View {
     /// Whether a post's link is drawn with its preview (#335): the person's preference, handed in
     /// by the root, so building a row's acts reads nothing of the environment.
     var linkPreviews = true
+    /// Whether a source's filters hide or cover a row (#406): the person's preference, handed in
+    /// by the root, so building a row's acts reads nothing of the environment. The timeline says
+    /// nothing of the choice. Off, a row is drawn plainly and no source is asked again.
+    /// No default: a caller that drops it does not compile.
+    var serverFilters: Bool
     /// The press about looking somebody up through a source, answered by the root.
     var onLookUp: (SearchLookUpLine.Press) -> Void = { _ in }
     /// Trends' tabs, where this pane is Trends: drawn in place of the timelines' names, and
@@ -1393,11 +1398,6 @@ struct TimelinePane: View {
                         }
                         }
                     }
-                    // Which sources have no more of what is rising to give (#288). A search's
-                    // results are not a timeline, and end nowhere a source chose.
-                    if !searching { TrendsEndFoot(timeline: timeline, session: session) }
-                    // That the reader's marks stand by when they were published (#317).
-                    if !searching, session.readsMarks(timeline) { MarksOrderFoot() }
                     // The page below being read from this device (#357).
                     if !searching, session.timelineLoading(latest: prefs.latestDate) { TimelineReadingOn() }
                 }
@@ -1562,7 +1562,8 @@ struct TimelinePane: View {
     /// notices page builds a post's row by too (#375).
     func acting(_ item: DummyItem, inside root: DummyItem?) -> ItemActing {
         RowActing(
-            session: session, people: people, linkPreviews: linkPreviews, openThread: onOpenThread,
+            session: session, people: people, linkPreviews: linkPreviews, serverFilters: serverFilters,
+            openThread: onOpenThread,
             openPeople: onOpenPeople
         )(item, inside: root)
     }
@@ -1577,12 +1578,16 @@ struct TimelinePane: View {
         }
     }
 
-    /// `[+]`, the queries, then the rule the current one is under — one line.
+    /// `[+]`, the queries, then search and reload.
     ///
     /// `[+]` is pinned leading, outside the scroll, so adding is always in reach. It is a
     /// press, not a Tab stop: Tab rotates All, Trends and yours. The names scroll so a
-    /// narrow window or a larger text size does not squeeze them; the rule keeps its own
-    /// width on the trailing edge.
+    /// narrow window or a larger text size does not squeeze them.
+    ///
+    /// **A wide page does not spell the rule** (#404). The pills, search and reload stand
+    /// without it. The list of timelines and the editor keep it. A narrow page that has
+    /// timelines says the rule under the name (`TimelineNarrowHead`). This row is that page
+    /// only when it has no timeline, and then there is no rule to say.
     ///
     /// **On a narrow page it is the one timeline in front, by name** (#304): its rules and where
     /// it stands under the name, and every other timeline behind a press on it. See
@@ -1593,8 +1598,7 @@ struct TimelinePane: View {
                 trendsHead(trends)
             } else if shellLayout == .narrow, !session.queries.isEmpty {
                 TimelineNarrowHead(session: session, slide: slide) {
-                    searchMark
-                    reloadMark
+                    headMarks
                 }
             } else {
             HStack(alignment: .center, spacing: ShellSpace.step) {
@@ -1629,14 +1633,11 @@ struct TimelinePane: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                if session.timelineID != nil {
-                    Text(session.rule(of: timeline))
-                        .shellFont(.meta)
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                        .lineLimit(1)
-                }
-                searchMark
-                reloadMark
+                // No rule sentence on this row (#404). A narrow page with timelines is
+                // `TimelineNarrowHead`, above. This row is reached on a narrow page only when
+                // `queries` is empty, and then `timelineID` is nil, so the sentence could not
+                // be said here anyway.
+                headMarks
             }
             }
             if trends == nil, session.timelinesUnreadable {
@@ -1666,9 +1667,26 @@ struct TimelinePane: View {
                 ShellTabs(trends.tabs, selected: trends.front, slide: slide, onSelect: trends.onTurn)
             }
             Spacer(minLength: 0)
-            searchMark
-            reloadMark
+            headMarks
         }
+    }
+
+    /// The marks at the head's trailing edge (#402): the order of a marks timeline, behind (?),
+    /// and a Trends source that has nothing more, in the status mark. Then search and reload.
+    @ViewBuilder
+    private var headMarks: some View {
+        if let key = TimelineStatus.marksKey(readsMarks: trends == nil && session.readsMarks(timeline)) {
+            ShellHelp(key, about: session.name(of: timeline))
+        }
+        let lines = TimelineStatus.ended(
+            searching ? [] : session.reload.trendsEnded(of: timeline, in: session),
+            reload: ways.onReload
+        )
+        if !lines.isEmpty {
+            StatusMark(lines: lines)
+        }
+        searchMark
+        reloadMark
     }
 
     /// Quiet word that newer posts are held back by the latest date in Preferences (#22), so a

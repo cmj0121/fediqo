@@ -1,13 +1,13 @@
 import FediqoCore
 import SwiftUI
 
-// Whose notices a source holds back is the person's to choose (#376): one line a source on the
-// notices page, opened to the choices the source has — let in, hold back, or let go — each a
-// press that shows at once and is the source's own choice once it answers.
+// Whose notices a source holds back is the person's to choose (#376), on that source's own page
+// of settings (#398) and never on Notifications: the choices the source has — let in, hold back,
+// or let go — each a press that shows at once and is the source's own choice once it answers.
 
-/// What the line of one source's choices says, as values a test reads without drawing it.
+/// What the block of one source's choices says, as values a test reads without drawing it.
 enum NoticePolicyWords {
-    /// "What a.example holds back": the line's own words, and its press's.
+    /// "What a.example holds back": the block's heading.
     static func title(_ host: String, language: DummyLanguage? = nil) -> String {
         String(format: L10n.t("notices.policy.title", language: language), host)
     }
@@ -41,8 +41,8 @@ enum NoticePolicyWords {
         }
     }
 
-    /// What the opened line says in place of the choices, where there are none to offer: the
-    /// source holds nothing back, or the sign-in may not choose — and then what more is asked.
+    /// What the block draws: the choices, or where the sign-in may not choose, what more is
+    /// asked — and nothing at all for a source that has no such thing, or was not asked yet.
     enum Stands: Equatable {
         /// The choices, as the source last said them with what is on its way drawn over them.
         case offered(NoticePolicy)
@@ -73,50 +73,54 @@ enum NoticePolicyWords {
         )
     }
 
-    static func absent(_ host: String, language: DummyLanguage? = nil) -> String {
-        String(format: L10n.t("notices.policy.absent", language: language), host)
-    }
-
     static func locked(_ host: String, language: DummyLanguage? = nil) -> String {
         String(format: L10n.t("notices.policy.locked", language: language), host)
     }
 }
 
-/// One source's line of whose notices it holds back: a press that opens it, and under it the
-/// choices — or, where there are none to make here, why.
-struct NoticePolicyLine: View {
+/// **On a joined source's page: whose notices it holds back** (#398) — people not followed, new
+/// accounts and the rest, each let in, held back or let go. Beside what the source tells while
+/// Fediqo runs (`NoticesToldControl`) and its filters (`ServerFiltersBlock`), and in their shape:
+/// a heading, then the choices. **Nothing for a source that has none** — absent, not dim. A
+/// sign-in that may not change them offers, in their place, the ask for what is missing.
+/// Letting go asks first, here: the source then throws those notices away. A sign-in that cannot
+/// read notices at all is not asked here: the block beside it (`NoticesToldControl`) already
+/// offers the ask for notices, and once they are read this block has its choices or its ask.
+struct NoticePolicyBlock: View {
     let host: String
     let session: ShellSession
 
     @Environment(\.colorScheme) private var colorScheme
+    @State private var asked: ShellMoreAsk?
 
     private var acts: ShellNoticeActs { session.noticeList.acts }
 
+    /// Whether the block is drawn: only where there are choices, or an ask for them.
+    static func shows(_ stands: NoticePolicyWords.Stands) -> Bool {
+        switch stands {
+        case .offered, .locked: true
+        case .absent, .unknown: false
+        }
+    }
+
     var body: some View {
         let stands = NoticePolicyWords.stands(host, in: session)
-        if stands != .unknown {
-            let open = acts.policyOpen.contains(host)
-            VStack(alignment: .leading, spacing: ShellSpace.snug) {
-                Button { acts.togglePolicy(host: host) } label: {
-                    HStack(spacing: ShellSpace.snug) {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                            .accessibilityHidden(true)
-                        Text(NoticePolicyWords.title(host))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Image(systemName: open ? "chevron.up" : "chevron.down")
-                            .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 0) {
+            if Self.shows(stands) {
+                ShellRule()
+                VStack(alignment: .leading, spacing: ShellSpace.step) {
+                    ShellSectionHead(NoticePolicyWords.title(host))
+                    choices(stands)
+                    if let said = acts.said[host.lowercased()], said.act == .policy {
+                        sentence(NoticeActs.words(said, host: host))
                     }
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .accessibilityValue(Text(L10n.t(open ? "notices.policy.opened" : "notices.policy.closed")))
-                if open { choices(stands) }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(ShellSpace.pad)
             }
-            .padding(.horizontal, ShellSpace.pad)
-            .padding(.vertical, ShellSpace.snug)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(ShellMoreAsks(asked: $asked))
     }
 
     @ViewBuilder
@@ -126,15 +130,13 @@ struct NoticePolicyLine: View {
             ForEach(policy.offered, id: \.self) { whose in
                 if let way = policy.ways[whose] { choice(whose, way) }
             }
-        case .absent:
-            sentence(NoticePolicyWords.absent(host))
         case .locked:
             sentence(NoticePolicyWords.locked(host))
             ShellLinkButton(L10n.t("account.source.permission.word"), symbol: SourceRow.permissionSymbol) {
                 _ = session.askFor([.acting, .notices], host: host)
             }
             .fixedSize()
-        case .unknown:
+        case .absent, .unknown:
             EmptyView()
         }
     }
@@ -151,7 +153,7 @@ struct NoticePolicyLine: View {
                 .accessibilityHidden(true)
             Picker(label, selection: Binding(
                 get: { way },
-                set: { chosen in choose(chosen, for: whose) }
+                set: { chosen in Self.choose(chosen, for: whose, at: host, in: session) { asked = $0 } }
             )) {
                 ForEach(NoticePolicy.Way.allCases, id: \.self) { way in
                     Text(NoticePolicyWords.way(way)).tag(way)
@@ -165,23 +167,26 @@ struct NoticePolicyLine: View {
         }
     }
 
-    /// A choice made: let in and hold back at once; let go asks first, in one line, since the source
-    /// then throws those notices away — the page's one asker puts it, and only its yes sends.
-    private func choose(_ way: NoticePolicy.Way, for whose: NoticePolicy.Whose) {
-        let acts = acts, session = session, host = host
+    /// A choice made: let in and hold back at once; let go asks first, in one line, since the
+    /// source then throws those notices away — `ask` puts the question, and only its yes sends.
+    static func choose(
+        _ way: NoticePolicy.Way, for whose: NoticePolicy.Whose, at host: String, in session: ShellSession,
+        ask: (ShellMoreAsk) -> Void
+    ) {
+        let acts = session.noticeList.acts
         guard way == .drop else {
             Task { await acts.choose(way, for: whose, at: host, in: session) }
             return
         }
-        acts.asked = ShellMoreAsk(question: NoticePolicyWords.letGoQuestion(whose, at: host)) {
+        ask(ShellMoreAsk(question: NoticePolicyWords.letGoQuestion(whose, at: host)) {
             Task { await acts.choose(.drop, for: whose, at: host, in: session) }
-        }
+        })
     }
 
     private func sentence(_ words: String) -> some View {
         Text(words)
             .shellFont(.meta)
-            .foregroundStyle(ShellChrome.ink(colorScheme))
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
     }

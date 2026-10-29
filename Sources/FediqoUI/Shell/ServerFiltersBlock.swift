@@ -4,7 +4,8 @@ import SwiftUI
 /// On a joined source's page: the person's filters there (#338) — listed as the source keeps
 /// them, made, changed, and removed only from a row's `…`, asked first. Draws what
 /// `ShellServerFilters.offer` hands it and decides nothing: dim with the part's own sentence, or
-/// the sign-in's, where the sign-in held cannot tend them, whose press asks.
+/// the sign-in's, where the sign-in held cannot tend them, whose press asks. Its list is read as
+/// the source's page opens (`SourceSettings.read`), and again after each change.
 struct ServerFiltersBlock: View {
     let host: String
     let session: ShellSession
@@ -41,7 +42,6 @@ struct ServerFiltersBlock: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(ShellSpace.pad)
-            .task(id: host) { await session.serverFilters.read(host: host, in: session) }
             .sheet(item: $editing) { editing in
                 ServerFilterEditor(filter: editing.filter) { draft in
                     Task {

@@ -60,11 +60,33 @@ struct ShellIconButton: View {
     }
 
     private var ink: Color {
-        guard isEnabled else { return ShellChrome.inkFaint(colorScheme) }
+        Self.ink(tone, enabled: isEnabled, colorScheme)
+    }
+
+    /// The glyph's ink: faint where it cannot be pressed, and otherwise quiet or lit.
+    static func ink(_ tone: Tone, enabled: Bool, _ colorScheme: ColorScheme) -> Color {
+        guard enabled else { return ShellChrome.inkFaint(colorScheme) }
         switch tone {
         case .quiet: return ShellChrome.inkDim(colorScheme)
         case .lit: return ShellChrome.selectInk(colorScheme)
         }
+    }
+}
+
+/// **The gear a page's choices stand behind** (#397, #400, #401): the one glyph, in a
+/// `ShellIconButton`'s ink and box, lit while what is chosen there narrows what is shown. The
+/// label of a gear that opens a menu; a gear that opens a page is a `ShellIconButton`.
+struct ShellGearLabel: View {
+    nonisolated static let symbol = "gearshape"
+
+    let lit: Bool
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Image(systemName: Self.symbol)
+            .foregroundStyle(ShellIconButton.ink(lit ? .lit : .quiet, enabled: isEnabled, colorScheme))
+            .modifier(ShellGlyphBox())
     }
 }
 

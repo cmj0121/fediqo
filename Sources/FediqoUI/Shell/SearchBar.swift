@@ -17,8 +17,11 @@ struct SearchBar: View {
     /// Whether `found` is only at least so many — the file has more to give (#360, C25) — and the
     /// line that says only the posts read so far were searched, where only they were.
     var counted: (atLeast: Bool, readSoFar: String?) = (false, nil)
-    /// Which sources the last Return asked, and which it could not (#176), or nothing before one.
+    /// Which sources the last Return asked (#176), behind a (?), or nothing before one.
     var reach: String? = nil
+    /// Sources that could not be asked (#403): one line each of the status mark, because what
+    /// they would have found is missing.
+    var status: [StatusLine] = []
     /// The line about looking what was typed up through a source (#319), where it is an
     /// address of a person: the press, where the asking stands, or why there is none.
     var lookUp: SearchLookUpLine? = nil
@@ -60,6 +63,13 @@ struct SearchBar: View {
                         .lineLimit(1)
                         .fixedSize()
                 }
+                // Who was asked, one press away, and who could not be, counted (#403).
+                if let reach {
+                    ShellHelp(verbatim: reach, about: timeline)
+                }
+                if !status.isEmpty {
+                    StatusMark(lines: status)
+                }
             }
             .padding(.horizontal, ShellSpace.pad)
             // The end of the field and the count stop short of whatever floats over the page's
@@ -76,18 +86,6 @@ struct SearchBar: View {
             // Only what was read so far was searched (#360): said under the field, wrapping.
             if let readSoFar = counted.readSoFar {
                 Text(readSoFar)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, ShellSpace.pad)
-                    .padding(.trailing, floatingCorner.width)
-                    .padding(.bottom, ShellSpace.snug)
-            }
-            // Where the results came from, under the field it answers: this device, and the
-            // sources named here. Wraps rather than truncates, since the names are the point.
-            if let reach {
-                Text(reach)
                     .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)

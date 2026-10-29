@@ -1720,7 +1720,11 @@ struct MastodonLeftTests {
             resume.wait()
         }
         let packager = try carry.packager(1, seam)
-        let reading = Task { try await packager.readBack(carry.package, key: carry.key, replacing: false) { _ in } }
+        // On a thread of its own: the seam holds the read back's thread on a semaphore, and one of
+        // the shared pool's held so is a thread the rest of the run cannot have (#412).
+        let reading = Task(executorPreference: OwnThread()) {
+            try await packager.readBack(carry.package, key: carry.key, replacing: false) { _ in }
+        }
         for await _ in reached { break }
         #expect(try held(made) == "tok-pkg")
         #expect(try states(made) == [.left, .replacing])
@@ -1910,7 +1914,11 @@ struct MastodonLeftTests {
             resume.wait()
         }
         let packager = try carry.packager(1, seam)
-        let reading = Task { try await packager.readBack(carry.package, key: carry.key, replacing: false) { _ in } }
+        // On a thread of its own: the seam holds the read back's thread on a semaphore, and one of
+        // the shared pool's held so is a thread the rest of the run cannot have (#412).
+        let reading = Task(executorPreference: OwnThread()) {
+            try await packager.readBack(carry.package, key: carry.key, replacing: false) { _ in }
+        }
         for await _ in reached { break }
         made.sessions.refresh()
         await made.source.check("tok-pkg", answers: 401, saying: "<html><body><h1>401 Authorization Required</h1></body></html>")
@@ -2037,6 +2045,24 @@ struct MastodonLeftTests {
             #expect(line.contains("error: error"), "\(line)")
             #expect(line.components(separatedBy: "\\(").count == 2, "more than the one line is written into it: \(line)")
         }
+    }
+}
+
+/// A thread of a check's own for work it holds there with a semaphore (#412).
+///
+/// A task runs on the shared pool, which is as wide as the machine has cores — three on the
+/// shared build machine. A seam that blocks the read back's thread until the check says so holds
+/// one of them while the check goes on, and what the check goes on to await needs the pool: two
+/// such checks at once leave the whole run one thread, and with it held too, nothing moves. Handed
+/// to the task as its executor, the read back runs here, actor code it reaches included, and
+/// blocks only this.
+private final class OwnThread: TaskExecutor {
+    private let queue = DispatchQueue(label: "fediqo.test.own-thread")
+
+    func enqueue(_ job: consuming ExecutorJob) {
+        let job = UnownedJob(job)
+        let executor = asUnownedTaskExecutor()
+        queue.async { job.runSynchronously(on: executor) }
     }
 }
 
