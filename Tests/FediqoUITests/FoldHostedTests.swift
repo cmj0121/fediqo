@@ -136,7 +136,7 @@ struct FoldHostedTests {
     /// five, so Usage is drawn in Preferences' tab. Those five names are what the fold measures,
     /// with Trends standing where Usage stood, so the line stays where it was; folded, the pop-up
     /// lists every place, Usage among them. **And six names for a person who answers for a
-    /// server** (#416): Admin among the tabs, measured as the five are.
+    /// server** (#416): Admin among the tabs on a Mac, measured as the five are.
     private static let offered: [ShellAvailability] = [
         ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: TrendsTab.allCases),
         ShellAvailability(queryIDs: ["all"]),

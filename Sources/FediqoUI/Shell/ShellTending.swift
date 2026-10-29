@@ -8,10 +8,12 @@ import Observation
 // **The standing draws it, and only the standing.** The Admin place (#416) lists a host, and a
 // source's `…` offers "Tend <host>", only where the server's role for the account signed in
 // there allows some task of tending (`MastodonStaff`, read off its own account check this run),
-// and the host's page has a tab only for a task the role allows. An account without the standing sees no trace of it, whatever its
-// sign-in holds. **The words are asked apart**: where the role allows it and the sign-in does
-// not hold tending's words, the item is that part's lock, which asks for them alone (D9).
-// Holding only the word that reads, the page lists and offers no act.
+// and the host's page has a tab only for a task the role allows. An account without the standing
+// sees no host listed and no "Tend", whatever its sign-in holds, and the place itself is dim; an
+// iPhone tends nothing at all (`ShellSession.tendsHere`). **The words are asked apart**: where
+// the role allows it and the sign-in does not hold tending's words, the item is that part's
+// lock, which asks for them alone (D9). Holding only the word that reads, the page lists and
+// offers no act.
 //
 // **Asked as the page opens, and read on at its foot.** What was reported is asked for open
 // ones first, newest first, a stretch at a time by the server's own next; reaching the end of
@@ -199,8 +201,10 @@ final class ShellTending {
 
     /// The hosts the Admin place lists (#416): every source that says who people are whose
     /// sign-in was last told it holds a standing allowing some tab — **kept through a check that
-    /// fails** (`MastodonSessions.lastStanding`), in the order the sources stand.
+    /// fails** (`MastodonSessions.lastStanding`), in the order the sources stand. None on a
+    /// device that does not tend (`ShellSession.tendsHere`).
     static func hosts(in session: ShellSession) -> [String] {
+        guard session.tendsHere else { return [] }
         var seen = Set<String>()
         return session.sources.compactMap { source in
             let host = source.host.lowercased()
@@ -213,9 +217,9 @@ final class ShellTending {
 
     /// The tabs of tending `host` for whoever is signed in there now: those the role its own
     /// check said allows — **none where it said no role, or has not said**, and none for a
-    /// source that is no Mastodon's people.
+    /// source that is no Mastodon's people, or on a device that does not tend.
     static func tabs(at host: String, in session: ShellSession) -> [AdminTab] {
-        guard ShellPersonPages.source(at: host, in: session) != nil, session.mastodon.isSignedIn(host: host) else { return [] }
+        guard session.tendsHere, ShellPersonPages.source(at: host, in: session) != nil, session.mastodon.isSignedIn(host: host) else { return [] }
         return AdminTab.allowed(by: session.mastodon.staff(host: host))
     }
 

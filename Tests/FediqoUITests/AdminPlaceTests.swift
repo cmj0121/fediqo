@@ -400,6 +400,42 @@ struct AdminPlaceTests {
         #expect(locked.partAsks.open?.ticked == [.tending], "the lock asks for its word")
     }
 
+    @Test("A device that does not tend (an iPhone) lists no host and offers no Tend whatever the standing; a notice of a report or a sign-up waits for no standing and opens what an ordinary notice would")
+    func anIPhoneTendsNothing() async throws {
+        let (session, _, _) = try await session()
+        session.tendsHere = false
+        let said = session.availability
+        #expect(!said.tendsHere && said.adminHosts.isEmpty && !said.allows(.admin))
+        #expect(!said.railPlaces.contains(.admin) && !said.tabbedPlaces.contains(.admin) && said.tabbedPlaces.count <= 5)
+        #expect(ShellTending.tabs(at: Self.host, in: session).isEmpty && ShellTending.entry(at: Self.host, in: session) == nil, "no Tend")
+
+        var front = AdminFront()
+        #expect(front.noticePressed(Self.notice(report: "9"), in: session) == nil && front.awaited == nil)
+        #expect(front.noticePressed(Self.signUp(), in: session) == nil && front.awaited == nil)
+        #expect(FediqoRootView.tendingOpened(by: Self.notice(report: "9"), in: session) == nil)
+        // The line opens what it always did: the one who signed up; a report naming nobody, nothing.
+        let signUp = Self.signUp()
+        #expect(NoticeWords.opens(signUp) == .person(try #require(signUp.firstPerson)))
+        #expect(NoticesPane.pressed(signUp, selected: signUp.id, touch: true) == .open)
+        let report = Self.notice(report: "9")
+        #expect(NoticeWords.opens(report) == .nothing && NoticesPane.pressed(report, selected: report.id, touch: true) == nil)
+
+        let (early, _, _) = try await self.session(checked: false)
+        early.tendsHere = false
+        var unknown = AdminFront()
+        #expect(unknown.noticePressed(Self.notice(report: "9"), in: early) == nil && unknown.awaited == nil, "no standing waited for")
+    }
+
+    @Test("On a Mac the session tends, and the place is on the rail: dim without a standing, open with one")
+    func aMacTends() async throws {
+        #expect(ShellSession.tendsOnThisDevice)
+        let (plain, _, _) = try await session(permissions: "65536")
+        #expect(plain.tendsHere && plain.availability.railPlaces.contains(.admin) && !plain.availability.allows(.admin))
+        #expect(plain.availability.reasonKey(for: .admin) == "shell.admin.disabled")
+        let (tending, _, _) = try await session()
+        #expect(tending.availability.allows(.admin) && tending.availability.railPlaces.contains(.admin))
+    }
+
     private static func notice(report: String) -> Notice {
         Notice(
             source: source, handle: .one(id: report), kind: .server("admin.report"), people: [], at: Date(timeIntervalSince1970: 1),

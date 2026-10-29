@@ -34,8 +34,8 @@ import AppKit
 /// says what is drawn once AppKit has folded.
 ///
 /// **A phone never folds here.** Its tab bar is the system's: five places at every width a phone
-/// has, and with Admin's sixth the system's own More, which holds the last two (#416); an iPad's
-/// narrow arrangement is the same bar. Only a Mac draws this strip.
+/// has, and never Admin, which an iPhone does not have (#416); an iPad's narrow arrangement is the
+/// same bar, with Admin's sixth where it is entered. Only a Mac draws this strip.
 enum ShellFold {
     /// Where the page sits inside the strip's bordered page, which is where the folded page is
     /// drawn so that nothing moves when the pop-up takes the strip's place. Read off the hosted

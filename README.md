@@ -1057,9 +1057,10 @@ Move nearby.
 
 ### Tending a server
 
-Where your account at a Mastodon source holds a role there — an administrator's, a moderator's —
-Admin is a place of its own, after Notices: on a Mac's rail, and on a phone a tab. Somebody
-without such a role sees no trace of any of this. The source's row on Account also has Tend and
+Tending is a Mac's and an iPad's; an iPhone has none of it. There Admin is a place of its own,
+after Notices, always on the rail: dim, and closed, until your account at a Mastodon source holds
+a role there — an administrator's, a moderator's — and then open, and on a narrow screen a tab.
+Without such a role nothing else of this shows. The source's row on Account also has Tend and
 the host behind its three dots, which opens Admin at that server. Where the sign-in was not asked
 for tending, the item and the server's row on Admin wear the mark signing in wears, and a press
 asks for it alone — see Signing in to Mastodon, above.
@@ -1125,9 +1126,9 @@ list of keys itself, and replaying the landing.
 
 A phone's tab bar holds five places, so on a narrow screen Usage is not one of them: Preferences
 opens with a row that leads to it, and Usage, drawn under Preferences, opens with a row back.
-A key, or anything else that lands on Usage, lights Preferences and draws Usage there. Where
-Admin is there too, it is the fourth tab, and Account and Preferences move under the system's
-More. The wide rail, and a Mac's folded list of places, keep every place.
+A key, or anything else that lands on Usage, lights Preferences and draws Usage there. An iPhone
+has no Admin, so its bar keeps those five; an iPad draws Admin as a tab where it can be entered.
+The wide rail, and a Mac's folded list of places, keep every place.
 
 A narrow screen names the one timeline it shows: its name, its rules in one line, and a dot for
 where it stands among yours. Press the name for the list of every timeline, where a new one is

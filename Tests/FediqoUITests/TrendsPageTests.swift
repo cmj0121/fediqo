@@ -72,7 +72,7 @@ struct TrendsPageTests {
         // The pages are the session's weakly, as the root's are: held for the check.
         let held = withExtendedLifetime(pages) { all.availability }
         #expect(held.trendsTabs == [.posts, .tags, .links] && held.allows(.trends))
-        #expect(held.railPlaces == ShellPlace.allCases.filter { $0 != .admin } && held.enabledPlaces.prefix(3) == [.timeline, .trends, .notices])
+        #expect(held.railPlaces == ShellPlace.allCases && held.enabledPlaces.prefix(3) == [.timeline, .trends, .notices])
         #expect(held.reasonKey(for: .trends) == nil)
         #expect(FediqoRootView.opensTrends(held, open: []) && FediqoRootView.opensTrends(held, open: [.thread, .selection]))
 
@@ -80,7 +80,7 @@ struct TrendsPageTests {
         let none = talk.availability
         #expect(none.trendsTabs.isEmpty && !none.allows(.trends))
         #expect(!none.railPlaces.contains(.trends) && !none.enabledPlaces.contains(.trends), "absent, never grey")
-        #expect(none.railPlaces == [.timeline, .notices, .account, .usage, .preferences])
+        #expect(none.railPlaces == [.timeline, .notices, .admin, .account, .usage, .preferences])
         #expect(none.placing(.trends, as: .trends) == .timeline, "a reader standing on it as it goes is moved off")
         #expect(!FediqoRootView.opensTrends(none, open: []))
         #expect(!ShellAvailability.empty.allows(.trends) && !ShellAvailability.empty.railPlaces.contains(.trends))

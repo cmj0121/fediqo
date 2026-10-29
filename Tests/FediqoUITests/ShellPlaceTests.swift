@@ -93,29 +93,52 @@ struct ShellPlaceTests {
         #expect(held.rotate(from: .account, by: 1) == .usage && held.rotate(from: .usage, by: 1) == .preferences)
     }
 
-    /// #416, D1. With a standing on some host Admin is a place of its own after Notices: on the
-    /// Mac's rail, and on a phone the fourth of six tabs, Account and Preferences under the
-    /// system's More. Without one there is no trace of it, and the tabs are five as before.
-    @Test("Admin stands after Notices where some host's standing allows it — the fourth of six tabs, the rail's too — and is absent, never dim, without one")
+    /// #416, D1. On a Mac or an iPad, with a standing on some host, Admin is a place of its own
+    /// after Notices: on the rail, and the fourth of six tabs in the narrow arrangement. Without
+    /// one it is on the rail still, dim and closed as Timeline is without a source, saying why;
+    /// the tabs are five as before.
+    @Test("Admin stands after Notices where some host's standing allows it — the fourth of six tabs, the rail's too — and is dim on the rail without one, saying why, and no tab")
     func adminIsAPlaceOfItsOwn() {
         let tending = ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: [.posts], adminHosts: ["m.example"])
-        #expect(tending.allows(.admin))
+        #expect(tending.allows(.admin) && tending.reasonKey(for: .admin) == nil)
         #expect(tending.tabbedPlaces == [.timeline, .trends, .notices, .admin, .account, .preferences])
-        #expect(tending.tabbedPlaces.firstIndex(of: .admin) == 3, "the fourth: the phone's bar draws it, the More holds the two after")
+        #expect(tending.tabbedPlaces.firstIndex(of: .admin) == 3, "the fourth, after Notices")
         #expect(tending.railPlaces == [.timeline, .trends, .notices, .admin, .account, .usage, .preferences])
+        #expect(tending.placing(.notices, as: .admin) == .admin)
         // Usage still opens from Preferences, whose tab draws it.
         #expect(!tending.tabbedPlaces.contains(.usage) && ShellPlace.usage.tab == .preferences)
         #expect(ShellStream(.admin) == nil && !ShellPlace.admin.isStream)
 
         let plain = ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: [.posts])
-        #expect(!plain.allows(.admin) && !plain.railPlaces.contains(.admin) && !plain.enabledPlaces.contains(.admin))
+        #expect(!plain.allows(.admin) && !plain.enabledPlaces.contains(.admin))
+        #expect(plain.railPlaces == [.timeline, .trends, .notices, .admin, .account, .usage, .preferences], "dim, never absent")
+        #expect(plain.reasonKey(for: .admin) == "shell.admin.disabled")
         #expect(plain.tabbedPlaces == [.timeline, .trends, .notices, .account, .preferences])
         #expect(plain.placing(.notices, as: .admin) == .notices, "no way in without a standing")
-        #expect(plain.placing(.admin, as: .admin) == .timeline, "a place no longer there is left")
+        #expect(plain.placing(.admin, as: .admin) == .timeline, "a place no longer open is left")
+        #expect(plain.rotate(from: .notices, by: 1) == .account, "the keys step over it")
+        #expect(ShellAvailability.empty.railPlaces.contains(.admin) && !ShellAvailability.empty.allows(.admin))
         for language in DummyLanguage.allCases {
-            for key in ["shell.admin.title", "shell.admin.summary", "shell.admin.line", "shell.admin.readOnly", "shell.admin.unknown"] {
+            for key in [
+                "shell.admin.title", "shell.admin.summary", "shell.admin.line", "shell.admin.readOnly", "shell.admin.unknown",
+                "shell.admin.disabled",
+            ] {
                 #expect(L10n.t(key, language: language) != key, "\(language)/\(key)")
             }
+        }
+    }
+
+    /// #416. An iPhone tends nothing: whatever standing a sign-in holds, Admin is neither on the
+    /// rail nor among the tabs — the bar keeps its five and no system More — and nothing opens it.
+    @Test("Where the device does not tend (an iPhone) Admin is absent from the rail and the tabs, never dim, whatever the standing, and nothing places the reader on it")
+    func anIPhoneHasNoAdmin() {
+        for hosts in [[], ["m.example"]] {
+            let phone = ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: [.posts], adminHosts: hosts, tendsHere: false)
+            #expect(!phone.allows(.admin) && !phone.enabledPlaces.contains(.admin), "\(hosts)")
+            #expect(phone.railPlaces == [.timeline, .trends, .notices, .account, .usage, .preferences], "\(hosts)")
+            #expect(phone.tabbedPlaces == [.timeline, .trends, .notices, .account, .preferences], "\(hosts): five, no More")
+            #expect(phone.reasonKey(for: .admin) == nil, "absent, so nothing to say why")
+            #expect(phone.placing(.notices, as: .admin) == .notices && phone.placing(.admin, as: .admin) == .timeline)
         }
     }
 

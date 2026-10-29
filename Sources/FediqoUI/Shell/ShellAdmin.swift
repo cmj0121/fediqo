@@ -125,9 +125,15 @@ struct AdminFront: Equatable {
     /// A notice pressed: where it lands — its page where the host's standing allows it, the list
     /// where the host is listed and its page cannot open, and **kept to open once the standing is
     /// known** where it is not known yet. Nothing for a notice that is not Admin's, or whose host
-    /// is known to give no standing: the line opens what it always did.
+    /// is known to give no standing: the line opens what it always did. **Nothing on a device
+    /// that does not tend** (`ShellSession.tendsHere`), with no standing waited for: the line
+    /// opens what it always did there too.
     @MainActor
     mutating func noticePressed(_ notice: Notice, in session: ShellSession) -> Landing? {
+        guard session.tendsHere else {
+            awaited = nil
+            return nil
+        }
         if let page = FediqoRootView.tendingOpened(by: notice, in: session) {
             awaited = nil
             return .page(page)

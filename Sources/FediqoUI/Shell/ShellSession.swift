@@ -1017,6 +1017,7 @@ final class ShellSession {
         stopped: ShellStopped? = nil
     ) {
         self.http = http
+        tendsHere = Self.tendsOnThisDevice
         self.hides = hides ?? ShellHides()
         self.stopped = stopped ?? ShellStopped()
         timelineStore = timelines
@@ -1131,8 +1132,24 @@ final class ShellSession {
             queryIDs: Set(queries.map(\.id)),
             signedIn: sources.contains { isSignedIn(host: $0.host) },
             trendsTabs: TrendsTab.tabs(in: self),
-            adminHosts: ShellTending.hosts(in: self)
+            adminHosts: ShellTending.hosts(in: self),
+            tendsHere: tendsHere
         )
+    }
+
+    /// Whether this session tends servers (#416, `ShellAvailability.tendsHere`): the device's
+    /// answer, which a test sets either way. Where it is false the Admin place lists no host and
+    /// no host's page has a tab, so nothing of tending is drawn or opened.
+    @ObservationIgnored var tendsHere: Bool
+
+    /// **A Mac and an iPad tend, and an iPhone does not** (#416): the phone's bar keeps its five
+    /// places and no system More, and tending a server is the larger screen's work.
+    static var tendsOnThisDevice: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .pad
+        #else
+        true
+        #endif
     }
 
     /// Sources `SourceWriting.writes` names — forums, a read-only sign-in and a refused write

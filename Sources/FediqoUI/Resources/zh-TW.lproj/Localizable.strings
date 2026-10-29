@@ -9,6 +9,7 @@
 "shell.admin.line" = "你負責管理的站台，各自列出你的身分能處理的事。";
 "shell.admin.readOnly" = "只能閱讀";
 "shell.admin.unknown" = "目前讀不到這裡的身分。";
+"shell.admin.disabled" = "先登入你負責管理的站台";
 "shell.account.title" = "帳號";
 "shell.account.summary" = "你讀的來源";
 "shell.usage.title" = "用量";

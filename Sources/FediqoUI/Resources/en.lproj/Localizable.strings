@@ -9,6 +9,7 @@
 "shell.admin.line" = "The servers you answer for, each with what its standing lets you tend.";
 "shell.admin.readOnly" = "Read only";
 "shell.admin.unknown" = "Its standing cannot be read just now.";
+"shell.admin.disabled" = "Sign in to a server you answer for first";
 "shell.account.title" = "Account";
 "shell.account.summary" = "The servers you read";
 "shell.usage.title" = "Usage";

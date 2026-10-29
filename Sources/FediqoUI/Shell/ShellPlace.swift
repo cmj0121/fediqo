@@ -9,8 +9,8 @@ public enum ShellPlace: String, CaseIterable, Identifiable, Hashable, Sendable {
     case trends
     case notices
     /// Tending the servers the person answers for (#416): a list of those hosts, and each host's
-    /// page with a tab for each task its standing allows. Only where some sign-in holds such a
-    /// standing; see `ShellAvailability.adminHosts`.
+    /// page with a tab for each task its standing allows. A Mac's and an iPad's alone, entered
+    /// only where some sign-in holds such a standing; see `ShellAvailability.railPlaces`.
     case admin
     case account
     case usage
@@ -187,8 +187,13 @@ struct ShellAvailability: Hashable, Sendable {
     /// trending posts, hashtags or links, and then there is no Trends.
     var trendsTabs: [TrendsTab] = []
     /// The hosts whose sign-in holds a standing that allows some task of tending (#416), in the
-    /// order the Admin place lists them: none, and there is no Admin.
+    /// order the Admin place lists them: none, and Admin cannot be entered.
     var adminHosts: [String] = []
+    /// **Whether this device tends servers at all** (#416): a Mac and an iPad do, and an iPhone
+    /// does not — there is no Admin on it, dim or lit, no "Tend" on a source and no notice that
+    /// opens one. The session says it from the device (`ShellSession.tendsOnThisDevice`), and a
+    /// test says it either way.
+    var tendsHere = true
 
     static let empty = ShellAvailability()
 
@@ -221,9 +226,9 @@ struct ShellAvailability: Hashable, Sendable {
     }
 
     /// The narrow arrangement's tabs (decision 9): the places that can be entered, but Usage,
-    /// which is drawn in Preferences' tab (`ShellPlace.tab`). **Six at most**: five as before, and
-    /// Admin where the person answers for a server (#416) — a phone's bar then shows four and
-    /// the system's More, which holds Account and Preferences. These are the names the Mac's fold
+    /// which is drawn in Preferences' tab (`ShellPlace.tab`). **Five on an iPhone**, which never
+    /// tends (`tendsHere`); on a Mac or an iPad six at most, Admin among them where the person
+    /// answers for a server (#416), and never while it is dim. These are the names the Mac's fold
     /// measures (`ShellFold`). The rail and the fold's pop-up list them all.
     var tabbedPlaces: [ShellPlace] {
         enabledPlaces.filter { $0.tab == $0 }
@@ -231,10 +236,17 @@ struct ShellAvailability: Hashable, Sendable {
 
     /// The places the rail lists: every one, drawn dim where it cannot be entered — **but Trends,
     /// which is absent and never dim** where no source has anything rising (a Discourse-only
-    /// store): it is not a place waiting for a sign-in, it is one this store does not have. **Nor
-    /// Admin** (#416) without a standing: a person without it sees no trace of it.
+    /// store): it is not a place waiting for a sign-in, it is one this store does not have. **Admin
+    /// is always there where the device tends** (#416), dim as Timeline is until some sign-in
+    /// holds a standing, and absent on an iPhone, which never tends (`tendsHere`).
     var railPlaces: [ShellPlace] {
-        ShellPlace.allCases.filter { ($0 != .trends && $0 != .admin) || allows($0) }
+        ShellPlace.allCases.filter {
+            switch $0 {
+            case .trends: allows($0)
+            case .admin: tendsHere
+            default: true
+            }
+        }
     }
 
     /// **Notices is always there** (#323): with nobody signed in the page itself says what
@@ -243,7 +255,7 @@ struct ShellAvailability: Hashable, Sendable {
         switch place {
         case .timeline: timelineEnabled
         case .trends: !trendsTabs.isEmpty
-        case .admin: !adminHosts.isEmpty
+        case .admin: tendsHere && !adminHosts.isEmpty
         case .notices, .account, .usage, .preferences: true
         }
     }
@@ -268,6 +280,7 @@ struct ShellAvailability: Hashable, Sendable {
         guard !allows(place) else { return nil }
         switch place {
         case .timeline: return "shell.timeline.disabled"
+        case .admin: return tendsHere ? "shell.admin.disabled" : nil
         default: return nil
         }
     }
