@@ -5,8 +5,9 @@ import Darwin
 
 // The servers and the addresses a Mastodon the reader answers for refuses or allows (#383): the
 // servers it suspends, limits or allows, and the mail domains and address ranges it refuses to
-// let sign up. Asked of a real one first (`MastodonAdminFederationCaptures`); nothing here
-// writes anywhere on this device, and every write answers with what the server now holds.
+// let sign up — and the mailboxes it refuses however they are written (#417). Asked of a real
+// one first (`MastodonAdminFederationCaptures`); nothing here writes anywhere on this device,
+// and every write answers with what the server now holds.
 
 /// How hard a server is refused, in the server's words.
 public enum ServerSeverity: String, CaseIterable, Sendable {
@@ -154,7 +155,21 @@ public struct RefusedAddress: Sendable, Equatable, Identifiable {
     }
 }
 
-/// A stretch of any of the four lists, newest first, and where the next begins.
+/// A mailbox this server refuses to let anybody sign up with, however it is written (#417). The
+/// server keeps only the fingerprint of its one spelling — the address as it counts it, without
+/// dots, tags or capitals where its mail domain ignores them — never the address itself.
+public struct RefusedMailbox: Sendable, Equatable, Identifiable {
+    public let id: String
+    /// The server's fingerprint of the address, in hex.
+    public let hash: String
+
+    public init(id: String, hash: String) {
+        self.id = id
+        self.hash = hash
+    }
+}
+
+/// A stretch of any of the lists, newest first, and where the next begins.
 public struct FederationStretch<Item: Sendable & Equatable>: Sendable, Equatable {
     public let items: [Item]
     public let next: String?
@@ -178,6 +193,7 @@ public struct MastodonAdminFederation: Sendable {
     static let allowsPath = "/api/v1/admin/domain_allows"
     static let mailPath = "/api/v1/admin/email_domain_blocks"
     static let addressesPath = "/api/v1/admin/ip_blocks"
+    static let mailboxesPath = "/api/v1/admin/canonical_email_blocks"
     /// How long the words of a block or an address may be.
     public static let wordsLength = 1_000
 
@@ -275,6 +291,24 @@ public struct MastodonAdminFederation: Sendable {
         range(ip) != nil
     }
 
+    /// A mail address as written — pasted with spaces about it, its domain in capitals or in
+    /// letters beyond ASCII — in the form the wire carries: trimmed, one mailbox of no spaces
+    /// before its last `@`, and a server's name after it (`wireDomain` judges that it is one).
+    /// **Sent as written**, its domain only lower case: the server fingerprints the address in
+    /// the letters it was given, never in a name's ASCII spelling, and is the one that counts
+    /// spellings the same. Nothing where it is no address — the server would refuse the
+    /// fingerprint of nothing at all.
+    public static func wireMailbox(_ written: String) -> String? {
+        let trimmed = written.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.unicodeScalars.count <= 320, let at = trimmed.lastIndex(of: "@") else { return nil }
+        let local = trimmed[..<at], domain = trimmed[trimmed.index(after: at)...].lowercased()
+        let unwritten = CharacterSet.whitespacesAndNewlines.union(.controlCharacters)
+        guard !local.isEmpty, local.unicodeScalars.count <= 64, !local.unicodeScalars.contains(where: unwritten.contains),
+              wireDomain(domain) != nil
+        else { return nil }
+        return "\(local)@\(domain)"
+    }
+
     // MARK: - Servers refused
 
     public func blocks(after next: String? = nil) async throws -> FederationStretch<ServerBlock> {
@@ -341,6 +375,32 @@ public struct MastodonAdminFederation: Sendable {
 
     public func removeAddress(_ id: String) async throws {
         try await remove("\(Self.addressesPath)/\(id)", id)
+    }
+
+    // MARK: - Mailboxes, however written
+
+    public func mailboxes(after next: String? = nil) async throws -> FederationStretch<RefusedMailbox> {
+        try await list(Self.mailboxesPath, after: next) { (said: MailboxDTO) in said.mailbox }
+    }
+
+    /// The refused mailboxes `address` is, in any spelling the server counts as the same: none
+    /// where it would be let sign up. **Adds nothing.**
+    public func tryMailbox(_ address: String) async throws -> [RefusedMailbox] {
+        guard let address = Self.wireMailbox(address) else { throw MastodonAdminError.invalid }
+        let body = try await write("\(Self.mailboxesPath)/test", "POST", form: [("email", address)])
+        guard let read = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<MailboxDTO>].self, from: body) else {
+            throw MastodonAdminError.unreadable
+        }
+        return read.compactMap { $0.value?.mailbox }
+    }
+
+    public func addMailbox(_ address: String) async throws -> RefusedMailbox {
+        guard let address = Self.wireMailbox(address) else { throw MastodonAdminError.invalid }
+        return try read(try await write(Self.mailboxesPath, "POST", form: [("email", address)])) { (said: MailboxDTO) in said.mailbox }
+    }
+
+    public func removeMailbox(_ id: String) async throws {
+        try await remove("\(Self.mailboxesPath)/\(id)", id)
     }
 
     // MARK: - The wire
@@ -460,6 +520,17 @@ public struct MastodonAdminFederation: Sendable {
                 id: id, ip: LineText.oneLine(ip, limit: 64), severity: severity, words: MastodonAdminFederation.line(comment?.value),
                 at: createdAt?.value, until: expiresAt?.value
             )
+        }
+    }
+
+    struct MailboxDTO: Decodable, Sendable {
+        let id: String
+        let canonicalEmailHash: String
+
+        var mailbox: RefusedMailbox? {
+            let hash = canonicalEmailHash
+            guard ListSubscription.isPathSegment(id), !hash.isEmpty, hash.utf8.count <= 128, hash.allSatisfy(\.isHexDigit) else { return nil }
+            return RefusedMailbox(id: id, hash: hash.lowercased())
         }
     }
 }

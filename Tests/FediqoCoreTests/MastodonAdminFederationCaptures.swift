@@ -17,6 +17,20 @@ import Foundation
 /// | a server already suspended, blocked again         | 422, the server's sentence and its block        |
 /// | an address that is none                           | 422, the server's sentence                      |
 /// | `domain_blocks`, as the Moderator                 | `403 {"error":"This action is not allowed"}`    |
+///
+/// The mailboxes refused however written (#417), fetched on 2026-10-29 from the same image, as
+/// the same Admin, each added by a check and taken off after — the server holds only each one's
+/// fingerprint:
+///
+/// | Asked (`/api/v1/admin/…`)                         | Answered                                        |
+/// | ------------------------------------------------- | ----------------------------------------------- |
+/// | `canonical_email_blocks`                          | 200, the fingerprints, newest first             |
+/// | `…?limit=1`, then on from its `max_id`            | 200, one, and a `next` while there are more     |
+/// | `canonical_email_blocks`, a new one by address    | 200, its fingerprint                            |
+/// | `canonical_email_blocks/test`, an address         | 200, those it is in any spelling; `[]` if none  |
+/// | the same address added again                      | 422, the server's sentence                      |
+/// | `canonical_email_blocks`, as the Moderator        | `403 {"error":"This action is not allowed"}`    |
+/// | `canonical_email_blocks/:id` of none, `DELETE`    | `404 {"error":"Record not found"}`              |
 enum MastodonAdminFederationCaptures {
     static let host = "mastodon.localhost"
 
@@ -118,5 +132,67 @@ enum MastodonAdminFederationCaptures {
     /// The servers refused, asked by the Moderator, whose role does not answer for them: 403.
     static let modBlocks = #"""
     {"error":"This action is not allowed"}
+    """#
+
+    /// `GET /api/v1/admin/canonical_email_blocks` as the Admin, after `Fediqo.417+tag@Example.com`
+    /// and then `refused417@example.com` were added: newest first.
+    static let mailboxes = #"""
+    [{"id":"2","canonical_email_hash":"068b21a0cc520c747c7b8e6d468c34d01b418020c8c06e24f566560906918a52"},{"id":"1","canonical_email_hash":"775b10bf7772d11d49e38f382b2cab84ee93161169491aaf49bdaeb1a20b33e0"}]
+    """#
+
+    /// Its `Link` header.
+    static let mailboxesLink = #"""
+    <https://mastodon.localhost/api/v1/admin/canonical_email_blocks?min_id=2>; rel="prev"
+    """#
+
+    /// `GET …/canonical_email_blocks?limit=1`: the newest, and where the rest begin.
+    static let mailboxesFirst = #"""
+    [{"id":"2","canonical_email_hash":"068b21a0cc520c747c7b8e6d468c34d01b418020c8c06e24f566560906918a52"}]
+    """#
+
+    /// Its `Link` header.
+    static let mailboxesFirstLink = #"""
+    <https://mastodon.localhost/api/v1/admin/canonical_email_blocks?limit=1&max_id=2>; rel="next", <https://mastodon.localhost/api/v1/admin/canonical_email_blocks?limit=1&min_id=2>; rel="prev"
+    """#
+
+    /// `GET …/canonical_email_blocks?max_id=2`: the last.
+    static let mailboxesRest = #"""
+    [{"id":"1","canonical_email_hash":"775b10bf7772d11d49e38f382b2cab84ee93161169491aaf49bdaeb1a20b33e0"}]
+    """#
+
+    /// Its `Link` header.
+    static let mailboxesRestLink = #"""
+    <https://mastodon.localhost/api/v1/admin/canonical_email_blocks?min_id=1>; rel="prev"
+    """#
+
+    /// `POST …/canonical_email_blocks`, `email=Fediqo.417+tag@Example.com`.
+    static let mailboxAdded = #"""
+    {"id":"1","canonical_email_hash":"775b10bf7772d11d49e38f382b2cab84ee93161169491aaf49bdaeb1a20b33e0"}
+    """#
+
+    /// `POST …/canonical_email_blocks/test`, `email=fediqo417@example.com`: the one above, as
+    /// the server counts the two spellings the same.
+    static let mailboxTried = #"""
+    [{"id":"1","canonical_email_hash":"775b10bf7772d11d49e38f382b2cab84ee93161169491aaf49bdaeb1a20b33e0"}]
+    """#
+
+    /// `POST …/canonical_email_blocks/test`, `email=other@example.com`: refused by none.
+    static let mailboxTriedNone = #"""
+    []
+    """#
+
+    /// `refused417@example.com` added again: 422, in its words.
+    static let mailboxTwice = #"""
+    {"error":"Validation failed: Canonical email hash has already been taken"}
+    """#
+
+    /// `DELETE …/canonical_email_blocks/:id`.
+    static let mailboxRemoved = #"""
+    {}
+    """#
+
+    /// `DELETE …/canonical_email_blocks/999`, which there is none of.
+    static let noMailbox = #"""
+    {"error":"Record not found"}
     """#
 }

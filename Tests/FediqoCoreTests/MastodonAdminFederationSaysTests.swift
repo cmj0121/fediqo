@@ -9,7 +9,8 @@ import Testing
 /// **Everything read here is seeded** (`servers/mastodon/seed.rb`), and **every change a check
 /// makes it takes back**: a server it blocks is unblocked, one it allows is no longer, a mail
 /// domain or a range it refuses is taken off — and the seed takes off whatever a check that
-/// stopped half way left, on its next run.
+/// stopped half way left, on its next run. A mailbox refused however written (#417) is taken off
+/// by its own check, before it begins as after it ends: the seed has none to put back.
 @Suite("What a Mastodon says of the servers and addresses it refuses", .enabled(if: LocalServers.requested), .serialized)
 struct MastodonAdminFederationSaysTests {
     private static let host = LocalServers.mastodon
@@ -87,5 +88,29 @@ struct MastodonAdminFederationSaysTests {
         #expect(try await admin.addresses().items.contains { $0.id == range.id && $0.severity == .approval })
         try await admin.removeAddress(range.id)
         #expect(try await !admin.addresses().items.contains { $0.ip == "198.51.100.0/24" })
+    }
+
+    @Test("A mailbox refused is refused in any spelling the server counts as the same: tried, it is found; added again, refused in the server's words; taken off, it is tried and found in none — and the Moderator, whose role does not answer for it, is refused the list")
+    func aMailboxRefused() async throws {
+        try await LocalServers.requireHealthy()
+        let admin = try Self.reader("admin")
+        let plain = "fediqo417@example.com"
+        for left in try await admin.tryMailbox(plain) { try await admin.removeMailbox(left.id) }
+        #expect(try await admin.tryMailbox(plain).isEmpty)
+
+        let added = try await admin.addMailbox("Fediqo.417+tag@Example.com")
+        #expect(try await admin.tryMailbox(plain).map(\.id) == [added.id])
+        #expect(try await admin.mailboxes().items.contains(added))
+        do {
+            _ = try await admin.addMailbox(plain)
+            Issue.record("the same mailbox, written another way, was added again")
+        } catch MastodonAdminError.refused(let sentence) {
+            #expect(!sentence.isEmpty)
+        }
+        try await admin.removeMailbox(added.id)
+        #expect(try await admin.tryMailbox("fediqo.417+tag@example.com").isEmpty)
+        #expect(try await !admin.mailboxes().items.contains(added))
+
+        await #expect(throws: MastodonAdminError.notAllowed) { _ = try await Self.reader("mod").mailboxes() }
     }
 }
