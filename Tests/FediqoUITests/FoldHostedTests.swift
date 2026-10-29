@@ -135,11 +135,13 @@ struct FoldHostedTests {
     /// **The strip is the tabs', and the tabs hold no Usage** (decision 9): a phone's bar holds
     /// five, so Usage is drawn in Preferences' tab. Those five names are what the fold measures,
     /// with Trends standing where Usage stood, so the line stays where it was; folded, the pop-up
-    /// lists every place, Usage among them.
+    /// lists every place, Usage among them. **And six names for a person who answers for a
+    /// server** (#416): Admin among the tabs, measured as the five are.
     private static let offered: [ShellAvailability] = [
         ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: TrendsTab.allCases),
         ShellAvailability(queryIDs: ["all"]),
         .empty,
+        ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: TrendsTab.allCases, adminHosts: ["m.example"]),
     ]
 
     /// The reader holding everything, whose names are the ones that fold.
@@ -246,8 +248,9 @@ struct FoldHostedTests {
             #expect(popUp.itemTitles.contains(ShellPlace.usage.title(language: .english)))
             #expect(popUp.titleOfSelectedItem == places[0].title(language: .english))
         }
-        // Not vacuous: the reader with every place is the one whose names do not fit.
-        #expect(folded == 1)
+        // Not vacuous: the reader with every place — and with Admin besides — is the one whose
+        // names do not fit.
+        #expect(folded == 2)
     }
 
     /// **The word for the places is written beside the pop-up**, not only in its help: the

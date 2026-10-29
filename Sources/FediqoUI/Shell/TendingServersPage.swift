@@ -1,7 +1,7 @@
 import FediqoCore
 import SwiftUI
 
-/// What the Servers tab presses, each answered by the page's owner.
+/// What the Federation and Blocks tabs press, each answered by the page's owner.
 struct TendingServersActs {
     /// A list's Add: its sheet.
     var onAdd: (ServerList) -> Void = { _ in }
@@ -25,9 +25,9 @@ struct TendingServersActs {
     }
 }
 
-/// The Servers tab (#383): the servers this one refuses, then those it allows — where the role
-/// answers for them — and the mail domains and address ranges it refuses to let sign up — where
-/// it answers for those. Each list under its own head, with its Add; each row with what it is
+/// The Federation tab (#383, #416) — the servers this one refuses, then those it allows — and the
+/// Blocks tab — the mail domains and address ranges it refuses to let sign up: one view, drawing
+/// the lists its tab was handed, and nothing of the other's. Each list under its own head, with its Add; each row with what it is
 /// refused and why, and its `…`; the sentence where a list is empty, and the foot that reads on.
 ///
 ///     Servers refused                                              + Add
@@ -533,7 +533,7 @@ struct FederationAskSheetPresenter: ViewModifier {
             }
             .sheet(item: shown) { _ in
                 if let ask = servers.asking {
-                    let page = Tending(host: ask.host, tab: .servers)
+                    let page = ask.page
                     FederationAskSheet(
                         ask: Binding(get: { servers.asking ?? ask }, set: { if servers.asking != nil { servers.asking = $0 } }),
                         onSend: { Task { await servers.send(on: page, in: session) } },

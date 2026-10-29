@@ -2,15 +2,15 @@ import FediqoCore
 import Foundation
 import Observation
 
-// The Servers tab of tending a server (#383): the servers it suspends, limits or allows — with
-// what each is refused and why — and the mail domains and address ranges it refuses to let sign
-// up. Each is added, changed or taken off.
+// The Federation and Blocks tabs of a host's page (#383, #416): on Federation the servers it
+// suspends, limits or allows — with what each is refused and why — and on Blocks the mail domains
+// and address ranges it refuses to let sign up. Each is added, changed or taken off.
 //
-// **The tab's own state**, apart from the Reports tab's and the People tab's. **Each list is the
-// role's**: the servers refused and allowed are `manage_federation`'s, the mail domains and the
-// ranges `manage_blocks`'; a list whose flag the role lacks is absent, and the tab with it where
-// it lacks both. Every list the role allows is asked as the tab comes in front; each reads on by
-// its own press, by the server's own next. `r`, the mark and a pull ask them all from the top.
+// **Each tab's own state**, apart from each other's and from the other tabs'. **Each tab is its
+// flag's**: Federation `manage_federation`'s, Blocks `manage_blocks`'; a tab whose flag the role
+// lacks is absent, and **asks nothing** — a role holding one flag never asks the other tab's
+// lists. Every list of the tab is asked as the tab comes in front; each reads on by its own
+// press, by the server's own next. `r`, the mark and a pull ask the tab's lists from the top.
 //
 // **Every write is the server's, and its answer is the row**, by the rules the other tabs keep:
 // numbered as it answers, so a read sent while it was on the wire neither undoes it nor brings
@@ -23,16 +23,18 @@ import Observation
 // refused — is let go when the page leaves, when who reads changes, and when the role no longer
 // allows it.
 
-/// One of the tab's lists, and the flag of the role it needs.
+/// One of the two tabs' lists, the tab it stands on, and so the flag of the role it needs.
 enum ServerList: String, CaseIterable, Sendable {
     case blocks, allows, mail, addresses
 
-    var flag: MastodonStaff {
+    var tab: AdminTab {
         switch self {
-        case .blocks, .allows: .manageFederation
-        case .mail, .addresses: .manageBlocks
+        case .blocks, .allows: .federation
+        case .mail, .addresses: .blocks
         }
     }
+
+    var flag: MastodonStaff { tab.flag }
 }
 
 /// One list of the tab, as it is handed: its rows, whether more may be read, and what stands
@@ -44,7 +46,8 @@ struct ServerListSaid<Item: Equatable>: Equatable {
     var quiet: String?
 }
 
-/// What the Servers tab is handed: each list the role allows, and nothing of the rest.
+/// What the Federation or the Blocks tab is handed: each of its lists the role allows, and
+/// nothing of the rest — nothing of the other tab's.
 struct TendingServersSaid: Equatable {
     let host: String
     var blocks: ServerListSaid<ServerBlock>?
@@ -103,6 +106,9 @@ struct FederationAsk: Equatable, Identifiable {
         case .address: .addresses
         }
     }
+
+    /// The page it is sent on: the host's, at the tab its list stands on.
+    var page: Tending { Tending(host: host, tab: list.tab) }
 
     /// Whether what is written cuts the server off from others: a server suspended, where it was
     /// not; an address refused all access; or a range so wide it shuts out whole networks.
@@ -179,8 +185,12 @@ final class ShellTendingServers {
         var acted: [String: Int] = [:]
         var acting: Set<String> = []
         var under = 0
+
+        var answered: Bool { blocks.answered || allows.answered || mail.answered || addresses.answered }
     }
 
+    /// Each tab's lists, by `key`: a tab's ask is its own, so turning to the other neither waits
+    /// on it nor is answered by it.
     private var pages: [String: Lists] = [:]
     private var halted: Set<String> = []
     /// The sheet a change is written on, where one is up.
@@ -200,14 +210,24 @@ final class ShellTendingServers {
 
     // MARK: - Who may
 
-    /// The lists the role at `host` allows, in the order the tab draws them.
+    /// The lists the role at `host` allows, in the order the tabs draw them.
     static func lists(at host: String, in session: ShellSession) -> [ServerList] {
         guard let staff = session.mastodon.staff(host: host) else { return [] }
         return ServerList.allCases.filter { staff.allows($0.flag) }
     }
 
-    private func standing(_ host: String, in session: ShellSession) -> Lists? {
-        pages[host].flatMap { $0.under == ShellPersonPages.signIns(at: host, in: session) ? $0 : nil }
+    /// The lists of `page`'s tab the role allows: none on any other tab.
+    static func lists(of page: Tending, in session: ShellSession) -> [ServerList] {
+        lists(at: page.host, in: session).filter { $0.tab == page.tab }
+    }
+
+    private static func key(_ host: String, _ tab: AdminTab) -> String { host + "\u{1e}" + tab.rawValue }
+    private static func key(_ page: Tending) -> String { key(page.host, page.tab) }
+    private static func key(_ host: String, _ list: ServerList) -> String { key(host, list.tab) }
+    private static let tabs: [AdminTab] = [.federation, .blocks]
+
+    private func standing(_ page: Tending, in session: ShellSession) -> Lists? {
+        pages[Self.key(page)].flatMap { $0.under == ShellPersonPages.signIns(at: page.host, in: session) ? $0 : nil }
     }
 
     /// What the role no longer answers for let go, list by list — everything of `host` where it
@@ -222,11 +242,14 @@ final class ShellTendingServers {
         if let ask = asking, ask.host == host, !allowed.contains(ask.list) || !ShellTending.acts(at: host, in: session) {
             closeGone(host)
         }
-        guard pages[host] != nil else { return true }
-        if !allowed.contains(.blocks) { pages[host]?.blocks = Read() }
-        if !allowed.contains(.allows) { pages[host]?.allows = Read() }
-        if !allowed.contains(.mail) { pages[host]?.mail = Read() }
-        if !allowed.contains(.addresses) { pages[host]?.addresses = Read() }
+        for tab in Self.tabs {
+            let key = Self.key(host, tab)
+            guard pages[key] != nil else { continue }
+            if !allowed.contains(.blocks) { pages[key]?.blocks = Read() }
+            if !allowed.contains(.allows) { pages[key]?.allows = Read() }
+            if !allowed.contains(.mail) { pages[key]?.mail = Read() }
+            if !allowed.contains(.addresses) { pages[key]?.addresses = Read() }
+        }
         return true
     }
 
@@ -250,10 +273,10 @@ final class ShellTendingServers {
         // go at the next opening or press (`keepsStanding`).
         let host = page.host
         let acts = ShellTending.acts(at: host, in: session)
-        let allowed = Set(Self.lists(at: host, in: session))
+        let allowed = Set(Self.lists(of: page, in: session))
         var said = TendingServersSaid(host: host, acts: acts)
         if !acts { said.lock = session.mastodon.place(.tending, host: host) }
-        let lists = standing(host, in: session)
+        let lists = standing(page, in: session)
         said.acting = lists?.acting ?? []
         func list<Item: Equatable>(_ which: ServerList, _ read: Read<Item>?) -> ServerListSaid<Item>? {
             guard allowed.contains(which) else { return nil }
@@ -273,8 +296,8 @@ final class ShellTendingServers {
     }
 
     func walked(_ page: Tending, in session: ShellSession) -> [String] {
-        guard let lists = standing(page.host, in: session) else { return [] }
-        let allowed = Set(Self.lists(at: page.host, in: session))
+        guard let lists = standing(page, in: session) else { return [] }
+        let allowed = Set(Self.lists(of: page, in: session))
         var ids: [String] = []
         if allowed.contains(.blocks) { ids += lists.blocks.rows.map { TendingServersSaid.rowID(.blocks, $0.id) } }
         if allowed.contains(.allows) { ids += lists.allows.rows.map { TendingServersSaid.rowID(.allows, $0.id) } }
@@ -284,7 +307,8 @@ final class ShellTendingServers {
     }
 
     func ask(of page: Tending, language: DummyLanguage? = nil) -> PageAsking {
-        guard let lists = pages[page.host] else { return PageAsking() }
+        let key = Self.key(page)
+        guard let lists = pages[key] else { return PageAsking() }
         let readingOn = lists.blocks.readingOn || lists.allows.readingOn || lists.mail.readingOn || lists.addresses.readingOn
         let failed = lists.blocks.failed || lists.allows.failed || lists.mail.failed || lists.addresses.failed
         return PageAsking(
@@ -293,19 +317,19 @@ final class ShellTendingServers {
                 : readingOn ? L10n.t("tend.servers.reading", language: language) : nil,
             stoppable: lists.asking,
             failed: failed && !lists.asking && !readingOn ? [page.host] : [],
-            stopped: halted.contains(page.host)
+            stopped: halted.contains(key)
         )
     }
 
     @discardableResult
     func stop(_ page: Tending) -> Bool {
-        let host = page.host
-        guard pages[host]?.asking == true else { return false }
-        asks[host]?.cancel()
-        asks[host] = nil
-        pages[host]?.awaits = errands.next()
-        pages[host]?.asking = false
-        halted.insert(host)
+        let key = Self.key(page)
+        guard pages[key]?.asking == true else { return false }
+        asks[key]?.cancel()
+        asks[key] = nil
+        pages[key]?.awaits = errands.next()
+        pages[key]?.asking = false
+        halted.insert(key)
         return true
     }
 
@@ -313,45 +337,47 @@ final class ShellTendingServers {
 
     func opened(_ page: Tending, in session: ShellSession) async {
         guard keepsStanding(at: page.host, in: session) else { return }
-        if let lists = standing(page.host, in: session) {
+        if let lists = standing(page, in: session) {
             if lists.asking {
-                await asks[page.host]?.value
+                await asks[Self.key(page)]?.value
                 return
             }
-            if lists.blocks.answered || lists.mail.answered || lists.notAllowed { return }
+            if lists.answered || lists.notAllowed { return }
         }
         await begin(page, in: session)?.value
     }
 
     func again(_ page: Tending, in session: ShellSession) async {
-        guard keepsStanding(at: page.host, in: session), pages[page.host]?.asking != true else { return }
+        guard keepsStanding(at: page.host, in: session), pages[Self.key(page)]?.asking != true else { return }
         await begin(page, in: session)?.value
     }
 
-    /// Every list the role allows asked from its top, at once.
+    /// Every list of the tab the role allows asked from its top, at once — and nothing of the
+    /// other tab's.
     private func begin(_ page: Tending, in session: ShellSession) -> Task<Void, Never>? {
         let host = page.host
-        let allowed = Self.lists(at: host, in: session)
+        let key = Self.key(page)
+        let allowed = Self.lists(of: page, in: session)
         guard !allowed.isEmpty, ShellTending.drawn(page, in: session), let through = door(at: host, in: session) else { return nil }
         let under = ShellPersonPages.signIns(at: host, in: session)
-        if pages[host]?.under != under {
-            asks[host]?.cancel()
-            pages[host] = Lists(under: under)
+        if pages[key]?.under != under {
+            asks[key]?.cancel()
+            pages[key] = Lists(under: under)
         }
         let errand = errands.next()
-        pages[host]?.awaits = errand
-        pages[host]?.asking = true
-        halted.remove(host)
+        pages[key]?.awaits = errand
+        pages[key]?.asking = true
+        halted.remove(key)
         let task = Task {
-            defer { if self.pages[host]?.awaits == errand { self.asks[host] = nil } }
+            defer { if self.pages[key]?.awaits == errand { self.asks[key] = nil } }
             await withTaskGroup(of: Void.self) { group in
                 for list in allowed {
                     group.addTask { await self.read(list, at: host, after: nil, through: through, errand: errand, in: session) }
                 }
             }
-            if self.pages[host]?.awaits == errand { self.pages[host]?.asking = false }
+            if self.pages[key]?.awaits == errand { self.pages[key]?.asking = false }
         }
-        asks[host] = task
+        asks[key] = task
         return task
     }
 
@@ -359,7 +385,8 @@ final class ShellTendingServers {
     func readOn(_ list: ServerList, of page: Tending, in session: ShellSession) async {
         let host = page.host
         guard keepsStanding(at: host, in: session), Self.lists(at: host, in: session).contains(list),
-              let lists = standing(host, in: session), !lists.asking, let through = door(at: host, in: session)
+              let lists = standing(Tending(host: host, tab: list.tab), in: session), !lists.asking,
+              let through = door(at: host, in: session)
         else { return }
         let next: String?
         switch list {
@@ -375,11 +402,12 @@ final class ShellTendingServers {
     }
 
     private func setReadingOn(_ list: ServerList, at host: String, _ on: Bool) {
+        let key = Self.key(host, list)
         switch list {
-        case .blocks: pages[host]?.blocks.readingOn = on
-        case .allows: pages[host]?.allows.readingOn = on
-        case .mail: pages[host]?.mail.readingOn = on
-        case .addresses: pages[host]?.addresses.readingOn = on
+        case .blocks: pages[key]?.blocks.readingOn = on
+        case .allows: pages[key]?.allows.readingOn = on
+        case .mail: pages[key]?.mail.readingOn = on
+        case .addresses: pages[key]?.addresses.readingOn = on
         }
     }
 
@@ -402,9 +430,10 @@ final class ShellTendingServers {
                 land(stretch, into: \.addresses, list, at: host, after: next, errand: errand)
             }
         } catch {
-            guard pages[host]?.awaits == errand else { return }
+            let key = Self.key(host, list)
+            guard pages[key]?.awaits == errand else { return }
             switch error {
-            case MastodonAdminError.notAllowed: pages[host]?.notAllowed = true
+            case MastodonAdminError.notAllowed: pages[key]?.notAllowed = true
             case is PagingError: failed(list, at: host, paging: true)
             case MastodonAuthError.signedOut:
                 session.mastodon.endedByServer(host: host)
@@ -416,11 +445,12 @@ final class ShellTendingServers {
     }
 
     private func failed(_ list: ServerList, at host: String, paging: Bool) {
+        let key = Self.key(host, list)
         switch list {
-        case .blocks: if paging { pages[host]?.blocks.notPaging = true } else { pages[host]?.blocks.failed = true }
-        case .allows: if paging { pages[host]?.allows.notPaging = true } else { pages[host]?.allows.failed = true }
-        case .mail: if paging { pages[host]?.mail.notPaging = true } else { pages[host]?.mail.failed = true }
-        case .addresses: if paging { pages[host]?.addresses.notPaging = true } else { pages[host]?.addresses.failed = true }
+        case .blocks: if paging { pages[key]?.blocks.notPaging = true } else { pages[key]?.blocks.failed = true }
+        case .allows: if paging { pages[key]?.allows.notPaging = true } else { pages[key]?.allows.failed = true }
+        case .mail: if paging { pages[key]?.mail.notPaging = true } else { pages[key]?.mail.failed = true }
+        case .addresses: if paging { pages[key]?.addresses.notPaging = true } else { pages[key]?.addresses.failed = true }
         }
     }
 
@@ -430,7 +460,8 @@ final class ShellTendingServers {
         _ stretch: FederationStretch<Item>, into path: WritableKeyPath<Lists, Read<Item>>, _ list: ServerList, at host: String,
         after next: String?, errand: Int
     ) where Item.ID == String {
-        guard var lists = pages[host], lists.awaits == errand else { return }
+        let key = Self.key(host, list)
+        guard var lists = pages[key], lists.awaits == errand else { return }
         var read = lists[keyPath: path]
         let current = Dictionary(read.rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let newer = { (id: String) in (lists.acted[TendingServersSaid.rowID(list, id)] ?? 0) > errand }
@@ -447,7 +478,7 @@ final class ShellTendingServers {
         read.notPaging = false
         lists[keyPath: path] = read
         lists.notAllowed = false
-        pages[host] = lists
+        pages[key] = lists
     }
 
     // MARK: - Writes
@@ -522,31 +553,32 @@ final class ShellTendingServers {
         _ send: (MastodonAdminFederation) async throws -> Item?
     ) async -> String? where Item.ID == String {
         let host = page.host
+        let at = Self.key(host, list)
         let key = TendingServersSaid.rowID(list, id ?? "new")
         // **Nothing sent is never "done"**: each way this does not send says why, so a sheet stays up.
         let notAllowed = String(format: L10n.t("tend.act.notAllowed"), host)
         guard keepsStanding(at: host, in: session), Self.lists(at: host, in: session).contains(list),
               ShellTending.acts(at: host, in: session)
         else { return notAllowed }
-        guard let held = pages[host], held.under == ShellPersonPages.signIns(at: host, in: session) else {
+        guard let held = pages[at], held.under == ShellPersonPages.signIns(at: host, in: session) else {
             return String(format: L10n.t("tend.act.failed"), host)
         }
         guard !held.acting.contains(key) else { return String(format: L10n.t("tend.servers.busy"), host) }
         guard let through = door(at: host, in: session) else { return String(format: L10n.t("tend.act.failed"), host) }
-        let under = pages[host]?.under
-        pages[host]?.acting.insert(key)
-        defer { if pages[host]?.under == under { pages[host]?.acting.remove(key) } }
+        let under = pages[at]?.under
+        pages[at]?.acting.insert(key)
+        defer { if pages[at]?.under == under { pages[at]?.acting.remove(key) } }
         do {
             let item = try await send(through)
             let errand = errands.next()
-            guard pages[host]?.under == under else { return nil }
+            guard pages[at]?.under == under else { return nil }
             let written = item?.id ?? id ?? ""
-            pages[host]?.acted[TendingServersSaid.rowID(list, written)] = errand
+            pages[at]?.acted[TendingServersSaid.rowID(list, written)] = errand
             switch list {
-            case .blocks: apply(item as? ServerBlock, id: id, to: \.blocks, at: host)
-            case .allows: apply(item as? ServerAllow, id: id, to: \.allows, at: host)
-            case .mail: apply(item as? RefusedMailDomain, id: id, to: \.mail, at: host)
-            case .addresses: apply(item as? RefusedAddress, id: id, to: \.addresses, at: host)
+            case .blocks: apply(item as? ServerBlock, id: id, to: \.blocks, at: at)
+            case .allows: apply(item as? ServerAllow, id: id, to: \.allows, at: at)
+            case .mail: apply(item as? RefusedMailDomain, id: id, to: \.mail, at: at)
+            case .addresses: apply(item as? RefusedAddress, id: id, to: \.addresses, at: at)
             }
             return nil
         } catch {
@@ -565,9 +597,9 @@ final class ShellTendingServers {
     /// A write's answer in its list: the row replaced or added at the top — or, for one taken
     /// off, gone.
     private func apply<Item: Identifiable & Equatable>(
-        _ item: Item?, id: String?, to path: WritableKeyPath<Lists, Read<Item>>, at host: String
+        _ item: Item?, id: String?, to path: WritableKeyPath<Lists, Read<Item>>, at key: String
     ) where Item.ID == String {
-        guard var lists = pages[host] else { return }
+        guard var lists = pages[key] else { return }
         if let item {
             if let index = lists[keyPath: path].rows.firstIndex(where: { $0.id == item.id }) {
                 lists[keyPath: path].rows[index] = item
@@ -577,17 +609,20 @@ final class ShellTendingServers {
         } else if let id {
             lists[keyPath: path].rows.removeAll { $0.id == id }
         }
-        pages[host] = lists
+        pages[key] = lists
     }
 
     /// Everything of `host` let go: the page left, who reads it changed, or the role lost. A sheet
     /// up for it closes, and says why.
     func letGo(at host: String) {
         let host = host.lowercased()
-        asks[host]?.cancel()
-        asks[host] = nil
-        pages[host] = nil
-        halted.remove(host)
+        for tab in Self.tabs {
+            let key = Self.key(host, tab)
+            asks[key]?.cancel()
+            asks[key] = nil
+            pages[key] = nil
+            halted.remove(key)
+        }
         closeGone(host)
     }
 }

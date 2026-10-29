@@ -118,7 +118,7 @@ extension ShellSession {
             // What the sources listed of a rising link (#379), drawn from the store's copy.
             case .shared(let page):
                 pins.formUnion(personPages?.shared.keys(of: page) ?? [])
-            case .tag, .link, .people, .found, .followedTags, .server:
+            case .tag, .link, .people, .found, .followedTags:
                 break
             }
         }
@@ -160,7 +160,7 @@ extension ShellSession {
             switch step {
             case .person(let who): pins.formUnion(keys(of: heldPosts(of: who)))
             case .tag(let tag): pins.formUnion(keys(of: heldPosts(under: tag, latest: openPages.latest)))
-            case .thread, .link, .people, .found, .followedTags, .shared, .server: break
+            case .thread, .link, .people, .found, .followedTags, .shared: break
             }
         }
         if let search { pins.formUnion(keys(of: searched(search, latest: openPages.latest) ?? [])) }

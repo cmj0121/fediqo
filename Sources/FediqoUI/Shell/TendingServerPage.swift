@@ -1,7 +1,7 @@
 import FediqoCore
 import SwiftUI
 
-/// What the Server tab presses, each answered by the page's owner.
+/// What the Dashboard, Trends and Rules tabs press, each answered by the page's owner.
 struct TendingServerActs {
     /// Another span of the figures chosen, in days.
     var onSpan: (Int) -> Void = { _ in }
@@ -15,7 +15,8 @@ struct TendingServerActs {
     var onAskWords: () -> Void = {}
 }
 
-/// The Server tab (#384): how the server is doing, as its own figures over a span the person
+/// The Dashboard, Trends and Rules tabs (#384, #416), one view drawing the part its tab was
+/// handed: how the server is doing, as its own figures over a span the person
 /// chooses and as of when it said them; what waits to rise on it — hashtags, links, posts — each
 /// with whether it waits for review and its `…`; and its rules, in order, with the way to its
 /// own page, where they are changed. A part the role does not answer for is not drawn.

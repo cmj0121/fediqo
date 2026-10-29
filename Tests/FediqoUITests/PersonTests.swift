@@ -201,7 +201,7 @@ struct PersonTests {
     /// sharpest way to say so is that the rail did not grow a sixth destination.
     @Test("A person is not a place on the rail, and not a source")
     func aPersonIsNotASource() {
-        #expect(ShellPlace.allCases == [.timeline, .trends, .notices, .account, .usage, .preferences])
+        #expect(ShellPlace.allCases == [.timeline, .trends, .notices, .admin, .account, .usage, .preferences])
         // What a person is identified by is a host and a name — never a `Source`, which is what a
         // page that had quietly become a source page would have had to carry.
         let person = DummyPerson(Self.row(Self.note()))!

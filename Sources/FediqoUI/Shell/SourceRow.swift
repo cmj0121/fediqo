@@ -568,7 +568,7 @@ extension SourceRow {
         /// no such page to open — no sign-in, a source that does not say who people are, or
         /// one that has not yet said who the reader is there — and then no item is drawn.
         var ownPage: (() -> Void)?
-        /// Opens the page of tending this server, or asks for tending's words (#380). Pressed
+        /// Opens this server's page in the Admin place (#416), or asks for tending's words (#380). Pressed
         /// only through the item `tending` draws, and nothing is drawn without it.
         var tend: () -> Void = {}
     }
@@ -583,7 +583,7 @@ extension SourceRow {
         case nil:
             return nil
         case .open:
-            return .plain(TendingTab.reports.symbol, String(format: L10n.t("tend.item", language: language), host), act: press)
+            return .plain(ShellPlace.admin.symbolName, String(format: L10n.t("tend.item", language: language), host), act: press)
         case .lock(let place):
             let line = String(format: L10n.t(place.key, language: language), host)
             let dim: DimReason = place.kind == .none ? .never : .notNow

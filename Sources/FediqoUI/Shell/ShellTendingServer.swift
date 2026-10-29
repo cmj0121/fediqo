@@ -2,14 +2,16 @@ import FediqoCore
 import Foundation
 import Observation
 
-// The Server tab of tending a server (#384): how it is doing, as a few of its own figures over a
-// span the person chooses; what waits to rise on it — hashtags, links, posts — each let rise or
-// kept back; and its rules, read, with the way to its own page where they are changed.
+// The Dashboard, Trends and Rules tabs of a host's page (#384, #416): how it is doing, as a few
+// of its own figures over a span the person chooses; what waits to rise on it — hashtags, links,
+// posts — each let rise or kept back; and its rules, read, with the way to its own page where
+// they are changed.
 //
-// **Each part is the role's**: the figures `view_dashboard`'s, what rises `manage_taxonomies'`,
-// the rules `manage_rules'`; a part whose flag the role lacks is absent, and the tab with it
-// where it lacks all three. Every part the role allows is asked as the tab comes in front; each
-// list of what rises reads on by its own foot.
+// **Each part is its own tab, and its flag's**: the figures `view_dashboard`'s, what rises
+// `manage_taxonomies'`, the rules `manage_rules'`; a tab whose flag the role lacks is absent, and
+// **asks nothing** — a role holding one flag never asks another tab's part. Each tab's part is
+// asked as the tab comes in front, in a state of its own; each list of what rises reads on by
+// its own foot.
 //
 // **Every review is the server's, and its answer is the row**, by the rules the other tabs keep:
 // numbered as it answers, so a read sent while it was on the wire neither undoes it; written only
@@ -22,20 +24,24 @@ import Observation
 // **Held for the page alone.** What rises — strangers' posts among it — is let go when the page
 // leaves, when who reads changes, and part by part when the role no longer allows it.
 
-/// One part of the Server tab, and the flag of the role it needs.
+/// One part of a server's figures, what rises and its rules, the tab it is, and so the flag of the
+/// role it needs.
 enum ServerPart: String, CaseIterable, Sendable {
     case measures, rising, rules
 
-    var flag: MastodonStaff {
+    var tab: AdminTab {
         switch self {
-        case .measures: .viewDashboard
-        case .rising: .manageTaxonomies
-        case .rules: .manageRules
+        case .measures: .dashboard
+        case .rising: .rising
+        case .rules: .rules
         }
     }
+
+    var flag: MastodonStaff { tab.flag }
 }
 
-/// What the Server tab is handed: each part the role allows, and nothing of the rest.
+/// What the Dashboard, Trends or Rules tab is handed: its own part, where the role allows it, and
+/// nothing of the rest.
 struct TendingServerSaid: Equatable {
     struct Measures: Equatable {
         /// The span chosen, in days.
@@ -110,6 +116,7 @@ final class ShellTendingServer {
         var acting: Set<String> = []
     }
 
+    /// Each tab's part, by `key`: a tab's ask is its own.
     private var pages: [String: Page] = [:]
     private var halted: Set<String> = []
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
@@ -134,8 +141,20 @@ final class ShellTendingServer {
         return ServerPart.allCases.filter { staff.allows($0.flag) }
     }
 
-    private func standing(_ host: String, in session: ShellSession) -> Page? {
-        pages[host].flatMap { $0.under == ShellPersonPages.signIns(at: host, in: session) ? $0 : nil }
+    /// The part of `page`'s tab, where the role allows it: none on any other tab.
+    static func parts(of page: Tending, in session: ShellSession) -> [ServerPart] {
+        parts(at: page.host, in: session).filter { $0.tab == page.tab }
+    }
+
+    private static func key(_ host: String, _ part: ServerPart) -> String { host + "\u{1e}" + part.tab.rawValue }
+    private static func key(_ page: Tending) -> String { page.host + "\u{1e}" + page.tab.rawValue }
+
+    private func standing(_ page: Tending, in session: ShellSession) -> Page? {
+        pages[Self.key(page)].flatMap { $0.under == ShellPersonPages.signIns(at: page.host, in: session) ? $0 : nil }
+    }
+
+    private func standing(_ host: String, _ part: ServerPart, in session: ShellSession) -> Page? {
+        standing(Tending(host: host, tab: part.tab), in: session)
     }
 
     /// What the role no longer answers for let go, part by part — everything of `host` where it
@@ -146,15 +165,14 @@ final class ShellTendingServer {
             letGo(at: host)
             return false
         }
-        guard pages[host] != nil else { return true }
-        if !allowed.contains(.measures) {
-            pages[host]?.measures = nil
-            pages[host]?.measuresFailed = false
-        }
-        if !allowed.contains(.rising) { pages[host]?.rising = [:] }
-        if !allowed.contains(.rules) {
-            pages[host]?.rules = nil
-            pages[host]?.rulesFailed = false
+        for part in ServerPart.allCases where !allowed.contains(part) {
+            let key = Self.key(host, part)
+            asks[key]?.cancel()
+            asks[key] = nil
+            spanAsks[key]?.cancel()
+            spanAsks[key] = nil
+            pages[key] = nil
+            halted.remove(key)
         }
         return true
     }
@@ -169,10 +187,10 @@ final class ShellTendingServer {
     func said(of page: Tending, in session: ShellSession, language: DummyLanguage? = nil) -> TendingServerSaid {
         let host = page.host
         let acts = ShellTending.acts(at: host, in: session)
-        let allowed = Set(Self.parts(at: host, in: session))
+        let allowed = Set(Self.parts(of: page, in: session))
         var said = TendingServerSaid(host: host, acts: acts)
         if !acts { said.lock = session.mastodon.place(.tending, host: host) }
-        let held = standing(host, in: session)
+        let held = standing(page, in: session)
         said.acting = held?.acting ?? []
         let notAllowed = String(format: L10n.t("tend.act.notAllowed", language: language), host)
         if allowed.contains(.measures) {
@@ -208,8 +226,8 @@ final class ShellTendingServer {
     }
 
     func walked(_ page: Tending, in session: ShellSession) -> [String] {
-        guard let held = standing(page.host, in: session) else { return [] }
-        let allowed = Set(Self.parts(at: page.host, in: session))
+        guard let held = standing(page, in: session) else { return [] }
+        let allowed = Set(Self.parts(of: page, in: session))
         var ids: [String] = []
         if allowed.contains(.rising) {
             for kind in RisingKind.allCases {
@@ -222,7 +240,7 @@ final class ShellTendingServer {
 
     /// The row of what rises the lamp is on, where the page holds it.
     func review(_ rowID: String, of page: Tending, in session: ShellSession) -> RisingReview? {
-        guard let held = standing(page.host, in: session) else { return nil }
+        guard let held = standing(page.host, .rising, in: session) else { return nil }
         for kind in RisingKind.allCases {
             if let found = held.rising[kind]?.rows.first(where: { TendingServerSaid.rowID(kind, $0.id) == rowID }) { return found }
         }
@@ -230,7 +248,8 @@ final class ShellTendingServer {
     }
 
     func ask(of page: Tending, language: DummyLanguage? = nil) -> PageAsking {
-        guard let held = pages[page.host] else { return PageAsking() }
+        let key = Self.key(page)
+        guard let held = pages[key] else { return PageAsking() }
         let readingOn = held.rising.values.contains(where: \.readingOn)
         let failed = held.rising.values.contains(where: \.failed) || held.measuresFailed || held.rulesFailed
         let asking = held.asking || held.measuresAsking
@@ -240,23 +259,23 @@ final class ShellTendingServer {
                 : readingOn ? L10n.t("tend.servers.reading", language: language) : nil,
             stoppable: asking,
             failed: failed && !asking && !readingOn ? [page.host] : [],
-            stopped: halted.contains(page.host)
+            stopped: halted.contains(key)
         )
     }
 
     @discardableResult
     func stop(_ page: Tending) -> Bool {
-        let host = page.host
-        guard pages[host]?.asking == true || pages[host]?.measuresAsking == true else { return false }
-        asks[host]?.cancel()
-        asks[host] = nil
-        spanAsks[host]?.cancel()
-        spanAsks[host] = nil
-        if pages[host]?.asking == true { pages[host]?.awaits = errands.next() }
-        pages[host]?.measuresErrand = errands.next()
-        pages[host]?.measuresAsking = false
-        pages[host]?.asking = false
-        halted.insert(host)
+        let key = Self.key(page)
+        guard pages[key]?.asking == true || pages[key]?.measuresAsking == true else { return false }
+        asks[key]?.cancel()
+        asks[key] = nil
+        spanAsks[key]?.cancel()
+        spanAsks[key] = nil
+        if pages[key]?.asking == true { pages[key]?.awaits = errands.next() }
+        pages[key]?.measuresErrand = errands.next()
+        pages[key]?.measuresAsking = false
+        pages[key]?.asking = false
+        halted.insert(key)
         return true
     }
 
@@ -264,9 +283,9 @@ final class ShellTendingServer {
 
     func opened(_ page: Tending, in session: ShellSession) async {
         guard keepsStanding(at: page.host, in: session) else { return }
-        if let held = standing(page.host, in: session) {
+        if let held = standing(page, in: session) {
             if held.asking {
-                await asks[page.host]?.value
+                await asks[Self.key(page)]?.value
                 return
             }
             if held.measures != nil || held.rules != nil || !held.rising.isEmpty || !held.notAllowed.isEmpty { return }
@@ -275,30 +294,31 @@ final class ShellTendingServer {
     }
 
     func again(_ page: Tending, in session: ShellSession) async {
-        guard keepsStanding(at: page.host, in: session), pages[page.host]?.asking != true else { return }
+        guard keepsStanding(at: page.host, in: session), pages[Self.key(page)]?.asking != true else { return }
         await begin(page, in: session)?.value
     }
 
-    /// Every part the role allows asked afresh, at once.
+    /// The tab's part asked afresh, where the role allows it — and nothing of another tab's.
     private func begin(_ page: Tending, in session: ShellSession) -> Task<Void, Never>? {
         let host = page.host
-        let allowed = Self.parts(at: host, in: session)
+        let key = Self.key(page)
+        let allowed = Self.parts(of: page, in: session)
         guard !allowed.isEmpty, ShellTending.drawn(page, in: session), let through = door(at: host, in: session) else { return nil }
         let under = ShellPersonPages.signIns(at: host, in: session)
-        if pages[host]?.under != under {
-            asks[host]?.cancel()
-            pages[host] = Page(under: under)
+        if pages[key]?.under != under {
+            asks[key]?.cancel()
+            pages[key] = Page(under: under)
         }
         let errand = errands.next()
-        pages[host]?.awaits = errand
-        pages[host]?.asking = true
-        pages[host]?.notAllowed = []
-        halted.remove(host)
-        let days = pages[host]?.days ?? TendingServerSaid.spans[0]
+        pages[key]?.awaits = errand
+        pages[key]?.asking = true
+        pages[key]?.notAllowed = []
+        halted.remove(key)
+        let days = pages[key]?.days ?? TendingServerSaid.spans[0]
         let measuresErrand = errand
-        if allowed.contains(.measures) { pages[host]?.measuresErrand = measuresErrand }
+        if allowed.contains(.measures) { pages[key]?.measuresErrand = measuresErrand }
         let task = Task {
-            defer { if self.pages[host]?.awaits == errand { self.asks[host] = nil } }
+            defer { if self.pages[key]?.awaits == errand { self.asks[key] = nil } }
             await withTaskGroup(of: Void.self) { group in
                 if allowed.contains(.measures) {
                     group.addTask { await self.readMeasures(days, at: host, through: through, errand: measuresErrand, in: session) }
@@ -312,9 +332,9 @@ final class ShellTendingServer {
                     group.addTask { await self.readRules(at: host, through: through, errand: errand, in: session) }
                 }
             }
-            if self.pages[host]?.awaits == errand { self.pages[host]?.asking = false }
+            if self.pages[key]?.awaits == errand { self.pages[key]?.asking = false }
         }
-        asks[host] = task
+        asks[key] = task
         return task
     }
 
@@ -322,70 +342,75 @@ final class ShellTendingServer {
     /// the tab is; a span chosen before, landing after, is not drawn.
     func choose(days: Int, on page: Tending, in session: ShellSession) async {
         let host = page.host
+        let key = Self.key(host, .measures)
         guard TendingServerSaid.spans.contains(days), keepsStanding(at: host, in: session),
-              Self.parts(at: host, in: session).contains(.measures), standing(host, in: session) != nil,
+              Self.parts(at: host, in: session).contains(.measures), standing(host, .measures, in: session) != nil,
               let through = door(at: host, in: session)
         else { return }
         let errand = errands.next()
-        pages[host]?.days = days
-        pages[host]?.measures = nil
-        pages[host]?.measuresErrand = errand
-        pages[host]?.measuresAsking = true
-        halted.remove(host)
-        spanAsks[host]?.cancel()
+        pages[key]?.days = days
+        pages[key]?.measures = nil
+        pages[key]?.measuresErrand = errand
+        pages[key]?.measuresAsking = true
+        halted.remove(key)
+        spanAsks[key]?.cancel()
         let task = Task {
             await self.readMeasures(days, at: host, through: through, errand: errand, in: session)
-            if self.pages[host]?.measuresErrand == errand {
-                self.pages[host]?.measuresAsking = false
-                self.spanAsks[host] = nil
+            if self.pages[key]?.measuresErrand == errand {
+                self.pages[key]?.measuresAsking = false
+                self.spanAsks[key] = nil
             }
         }
-        spanAsks[host] = task
+        spanAsks[key] = task
         await task.value
     }
 
     private func readMeasures(_ days: Int, at host: String, through: MastodonAdminServer, errand: Int, in session: ShellSession) async {
+        let key = Self.key(host, .measures)
         do {
             let said = try await through.measures(days: days, now: now())
-            guard pages[host]?.measuresErrand == errand else { return }
-            pages[host]?.measures = said
-            pages[host]?.measuresFailed = false
+            guard pages[key]?.measuresErrand == errand else { return }
+            pages[key]?.measures = said
+            pages[key]?.measuresFailed = false
         } catch {
-            guard pages[host]?.measuresErrand == errand else { return }
-            failed(error, .measures, at: host, in: session) { pages[host]?.measuresFailed = true }
+            guard pages[key]?.measuresErrand == errand else { return }
+            failed(error, .measures, at: host, in: session) { pages[key]?.measuresFailed = true }
         }
     }
 
     private func readRules(at host: String, through: MastodonAdminServer, errand: Int, in session: ShellSession) async {
+        let key = Self.key(host, .rules)
         do {
             let rules = try await through.rules()
-            guard pages[host]?.awaits == errand else { return }
-            pages[host]?.rules = rules
-            pages[host]?.rulesFailed = false
+            guard pages[key]?.awaits == errand else { return }
+            pages[key]?.rules = rules
+            pages[key]?.rulesFailed = false
         } catch {
-            guard pages[host]?.awaits == errand else { return }
-            failed(error, .rules, at: host, in: session) { pages[host]?.rulesFailed = true }
+            guard pages[key]?.awaits == errand else { return }
+            failed(error, .rules, at: host, in: session) { pages[key]?.rulesFailed = true }
         }
     }
 
     /// One list's foot pressed: its next stretch, or again the one that did not come.
     func readOn(_ kind: RisingKind, of page: Tending, in session: ShellSession) async {
         let host = page.host
+        let key = Self.key(host, .rising)
         guard keepsStanding(at: host, in: session), Self.parts(at: host, in: session).contains(.rising),
-              let held = standing(host, in: session), !held.asking, let read = held.rising[kind], !read.readingOn,
+              let held = standing(host, .rising, in: session), !held.asking, let read = held.rising[kind], !read.readingOn,
               let next = read.next ?? (read.failed ? read.rows.count : nil), let through = door(at: host, in: session)
         else { return }
-        pages[host]?.rising[kind]?.readingOn = true
+        pages[key]?.rising[kind]?.readingOn = true
         await self.read(kind, at: host, from: next, through: through, errand: held.awaits, in: session)
-        pages[host]?.rising[kind]?.readingOn = false
+        pages[key]?.rising[kind]?.readingOn = false
     }
 
     private func read(
         _ kind: RisingKind, at host: String, from offset: Int, through: MastodonAdminServer, errand: Int, in session: ShellSession
     ) async {
+        let key = Self.key(host, .rising)
         do {
             let stretch = try await through.rising(kind, from: offset)
-            guard var held = pages[host], held.awaits == errand else { return }
+            guard var held = pages[key], held.awaits == errand else { return }
             var read = held.rising[kind] ?? Read()
             // A row a review answered for after this read set out stands as the review left it.
             let current = Dictionary(read.rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -401,19 +426,19 @@ final class ShellTendingServer {
             read.failed = false
             held.rising[kind] = read
             held.notAllowed.remove(.rising)
-            pages[host] = held
+            pages[key] = held
         } catch {
-            guard pages[host]?.awaits == errand else { return }
+            guard pages[key]?.awaits == errand else { return }
             failed(error, .rising, at: host, in: session) {
-                if pages[host]?.rising[kind] == nil { pages[host]?.rising[kind] = Read() }
-                pages[host]?.rising[kind]?.failed = true
+                if pages[key]?.rising[kind] == nil { pages[key]?.rising[kind] = Read() }
+                pages[key]?.rising[kind]?.failed = true
             }
         }
     }
 
     private func failed(_ error: any Error, _ part: ServerPart, at host: String, in session: ShellSession, _ mark: () -> Void) {
         switch error {
-        case MastodonAdminError.notAllowed: pages[host]?.notAllowed.insert(part)
+        case MastodonAdminError.notAllowed: pages[Self.key(host, part)]?.notAllowed.insert(part)
         case MastodonAuthError.signedOut:
             session.mastodon.endedByServer(host: host)
             mark()
@@ -435,24 +460,25 @@ final class ShellTendingServer {
         let host = page.host
         let kind = item.kind
         let key = TendingServerSaid.rowID(kind, item.id)
+        let at = Self.key(host, .rising)
         let notAllowed = String(format: L10n.t("tend.act.notAllowed"), host)
         guard keepsStanding(at: host, in: session), Self.parts(at: host, in: session).contains(.rising),
               ShellTending.acts(at: host, in: session)
         else { return notAllowed }
-        guard let held = standing(host, in: session) else { return String(format: L10n.t("tend.act.failed"), host) }
+        guard let held = standing(host, .rising, in: session) else { return String(format: L10n.t("tend.act.failed"), host) }
         guard !held.acting.contains(key) else { return nil }
         guard let through = door(at: host, in: session) else { return String(format: L10n.t("tend.act.failed"), host) }
         let under = held.under
-        pages[host]?.acting.insert(key)
-        defer { if pages[host]?.under == under { pages[host]?.acting.remove(key) } }
+        pages[at]?.acting.insert(key)
+        defer { if pages[at]?.under == under { pages[at]?.acting.remove(key) } }
         do {
             let answered = try await through.review(kind, item.id, rise: rise)
             // **Numbered as it answers**: a read sent while this was on the wire does not undo it.
             let errand = errands.next()
-            guard pages[host]?.under == under else { return nil }
-            pages[host]?.acted[key] = errand
-            if let index = pages[host]?.rising[kind]?.rows.firstIndex(where: { $0.id == item.id }) {
-                pages[host]?.rising[kind]?.rows[index] = answered
+            guard pages[at]?.under == under else { return nil }
+            pages[at]?.acted[key] = errand
+            if let index = pages[at]?.rising[kind]?.rows.firstIndex(where: { $0.id == item.id }) {
+                pages[at]?.rising[kind]?.rows[index] = answered
             }
             return nil
         } catch {
@@ -472,11 +498,14 @@ final class ShellTendingServer {
     /// Everything of `host` let go: the page left, who reads it changed, or the role lost.
     func letGo(at host: String) {
         let host = host.lowercased()
-        asks[host]?.cancel()
-        asks[host] = nil
-        spanAsks[host]?.cancel()
-        spanAsks[host] = nil
-        pages[host] = nil
-        halted.remove(host)
+        for part in ServerPart.allCases {
+            let key = Self.key(host, part)
+            asks[key]?.cancel()
+            asks[key] = nil
+            spanAsks[key]?.cancel()
+            spanAsks[key] = nil
+            pages[key] = nil
+            halted.remove(key)
+        }
     }
 }

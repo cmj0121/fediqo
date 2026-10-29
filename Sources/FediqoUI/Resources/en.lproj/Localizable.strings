@@ -4,6 +4,11 @@
 "shell.trends.summary" = "What your sources say is trending: posts, hashtags and links";
 "shell.notices.title" = "Notices";
 "shell.notices.summary" = "Who has been in touch";
+"shell.admin.title" = "Admin";
+"shell.admin.summary" = "The servers you answer for";
+"shell.admin.line" = "The servers you answer for, each with what its standing lets you tend.";
+"shell.admin.readOnly" = "Read only";
+"shell.admin.unknown" = "Its standing cannot be read just now.";
 "shell.account.title" = "Account";
 "shell.account.summary" = "The servers you read";
 "shell.usage.title" = "Usage";
@@ -2609,7 +2614,8 @@
 "tend.staff.since" = "Signed up %@";
 "tend.staff.email" = "Mail: %@";
 "tend.staff.ip" = "Last signed in from %@";
-"tend.tab.servers" = "Servers";
+"tend.tab.federation" = "Federation";
+"tend.tab.blocks" = "Blocks";
 "tend.servers.asking" = "Asking %@ which servers and addresses it refuses…";
 "tend.servers.reading" = "Reading on…";
 "tend.servers.none.blocks" = "It refuses no server.";
@@ -2672,7 +2678,9 @@
 "tend.servers.address.ask" = "Refusing %1$@ shuts it out of %2$@: whole networks may no longer reach it.";
 "tend.servers.refuse" = "Refuse";
 "tend.servers.sentAs" = "Sent as %@.";
-"tend.tab.server" = "Server";
+"tend.tab.dashboard" = "Dashboard";
+"tend.tab.rising" = "Trends";
+"tend.tab.rules" = "Rules";
 "tend.server.asking" = "Asking %@ how it is doing, what waits to rise and its rules…";
 "tend.server.measures.title" = "How %@ is doing";
 "tend.server.measures.span" = "Over the last";

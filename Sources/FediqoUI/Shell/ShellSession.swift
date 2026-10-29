@@ -1130,7 +1130,8 @@ final class ShellSession {
         ShellAvailability(
             queryIDs: Set(queries.map(\.id)),
             signedIn: sources.contains { isSignedIn(host: $0.host) },
-            trendsTabs: TrendsTab.tabs(in: self)
+            trendsTabs: TrendsTab.tabs(in: self),
+            adminHosts: ShellTending.hosts(in: self)
         )
     }
 

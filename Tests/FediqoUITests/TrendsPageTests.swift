@@ -56,7 +56,7 @@ struct TrendsPageTests {
 
     @Test("Trends stands on the rail between Timeline and Notices where some source has anything trending, and is absent — not dim — where none has: a Discourse-only store has no Trends, so neither the rail, the places nor `h` reach it")
     func thePlace() async {
-        #expect(ShellPlace.allCases == [.timeline, .trends, .notices, .account, .usage, .preferences])
+        #expect(ShellPlace.allCases == [.timeline, .trends, .notices, .admin, .account, .usage, .preferences])
         #expect(ShellPlace.trends.symbolName == "chart.line.uptrend.xyaxis")
         #expect(ShellPlace.timeline.isStream && ShellPlace.trends.isStream)
         #expect(ShellPlace.allCases.filter(\.isStream) == [.timeline, .trends])
@@ -72,7 +72,7 @@ struct TrendsPageTests {
         // The pages are the session's weakly, as the root's are: held for the check.
         let held = withExtendedLifetime(pages) { all.availability }
         #expect(held.trendsTabs == [.posts, .tags, .links] && held.allows(.trends))
-        #expect(held.railPlaces == ShellPlace.allCases && held.enabledPlaces.prefix(3) == [.timeline, .trends, .notices])
+        #expect(held.railPlaces == ShellPlace.allCases.filter { $0 != .admin } && held.enabledPlaces.prefix(3) == [.timeline, .trends, .notices])
         #expect(held.reasonKey(for: .trends) == nil)
         #expect(FediqoRootView.opensTrends(held, open: []) && FediqoRootView.opensTrends(held, open: [.thread, .selection]))
 

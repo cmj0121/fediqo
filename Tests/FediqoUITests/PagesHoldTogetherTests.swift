@@ -36,7 +36,6 @@ struct PagesHoldTogetherTests {
         (.found(found, .tags), true),
         (.followedTags(FollowedTags(host: gone)), true),
         (.shared(SharedLink(link: RisingLink(link: PostLink("https://example.org/story")!), sources: [gone])), true),
-        (.server(Tending(host: gone, tab: .reports)), true),
     ]
 
     /// Names every kind of step, with no `default:`: a kind added later does not compile here
@@ -52,13 +51,12 @@ struct PagesHoldTogetherTests {
         case .found: "found"
         case .followedTags: "followedTags"
         case .shared: "shared"
-        case .server: "server"
         }
     }
 
     @Test("The list of steps is every kind there is")
     func everyKindIsHere() {
-        #expect(Set(Self.everyKind.map { Self.kind($0.step) }) == ["stream", "person", "tag", "link", "thread", "people", "found", "followedTags", "shared", "server"])
+        #expect(Set(Self.everyKind.map { Self.kind($0.step) }) == ["stream", "person", "tag", "link", "thread", "people", "found", "followedTags", "shared"])
     }
 
     /// A session with one source and five posts on the stream; the pages held beside it.

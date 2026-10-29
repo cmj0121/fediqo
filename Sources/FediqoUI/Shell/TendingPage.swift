@@ -1,18 +1,20 @@
 import FediqoCore
 import SwiftUI
 
-/// Tending a server the reader answers for (#380), opened: a page of its own (F10), drawn in the
-/// frame every opened page stands in (`OpenedPage`), with a tab for each task the reader's
-/// standing there allows — Reports (#381) and People (#382).
+/// One host's page in the Admin place (#380, #416), opened from its list of hosts: the whole
+/// place, in the frame every opened page stands in (`OpenedPage`), its Back going back to the
+/// list, with a tab for each task the reader's standing there allows, in `AdminTab`'s order.
 ///
 ///     ‹ Back                                                   ↻   Esc or q
 ///     ─────────────────────────────────────────────────────────────────────
 ///     Tending m.example                      [! 2]  [person.badge.clock 3]
 ///     What m.example keeps for those who answer for it, as far as …
 ///     ─────────────────────────────────────────────────────────────────────
-///     (Reports)  (People)                          where the standing allows both
+///     (Reports) (People) (Federation) (Blocks) (Dashboard) (Trends) (Rules)
 ///     ─────────────────────────────────────────────────────────────────────
 ///     the tab in front: its rows, and the foot that reads on
+///
+/// A tab whose flag the standing lacks is absent, not dim.
 ///
 /// **Its head's figures are icons that open their tab**: the open reports, and those waiting to
 /// be let in, each as far as it has been read. **It is handed everything it draws** and asks
@@ -20,8 +22,8 @@ import SwiftUI
 /// allows (`ShellTending.drawn`).
 struct TendingPane: View {
     let page: Tending
-    let tabs: [TendingTab]
-    /// What the tab in front is handed: one of the two, by the tab.
+    let tabs: [AdminTab]
+    /// What the tab in front is handed: one of these, by the tab.
     var reports: TendingReportsSaid?
     var people: TendingPeopleSaid?
     var servers: TendingServersSaid?
@@ -32,7 +34,7 @@ struct TendingPane: View {
     var acts = true
     var reload: String?
     var slide = PageSlide()
-    var frame = OpenedPageActs<TendingTab>()
+    var frame = OpenedPageActs<AdminTab>()
     var onReport = TendingReportActs()
     var onPeople = TendingPeopleActs()
     var onServers = TendingServersActs()
@@ -76,11 +78,11 @@ struct TendingPane: View {
                     selectedID: $selectedID, asked: $asked, jumpToTop: jumpToTop
                 ) { lead }
             }
-        case .servers:
+        case .federation, .blocks:
             if let servers {
                 TendingServersList(said: servers, acts: onServers, selectedID: $selectedID, asked: $asked, jumpToTop: jumpToTop) { lead }
             }
-        case .server:
+        case .dashboard, .rising, .rules:
             if let server {
                 TendingServerList(
                     said: server, acts: onServer, onOpenPerson: onOpenPerson, catalogues: catalogues, posts: posts,
@@ -109,12 +111,12 @@ struct TendingReportActs {
 
 /// One of the head's figures: how many a tab holds, as far as it has been read, opening it.
 struct TendingCount: Equatable, Identifiable {
-    let tab: TendingTab
+    let tab: AdminTab
     let count: Int
     /// Whether the server named more than were read.
     let more: Bool
 
-    var id: TendingTab { tab }
+    var id: AdminTab { tab }
 
     /// The figure drawn: the count, and "+" where more were named.
     func figure(language: DummyLanguage? = nil) -> String {
@@ -134,7 +136,7 @@ struct TendingHead: View {
     let host: String
     let acts: Bool
     var counts: [TendingCount] = []
-    var onTab: (TendingTab) -> Void = { _ in }
+    var onTab: (AdminTab) -> Void = { _ in }
     @Environment(\.colorScheme) private var colorScheme
 
     static func spoken(_ host: String, acts: Bool, language: DummyLanguage? = nil) -> String {

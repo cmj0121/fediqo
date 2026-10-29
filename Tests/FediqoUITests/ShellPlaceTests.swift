@@ -8,7 +8,7 @@ struct ShellPlaceTests {
     @Test("Compose is not a place")
     func composeIsNotAPlace() {
         #expect(ShellPlace.allCases.map(\.rawValue) == [
-            "timeline", "trends", "notices", "account", "usage", "preferences",
+            "timeline", "trends", "notices", "admin", "account", "usage", "preferences",
         ])
     }
 
@@ -57,7 +57,7 @@ struct ShellPlaceTests {
     /// before: the set of places is what a session holds, and the landing is drawn from it.
     @Test("The rail reaches every place from either landing")
     func everyPlaceIsStillReachable() {
-        let held = ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: [.posts])
+        let held = ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: [.posts], adminHosts: ["m.example"])
         #expect(held.enabledPlaces == ShellPlace.allCases)
         var walk: Set<ShellPlace> = [held.launchPlace]
         var step = held.launchPlace
@@ -78,7 +78,7 @@ struct ShellPlaceTests {
         #expect(ShellAvailability(queryIDs: ["all"]).tabbedPlaces == [.timeline, .notices, .account, .preferences])
         #expect(ShellAvailability.empty.tabbedPlaces == [.notices, .account, .preferences])
         for availability in [held, ShellAvailability(queryIDs: ["all"]), .empty] {
-            #expect(availability.tabbedPlaces.count <= 5)
+            #expect(availability.tabbedPlaces.count <= 5, "five without Admin")
             // Every place that can be entered has a tab to be drawn in, so none is a missing one.
             for place in availability.enabledPlaces {
                 #expect(availability.tabbedPlaces.contains(place.tab), "\(place)")
@@ -91,6 +91,32 @@ struct ShellPlaceTests {
         #expect(ShellPlace.timeline.drawn(standingOn: .usage) == .timeline)
         // The keys still walk Usage, on its own.
         #expect(held.rotate(from: .account, by: 1) == .usage && held.rotate(from: .usage, by: 1) == .preferences)
+    }
+
+    /// #416, D1. With a standing on some host Admin is a place of its own after Notices: on the
+    /// Mac's rail, and on a phone the fourth of six tabs, Account and Preferences under the
+    /// system's More. Without one there is no trace of it, and the tabs are five as before.
+    @Test("Admin stands after Notices where some host's standing allows it — the fourth of six tabs, the rail's too — and is absent, never dim, without one")
+    func adminIsAPlaceOfItsOwn() {
+        let tending = ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: [.posts], adminHosts: ["m.example"])
+        #expect(tending.allows(.admin))
+        #expect(tending.tabbedPlaces == [.timeline, .trends, .notices, .admin, .account, .preferences])
+        #expect(tending.tabbedPlaces.firstIndex(of: .admin) == 3, "the fourth: the phone's bar draws it, the More holds the two after")
+        #expect(tending.railPlaces == [.timeline, .trends, .notices, .admin, .account, .usage, .preferences])
+        // Usage still opens from Preferences, whose tab draws it.
+        #expect(!tending.tabbedPlaces.contains(.usage) && ShellPlace.usage.tab == .preferences)
+        #expect(ShellStream(.admin) == nil && !ShellPlace.admin.isStream)
+
+        let plain = ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: [.posts])
+        #expect(!plain.allows(.admin) && !plain.railPlaces.contains(.admin) && !plain.enabledPlaces.contains(.admin))
+        #expect(plain.tabbedPlaces == [.timeline, .trends, .notices, .account, .preferences])
+        #expect(plain.placing(.notices, as: .admin) == .notices, "no way in without a standing")
+        #expect(plain.placing(.admin, as: .admin) == .timeline, "a place no longer there is left")
+        for language in DummyLanguage.allCases {
+            for key in ["shell.admin.title", "shell.admin.summary", "shell.admin.line", "shell.admin.readOnly", "shell.admin.unknown"] {
+                #expect(L10n.t(key, language: language) != key, "\(language)/\(key)")
+            }
+        }
     }
 
     /// A tab the bar sets again — a reselect, the tabs rebuilt as Trends comes or goes — leaves
