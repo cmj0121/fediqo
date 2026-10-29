@@ -207,15 +207,8 @@ public struct MastodonAdminServer: Sendable {
     /// The server's figures over the last `days` days, the last of them the day `now` falls on
     /// by the server's calendar (UTC), said as of `now`.
     public func measures(days: Int, now: Date = Date()) async throws -> ServerMeasures {
-        guard (1...366).contains(days) else { throw MastodonAdminError.invalid }
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        let today = calendar.startOfDay(for: now)
-        guard let start = calendar.date(byAdding: .day, value: -(days - 1), to: today),
-              let end = calendar.date(byAdding: .day, value: 1, to: today)
-        else { throw MastodonAdminError.invalid }
-        let form = ServerMeasure.Key.allCases.map { ("keys[]", $0.rawValue) }
-            + [("start_at", Self.day(start, in: calendar)), ("end_at", Self.day(end, in: calendar))]
+        guard let span = Self.span(days: days, now: now) else { throw MastodonAdminError.invalid }
+        let form = ServerMeasure.Key.allCases.map { ("keys[]", $0.rawValue) } + [("start_at", span.start), ("end_at", span.end)]
         let body = try await asked {
             do {
                 return try await door.actAtAddress(path: Self.measuresPath, method: "POST", form: form)
@@ -231,7 +224,27 @@ public struct MastodonAdminServer: Sendable {
         return ServerMeasures(days: days, asOf: now, measures: ServerMeasure.Key.allCases.compactMap { key in measures.first { $0.key == key } })
     }
 
-    private static func day(_ date: Date, in calendar: Calendar) -> String {
+    /// The server's calendar: days of UTC.
+    static let calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }()
+
+    /// The last `days` days, the last of them the day `now` falls on by the server's calendar,
+    /// as the server is asked them: its first day, and the day after its last. Nothing for a
+    /// span of no days, or of more than a year.
+    static func span(days: Int, now: Date) -> (start: String, end: String)? {
+        guard (1...366).contains(days) else { return nil }
+        let today = calendar.startOfDay(for: now)
+        guard let start = calendar.date(byAdding: .day, value: -(days - 1), to: today),
+              let end = calendar.date(byAdding: .day, value: 1, to: today)
+        else { return nil }
+        return (day(start), day(end))
+    }
+
+    /// `date`'s day by the server's calendar, as it is asked (`2026-10-22`).
+    static func day(_ date: Date) -> String {
         let parts = calendar.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
     }
