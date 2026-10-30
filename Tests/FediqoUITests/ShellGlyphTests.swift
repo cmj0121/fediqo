@@ -37,6 +37,7 @@ struct ShellGlyphTests {
     func unchosenIsItself() {
         #expect(ShellGlyph.drawn("bell", chosen: false) == "bell")
         #expect(ShellGlyph.drawn("bell", chosen: true) == "bell.fill")
+        #expect(ShellGlyph.drawn(ShellPlace.trends.symbolName, chosen: true) == "chart.bar.fill", "Trends is a line rising, and bars once chosen")
         #expect(ShellGlyph.drawn("hand.tap.fill", chosen: true) == "hand.tap.fill")
         #expect(ShellGlyph.drawn("", chosen: true) == "")
     }

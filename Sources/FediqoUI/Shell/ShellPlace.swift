@@ -56,7 +56,7 @@ public enum ShellPlace: String, CaseIterable, Identifiable, Hashable, Sendable {
         switch self {
         case .timeline: "list.bullet.rectangle"
         // The glyph the Trends tab of the timeline led with, which the place is now.
-        case .trends: "chart.line.uptrend.xyaxis.circle"
+        case .trends: "chart.line.uptrend.xyaxis"
         case .notices: "bell"
         // A shield: what keeps a server, and nothing a reader of it is offered.
         case .admin: "checkmark.shield"

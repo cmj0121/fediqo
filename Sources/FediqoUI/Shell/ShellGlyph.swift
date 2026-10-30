@@ -6,9 +6,11 @@
 /// the same chosen as not, and nothing said so. A name written here is a name a test can look
 /// up (`ShellGlyphTests`), so a glyph without a twin stops the suite instead of the eye.
 enum ShellGlyph {
-    /// The twins that are not the glyph's own name and `.fill` after it.
+    /// The twins that are not the glyph's own name and `.fill` after it. Trends is glacial's: a
+    /// line rising where it is not chosen, and the bars it is read in where it is.
     static let twins: [String: String] = [
-        "point.3.connected.trianglepath.dotted": "point.3.filled.connected.trianglepath.dotted"
+        "chart.line.uptrend.xyaxis": "chart.bar.fill",
+        "point.3.connected.trianglepath.dotted": "point.3.filled.connected.trianglepath.dotted",
     ]
 
     /// The glyph drawn: its twin where it is chosen, itself where it is not. A glyph already

@@ -167,7 +167,7 @@ struct PersonActing: Equatable {
 
         var symbol: String {
             switch which {
-            case .boosts: "arrow.2.squarepath"
+            case .boosts: "repeat"
             case .notices: "bell"
             }
         }
@@ -388,7 +388,7 @@ struct PersonActing: Equatable {
             let muted = PersonStanding(accountID: standing.accountID, muting: true, mutedUntil: standing.mutedUntil)
             marks.append(Mark(symbol: "speaker.slash", words: pills(of: muted, language: language).first ?? ""))
         }
-        if standing.blocking { say("hand.raised", "person.stands.blocked") }
+        if standing.blocking { say("nosign", "person.stands.blocked") }
         if standing.serverBlocked { say(serverBlockedSymbol, "person.stands.serverBlocked") }
         return marks
     }
@@ -501,7 +501,7 @@ struct PersonActing: Equatable {
         case .follow: "person.badge.plus"
         case .unfollow: "person.badge.minus"
         case .withdraw: "arrow.uturn.backward"
-        case .showBoosts, .hideBoosts: "arrow.2.squarepath"
+        case .showBoosts, .hideBoosts: "repeat"
         case .notify, .stopNotifying: "bell"
         case .chooseLanguages: PersonLanguagesWords.symbol
         case .acceptRequest: "person.crop.circle.badge.checkmark"
@@ -511,8 +511,8 @@ struct PersonActing: Equatable {
         case .dismissSuggestion: PeopleSaid.dismissSymbol
         case .mute: "speaker.slash"
         case .unmute: "speaker.wave.2"
-        case .block: "hand.raised"
-        case .unblock: "hand.raised.slash"
+        case .block: "nosign"
+        case .unblock: "nosign"
         case .blockServer: serverBlockedSymbol
         case .unblockServer: "checkmark.shield"
         case .report: reportSymbol

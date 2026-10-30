@@ -58,7 +58,7 @@ extension ItemActs {
                 .hinted(L10n.t("item.act.quotePolicy.line", language: language))
         }
         if let count = quotes.count, let open = quotes.openQuotes {
-            items.append(.plain("quote.bubble", String(format: L10n.t("item.act.quotes", language: language), count), act: open))
+            items.append(.plain("quote.opening", String(format: L10n.t("item.act.quotes", language: language), count), act: open))
         }
         return items
     }

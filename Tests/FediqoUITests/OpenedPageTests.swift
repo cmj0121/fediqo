@@ -286,11 +286,11 @@ struct OpenedPageTests {
     func somebodysFigureAsThePageDrawsIt() {
         let en = DummyLanguage.english
         let posts = PersonSaid.Figure(tab: .posts, figure: "1,204", words: "1,204 posts")
-        #expect(posts.drawn(front: .posts, language: en) == PageFigure(symbol: "text.bubble", figure: "1,204", spoken: "1,204 posts", opens: true, lit: true))
+        #expect(posts.drawn(front: .posts, language: en) == PageFigure(symbol: "doc.text", figure: "1,204", spoken: "1,204 posts", opens: true, lit: true))
         #expect(!posts.drawn(front: .about).lit && !posts.drawn(front: nil).lit)
         let hidden = PersonSaid.Figure(tab: .followers, figure: "2,811", words: "2,811 followers", opens: false, hidden: true)
         let drawn = hidden.drawn(front: .followers, language: en)
-        #expect(!drawn.opens && !drawn.lit && drawn.symbol == "person.2" && drawn.spoken == "2,811 followers. They hide this list.")
+        #expect(!drawn.opens && !drawn.lit && drawn.symbol == "eye" && drawn.spoken == "2,811 followers. They hide this list.")
         #expect(PageFigure.hint(language: en) == "Shows it on this page" && PageFigure.hint(language: .taiwanese) == "在這一頁顯示")
     }
 

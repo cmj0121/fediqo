@@ -163,7 +163,7 @@ enum ItemActs {
     static func glyph(_ act: PostAct, standing: ShellActStanding?) -> String {
         if standing == .failed { return "exclamationmark.triangle" }
         switch act {
-        case .boost: return "arrow.2.squarepath"
+        case .boost: return "repeat"
         case .favourite: return "star"
         // An answer is never "done" on the post: the reader may answer as often as they like, and
         // the words they wrote are rows of their own in the thread.
@@ -429,10 +429,10 @@ extension ItemActs {
                 return made(kind, ShellMark(shown.glyph, shown.spoken, look: look, on: shown.done, count: count), why: why)
             case .quote:
                 if let quote = acting.quote {
-                    let mark = ShellMark("quote.bubble", L10n.t("item.act.quote", language: language), look: quote.look)
+                    let mark = ShellMark("quote.opening", L10n.t("item.act.quote", language: language), look: quote.look)
                     return made(kind, mark, why: quote.why)
                 }
-                let mark = ShellMark("quote.bubble", L10n.t("item.act.quote", language: language), look: .dim(.notNow))
+                let mark = ShellMark("quote.opening", L10n.t("item.act.quote", language: language), look: .dim(.notNow))
                 let label = String(format: said, mark.name, quoteLine(language: language))
                 return RowMark(kind: kind, mark: mark, label: label)
             case .keep:

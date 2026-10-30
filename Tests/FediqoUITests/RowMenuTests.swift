@@ -76,7 +76,7 @@ struct RowMenuTests {
 
     @Test("Every post from every kind of source draws the same seven marks in the same order and the same glyphs, whatever its sign-in, and taking back is never one of them")
     func theSameSevenForEveryProtocol() {
-        let glyphs = ["arrowshape.turn.up.left", "arrow.2.squarepath", "quote.bubble", "star", "bookmark", "archivebox", "ellipsis"]
+        let glyphs = ["arrowshape.turn.up.left", "repeat", "quote.opening", "star", "bookmark", "archivebox", "ellipsis"]
         #expect(ItemActs.line == [.act(.answer), .act(.boost), .quote, .act(.favourite), .act(.bookmark), .keep, .more])
         let grants: [MastodonGrant?] = [nil] + MastodonGrant.allCases.map { $0 }
         var seen = 0
@@ -176,7 +176,7 @@ struct RowMenuTests {
         let item = DummyItem(Self.note(favourited: true, bookmarked: true, kept: true))
         let live = marks(item, Self.writes), dim = marks(item, Self.signedOut)
         #expect(live.map(\.mark.drawn) == dim.map(\.mark.drawn))
-        #expect(dim.map(\.mark.drawn) == ["arrowshape.turn.up.left", "arrow.2.squarepath", "quote.bubble", "star.fill", "bookmark.fill", "archivebox.fill", "ellipsis"])
+        #expect(dim.map(\.mark.drawn) == ["arrowshape.turn.up.left", "repeat", "quote.opening", "star.fill", "bookmark.fill", "archivebox.fill", "ellipsis"])
         #expect(live.map(\.mark.count) == dim.map(\.mark.count))
         #expect(dim.map(\.mark.count) == [1, 2, nil, 3, nil, nil, nil], "a count stays beside its mark, live or dim")
         #expect(dim.map(\.mark.on) == [false, false, false, true, true, true, false])
@@ -195,7 +195,7 @@ struct RowMenuTests {
         var acting = Self.writes
         acting.standings = [.boost: .pressed(to: false), .favourite: .failed]
         let drawn = marks(DummyItem(Self.note(boosted: true)), acting)
-        #expect(drawn.map(\.mark.drawn) == ["arrowshape.turn.up.left", "arrow.2.squarepath", "quote.bubble", "exclamationmark.triangle", "bookmark", "archivebox", "ellipsis"])
+        #expect(drawn.map(\.mark.drawn) == ["arrowshape.turn.up.left", "repeat", "quote.opening", "exclamationmark.triangle", "bookmark", "archivebox", "ellipsis"])
         #expect(drawn.filter { $0.mark.drawn == ShellMore.symbol }.map(\.kind) == [.more])
         #expect(!drawn[1].mark.on && drawn[1].mark.look == .live, "a boost pressed to be taken back is drawn taken back, and is still offered")
         #expect(drawn[1].label == "Boost", "named for what the next press does, nothing added")

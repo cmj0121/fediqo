@@ -76,7 +76,7 @@ public enum TimelineQuery: Hashable, Identifiable, Sendable {
     var symbol: String {
         switch self {
         case .all: "tray.full"
-        case .trends: "chart.line.uptrend.xyaxis.circle"
+        case .trends: "chart.line.uptrend.xyaxis"
         case .written: "line.3.horizontal.decrease.circle"
         }
     }

@@ -559,7 +559,7 @@ struct DummyItemRow: View {
 
     private func boosted(_ line: String) -> some View {
         HStack(spacing: ShellSpace.tight) {
-            Image(systemName: "arrow.2.squarepath")
+            Image(systemName: "repeat")
             Text(line)
         }
     }
