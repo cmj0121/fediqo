@@ -168,7 +168,7 @@ private struct ComposeChoices: View {
             set: { session.chooseAudience($0) }
         )) {
             ForEach(Audience.allCases, id: \.self) { audience in
-                Text(L10n.t(ComposerSheet.visibilityKey(audience))).tag(audience)
+                AudienceOption(audience).tag(audience)
             }
         }
         .shellFont(.meta)
@@ -347,5 +347,16 @@ private struct HiddenIndicators: ViewModifier {
 enum WritingRoom {
     static func floor(_ asked: CGFloat, compact: Bool) -> CGFloat? {
         compact ? nil : asked
+    }
+}
+
+/// One audience as a picker lists it: the glyph its posts are marked with, and its name.
+struct AudienceOption: View {
+    let audience: Audience
+
+    init(_ audience: Audience) { self.audience = audience }
+
+    var body: some View {
+        Label(L10n.t(ComposerSheet.visibilityKey(audience)), systemImage: DummyAudience(audience).symbolName)
     }
 }

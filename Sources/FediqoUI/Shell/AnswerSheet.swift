@@ -84,7 +84,7 @@ struct AnswerSheet: View {
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     Picker(L10n.t("answer.reach"), selection: reach) {
                         ForEach(Audience.allCases, id: \.self) { audience in
-                            Text(L10n.t(ComposerSheet.visibilityKey(audience))).tag(audience)
+                            AudienceOption(audience).tag(audience)
                         }
                     }
                     .pickerStyle(.menu)

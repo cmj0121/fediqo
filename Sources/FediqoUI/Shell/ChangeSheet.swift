@@ -65,7 +65,7 @@ struct ChangeSheet: View {
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
         Picker(L10n.t("compose.visibility"), selection: Bindable(changes).draft.audience) {
             ForEach(Audience.allCases, id: \.self) { audience in
-                Text(L10n.t(ComposerSheet.visibilityKey(audience))).tag(audience)
+                AudienceOption(audience).tag(audience)
             }
         }
         .pickerStyle(.menu)
