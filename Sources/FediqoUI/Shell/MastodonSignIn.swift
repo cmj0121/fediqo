@@ -115,6 +115,13 @@ public final class MastodonSessions {
     /// Whether the last look read the filings of each sign-in: where it could not, nothing laid
     /// on a sign-in this run — its standing (#380) — is believed of whatever is filed now.
     private(set) var partsKnown = false
+    /// The standing each sign-in's own check last named this run (#416), by host: laid down by a
+    /// check that names one, taken up by one that names none, and let go the moment the filing at
+    /// its host becomes another — a sign-out, another account. **Not by a check that fails**: the
+    /// same sign-in keeps what it was last told (`lastStanding`).
+    private var standings: [String: MastodonStaff] = [:]
+    /// The hosts whose sign-in held now has had its own check answer this run.
+    private var standingChecked: Set<String> = []
 
     /// Whether the last look at who may read notices could be had (#323). Where it could not,
     /// `noticeHosts` is empty for want of an answer, and a sign-in that would carry notices reads
@@ -224,6 +231,24 @@ public final class MastodonSessions {
         // look that failed, and a standing laid down for the sign-in before never stands over it.
         guard partsKnown, grants[host] != nil else { return nil }
         return readers[host]?.staff
+    }
+
+    /// The standing the sign-in at `host` was last told it has (#416), **kept through a check
+    /// that fails and a look that could not be had** — what draws the Admin place, so a dark
+    /// network or a locked device does not take it from under the person. Let go at once where
+    /// the sign-in goes or becomes another, and where its own check names no standing.
+    func lastStanding(host raw: String) -> MastodonStaff? {
+        let host = raw.lowercased()
+        // Signed out is known by the look at the sign-ins alone, whether or not their filings
+        // could be read beside it.
+        if grantsKnown, grants[host] == nil { return nil }
+        return standings[host]
+    }
+
+    /// Whether the sign-in held at `host` has had its own check answer this run: until it has,
+    /// its standing is not known either way.
+    func standingKnown(host raw: String) -> Bool {
+        standingChecked.contains(raw.lowercased())
     }
 
     /// How many ask to follow the reader at `host`, as a change to their own account was just
@@ -1140,6 +1165,8 @@ public final class MastodonSessions {
         readers[host] = who.id.map {
             Reader(id: $0, handle: who.handle, accessToken: asked.accessToken, asking: newer ?? who.asking, staff: who.staff)
         }
+        if who.id != nil, let staff = who.staff { standings[host] = staff } else { standings[host] = nil }
+        standingChecked.insert(host)
         askingChecks[host, default: 0] += 1
         readersLearnt += 1
     }
@@ -2219,6 +2246,8 @@ public final class MastodonSessions {
             changes[host, default: 0] += 1
             handles[host] = nil
             readers[host] = nil
+            standings[host] = nil
+            standingChecked.remove(host)
             // Nor its words: a package may file the very string held, saying other of it.
             wordsConfirmed[host] = nil
             if before[host] != nil, found[host] != nil { unlearned.insert(host) }

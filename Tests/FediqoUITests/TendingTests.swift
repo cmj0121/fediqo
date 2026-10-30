@@ -82,7 +82,7 @@ struct TendingTests {
     @Test("Tending is offered by the role the server's own check names, and by nothing else: a Moderator holding its words is offered the page on Reports; holding none of them, the part's lock, whose press asks for them alone; everybody's role, or no role, is offered nothing — whatever the sign-in holds — and no trace is drawn")
     func offeredByTheRole() async throws {
         let (session, _, _) = try await session([:])
-        #expect(ShellTending.tabs(at: Self.host, in: session) == [.reports, .people, .server], "a Moderator manages reports and users, and sees the figures and what rises")
+        #expect(ShellTending.tabs(at: Self.host, in: session) == [.reports, .people, .dashboard, .rising], "a Moderator manages reports and users, and sees the figures and what rises")
         #expect(ShellTending.entry(at: Self.host, in: session) == .open(Self.page))
         #expect(ShellTending.acts(at: Self.host, in: session) && ShellTending.drawn(Self.page, in: session))
         let item = try #require(SourceRow.tendItem(.open(Self.page), host: Self.host, actsLive: true, press: {}, language: .english))
@@ -104,7 +104,7 @@ struct TendingTests {
             #expect(!ShellTending.drawn(Self.page, in: plain))
             #expect(SourceRow.tendItem(nil, host: Self.host, actsLive: true, press: {}) == nil)
         }
-        #expect(TendingTab.allowed(by: MastodonStaff(rawValue: 1)) == [.reports, .people, .servers, .server], "the administrator is allowed every tab")
+        #expect(AdminTab.allowed(by: MastodonStaff(rawValue: 1)) == AdminTab.allCases, "the administrator is allowed every tab")
     }
 
     @Test("Holding only tending's word that reads, the page lists and offers no act: every act is dim, and pressed sends nothing")
@@ -402,31 +402,6 @@ struct TendingTests {
         #expect(FediqoRootView.tendingOpened(by: other, in: session) == nil)
         let (plain, _, _) = try await self.session([:], permissions: Self.everybody)
         #expect(FediqoRootView.tendingOpened(by: notice, in: plain) == nil)
-    }
-
-    // MARK: - The page
-
-    @Test("The page is one of its own: a page of rows on the people's layer, its own toast and Stop, no timelines' head over it, the stream in its stead once the standing is gone")
-    func thePage() async throws {
-        let (session, _, pages) = try await session([:])
-        let step = ShellStep.server(Self.page)
-        #expect(step.layer == .people && step.tabKey == .tending(Self.page) && step.isKind(of: .server(Tending(host: "x", tab: .reports))))
-        var walk = ShellWalk()
-        _ = walk.walk(to: step, from: nil)
-        #expect(walk.openedTending == Self.page && walk.openedPeople == nil)
-        #expect(TimelinePane.askInFront(step, rising: nil, of: pages, in: session) == .tending(Self.page))
-        #expect(TimelinePane.drawn(step, of: pages, in: session).drawn && !TimelinePane.headDrawn(over: step))
-        #expect(TimelinePane.openedID(step) == "server:m.example\u{1e}reports")
-        // Tab turns round the tabs the standing allows, in place; covered, it is not the page's.
-        var lamp: String? = "x"
-        #expect(!pages.tending.rotate(&walk, by: 1, covered: true, lamp: &lamp, in: session))
-        #expect(pages.tending.rotate(&walk, by: 1, covered: false, lamp: &lamp, in: session) && walk.openedTending?.tab == .people && lamp == nil)
-        #expect(walk.depth == 1, "a tab is no step")
-        #expect(pages.tending.rotate(&walk, by: 1, covered: false, lamp: &lamp, in: session) && walk.openedTending?.tab == .server)
-        #expect(pages.tending.rotate(&walk, by: 1, covered: false, lamp: &lamp, in: session) && walk.openedTending == Self.page)
-        #expect(!pages.tending.turn(&walk, to: .reports, lamp: &lamp, in: session), "already on it")
-        session.sources = []
-        #expect(!TimelinePane.drawn(step, of: pages, in: session).drawn)
     }
 
     @Test("Every word of the page, the item and the part is in each language the app speaks")

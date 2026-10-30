@@ -727,6 +727,15 @@ waiting_post_trend = StatusTrend.find_or_initialize_by(status_id: waiting_post.i
 waiting_post_trend.assign_attributes(account_id: riser_384.id, score: 4.0, rank: 2, allowed: false, language: waiting_post.language)
 waiting_post_trend.save!
 
+# What the checks of the hashtags a server knows and the sites its links come from need (#419):
+# a hashtag and a site of their own, each waiting to be reviewed — never the ones #384 checks
+# review, so neither check moves the other's. Put back every run: waiting, nothing decided.
+tended_tag = Tag.find_or_create_by_names(["Fediqo419"]).first
+tended_tag.update!(trendable: nil, reviewed_at: nil, requested_review_at: Time.now.utc, usable: true, listable: true)
+tended_site = PreviewCardProvider.find_or_initialize_by(domain: "fediqo419.example")
+tended_site.assign_attributes(trendable: nil, reviewed_at: nil, requested_review_at: Time.now.utc)
+tended_site.save!
+
 more = "/tmp/fediqo-mastodon-tokens.json"
 owner_only.call(more, JSON.generate(tokens.merge(
   # The sign-in page is asked by this id for a scope the registration does not include.

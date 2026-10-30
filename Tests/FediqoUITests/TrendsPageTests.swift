@@ -56,7 +56,7 @@ struct TrendsPageTests {
 
     @Test("Trends stands on the rail between Timeline and Notices where some source has anything trending, and is absent — not dim — where none has: a Discourse-only store has no Trends, so neither the rail, the places nor `h` reach it")
     func thePlace() async {
-        #expect(ShellPlace.allCases == [.timeline, .trends, .notices, .account, .usage, .preferences])
+        #expect(ShellPlace.allCases == [.timeline, .trends, .notices, .admin, .account, .usage, .preferences])
         #expect(ShellPlace.trends.symbolName == "chart.line.uptrend.xyaxis")
         #expect(ShellPlace.timeline.isStream && ShellPlace.trends.isStream)
         #expect(ShellPlace.allCases.filter(\.isStream) == [.timeline, .trends])
@@ -80,7 +80,7 @@ struct TrendsPageTests {
         let none = talk.availability
         #expect(none.trendsTabs.isEmpty && !none.allows(.trends))
         #expect(!none.railPlaces.contains(.trends) && !none.enabledPlaces.contains(.trends), "absent, never grey")
-        #expect(none.railPlaces == [.timeline, .notices, .account, .usage, .preferences])
+        #expect(none.railPlaces == [.timeline, .notices, .admin, .account, .usage, .preferences])
         #expect(none.placing(.trends, as: .trends) == .timeline, "a reader standing on it as it goes is moved off")
         #expect(!FediqoRootView.opensTrends(none, open: []))
         #expect(!ShellAvailability.empty.allows(.trends) && !ShellAvailability.empty.railPlaces.contains(.trends))

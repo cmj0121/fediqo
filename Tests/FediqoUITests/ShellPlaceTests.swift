@@ -8,7 +8,7 @@ struct ShellPlaceTests {
     @Test("Compose is not a place")
     func composeIsNotAPlace() {
         #expect(ShellPlace.allCases.map(\.rawValue) == [
-            "timeline", "trends", "notices", "account", "usage", "preferences",
+            "timeline", "trends", "notices", "admin", "account", "usage", "preferences",
         ])
     }
 
@@ -57,7 +57,7 @@ struct ShellPlaceTests {
     /// before: the set of places is what a session holds, and the landing is drawn from it.
     @Test("The rail reaches every place from either landing")
     func everyPlaceIsStillReachable() {
-        let held = ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: [.posts])
+        let held = ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: [.posts], adminHosts: ["m.example"])
         #expect(held.enabledPlaces == ShellPlace.allCases)
         var walk: Set<ShellPlace> = [held.launchPlace]
         var step = held.launchPlace
@@ -78,7 +78,7 @@ struct ShellPlaceTests {
         #expect(ShellAvailability(queryIDs: ["all"]).tabbedPlaces == [.timeline, .notices, .account, .preferences])
         #expect(ShellAvailability.empty.tabbedPlaces == [.notices, .account, .preferences])
         for availability in [held, ShellAvailability(queryIDs: ["all"]), .empty] {
-            #expect(availability.tabbedPlaces.count <= 5)
+            #expect(availability.tabbedPlaces.count <= 5, "five without Admin")
             // Every place that can be entered has a tab to be drawn in, so none is a missing one.
             for place in availability.enabledPlaces {
                 #expect(availability.tabbedPlaces.contains(place.tab), "\(place)")
@@ -91,6 +91,55 @@ struct ShellPlaceTests {
         #expect(ShellPlace.timeline.drawn(standingOn: .usage) == .timeline)
         // The keys still walk Usage, on its own.
         #expect(held.rotate(from: .account, by: 1) == .usage && held.rotate(from: .usage, by: 1) == .preferences)
+    }
+
+    /// #416, D1. On a Mac or an iPad, with a standing on some host, Admin is a place of its own
+    /// after Notices: on the rail, and the fourth of six tabs in the narrow arrangement. Without
+    /// one it is on the rail still, dim and closed as Timeline is without a source, saying why;
+    /// the tabs are five as before.
+    @Test("Admin stands after Notices where some host's standing allows it — the fourth of six tabs, the rail's too — and is dim on the rail without one, saying why, and no tab")
+    func adminIsAPlaceOfItsOwn() {
+        let tending = ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: [.posts], adminHosts: ["m.example"])
+        #expect(tending.allows(.admin) && tending.reasonKey(for: .admin) == nil)
+        #expect(tending.tabbedPlaces == [.timeline, .trends, .notices, .admin, .account, .preferences])
+        #expect(tending.tabbedPlaces.firstIndex(of: .admin) == 3, "the fourth, after Notices")
+        #expect(tending.railPlaces == [.timeline, .trends, .notices, .admin, .account, .usage, .preferences])
+        #expect(tending.placing(.notices, as: .admin) == .admin)
+        // Usage still opens from Preferences, whose tab draws it.
+        #expect(!tending.tabbedPlaces.contains(.usage) && ShellPlace.usage.tab == .preferences)
+        #expect(ShellStream(.admin) == nil && !ShellPlace.admin.isStream)
+
+        let plain = ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: [.posts])
+        #expect(!plain.allows(.admin) && !plain.enabledPlaces.contains(.admin))
+        #expect(plain.railPlaces == [.timeline, .trends, .notices, .admin, .account, .usage, .preferences], "dim, never absent")
+        #expect(plain.reasonKey(for: .admin) == "shell.admin.disabled")
+        #expect(plain.tabbedPlaces == [.timeline, .trends, .notices, .account, .preferences])
+        #expect(plain.placing(.notices, as: .admin) == .notices, "no way in without a standing")
+        #expect(plain.placing(.admin, as: .admin) == .timeline, "a place no longer open is left")
+        #expect(plain.rotate(from: .notices, by: 1) == .account, "the keys step over it")
+        #expect(ShellAvailability.empty.railPlaces.contains(.admin) && !ShellAvailability.empty.allows(.admin))
+        for language in DummyLanguage.allCases {
+            for key in [
+                "shell.admin.title", "shell.admin.summary", "shell.admin.line", "shell.admin.readOnly", "shell.admin.unknown",
+                "shell.admin.disabled",
+            ] {
+                #expect(L10n.t(key, language: language) != key, "\(language)/\(key)")
+            }
+        }
+    }
+
+    /// #416. An iPhone tends nothing: whatever standing a sign-in holds, Admin is neither on the
+    /// rail nor among the tabs — the bar keeps its five and no system More — and nothing opens it.
+    @Test("Where the device does not tend (an iPhone) Admin is absent from the rail and the tabs, never dim, whatever the standing, and nothing places the reader on it")
+    func anIPhoneHasNoAdmin() {
+        for hosts in [[], ["m.example"]] {
+            let phone = ShellAvailability(queryIDs: ["all"], signedIn: true, trendsTabs: [.posts], adminHosts: hosts, tendsHere: false)
+            #expect(!phone.allows(.admin) && !phone.enabledPlaces.contains(.admin), "\(hosts)")
+            #expect(phone.railPlaces == [.timeline, .trends, .notices, .account, .usage, .preferences], "\(hosts)")
+            #expect(phone.tabbedPlaces == [.timeline, .trends, .notices, .account, .preferences], "\(hosts): five, no More")
+            #expect(phone.reasonKey(for: .admin) == nil, "absent, so nothing to say why")
+            #expect(phone.placing(.notices, as: .admin) == .notices && phone.placing(.admin, as: .admin) == .timeline)
+        }
     }
 
     /// A tab the bar sets again — a reselect, the tabs rebuilt as Trends comes or goes — leaves
@@ -146,9 +195,7 @@ struct ShellPlaceTests {
     /// said the rail's marks looked small beside the buttons.
     ///
     /// **The literal reading, glyph = well = 32, is what this test refuses.** It leaves no margin
-    /// inside the plate and it breaks `RailButton.closedMark`, whose strike is `glyph * 1.2`: at 32
-    /// that is 38.4 across a 32pt well, so the closed mark for Timeline and Notices would stick out
-    /// of its own plate on both sides.
+    /// inside the plate.
     @Test("A rail row is the same height open or collapsed, and its mark keeps its margin")
     func railRowHeightIsStable() {
         #expect(RailView.Metrics.rowInnerHeight == RailView.Metrics.well)
@@ -158,11 +205,6 @@ struct ShellPlaceTests {
         #expect(RailView.Metrics.iconSize == SourceRow.markBase, """
             The rail's mark and the source row's stopped being one number. Every mark in this app \
             is 24pt at the default rung, and that is the whole of why the rail was enlarged.
-            """)
-        // `closedMark`'s strike must stay inside the well it crosses.
-        #expect(RailView.Metrics.iconSize * 1.2 <= RailView.Metrics.well, """
-            The closed mark's strike is wider than the plate it is drawn on, so Timeline and \
-            Notices would strike out past their own wells.
             """)
     }
 

@@ -1,7 +1,7 @@
 import FediqoCore
 import SwiftUI
 
-/// What the Servers tab presses, each answered by the page's owner.
+/// What the Federation and Blocks tabs press, each answered by the page's owner.
 struct TendingServersActs {
     /// A list's Add: its sheet.
     var onAdd: (ServerList) -> Void = { _ in }
@@ -20,15 +20,17 @@ struct TendingServersActs {
         case .blocks: .block(nil)
         case .allows: .allow
         case .mail: .mail
+        case .mailboxes: .mailbox
         case .addresses: .address
         }
     }
 }
 
-/// The Servers tab (#383): the servers this one refuses, then those it allows — where the role
-/// answers for them — and the mail domains and address ranges it refuses to let sign up — where
-/// it answers for those. Each list under its own head, with its Add; each row with what it is
-/// refused and why, and its `…`; the sentence where a list is empty, and the foot that reads on.
+/// The Federation tab (#383, #416) — the servers this one refuses, then those it allows — and the
+/// Blocks tab — the mail domains, the mailboxes however written (#417) and the address ranges it
+/// refuses to let sign up: one view, drawing the lists its tab was handed, and nothing of the
+/// other's. Each list under its own head, with its Add; each row with what it is refused and why,
+/// and its `…`; the sentence where a list is empty, and the foot that reads on.
 ///
 ///     Servers refused                                              + Add
 ///     suspended.example
@@ -36,6 +38,13 @@ struct TendingServersActs {
 ///     ─────────────────────────────────────────────────────────────────
 ///     Servers allowed                                              + Add
 ///     allowed.example                                                 …
+///
+/// **A mailbox's row is only what the server keeps of it**: that an address is refused, and the
+/// first letters of its fingerprint — the server never keeps the address itself.
+///
+///     Addresses refused however written                            + Add
+///     A refused address
+///     Fingerprint 3f9a0c2e71b4                                        …
 ///
 /// **It is handed everything it draws**: what each list holds and whether it may change them are
 /// `ShellTendingServers`'.
@@ -74,6 +83,15 @@ struct TendingServersList<Lead: View>: View {
                         section(.mail, mail) { domain in
                             row(.mail, domain.id, title: domain.domain, lines: [],
                                 more: TendingServersSaid.more(.mail, id: domain.id, name: domain.domain, said: said, actions: acts))
+                        }
+                    }
+                    if let mailboxes = said.mailboxes {
+                        section(.mailboxes, mailboxes) { mailbox in
+                            row(.mailboxes, mailbox.id, title: L10n.t("tend.servers.mailbox.row"),
+                                lines: TendingServersSaid.lines(of: mailbox),
+                                more: TendingServersSaid.more(
+                                    .mailboxes, id: mailbox.id, name: TendingServersSaid.shortHash(mailbox), said: said, actions: acts
+                                ))
                         }
                     }
                     if let addresses = said.addresses {
@@ -239,6 +257,19 @@ extension TendingServersSaid {
         ].compactMap { $0 }
     }
 
+    /// The line under a mailbox refused: the first letters of the server's fingerprint of it.
+    static func lines(of mailbox: RefusedMailbox, language: DummyLanguage? = nil) -> [String] {
+        [String(format: L10n.t("tend.servers.mailbox.hash", language: language), shortHash(mailbox))]
+    }
+
+    /// What trying a mailbox said, in one line: refused, or free to ask to join.
+    static func triedLine(_ ask: FederationAsk, language: DummyLanguage? = nil) -> String? {
+        ask.triedNow.map { refused in
+            String(format: L10n.t(refused ? "tend.servers.mailbox.refused" : "tend.servers.mailbox.free", language: language),
+                   LineText.oneLine(ask.mailbox), ask.host)
+        }
+    }
+
     /// The lines under a range refused: how hard, why, and until when.
     static func lines(of address: RefusedAddress, language: DummyLanguage? = nil) -> [String] {
         [
@@ -311,7 +342,8 @@ extension TendingServersSaid {
 // MARK: - The sheet
 
 /// The sheet a change is written on (#383): a server refused — how hard, what besides, why — a
-/// server allowed, a mail domain, or a range refused. **What cuts the server off from another asks
+/// server allowed, a mail domain, a mailbox however written — tried first where the person
+/// wishes, which adds nothing (#417) — or a range refused. **What cuts the server off from another asks
 /// once more, in one line, in red, before it is sent.** A refusal stays on the sheet, in the
 /// server's words.
 struct FederationAskSheet: View {
@@ -319,6 +351,8 @@ struct FederationAskSheet: View {
     var onSend: () -> Void
     var onConfirm: () -> Void
     var onClose: () -> Void
+    /// A mailbox's Try (#417): whether it would be refused, adding nothing.
+    var onTry: () -> Void = {}
     @Environment(\.colorScheme) private var colorScheme
 
     /// The sheet's head.
@@ -390,6 +424,18 @@ struct FederationAskSheet: View {
             words(L10n.t("tend.servers.privateWords"), text: $ask.draft.privateWords)
         case .allow, .mail:
             field(L10n.t(ask.kind == .mail ? "tend.servers.mailDomain" : "tend.servers.domain"), text: $ask.domain)
+        case .mailbox:
+            field(L10n.t("tend.servers.mailbox"), text: $ask.mailbox)
+            Text(L10n.t("tend.servers.mailbox.line"))
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+            if let tried = TendingServersSaid.triedLine(ask) {
+                Label(tried, systemImage: ask.triedNow == true ? "hand.raised" : "checkmark.circle")
+                    .shellFont(.reading)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         case .address:
             field(L10n.t("tend.servers.ip"), text: $ask.ip)
             choices(AddressSeverity.allCases, chosen: $ask.addressSeverity) { severity in
@@ -421,9 +467,13 @@ struct FederationAskSheet: View {
             Spacer(minLength: 0)
             Button(L10n.t("board.choose.cancel"), role: .cancel, action: onClose)
                 .keyboardShortcut(.cancelAction)
+            if ask.kind == .mailbox {
+                Button(L10n.t(ask.trying ? "tend.servers.mailbox.trying" : "tend.servers.mailbox.try"), action: onTry)
+                    .disabled(ask.trying || ask.stage == .sending || !ask.sendable)
+            }
             Button(L10n.t("tend.servers.send"), role: ask.cutsOff ? .destructive : nil, action: onSend)
                 .tint(ask.cutsOff ? ShellChrome.alarm(colorScheme) : ShellChrome.selectInk(colorScheme))
-                .disabled(ask.stage == .sending || !ask.sendable)
+                .disabled(ask.stage == .sending || ask.trying || !ask.sendable)
         }
         .buttonStyle(.bordered)
         .controlSize(.large)
@@ -533,12 +583,13 @@ struct FederationAskSheetPresenter: ViewModifier {
             }
             .sheet(item: shown) { _ in
                 if let ask = servers.asking {
-                    let page = Tending(host: ask.host, tab: .servers)
+                    let page = ask.page
                     FederationAskSheet(
                         ask: Binding(get: { servers.asking ?? ask }, set: { if servers.asking != nil { servers.asking = $0 } }),
                         onSend: { Task { await servers.send(on: page, in: session) } },
                         onConfirm: { Task { await servers.send(on: page, in: session, confirmed: true) } },
-                        onClose: { servers.close() }
+                        onClose: { servers.close() },
+                        onTry: { Task { await servers.tryMailbox(on: page, in: session) } }
                     )
                 }
             }

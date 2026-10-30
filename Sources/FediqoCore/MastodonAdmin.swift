@@ -153,7 +153,7 @@ public struct MastodonAdminReports: Sendable {
     /// this build cannot read is that one report not listed, never the stretch.
     public func stretch(resolved: Bool, after next: String? = nil) async throws -> AdminReportStretch {
         let query = [URLQueryItem(name: "resolved", value: String(resolved))] + (try MastodonPage.older(than: next))
-        let (body, link) = try await asked { try await door.getLinked(path: Self.path, query: query) }
+        let (body, link) = try await door.adminAsked { try await door.getLinked(path: Self.path, query: query) }
         guard let read = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<ReportDTO>].self, from: body) else {
             throw MastodonAdminError.unreadable
         }
@@ -172,13 +172,13 @@ public struct MastodonAdminReports: Sendable {
     /// One report, as the server holds it now.
     public func report(_ id: String) async throws -> AdminReport {
         guard ListSubscription.isPathSegment(id) else { throw MastodonAdminError.invalid }
-        return try read(try await asked { try await door.get(path: "\(Self.path)/\(id)") }, id: id)
+        return try read(try await door.adminAsked { try await door.get(path: "\(Self.path)/\(id)") }, id: id)
     }
 
     /// `act` done to the report `id`: the report as the server holds it after.
     public func act(_ act: Act, on id: String) async throws -> AdminReport {
         guard ListSubscription.isPathSegment(id) else { throw MastodonAdminError.invalid }
-        let body = try await asked {
+        let body = try await door.adminAsked {
             do {
                 return try await door.postRefusable(path: "\(Self.path)/\(id)/\(act.rawValue)", form: [])
             } catch let refused as MastodonUnprocessable {
@@ -204,16 +204,6 @@ public struct MastodonAdminReports: Sendable {
               report.id == id
         else { throw MastodonAdminError.unreadable }
         return report
-    }
-
-    /// A refusal for want of standing (403) told from every other: what an account without the
-    /// role is answered, whatever its sign-in holds.
-    private func asked<T>(_ ask: () async throws -> T) async throws -> T {
-        do {
-            return try await ask()
-        } catch MastodonAuthError.http(403) {
-            throw MastodonAdminError.notAllowed
-        }
     }
 
     struct ReportDTO: Decodable, Sendable {

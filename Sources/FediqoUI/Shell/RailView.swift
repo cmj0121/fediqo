@@ -26,8 +26,7 @@ struct RailView: View {
         /// controls — `SourceRow.symbolPoints` is `touch - snug`, "leaving `ShellSpace.snug` of
         /// the target around it" — and applied here it gives 24, which is
         /// `SourceRow.markBase`, the base `SourceRowView.mark` grows from. **One number, three surfaces: every mark in this app is
-        /// 24pt at the default rung.** A mark at the full 32 would fill its plate edge to edge and
-        /// put `closedMark`'s 1.2x strike 3.2pt outside the well on each side.
+        /// 24pt at the default rung.** A mark at the full 32 would fill its plate edge to edge.
         ///
         /// **No metric moves with it.** The glyph lives inside a `well`-sized frame, so
         /// `collapsedWidth` stays 48, `expandedWidth` stays 201, the row stays 32 tall, and the
@@ -72,11 +71,10 @@ struct RailView: View {
             .padding(.bottom, Metrics.side)
 
             ForEach(availability.railPlaces) { item in
-                // A place that cannot be entered is marked as closed at every width,
-                // and says why wherever there is room for a sentence: the label beside
-                // the glyph when the bar is open, the tooltip and the accessibility
-                // hint when it is not. Collapsed, the bar has room for a mark and for
-                // nothing else — no row shows any text there, closed or open.
+                // A place that cannot be entered is drawn grey at every width, its mark
+                // unchanged, and says why wherever there is room for a sentence: the
+                // label beside the glyph when the bar is open, the tooltip and the
+                // accessibility hint when it is not.
                 let plain = item == .account ? accountSummary : item.summary
                 let summary = availability.reasonKey(for: item).map { L10n.t($0) } ?? plain
                 RailButton(
@@ -160,7 +158,7 @@ private struct RailButton: View {
                     .fill(rowFill)
             )
             .overlay(alignment: .leading) { lamp }
-            .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.ink(colorScheme))
+            .foregroundStyle(ink)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -174,6 +172,13 @@ private struct RailButton: View {
     }
 
     private var helpText: String { hint ?? summary }
+
+    /// Closed is grey and nothing else (2026-10-30): the mark stays the place's own, as the
+    /// person knows it, and is only drawn in the dim ink.
+    private var ink: Color {
+        if selected { return ShellChrome.selectInk(colorScheme) }
+        return enabled ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme)
+    }
 
     /// Where the reader is, drawn in the rail's own margin so that selecting a row
     /// moves nothing. The lamp is the only phosphor on the bar.
@@ -208,7 +213,6 @@ private struct RailButton: View {
             .font(.system(size: glyph, weight: selected ? .semibold : .regular))
             .symbolVariant(selected ? .fill : .none)
             .symbolRenderingMode(.hierarchical)
-            .overlay { closedMark }
             .overlay(alignment: .topTrailing) { countMark }
     }
 
@@ -224,30 +228,6 @@ private struct RailButton: View {
                 .offset(x: glyph * 0.2, y: -glyph * 0.15)
                 .accessibilityHidden(true)
         }
-    }
-
-    /// Closed, said in the space a collapsed bar actually has.
-    ///
-    /// It is a line struck through the glyph and not a mark in its corner. A small
-    /// filled shape at the bottom-right of a bell is the one thing every reader
-    /// already knows how to read, and what it says is "two of something is waiting" —
-    /// the exact opposite of a place with nothing in it that cannot be opened.
-    @ViewBuilder
-    private var closedMark: some View {
-        if !enabled {
-            ZStack {
-                strike(ShellChrome.rail(colorScheme), thickness: ShellSpace.tight)
-                strike(ShellChrome.inkDim(colorScheme), thickness: ShellSpace.hair * 1.5)
-            }
-            .rotationEffect(.degrees(-45))
-            .accessibilityHidden(true)
-        }
-    }
-
-    private func strike(_ color: Color, thickness: CGFloat) -> some View {
-        Capsule(style: .continuous)
-            .fill(color)
-            .frame(width: glyph * 1.2, height: thickness)
     }
 
     private var rowFill: Color {

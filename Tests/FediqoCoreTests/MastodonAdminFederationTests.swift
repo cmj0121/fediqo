@@ -147,4 +147,71 @@ struct MastodonAdminFederationTests {
         let body = try #require(await server.sent.last?.body)
         #expect(body.contains("private_comment=first%0Asecond") && body.contains("public_comment=one%0D%0Atwo"))
     }
+
+    @Test("The mailboxes refused however written are read a stretch at a time, newest first, each only the server's fingerprint of it, and read on from where the server says the next begins")
+    func mailboxes() async throws {
+        let path = MastodonAdminFederation.mailboxesPath
+        let (reader, server) = try reader([
+            path: .json(Captures.mailboxes, link: Captures.mailboxesLink),
+            "\(path)?max_id=2": .json(Captures.mailboxesRest, link: Captures.mailboxesRestLink),
+        ])
+        let all = try await reader.mailboxes()
+        #expect(all.items.map(\.id) == ["2", "1"] && all.next == nil)
+        #expect(all.items[1].hash == "775b10bf7772d11d49e38f382b2cab84ee93161169491aaf49bdaeb1a20b33e0")
+        let rest = try await reader.mailboxes(after: "2")
+        #expect(rest.items.map(\.id) == ["1"] && rest.next == nil)
+        #expect(await server.asked.last == "\(path)?max_id=2")
+
+        let (first, _) = try self.reader([path: .json(Captures.mailboxesFirst, link: Captures.mailboxesFirstLink)])
+        #expect(try await first.mailboxes().next == "2")
+    }
+
+    @Test("A mailbox is tried, added and taken off by its address, as written and trimmed, its domain only lower case and never in its ASCII spelling: trying answers with those it already is, in any spelling, and sends nothing to keep")
+    func mailboxWrites() async throws {
+        let path = MastodonAdminFederation.mailboxesPath
+        let (reader, server) = try reader([
+            "\(path)/test": .json(Captures.mailboxTried), path: .json(Captures.mailboxAdded),
+            "\(path)/1": .json(Captures.mailboxRemoved),
+        ])
+        let tried = try await reader.tryMailbox(" fediqo417@Example.COM\n")
+        #expect(tried.map(\.id) == ["1"])
+        let sent = try #require(await server.sent.first)
+        #expect(sent.method == "POST" && sent.body == "email=fediqo417%40example.com")
+        #expect(await server.asked.first == "\(path)/test")
+        let added = try await reader.addMailbox("Fediqo.417+tag@Bücher.Example")
+        #expect(added.id == "1" && added.hash.hasPrefix("775b10bf"))
+        #expect(await server.sent.last?.body == "email=Fediqo.417%2Btag%40b%C3%BCcher.example")
+        try await reader.removeMailbox("1")
+        #expect(await server.asked.last == "\(path)/1")
+
+        let (none, _) = try self.reader(["\(path)/test": .json(Captures.mailboxTriedNone)])
+        #expect(try await none.tryMailbox("other@example.com").isEmpty)
+    }
+
+    @Test("A mailbox already refused, added again, is refused in the server's words; one there is none of is not found; without the standing it is not allowed; an address that is none is asked nothing")
+    func mailboxRefusals() async throws {
+        let path = MastodonAdminFederation.mailboxesPath
+        let (reader, server) = try reader([
+            path: .json(Captures.mailboxTwice, status: 422),
+            "\(path)/999": .json(Captures.noMailbox, status: 404),
+            "\(path)?max_id=1": .json(Captures.modBlocks, status: 403),
+            "\(path)/test": .json("{}"),
+        ])
+        await #expect(throws: MastodonAdminError.refused(sentence: "Validation failed: Canonical email hash has already been taken")) {
+            _ = try await reader.addMailbox("refused417@example.com")
+        }
+        await #expect(throws: MastodonAuthError.http(404)) { try await reader.removeMailbox("999") }
+        await #expect(throws: MastodonAdminError.notAllowed) { _ = try await reader.mailboxes(after: "1") }
+        await #expect(throws: MastodonAdminError.unreadable) { _ = try await reader.tryMailbox("x@example.com") }
+        let before = await server.asked.count
+        for address in ["", "  ", "nobody", "@example.com", "a b@example.com", "a@", "a@nodot", "a@x y.example", "a\t@example.com",
+                        String(repeating: "a", count: 65) + "@example.com"] {
+            #expect(MastodonAdminFederation.wireMailbox(address) == nil, "\(address)")
+            await #expect(throws: MastodonAdminError.invalid) { _ = try await reader.tryMailbox(address) }
+            await #expect(throws: MastodonAdminError.invalid) { _ = try await reader.addMailbox(address) }
+        }
+        await #expect(throws: MastodonAdminError.invalid) { try await reader.removeMailbox("../1") }
+        #expect(await server.asked.count == before)
+        #expect(MastodonAdminFederation.wireMailbox("\"odd@name\"@example.com") == "\"odd@name\"@example.com")
+    }
 }

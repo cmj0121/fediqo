@@ -764,7 +764,7 @@ struct ViewerTests {
             case .shortcuts: shortcutsOpen
             case .person: personOpen != nil
             case .tag: walk.openedTag != nil || walk.openedShared != nil
-            case .people: walk.openedPeople != nil || walk.openedTending != nil
+            case .people: walk.openedPeople != nil
             case .rising: walk.openedFoundTags != nil || walk.openedFollowedTags != nil
             case .thread: threadOpen
             case .link: walk.openedLink != nil

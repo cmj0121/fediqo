@@ -5,13 +5,15 @@ import Observation
 // Tending a Mastodon the reader answers for (#380), and — for #381 — what was reported to it:
 // who may, what is asked, when, and what the page holds of the answers.
 //
-// **The standing draws it, and only the standing.** A source's `…` offers "Tend <host>" only
-// where the server's role for the account signed in there allows some task of tending
-// (`MastodonStaff`, read off its own account check this run), and the page has a tab only for a
-// task the role allows. An account without the standing sees no trace of it, whatever its
-// sign-in holds. **The words are asked apart**: where the role allows it and the sign-in does
-// not hold tending's words, the item is that part's lock, which asks for them alone (D9).
-// Holding only the word that reads, the page lists and offers no act.
+// **The standing draws it, and only the standing.** The Admin place (#416) lists a host, and a
+// source's `…` offers "Tend <host>", only where the server's role for the account signed in
+// there allows some task of tending (`MastodonStaff`, read off its own account check this run),
+// and the host's page has a tab only for a task the role allows. An account without the standing
+// sees no host listed and no "Tend", whatever its sign-in holds, and the place itself is dim; an
+// iPhone tends nothing at all (`ShellSession.tendsHere`). **The words are asked apart**: where
+// the role allows it and the sign-in does not hold tending's words, the item is that part's
+// lock, which asks for them alone (D9). Holding only the word that reads, the page lists and
+// offers no act.
 //
 // **Asked as the page opens, and read on at its foot.** What was reported is asked for open
 // ones first, newest first, a stretch at a time by the server's own next; reaching the end of
@@ -34,16 +36,26 @@ import Observation
 /// An act on a report, as the page offers it: the server's own (`MastodonAdminReports.Act`).
 typealias ReportAct = MastodonAdminReports.Act
 
-/// A tab of the page of tending, each the task a flag of the role allows. Later tasks of #380
-/// add their own tab and flag here.
-enum TendingTab: String, ShellTab, Sendable, CaseIterable {
+/// A tab of a host's page in the Admin place (#416), each the task one flag of the role allows,
+/// in the order they stand. **Each tab reads only its own part, under its own flag**: a role
+/// holding one flag never asks the half of the server another flag answers for.
+///
+/// `rising` is what waits to rise on the server, named apart from the Trends place: its words
+/// say "Trends", its keys and its type never do.
+enum AdminTab: String, ShellTab, Sendable, CaseIterable {
     case reports
     /// Who asks to join, and the server's accounts (#382).
     case people
-    /// The servers it refuses or allows, and the addresses it refuses (#383).
-    case servers
-    /// How it is doing, what waits to rise on it, and its rules (#384).
-    case server
+    /// The servers it refuses or allows (#383).
+    case federation
+    /// The mail domains and the address ranges it refuses to let sign up (#383).
+    case blocks
+    /// How it is doing, as its own figures over a span (#384).
+    case dashboard
+    /// What waits to rise on it: hashtags, links, posts, each let rise or kept back (#384).
+    case rising
+    /// Its rules, read, with the way to its own page where they are changed (#384).
+    case rules
 
     var id: String { rawValue }
     var titleKey: String { "tend.tab.\(rawValue)" }
@@ -52,33 +64,39 @@ enum TendingTab: String, ShellTab, Sendable, CaseIterable {
         switch self {
         case .reports: "exclamationmark.bubble"
         case .people: "person.badge.clock"
-        case .servers: "network"
-        case .server: "chart.bar"
+        case .federation: "network"
+        case .blocks: "hand.raised"
+        case .dashboard: "chart.bar"
+        case .rising: "arrow.up.forward.circle"
+        case .rules: "list.number"
         }
     }
 
-    /// The flags of the role this tab's task needs, any one of which opens it: the Servers tab
-    /// holds the servers' lists and the addresses', each its own flag's.
-    var flags: [MastodonStaff] {
+    /// The flag of the role this tab's task needs.
+    var flag: MastodonStaff {
         switch self {
-        case .reports: [.manageReports]
-        case .people: [.manageUsers]
-        case .servers: [.manageFederation, .manageBlocks]
-        case .server: [.viewDashboard, .manageTaxonomies, .manageRules]
+        case .reports: .manageReports
+        case .people: .manageUsers
+        case .federation: .manageFederation
+        case .blocks: .manageBlocks
+        case .dashboard: .viewDashboard
+        case .rising: .manageTaxonomies
+        case .rules: .manageRules
         }
     }
 
     /// The tabs a standing allows, in the order they stand: none for no standing.
-    static func allowed(by staff: MastodonStaff?) -> [TendingTab] {
+    static func allowed(by staff: MastodonStaff?) -> [AdminTab] {
         guard let staff else { return [] }
-        return allCases.filter { $0.flags.contains(where: staff.allows) }
+        return allCases.filter { staff.allows($0.flag) }
     }
 }
 
-/// The page of tending one server, on one of its tabs: a step of the walk (`ShellStep.server`).
+/// One host's page in the Admin place, on one of its tabs (#416). Its tab is the page's own
+/// value, turned in place.
 struct Tending: Hashable, Sendable, Identifiable {
     let host: String
-    var tab: TendingTab
+    var tab: AdminTab
 
     var id: String { host }
 }
@@ -167,9 +185,9 @@ final class ShellTending {
 
     /// The People tab's own state (#382), apart from the reports'.
     let people: ShellTendingPeople
-    /// The Servers tab's own state (#383).
+    /// The Federation and Blocks tabs' own state (#383).
     let servers: ShellTendingServers
-    /// The Server tab's own state (#384).
+    /// The Dashboard, Trends and Rules tabs' own state (#384).
     let server: ShellTendingServer
 
     init(errands: PageErrands) {
@@ -181,12 +199,28 @@ final class ShellTending {
 
     // MARK: - Who may
 
+    /// The hosts the Admin place lists (#416): every source that says who people are whose
+    /// sign-in was last told it holds a standing allowing some tab — **kept through a check that
+    /// fails** (`MastodonSessions.lastStanding`), in the order the sources stand. None on a
+    /// device that does not tend (`ShellSession.tendsHere`).
+    static func hosts(in session: ShellSession) -> [String] {
+        guard session.tendsHere else { return [] }
+        var seen = Set<String>()
+        return session.sources.compactMap { source in
+            let host = source.host.lowercased()
+            guard ShellPersonPages.saysPeople(source), !AdminTab.allowed(by: session.mastodon.lastStanding(host: host)).isEmpty,
+                  seen.insert(host).inserted
+            else { return nil }
+            return host
+        }
+    }
+
     /// The tabs of tending `host` for whoever is signed in there now: those the role its own
     /// check said allows — **none where it said no role, or has not said**, and none for a
-    /// source that is no Mastodon's people.
-    static func tabs(at host: String, in session: ShellSession) -> [TendingTab] {
-        guard ShellPersonPages.source(at: host, in: session) != nil, session.mastodon.isSignedIn(host: host) else { return [] }
-        return TendingTab.allowed(by: session.mastodon.staff(host: host))
+    /// source that is no Mastodon's people, or on a device that does not tend.
+    static func tabs(at host: String, in session: ShellSession) -> [AdminTab] {
+        guard session.tendsHere, ShellPersonPages.source(at: host, in: session) != nil, session.mastodon.isSignedIn(host: host) else { return [] }
+        return AdminTab.allowed(by: session.mastodon.staff(host: host))
     }
 
     /// What a source's `…` offers for tending it: nothing without the standing; where the
@@ -267,8 +301,8 @@ final class ShellTending {
         switch page.tab {
         case .reports: (standing(page.host, in: session)?.rows ?? []).map { TendingReportsSaid.rowID($0.id) }
         case .people: people.walked(page, in: session)
-        case .servers: servers.walked(page, in: session)
-        case .server: server.walked(page, in: session)
+        case .federation, .blocks: servers.walked(page, in: session)
+        case .dashboard, .rising, .rules: server.walked(page, in: session)
         }
     }
 
@@ -280,7 +314,7 @@ final class ShellTending {
             let said: (count: Int, more: Bool)? = switch tab {
             case .reports: openReports(at: page.host, in: session)
             case .people: people.waiting(at: page.host, in: session)
-            case .servers, .server: nil
+            case .federation, .blocks, .dashboard, .rising, .rules: nil
             }
             return said.map { TendingCount(tab: tab, count: $0.count, more: $0.more) }
         }
@@ -312,9 +346,12 @@ final class ShellTending {
     }
 
     func ask(of page: Tending, language: DummyLanguage? = nil) -> PageAsking {
-        if page.tab == .people { return people.ask(of: page, language: language) }
-        if page.tab == .servers { return servers.ask(of: page, language: language) }
-        if page.tab == .server { return server.ask(of: page, language: language) }
+        switch page.tab {
+        case .reports: break
+        case .people: return people.ask(of: page, language: language)
+        case .federation, .blocks: return servers.ask(of: page, language: language)
+        case .dashboard, .rising, .rules: return server.ask(of: page, language: language)
+        }
         guard let reports = pages[page.host] else { return PageAsking() }
         return PageAsking(
             asking: reports.asking
@@ -328,9 +365,12 @@ final class ShellTending {
 
     @discardableResult
     func stop(_ page: Tending) -> Bool {
-        if page.tab == .people { return people.stop(page) }
-        if page.tab == .servers { return servers.stop(page) }
-        if page.tab == .server { return server.stop(page) }
+        switch page.tab {
+        case .reports: break
+        case .people: return people.stop(page)
+        case .federation, .blocks: return servers.stop(page)
+        case .dashboard, .rising, .rules: return server.stop(page)
+        }
         let host = page.host
         guard let reports = pages[host], reports.asking || reports.readingOn else { return false }
         asks[host]?.cancel()
@@ -351,8 +391,8 @@ final class ShellTending {
         switch page.tab {
         case .reports: await reportsOpened(page, in: session)
         case .people: await people.opened(page, in: session)
-        case .servers: await servers.opened(page, in: session)
-        case .server: await server.opened(page, in: session)
+        case .federation, .blocks: await servers.opened(page, in: session)
+        case .dashboard, .rising, .rules: await server.opened(page, in: session)
         }
     }
 
@@ -372,9 +412,12 @@ final class ShellTending {
 
     /// `r`, the mark and a pull: asked from the top again. A press while it is asked asks nothing.
     func again(_ page: Tending, in session: ShellSession) async {
-        if page.tab == .people { return await people.again(page, in: session) }
-        if page.tab == .servers { return await servers.again(page, in: session) }
-        if page.tab == .server { return await server.again(page, in: session) }
+        switch page.tab {
+        case .reports: break
+        case .people: return await people.again(page, in: session)
+        case .federation, .blocks: return await servers.again(page, in: session)
+        case .dashboard, .rising, .rules: return await server.again(page, in: session)
+        }
         if pages[page.host]?.asking == true { return }
         await begin(page, fromTop: true, in: session)?.value
     }
@@ -382,9 +425,12 @@ final class ShellTending {
     /// The foot pressed — `pressed` — or reached: the next stretch; pressed, again the one that
     /// did not come or was stopped. Reached, only after a stretch that came.
     func readOn(_ page: Tending, pressed: Bool, in session: ShellSession) async {
-        if page.tab == .people { return await people.readOn(page, pressed: pressed, in: session) }
-        // The Servers and Server tabs' lists read on each by its own foot, pressed (`readOn`).
-        if page.tab == .servers || page.tab == .server { return }
+        switch page.tab {
+        case .reports: break
+        case .people: return await people.readOn(page, pressed: pressed, in: session)
+        // The other tabs' lists read on each by its own foot, pressed (`readOn`).
+        case .federation, .blocks, .dashboard, .rising, .rules: return
+        }
         guard let reports = standing(page.host, in: session), pressed ? reports.readsOn : reports.reachesOn else { return }
         pages[page.host]?.held = false
         await begin(page, fromTop: false, in: session)?.value
@@ -522,21 +568,21 @@ final class ShellTending {
 
     // MARK: - Tabs
 
-    /// Tab on the page in front: the next tab its standing allows, round their ring, turned in
-    /// place as a tab of what a search found is. Taken, turning nothing, where it has one.
-    func rotate(_ walk: inout ShellWalk, by step: Int, covered: Bool, lamp: inout String?, in session: ShellSession) -> Bool {
-        guard !covered, let page = walk.openedTending else { return false }
+    /// Tab on a host's page: the next tab its standing allows, round their ring, turned in
+    /// place. Taken, turning nothing, where it has one; not the page's while something is drawn
+    /// over it (`covered`).
+    func rotate(_ page: inout Tending, by step: Int, covered: Bool, lamp: inout String?, in session: ShellSession) -> Bool {
+        guard !covered else { return false }
         let tabs = Self.tabs(at: page.host, in: session)
         guard tabs.count > 1, let at = tabs.firstIndex(of: page.tab) else { return true }
-        return turn(&walk, to: tabs[(at + step + tabs.count) % tabs.count], lamp: &lamp, in: session)
+        return turn(&page, to: tabs[(at + step + tabs.count) % tabs.count], lamp: &lamp, in: session)
     }
 
-    /// A tab of the page in front pressed or swiped to: the step turned in place, no step more.
+    /// A tab of the page pressed or swiped to: the page turned in place, its lamp put out.
     @discardableResult
-    func turn(_ walk: inout ShellWalk, to tab: TendingTab, lamp: inout String?, in session: ShellSession) -> Bool {
-        guard var page = walk.openedTending, page.tab != tab, Self.tabs(at: page.host, in: session).contains(tab) else { return false }
+    func turn(_ page: inout Tending, to tab: AdminTab, lamp: inout String?, in session: ShellSession) -> Bool {
+        guard page.tab != tab, Self.tabs(at: page.host, in: session).contains(tab) else { return false }
         page.tab = tab
-        guard walk.turned(to: .server(page)) else { return false }
         lamp = nil
         return true
     }

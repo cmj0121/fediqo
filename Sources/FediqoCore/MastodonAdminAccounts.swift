@@ -165,7 +165,7 @@ public struct MastodonAdminAccounts: Sendable {
     /// is that one not listed.
     public func stretch(_ filter: AdminAccountFilter, after next: String? = nil) async throws -> AdminAccountStretch {
         let query = filter.query + (try MastodonPage.older(than: next))
-        let (body, link) = try await asked { try await door.getLinked(path: Self.listPath, query: query) }
+        let (body, link) = try await door.adminAsked { try await door.getLinked(path: Self.listPath, query: query) }
         guard let read = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<AdminDTO>].self, from: body) else {
             throw MastodonAdminError.unreadable
         }
@@ -183,7 +183,7 @@ public struct MastodonAdminAccounts: Sendable {
     /// One account, as the server holds it now.
     public func account(_ id: String) async throws -> AdminAccount {
         guard ListSubscription.isPathSegment(id) else { throw MastodonAdminError.invalid }
-        return try read(try await asked { try await door.get(path: "\(Self.path)/\(id)") }, id: id)
+        return try read(try await door.adminAsked { try await door.get(path: "\(Self.path)/\(id)") }, id: id)
     }
 
     /// Somebody waiting let in: the account as it now stands.
@@ -220,7 +220,7 @@ public struct MastodonAdminAccounts: Sendable {
     }
 
     private func refusable(_ ask: () async throws -> Data) async throws -> Data {
-        try await asked {
+        try await door.adminAsked {
             do {
                 return try await ask()
             } catch let refused as MastodonUnprocessable {
@@ -237,15 +237,6 @@ public struct MastodonAdminAccounts: Sendable {
         guard let account = (try? MastodonJSON.decoder.decode(AdminDTO.self, from: body))?.account(source: source), account.id == id
         else { throw MastodonAdminError.unreadable }
         return account
-    }
-
-    /// A refusal for want of standing (403) told from every other.
-    private func asked<T>(_ ask: () async throws -> T) async throws -> T {
-        do {
-            return try await ask()
-        } catch MastodonAuthError.http(403) {
-            throw MastodonAdminError.notAllowed
-        }
     }
 
     struct AdminDTO: Decodable, Sendable {

@@ -44,6 +44,9 @@ public struct FediqoRootView: View {
     @State private var noticeSelectedID: String?
     @State private var noticeMark = ShellReadingMark()
     @State private var noticeJump = 0
+    /// Where the person stands in the Admin place (#416): the list of hosts or one host's page,
+    /// and that place's own lamp.
+    @State private var admin = AdminFront()
     /// The walk a press on another place began — a notice's line (#323), the reader's own page
     /// from Account (#310) — until its last step is left. See `PlaceErrand`.
     @State private var errand: PlaceErrand?
@@ -374,6 +377,8 @@ public struct FediqoRootView: View {
                 // A walk a notice began is come back from by leaving it, and not by leaving
                 // the timeline some other way.
                 if accepted != .timeline { errand = nil }
+                // A notice waiting on its host's standing waits no more once the person moves.
+                if accepted != .admin { admin.awaited = nil }
                 // Nothing is asked for notices while their page is closed, and it opens on them.
                 if old == .notices { Self.leftNotices(session) }
                 // Closed on the stream it was opened over, before the session follows another.
@@ -398,6 +403,7 @@ public struct FediqoRootView: View {
                     letGo(cleared)
                 }
                 settleTrendsFront(among: new.trendsTabs)
+                adminSettled()
                 let accepted = new.placing(place, as: place)
                 if accepted != place { place = accepted }
             }
@@ -666,12 +672,17 @@ public struct FediqoRootView: View {
             place = availability.rotate(from: place, by: -1)
             return true
         case .nextPost:
-            return place == .notices ? moveInNotices(by: 1) : moveInList(by: 1)
+            return movePost(by: 1)
         case .previousPost:
-            return place == .notices ? moveInNotices(by: -1) : moveInList(by: -1)
+            return movePost(by: -1)
         case .goTop:
+            if place == .admin {
+                let rows = adminRows
+                return adminKeyed { $0.top(among: rows) }
+            }
             return place == .notices ? jumpNoticesToTop() : jumpListOrThreadToTop()
         case .expandPost:
+            if place == .admin { return openAdminRow() }
             return place == .notices ? openFocusedNotice() : openThread()
         case .nextAttachment:
             return onActedItem(turn)
@@ -696,6 +707,10 @@ public struct FediqoRootView: View {
             // Only what is on screen, as Escape reads it — and on Notices, the page of what is
             // held back first, as Escape leaves it (#399).
             if leaveHeldPage() { return true }
+            // On a host's page in the Admin place, back to its list (#416).
+            if place == .admin, Self.escapeSees(openLayers, place: place).subtracting([.selection]).isEmpty {
+                return leaveAdminPage()
+            }
             switch DummyCommand.outermost(of: Self.escapeSees(openLayers, place: place)) {
             case .viewer: return closeViewer()
             // One step back, whichever kind of step it was. The two lines used to be two
@@ -784,6 +799,8 @@ public struct FediqoRootView: View {
             }
             // Only what is on screen: a walk left open on the timeline is not unwound from Usage.
             let open = Self.escapeSees(openLayers, place: place)
+            // In Admin: the ask of the tab in front, then its lamp, then back to the list (#416).
+            if place == .admin, open.subtracting([.selection]).isEmpty, dismissInAdmin() { return true }
             // A source's detail on Usage goes back to its list before anything further out.
             if place == .usage, open.subtracting([.selection]).isEmpty, session.closeUsageSource() { return true }
             // And a detail on Preferences, to its list (#233).
@@ -839,8 +856,8 @@ public struct FediqoRootView: View {
         // (#122). That is what lets the order between them go unasked: `outermost` is handed at
         // most one of them, and `DummyCommand.canWalk` asks about the pair rather than either.
         case .person: walk.openedPerson != nil
-        // A list of people, and a server tended (#380): pages of rows opened from a source.
-        case .people: walk.openedPeople != nil || walk.openedTending != nil
+        // A list of people: a page of rows opened from a source.
+        case .people: walk.openedPeople != nil
         // The pages of the hashtags a search found and of those followed (#318, #319).
         case .rising: walk.openedFoundTags != nil || walk.openedFollowedTags != nil
         // A hashtag's page, and the posts sharing a rising link (#379): pages of post rows.
@@ -1274,10 +1291,6 @@ public struct FediqoRootView: View {
         // The posts sharing a rising link, as the page draws them (#379).
         case .shared(let page):
             return people.shared.items(of: page, in: session)
-        // A server tended has reports, walked by their rows (`currentListIDs`), and no post a
-        // mark of a post acts on (#381).
-        case .server:
-            return []
         case .thread(let opened):
             guard let item = session.held(opened) else { return streamItems() }
             return session.conversations.conversation(around: item).inOrder
@@ -1319,9 +1332,7 @@ public struct FediqoRootView: View {
         let person = walk.openedPerson.map { people.walkedIDs(of: $0, in: session) }
         // On a hashtag's About the rows are its blocks (F10).
         let tagAbout = walk.openedTag.flatMap { people.tags.walkedAbout(of: $0, in: session) }
-        // On a server tended the rows are its reports (#381).
-        let tending = walk.openedTending.map { people.tending.walked($0, in: session) }
-        let opened = listed ?? rising ?? foundTags ?? person ?? tagAbout ?? tending
+        let opened = listed ?? rising ?? foundTags ?? person ?? tagAbout
         // Over a search's posts stand the rows of what the sources found (#319).
         let posts = drawn ?? items.map(\.id)
         let ids = opened ?? (found.isEmpty ? posts : found + posts)
@@ -1417,7 +1428,7 @@ public struct FediqoRootView: View {
         // A page read out of a post is somebody else's page, and its top is its own business.
         case .link:
             return false
-        case .person, .tag, .people, .found, .followedTags, .shared, .server, .thread, nil:
+        case .person, .tag, .people, .found, .followedTags, .shared, .thread, nil:
             guard let first = rows?.first else { return false }
             selected = first
         }
@@ -1682,12 +1693,6 @@ public struct FediqoRootView: View {
         }
         // Over a search's posts, and on the page of the hashtags it found, the row the lamp is
         // on may be what a source found (#319): Return opens it.
-        // On a server tended the row the lamp is on is a report (#381), which opens nothing — its
-        // acts are its `…` — or an account (#382), which opens that person as any person's row does.
-        if let page = keyed.openedTending {
-            guard page.tab == .people, let person = people.tending.people.account(id, of: page, in: session)?.person else { return false }
-            return openPerson(DummyPerson(person))
-        }
         if let page = keyed.openedFoundTags {
             guard let row = people.found.row(id, of: page, in: session) else { return false }
             return openFound(row)
@@ -1803,7 +1808,6 @@ public struct FediqoRootView: View {
     private var personAsked: Bool {
         if let list = walk.openedPeople { return people.lists.canAskAgain(list, in: session) }
         if let page = walk.openedFollowedTags { return people.followed.canAskAgain(page, in: session) }
-        if let page = walk.openedTending { return people.tending.canAskAgain(page, in: session) }
         return walk.openedPerson.map { people.canAskAgain($0, in: session) } ?? false
     }
 
@@ -1857,6 +1861,7 @@ public struct FediqoRootView: View {
     /// same one runs is taken and does nothing (`ShellReload.press`); Esc is what stops it.
     private func reload() -> Bool {
         if place == .notices { return readNotices() }
+        if place == .admin { return reloadAdmin() }
         let open = drawnOpenLayers
         guard canReloadNow else { return false }
         // On Hashtags or Links of Trends `r` asks every source of that tab again (#320).
@@ -1867,11 +1872,6 @@ public struct FediqoRootView: View {
         // On somebody's page `r` asks their source again: who they are, and their newest posts.
         if DummyCommand.outermost(of: open) == .person, let person = walk.openedPerson {
             Task { await people.again(person, in: session) }
-            return true
-        }
-        // On a server tended `r` asks it again, from the top (#381).
-        if DummyCommand.outermost(of: open) == .people, let page = walk.openedTending {
-            Task { await people.tending.again(page, in: session) }
             return true
         }
         // On a list of people `r` asks the source for it again, from the top (#311).
@@ -2028,22 +2028,9 @@ public struct FediqoRootView: View {
     /// place's walk, come back from by leaving it. A line that is only words opens nothing.
     private func openNotice(_ notice: Notice) -> Bool {
         guard Self.noticesInFront(place: place, open: openLayers, held: noticesHeld) else { return false }
-        // A new report opens the server's reports, on it, where the reader may tend them (#381).
-        if let page = Self.tendingOpened(by: notice, in: session) {
-            guard setOutFromNotices(to: .server(page), for: notice, lighting: notice.report.map(TendingReportsSaid.rowID)) else {
-                return false
-            }
-            // The report it names, where the page does not hold it, is asked for and stands at the top.
-            if let id = notice.report { Task { await people.tending.bringIn(id, of: page, in: session) } }
-            // The one who signed up, found among those waiting by their name, and lit (#382).
-            if page.tab == .people, let who = notice.people.first {
-                Task {
-                    let lit = await people.tending.people.lightSignUp(who, on: page, in: session)
-                    if let lit, walk.openedTending == page { selectedItemID = lit }
-                }
-            }
-            return true
-        }
+        // A new report or sign-up opens the Admin place at its host and tab, where the reader
+        // may tend it (#381, #382, #416) — or, its standing not known yet, once it is.
+        if let landing = admin.noticePressed(notice, in: session) { return landAdmin(landing, from: notice) }
         switch NoticeWords.opens(notice) {
         case .nothing:
             return false
@@ -2055,21 +2042,108 @@ public struct FediqoRootView: View {
         }
     }
 
-    /// The page of reports a notice of a new report opens (#381): where the reader's standing at
-    /// its source allows reports and the sign-in holds what reads them. Nothing otherwise, and
-    /// the line opens what it always did.
+    /// The host's page a notice of a new report opens (#381) — or of a sign-up (#382) — in the
+    /// Admin place (#416): where the reader's standing at its source allows that tab and the
+    /// sign-in holds what reads it. Nothing otherwise, and the line opens what it always did.
     static func tendingOpened(by notice: Notice, in session: ShellSession) -> Tending? {
-        // A new report opens the reports (#381); a new sign-up, those waiting (#382).
-        let tab: TendingTab? = switch notice.kind {
-        case .server("admin.report"): .reports
-        case .server("admin.sign_up"): .people
-        default: nil
-        }
-        guard let tab, ShellTending.tabs(at: notice.source.host, in: session).contains(tab),
+        guard let tab = AdminFront.tab(of: notice), ShellTending.tabs(at: notice.source.host, in: session).contains(tab),
               case .open(var page) = ShellTending.entry(at: notice.source.host, in: session)
         else { return nil }
         page.tab = tab
         return page
+    }
+
+    // MARK: - Admin — #416
+
+    /// The Admin place put where `landing` says (`AdminFront.land`): from a source's "Tend"
+    /// item, or from a notice — whose report is brought in, or whose sign-up is found among those
+    /// waiting and lit. A notice kept for its standing is taken and opens nothing yet.
+    private func landAdmin(_ landing: AdminFront.Landing, from notice: Notice?) -> Bool {
+        guard landing != .waiting else { return true }
+        guard availability.allows(.admin) else { return false }
+        if let left = admin.land(landing, from: notice, in: session) { people.tending.letGo(at: left.host) }
+        place = .admin
+        guard case .page(let page) = landing, let notice else { return true }
+        // The report it names, where the page does not hold it, is asked for and stands at the top.
+        if let id = notice.report { Task { await people.tending.bringIn(id, of: page, in: session) } }
+        // The one who signed up, found among those waiting by their name, and lit (#382).
+        if page.tab == .people, let who = notice.people.first {
+            Task {
+                let lit = await people.tending.people.lightSignUp(who, on: page, in: session)
+                admin.lit(lit, on: page)
+            }
+        }
+        return true
+    }
+
+    /// The hosts changed (`AdminFront.settled`): a page whose host went lets go of what it held,
+    /// and a notice waiting on its host's standing lands, now that it is known.
+    private func adminSettled() {
+        let settled = admin.settled(in: session)
+        if let left = settled.left { people.tending.letGo(at: left.host) }
+        if let (landing, notice) = settled.opens { _ = landAdmin(landing, from: notice) }
+    }
+
+    /// The rows `j` and `k` walk in the Admin place.
+    private var adminRows: [String] { admin.rows(in: session, tending: people.tending) }
+
+    /// A key on the Admin place, with nothing drawn over it.
+    private func adminKeyed(_ act: (inout AdminFront) -> Bool) -> Bool {
+        guard place == .admin, openLayers.isDisjoint(with: [.viewer, .shortcuts]) else { return false }
+        return act(&admin)
+    }
+
+    /// `j` and `k`: on Notices its lines, in Admin its rows, and elsewhere the list in front.
+    private func movePost(by step: Int) -> Bool {
+        switch place {
+        case .notices: return moveInNotices(by: step)
+        case .admin:
+            let rows = adminRows
+            return adminKeyed { $0.move(by: step, among: rows) }
+        default: return moveInList(by: step)
+        }
+    }
+
+    /// `Return` in Admin (`AdminFront.enter`): a host opened, or the account's person set out to.
+    private func openAdminRow() -> Bool {
+        guard place == .admin, openLayers.isDisjoint(with: [.viewer, .shortcuts]) else { return false }
+        switch admin.enter(in: session, tending: people.tending) {
+        case .person(let person)?: personSetOut(person)
+        case .host?: break
+        case nil: return false
+        }
+        return true
+    }
+
+    /// Somebody a row of Admin names: their page, drawn in the timeline place, and leaving it
+    /// comes back to the row pressed (`PlaceErrand`).
+    private var personSetOut: (DummyPerson) -> Void { { setOut(to: .person($0)) } }
+
+    /// `q`, Escape and the page's Back: from a host's page to the list, letting go of what the
+    /// page held. Whether the page was in front.
+    private func leaveAdminPage() -> Bool {
+        guard place == .admin, let left = admin.back() else { return false }
+        people.tending.letGo(at: left.host)
+        return true
+    }
+
+    /// Escape in Admin (`AdminFront.dismiss`): a page left lets go of what it held.
+    private func dismissInAdmin() -> Bool {
+        guard let dismissed = admin.dismiss(in: session, tending: people.tending) else { return false }
+        if case .left(let left) = dismissed { people.tending.letGo(at: left.host) }
+        return true
+    }
+
+    /// Whether `r` asks anything in Admin (`AdminFront.reloads`).
+    private var adminCanReload: Bool { !admin.reloads(in: session, tending: people.tending).isEmpty }
+
+    /// `r` in Admin: each page `AdminFront.reloads` names, asked again from the top.
+    private func reloadAdmin() -> Bool {
+        guard openLayers.isDisjoint(with: [.viewer, .shortcuts]) else { return false }
+        let tending = people.tending
+        let pages = admin.reloads(in: session, tending: tending)
+        for page in pages { Task { await tending.again(page, in: session) } }
+        return !pages.isEmpty
     }
 
     /// A face or a name on a line, pressed: that person, as a face on a post's row opens them.
@@ -2584,10 +2658,10 @@ public struct FediqoRootView: View {
         setOut(to: .person(me))
     }
 
-    /// A source's "Tend" item (#380): the page of tending it, set out to as the reader's own page is.
+    /// A source's "Tend" item (#380): the Admin place, on that host's page (#416).
     private var tendOpener: ((Tending) -> Void)? {
-        guard availability.allows(.timeline) else { return nil }
-        return { page in setOut(to: .server(page)) }
+        guard availability.allows(.admin) else { return nil }
+        return { page in _ = landAdmin(.page(page), from: nil) }
     }
 
     /// "Its directory of people" on a source's page (#315): the directory, set out to as the
@@ -2662,10 +2736,6 @@ public struct FediqoRootView: View {
         // The page read out of a post goes with its step, and the page under it — never torn
         // down — is simply in front again (#169).
         if case .link = left.step { linkReader.close() }
-        // What a server tended holds goes with its last page (#380): asked afresh when it is opened again.
-        if case .server(let page) = left.step, !walk.steps.contains(where: { if case .server(let other) = $0 { other.host == page.host } else { false } }) {
-            people.tending.letGo(at: page.host)
-        }
         // A tag's ask goes with its page (#124).
         if case .tag = left.step { session.reload.endTag() }
         // What a list of the hashtags followed was told goes with its step (#318).
@@ -2886,6 +2956,7 @@ public struct FediqoRootView: View {
         case .usage: session.rotateUsageTab(by: step)
         case .preferences: session.rotatePreferencesTab(by: step)
         case .account: session.rotateAccountTab(by: step)
+        case .admin: adminKeyed { $0.rotate(by: step, covered: false, tending: people.tending, in: session) }
         default: false
         }
     }
@@ -2920,10 +2991,6 @@ public struct FediqoRootView: View {
         case .tag(let tag):
             return people.tags.rotate(
                 tag, by: step, covered: !Self.pageInFront(.tag, open: openLayers), lamp: &selectedItemID, in: session
-            )
-        case .tending:
-            return people.tending.rotate(
-                &walk, by: step, covered: !Self.pageInFront(.people, open: openLayers), lamp: &selectedItemID, in: session
             )
         case .found(let at, let which):
             let layer = ShellStep.found(at, which).layer
@@ -3149,6 +3216,12 @@ public struct FediqoRootView: View {
                 tooOld: noticeTooOld,
                 jumpToTop: noticeJump
             )
+        case .admin:
+            AdminPane(
+                session: session, tending: people.tending, front: $admin, canReload: adminCanReload,
+                onReload: { _ = reloadAdmin() }, onOpenPerson: personSetOut,
+                onOpenServerPage: { url, host in _ = linkReader.open(url, from: host) }, onBack: { _ = leaveAdminPage() }
+            )
         case .account: AccountPane(session: session, onOwnPage: ownPageOpener, onTend: tendOpener, announced: people.announcements)
         case .usage: UsagePane()
         case .preferences: PreferencesPane()
@@ -3194,8 +3267,6 @@ public struct FediqoRootView: View {
                 onOpenRisingRow: { _ = openRisingRow($0) },
                 onOpenRising: { _ = openRising($0) },
                 onOpenSharedPage: { _ = linkReader.open($0.link.link.url, from: $0.sources.first) },
-                onOpenServerPage: { url, host in _ = linkReader.open(url, from: host) },
-                onTurnTending: { tab in _ = people.tending.turn(&walk, to: tab, lamp: &selectedItemID, in: session) },
                 onOpenFound: { _ = openFound($0) },
                 onTurnFound: foundTurned,
                 onFollowed: { _ = followedPressed($0) },

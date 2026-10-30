@@ -15,7 +15,8 @@ struct AccountPane: View {
     /// is drawn in the timeline place, and leaving it comes back here. Nothing where this page
     /// is drawn with nobody to answer, and then no row offers it.
     var onOwnPage: ((DummyPerson) -> Void)?
-    /// Opens the page of tending a server the reader answers for (#380), answered by the root.
+    /// Opens the Admin place at the host's page of a server the reader answers for (#380, #416),
+    /// answered by the root. Nothing where Admin cannot be entered, and then no row offers it.
     var onTend: ((Tending) -> Void)?
     /// What each source announces to the reader there (#321), as last asked by the pages the
     /// root holds: what lights a row's mark. Nothing where this page is drawn with none. **Read,
@@ -673,8 +674,9 @@ struct AccountPane: View {
         )
     }
 
-    /// A row's "Tend" item (#380): the page of tending its server, or — where the sign-in lacks
-    /// tending's words — the question that asks for them, alone. Nothing without the standing.
+    /// A row's "Tend" item (#380): its server's page in the Admin place (#416), or — where the
+    /// sign-in lacks tending's words — the question that asks for them, alone. Nothing without
+    /// the standing.
     func tend(_ row: SourceRow) {
         switch ShellTending.entry(at: row.source.host, in: session) {
         case .open(let page): onTend?(page)

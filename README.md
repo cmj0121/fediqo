@@ -422,9 +422,9 @@ Your profile's part also covers the note you keep on somebody's page, and dismis
 covers choosing whose notices a source holds back. Where the sign-in lacks the part, each asks for
 it, as above.
 
-Tending a server is the larger thing, and is asked for on its own and only from one place: Tend
-on a source's row on Account, which is there only where your account's role on that server lets
-it tend — see Tending a server, below. The press asks first, and says that the server's page asks
+Tending a server is the larger thing, and is asked for on its own and only from that server: Tend
+on a source's row on Account, or its row on Admin, which are there only where your account's role
+on that server lets it tend — see Tending a server, below. The press asks first, and says that the server's page asks
 for what the sign-in already has and for tending the server, as far as your role there allows.
 Nothing else ever asks for it, and no other part brings it. Nobody is signed out; close the
 server's page, or say no on it, and the sign-in you had goes on as it was. A sign-in that only
@@ -443,7 +443,7 @@ What a sign-in asks its server for, in the server's own words:
 | who you follow | `read:follows`                                   | only after you press for following              |
 | following  | `write:follows`                                      | with who you follow, and only where the sign-in writes |
 | your profile | `write:accounts`                                   | only after you press for something it covers    |
-| tending    | `admin:read admin:write`                             | only on its own, from Tend, where your role allows |
+| tending    | `admin:read admin:write`                             | on its own, from Tend or Admin, where your role allows |
 
 `write:notifications` covers choosing whose notices a source holds back as well as dismissing,
 and `write:accounts` covers your note on somebody as well as your profile.
@@ -844,7 +844,7 @@ what it counts to a pointer and to VoiceOver. What a kind of source does not hav
 | what a search found at a source | People · Hashtags, the one pressed in front           |
 | the hashtags you follow         | none                                                  |
 | the posts that share a link     | none                                                  |
-| a server you tend               | Reports · People · Servers · Server, as your role allows |
+| a server you tend               | Reports · People · Federation · Blocks · Dashboard · Trends · Rules, as your role allows |
 
 A hashtag's head counts the posts under it that this device has read lately — at least so
 many, marked + — and marks each source that says you follow it; About says how it stands at
@@ -970,8 +970,8 @@ bookmarked from the notice itself, and what is done to it on one shows on the ot
 Pressing a face opens that person, and "and 3 others" opens who they are. What can be done to a
 follower is in their row's three dots, as on their page; declining a request asks first. What
 has nothing behind it — the server's word, a relationship the server cut, a year looked back on —
-stays one line, and a new sign-up or report on a server you tend opens that server's page, on its
-tab — see Tending a server, below. Where the source gathers many of one kind about one post, that
+stays one line, and a new sign-up or report on a server you tend opens that server's page on
+Admin, on its tab — see Tending a server, below. Where the source gathers many of one kind about one post, that
 is one notice; Fediqo gathers nothing of its own. A kind this version does not know is kept and
 said to be unknown.
 
@@ -1057,22 +1057,30 @@ Move nearby.
 
 ### Tending a server
 
-Where your account at a Mastodon source holds a role there — an administrator's, a moderator's —
-the source's row on Account has Tend and the host behind its three dots. Somebody without such a
-role sees no trace of any of this. Where the sign-in was not asked for tending, the item wears
-the mark signing in wears, and a press asks for it alone — see Signing in to Mastodon, above.
+Tending is a Mac's and an iPad's; an iPhone has none of it. There Admin is a place of its own,
+after Notices, always on the rail: dim, and closed, until your account at a Mastodon source holds
+a role there — an administrator's, a moderator's — and then open, and on a narrow screen a tab.
+Without such a role nothing else of this shows. The source's row on Account also has Tend and
+the host behind its three dots, which opens Admin at that server. Where the sign-in was not asked
+for tending, the item and the server's row on Admin wear the mark signing in wears, and a press
+asks for it alone — see Signing in to Mastodon, above.
 
-Tend opens a page of its own, as somebody's page does, with a tab for each thing your role there
-lets you do and no tab for the rest. Its head counts the open reports and who waits to join, as
-far as they were read, and each count opens its tab. A notice of a new report or a new sign-up
-opens the page on that tab.
+Admin opens on the servers you answer for, even when there is one: each row its host, a mark for
+each tab your role there allows, and its open reports and who waits to join, each a press that
+opens its tab. A server opens its page over the whole place, and Back gives the list again. The
+page has a tab for each thing your role there lets you do and no tab for the rest. Its head counts
+the open reports and who waits to join, as far as they were read, and each count opens its tab. A
+notice of a new report or a new sign-up opens the page on that tab.
 
-| Tab     | What it reads                                         | What can be done                       |
-| ------- | ----------------------------------------------------- | -------------------------------------- |
-| Reports | open first: who reported whom, why, the posts named   | take on, hand back, close, open again  |
-| People  | who waits to join, with what they wrote; any account  | let in, turn away; act on an account   |
-| Servers | servers refused and allowed, mail domains, addresses  | add, change, take off                  |
-| Server  | how it is doing over 7, 30 or 90 days; what may rise; rules | let rise, keep back              |
+| Tab        | What it reads                                              | What can be done                      |
+| ---------- | ---------------------------------------------------------- | ------------------------------------- |
+| Reports    | open first: who reported whom, why, the posts named        | take on, hand back, close, open again |
+| People     | who waits to join, with what they wrote; any account       | let in, turn away; act on an account  |
+| Federation | servers refused and allowed                                | add, change, take off                 |
+| Blocks     | mail domains, addresses refused however written, addresses and ranges | add, try an address, take off |
+| Dashboard  | how it is doing over 7, 30 or 90 days; who stays; what it holds | choose the span                  |
+| Trends     | what waits to rise; the hashtags it knows; where its links come from | let rise, keep back       |
+| Rules      | its rules                                                  | change them on the server's page      |
 
 A report's posts are drawn as posts' rows, and its three dots offer acting on the account it
 names, which goes on to what People offers. A note on a report is written on the server's own
@@ -1083,9 +1091,25 @@ server see: when they signed up, their mail, where they last signed in from. Act
 account is a sheet: warn, mark sensitive, freeze, limit or suspend, with the words the server
 sends them and whether it mails them; each but a warning is undone from the same three dots. A
 refused server is limited or suspended, its pictures or reports refused, and why is said to all
-or kept among staff; an address or a range is refused for sign-ups or for all access. How the
-server is doing is the server's own numbers — who joined, who was active, what was reported —
-as it counted them at the time it says. Rules are read here, and changed on the server's page.
+or kept among staff; an address or a range is refused for sign-ups or for all access.
+
+An address refused however written is refused in every spelling the server counts as the same —
+dots, a tag after a plus, capitals — and the server keeps only a fingerprint of it, so its row
+reads "A refused address" and the fingerprint's first letters, and no more. The sheet that adds
+one has Try, which says whether the server would refuse the address as written, and adds nothing.
+
+How the server is doing is the server's own numbers — who joined, who was active, what was
+reported — as it counted them at the time it says. Below them, who stays is read by the month
+people joined, since the server counts by day or by month and never by week, a year back at most:
+how many of each month's joiners were still seen in each month after, and their share. What it
+holds is read by language, by server, and by software and its version. A part the server does not
+give says so and is never read as none, and a part that cannot be read says so on its own.
+
+Beside what waits to rise, Trends lists every hashtag the server knows, saying whether it may
+rise, whether it may be used and whether it waits for review, and the sites its links come from,
+saying whether their links may rise, are kept back, or are not yet decided. Each row's three dots
+offer only what it is not, and a hashtag may also be let be used or kept from use; the row is the
+server's answer. Rules are read here, and changed on the server's page.
 
 The acts that cannot be undone, or cut the server off, are red and ask first, saying what will
 be so: turning away somebody who asks to join, suspending an account, suspending a server, and
@@ -1102,8 +1126,9 @@ list of keys itself, and replaying the landing.
 
 A phone's tab bar holds five places, so on a narrow screen Usage is not one of them: Preferences
 opens with a row that leads to it, and Usage, drawn under Preferences, opens with a row back.
-A key, or anything else that lands on Usage, lights Preferences and draws Usage there. The
-wide rail, and a Mac's folded list of places, keep all six.
+A key, or anything else that lands on Usage, lights Preferences and draws Usage there. An iPhone
+has no Admin, so its bar keeps those five; an iPad draws Admin as a tab where it can be entered.
+The wide rail, and a Mac's folded list of places, keep every place.
 
 A narrow screen names the one timeline it shows: its name, its rules in one line, and a dot for
 where it stands among yours. Press the name for the list of every timeline, where a new one is
