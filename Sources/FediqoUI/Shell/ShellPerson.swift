@@ -415,6 +415,12 @@ final class ShellPersonPages {
         session.personPages?.you.settingsChanged(at: host)
     }
 
+    /// Whether whoever would ask at `host` now is who something was asked as, under that count of
+    /// sign-ins: **by the count too**, since a reader not yet named is the same as any by name alone.
+    static func stillAsked(host: String, askedAs: AskedAs, under: Int, in session: ShellSession) -> Bool {
+        signIns(at: host, in: session) == under && Self.askedAs(at: host, in: session).isTheSame(as: askedAs)
+    }
+
     /// Every page of `host` let go, and its ask called off: its reader is no longer who they
     /// were given to. Whatever an ask already out brings, it brings to no page.
     private func letGo(at host: String) {

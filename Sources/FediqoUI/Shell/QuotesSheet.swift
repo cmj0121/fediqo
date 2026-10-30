@@ -30,13 +30,15 @@ struct QuoteHead: View {
 struct QuotePolicyMenu: View {
     @Binding var draft: PostDraft
     let host: String
+    /// What the source says a new post starts from, where this is a new post and it said (#437).
+    var set: QuotePolicy?
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let fixed = draft.quotePolicySent == .nobody && draft.audience != .everyone && draft.audience != .unlisted
         VStack(alignment: .leading, spacing: ShellSpace.hair) {
             Picker(selection: Binding(get: { fixed ? .nobody : draft.quotePolicy }, set: { draft.quotePolicy = $0 })) {
-                Text(QuoteWords.unsaid(host: host)).tag(QuotePolicy?.none)
+                Text(QuoteWords.unsaid(host: host, set: set)).tag(QuotePolicy?.none)
                 ForEach(QuotePolicy.allCases, id: \.self) { policy in
                     Text(QuoteWords.policy(policy)).tag(QuotePolicy?.some(policy))
                 }

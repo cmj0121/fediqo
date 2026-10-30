@@ -111,6 +111,7 @@
 "compose.quotePolicy.followers" = "Your followers";
 "compose.quotePolicy.nobody" = "Only you";
 "compose.quotePolicy.unsaid" = "As your account at %@ is set";
+"compose.quotePolicy.unsaid.set" = "As your account at %1$@ is set: %2$@";
 "compose.quotePolicy.private" = "Others cannot quote a post only your followers or the people it mentions can read.";
 "change.title" = "Change your post";
 "change.save" = "Save";
@@ -2185,6 +2186,14 @@
 "source.you.media.open" = "Not covered";
 "source.you.stopped" = "Tell %@ where you stopped in Home";
 "source.you.stopped.help" = "Off until you turn it on. While on, %@ is told the post you are reading in Home, and another reader of this account can start there.";
+"source.you.quotes" = "Who may quote a new post";
+"source.you.quotes.help" = "What %1$@ uses for a new post of yours, unless you choose otherwise as you write it. Changing it here changes it at %1$@; posts already written keep theirs.";
+"source.you.quotes.asking" = "Asking %@ who may quote your new posts…";
+"source.you.quotes.failed" = "Could not ask %@ who may quote your new posts.";
+"source.you.quotes.refused" = "%@ would not take that.";
+"source.you.quotes.forbidden" = "%@ refused this sign-in that change.";
+"source.you.quotes.missed" = "No answer came from %@; this is what it says now.";
+"source.you.quotes.partGone" = "%@ says this sign-in was not given that change.";
 "home.place.line" = "You are at a post here. %@ has you at another.";
 "home.place.here" = "Stay on this post";
 "home.place.there" = "Go to the post %@ has";

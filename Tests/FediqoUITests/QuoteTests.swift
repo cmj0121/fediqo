@@ -126,10 +126,8 @@ struct QuoteTests {
         #expect(LaterSource.form(posts[0])["quoted_status_id"] == "1" && LaterSource.form(posts[0])["quote_approval_policy"] == "followers")
         #expect(session.composeDraft.quoting == nil, "the next post starts without a quote")
 
-        // Who may quote it stays for the next post, as who may read it does; set back to the
-        // account's own, it sends nothing.
-        #expect(session.composeDraft.quotePolicy == .followers)
-        session.composeDraft.quotePolicy = nil
+        // Who may quote it goes with the post: the next starts from the account's own, and sends nothing.
+        #expect(session.composeDraft.quotePolicy == nil)
         session.composeDraft.text = "plain"
         #expect(session.send())
         await session.outbox.settled()

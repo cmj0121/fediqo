@@ -1402,8 +1402,8 @@ extension ShellSession {
             ),
             in: self
         )
-        // The cover, the files and the poll go with this post. Who it reaches, its language and
-        // whether it covers its media stay, which is where the next one starts.
+        // The cover, the files, the poll and who may quote it go with this post. Who it reaches,
+        // its language and whether it covers its media stay, which is where the next one starts.
         composeDraft.text = ""
         composeDraft.cover = ""
         composeDraft.media = []
@@ -1411,6 +1411,7 @@ extension ShellSession {
         composeDraft.poll = nil
         composeDraft.at = nil
         composeDraft.quoting = nil
+        composeDraft.quotePolicy = nil
         composePollRefused = nil
         return true
     }

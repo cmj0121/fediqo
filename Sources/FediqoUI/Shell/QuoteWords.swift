@@ -15,8 +15,10 @@ enum QuoteWords {
     }
 
     /// What the menu says where nothing was chosen: the account's own setting, and nothing sent.
-    static func unsaid(host: String, language: DummyLanguage? = nil) -> String {
-        String(format: L10n.t("compose.quotePolicy.unsaid", language: language), host)
+    /// `set` is that setting where the source said it, for a new post (#437).
+    static func unsaid(host: String, set: QuotePolicy? = nil, language: DummyLanguage? = nil) -> String {
+        guard let set else { return String(format: L10n.t("compose.quotePolicy.unsaid", language: language), host) }
+        return String(format: L10n.t("compose.quotePolicy.unsaid.set", language: language), host, policy(set, language: language))
     }
 
     /// The question before a quote drops what the draft carries (D3).

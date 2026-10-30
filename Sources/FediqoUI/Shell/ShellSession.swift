@@ -1124,7 +1124,12 @@ final class ShellSession {
     @ObservationIgnored var composeTouchedLanguage = false
     @ObservationIgnored var composeTouchedSensitive = false
     /// What each source said a new post starts from, asked once a run.
-    @ObservationIgnored private var composeDefaults: [String: PostingDefaults] = [:]
+    /// Observed: the composer's menu names what the source said, and an answer may land under it.
+    private var composeDefaults: [String: PostingDefaults] = [:]
+    /// Which sign-in each answer was asked through, by the count of sign-ins at the host: what
+    /// was said of one account is not said of another there. **Read as the menu is drawn**, so
+    /// it is a count, and no token is read for it.
+    @ObservationIgnored private var composeDefaultsThrough: [String: Int] = [:]
     @ObservationIgnored private var composeDefaultsAsked: Set<String> = []
     /// How many times each source's word on a new post was let go: what tells an answer out
     /// before that from one still wanted.
@@ -1240,6 +1245,11 @@ final class ShellSession {
     /// A dark network is asked again next time the composer opens.
     func loadComposeDefaults() async {
         guard let host = composeHost else { return }
+        let through = ShellPersonPages.signIns(at: host, in: self)
+        if composeDefaultsAsked.contains(host), composeDefaultsThrough[host] != through {
+            postingDefaultsChanged(at: host)
+        }
+        composeDefaultsThrough[host] = through
         if composeDefaultsAsked.contains(host) {
             adoptComposeDefaults(for: host)
             return
@@ -1271,6 +1281,15 @@ final class ShellSession {
         composeDefaults[host] = nil
         composeDefaultsAsked.remove(host)
         composeDefaultsLetGo[host, default: 0] += 1
+    }
+
+    /// Who the source at `host` says may quote a new post, as the composer's menu names it: only
+    /// where it said so to whoever is signed in there now. Never copied into a draft (#437).
+    func composeQuoteSet(host: String) -> QuotePolicy? {
+        guard mastodon.signedInHosts.contains(host),
+              composeDefaultsThrough[host] == ShellPersonPages.signIns(at: host, in: self)
+        else { return nil }
+        return composeDefaults[host]?.quotePolicy
     }
 
     /// Takes the cached defaults for `host` into the fields the person has not touched.

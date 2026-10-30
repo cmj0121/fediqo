@@ -111,6 +111,7 @@
 "compose.quotePolicy.followers" = "你的跟隨者";
 "compose.quotePolicy.nobody" = "只有你";
 "compose.quotePolicy.unsaid" = "依你在 %@ 的帳號設定";
+"compose.quotePolicy.unsaid.set" = "依你在 %1$@ 的帳號設定：%2$@";
 "compose.quotePolicy.private" = "只有跟隨者或被提及的人能讀的貼文，別人不能引用。";
 "change.title" = "修改你的貼文";
 "change.save" = "儲存";
@@ -2129,6 +2130,14 @@
 "source.you.media.open" = "不蓋住";
 "source.you.stopped" = "告訴 %@ 你在 Home 讀到哪裡";
 "source.you.stopped.help" = "打開之前不會告訴它。打開之後，%@ 會知道你正在 Home 讀的那一則，同一個帳號的另一個閱讀器可以從那裡接著讀。";
+"source.you.quotes" = "新貼文誰可以引用";
+"source.you.quotes.help" = "除非你在寫的時候另外選，這是 %1$@ 對你的新貼文的設定。在這裡更改就是在 %1$@ 更改；已經寫好的貼文維持原樣。";
+"source.you.quotes.asking" = "正在問 %@ 誰可以引用你的新貼文…";
+"source.you.quotes.failed" = "無法向 %@ 問誰可以引用你的新貼文。";
+"source.you.quotes.refused" = "%@ 不接受這項更改。";
+"source.you.quotes.forbidden" = "%@ 不讓這個登入做這項更改。";
+"source.you.quotes.missed" = "%@ 沒有回覆；這裡顯示的是它現在的說法。";
+"source.you.quotes.partGone" = "%@ 表示這個登入沒有獲得這項更改的權限。";
 "home.place.line" = "你在這一則。%@ 把你記在另一則。";
 "home.place.here" = "留在這一則";
 "home.place.there" = "到 %@ 記的那一則";
