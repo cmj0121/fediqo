@@ -11,7 +11,8 @@ import Foundation
 //
 // **No part beyond reading.** The years are read with `read:accounts`, which reading holds.
 // Collections want `read:collections` of any sign-in — one without it is refused — and are given
-// to anyone with no sign-in, so they are read unsigned. What a thread is gathering is read off the
+// to anyone with no sign-in, so they are read unsigned; a sign-in's own, and every change, are
+// `MastodonCollectionWrites`. What a thread is gathering is read off the
 // answer to its own read; the source's own address for it wants the whole of `read` and is never
 // asked.
 
@@ -158,6 +159,67 @@ public struct PersonCollection: Hashable, Sendable, Identifiable {
     public let words: String?
     /// How many people the source counts in it.
     public let count: Int
+    /// Whether it warns of what is in it, where the source said.
+    public let sensitive: Bool?
+    /// Whether it may be found by others, where the source said.
+    public let discoverable: Bool?
+    /// Who is in it as the asker may see: each by the id a removal or a taking out goes by.
+    public let items: [CollectionItem]
+
+    public init(
+        id: String, name: String, words: String?, count: Int, sensitive: Bool? = nil, discoverable: Bool? = nil,
+        items: [CollectionItem] = []
+    ) {
+        self.id = id
+        self.name = name
+        self.words = words
+        self.count = count
+        self.sensitive = sensitive
+        self.discoverable = discoverable
+        self.items = items
+    }
+}
+
+/// One place in a collection: whose, and how it stands.
+public struct CollectionItem: Hashable, Sendable, Identifiable {
+    /// The source's words for it. Any other is nothing, and is said as neither.
+    public enum State: String, Sendable {
+        /// Waits on the person's consent. Only the owner's signed read shows it.
+        case pending
+        case accepted
+        case rejected
+        case revoked
+    }
+
+    public let id: String
+    /// Whose, where the source says: never of one rejected or revoked.
+    public let accountID: String?
+    public let state: State?
+
+    public init(id: String, accountID: String?, state: State?) {
+        self.id = id
+        self.accountID = accountID
+        self.state = state
+    }
+}
+
+/// Somebody in a collection: the person, and their place in it.
+public struct CollectionMember: Hashable, Sendable, Identifiable {
+    public let item: CollectionItem
+    public let person: Person
+
+    public var id: String { item.id }
+}
+
+/// A collection read whole.
+public struct CollectionRead: Hashable, Sendable {
+    public let collection: PersonCollection
+    public let members: [CollectionMember]
+
+    public init(collection: PersonCollection, members: [CollectionMember]) {
+        self.collection = collection
+        self.members = members
+    }
 }
 
 /// The collections a Mastodon keeps of somebody's, and the people in one — read unsigned, which
@@ -174,22 +236,50 @@ public struct MastodonCollections: Sendable {
     public func of(_ accountID: String, source: Source) async throws -> [PersonCollection] {
         guard source.host == door.host, ListSubscription.isPathSegment(accountID) else { throw MastodonRequestError.invalidURL }
         let (body, _) = try await door.getAtAddress(path: "/api/v1/accounts/\(accountID)/collections")
-        guard let read = try? MastodonJSON.decoder.decode(CollectionsDTO.self, from: body) else { throw MastodonPeopleError.unreadable }
-        return (read.collections ?? []).compactMap { $0.value?.collection }
+        guard let read = CollectionWire.list(body) else { throw MastodonPeopleError.unreadable }
+        return read
     }
 
     /// The people in one, in its order — not who put it together, unless they put themselves in.
     public func people(in collectionID: String, source: Source) async throws -> [Person] {
         guard source.host == door.host, ListSubscription.isPathSegment(collectionID) else { throw MastodonRequestError.invalidURL }
         let (body, _) = try await door.getAtAddress(path: "/api/v1/collections/\(collectionID)")
-        guard let read = try? MastodonJSON.decoder.decode(CollectionDTO.self, from: body) else { throw MastodonPeopleError.unreadable }
+        guard let read = CollectionWire.whole(body, source: source) else { throw MastodonPeopleError.unreadable }
+        return read.members.map(\.person)
+    }
+}
+
+/// What a source's answers about collections are read by, signed or not.
+enum CollectionWire {
+    static func list(_ body: Data) -> [PersonCollection]? {
+        (try? MastodonJSON.decoder.decode(CollectionsDTO.self, from: body)).map { ($0.collections ?? []).compactMap { $0.value?.collection } }
+    }
+
+    static func one(_ body: Data) -> PersonCollection? {
+        (try? MastodonJSON.decoder.decode(CollectionDTO.self, from: body))?.collection.collection
+    }
+
+    /// The people in one, in its order — not who put it together, unless they put themselves in.
+    static func whole(_ body: Data, source: Source) -> CollectionRead? {
+        guard let read = try? MastodonJSON.decoder.decode(CollectionDTO.self, from: body), let collection = read.collection.collection else {
+            return nil
+        }
         let accounts = Dictionary(
             (read.accounts ?? []).compactMap { $0.value }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }
         )
-        return (read.collection.items ?? []).compactMap { item in
-            item.accountId.flatMap { accounts[$0] }?.asPerson(source: source)
-        }
+        return CollectionRead(collection: collection, members: collection.items.compactMap { item in
+            guard let person = item.accountID.flatMap({ accounts[$0] })?.asPerson(source: source) else { return nil }
+            return CollectionMember(item: item, person: person)
+        })
     }
+
+    static func item(_ body: Data) -> CollectionItem? {
+        (try? MastodonJSON.decoder.decode(ItemDTO.self, from: body))?.collectionItem.item
+    }
+}
+
+private struct ItemDTO: Decodable {
+    let collectionItem: CollectionDTO.Item
 }
 
 private struct CollectionsDTO: Decodable {
@@ -198,7 +288,17 @@ private struct CollectionsDTO: Decodable {
 
 private struct CollectionDTO: Decodable {
     struct Item: Decodable {
+        let id: String?
         let accountId: String?
+        let state: String?
+
+        var item: CollectionItem? {
+            guard let id, ListSubscription.isPathSegment(id) else { return nil }
+            return CollectionItem(
+                id: id, accountID: accountId.flatMap { ListSubscription.isPathSegment($0) ? $0 : nil },
+                state: state.flatMap(CollectionItem.State.init(rawValue:))
+            )
+        }
     }
 
     struct Body: Decodable {
@@ -206,13 +306,16 @@ private struct CollectionDTO: Decodable {
         let name: String
         let description: String?
         let itemCount: Int?
-        let items: [Item]?
+        let sensitive: Bool?
+        let discoverable: Bool?
+        let items: [StatusDTO.Lenient<Item>]?
 
         var collection: PersonCollection? {
             guard ListSubscription.isPathSegment(id) else { return nil }
             return PersonCollection(
                 id: id, name: LineText.oneLine(name), words: description.map(HTMLText.plain).flatMap { $0.isEmpty ? nil : $0 },
-                count: max(0, itemCount ?? items?.count ?? 0)
+                count: max(0, itemCount ?? items?.count ?? 0), sensitive: sensitive, discoverable: discoverable,
+                items: (items ?? []).compactMap { $0.value?.item }
             )
         }
     }
