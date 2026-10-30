@@ -19,6 +19,14 @@ import Foundation
 // whole, as a change is. How large a picture may be is the host's word where it states one
 // (`configuration.media_attachments.image_size_limit`), and one over it is never sent.
 //
+// **What a source does not say is nothing, and draws no row** (#436): the descriptions of the
+// two pictures, the sites that may credit the account, whether it is automated, whether its posts
+// are indexed, and how new posts are covered. Asked of a real 4.6.6: one `attribution_domains[]`
+// with nothing in it empties the sites, as a form and as several parts, and the same name without
+// its brackets changes nothing; a description outlives the picture it describes, through a new
+// picture and through a removal; the host takes up to a hundred sites, though its documents say
+// ten. `source.spoiler_field` is 5.0's and is read from its documents alone, not from a real one.
+//
 // **Nothing here writes anywhere on this device**: what is read lands in what it returns.
 
 /// The reader's own account as its owner sees it: what a change starts from.
@@ -57,10 +65,28 @@ public struct OwnAccount: Sendable, Hashable {
     public var picture: URL?
     /// Where the account's header is; as `picture`.
     public var header: URL?
+    /// The words for those who cannot see the picture, as the owner wrote them; empty where
+    /// none are written. Nothing where the source did not say.
+    public var pictureDescription: String?
+    /// The words for those who cannot see the header; as `pictureDescription`.
+    public var headerDescription: String?
+    /// The sites that may credit the account, as the source keeps them. Nothing where the
+    /// source did not say; none where it holds none.
+    public var sites: [String]?
+    /// Whether the account says it is automated. Nothing where the source did not say.
+    public var automated: Bool?
+    /// Whether the account's public posts may be indexed. Nothing where the source did not say.
+    public var indexed: Bool?
+    /// Whether what a new post carries is covered by default. Nothing where the source did not say.
+    public var coversMedia: Bool?
+    /// Whether a new post carries a content warning by default. Nothing where the source did not say.
+    public var coversPosts: Bool?
 
     public init(
         name: String = "", words: String = "", fields: [Field] = [], followWithoutAsking: Bool? = nil,
-        findable: Bool? = nil, listsShown: Bool? = nil, picture: URL? = nil, header: URL? = nil
+        findable: Bool? = nil, listsShown: Bool? = nil, picture: URL? = nil, header: URL? = nil,
+        pictureDescription: String? = nil, headerDescription: String? = nil, sites: [String]? = nil,
+        automated: Bool? = nil, indexed: Bool? = nil, coversMedia: Bool? = nil, coversPosts: Bool? = nil
     ) {
         self.name = name
         self.words = words
@@ -70,12 +96,21 @@ public struct OwnAccount: Sendable, Hashable {
         self.listsShown = listsShown
         self.picture = picture
         self.header = header
+        self.pictureDescription = pictureDescription
+        self.headerDescription = headerDescription
+        self.sites = sites
+        self.automated = automated
+        self.indexed = indexed
+        self.coversMedia = coversMedia
+        self.coversPosts = coversPosts
     }
+
 }
 
 /// One thing of an own account a change sends and a refusal may name.
 public enum OwnRow: String, Sendable, CaseIterable {
     case name, words, fields, followWithoutAsking, findable, listsShown, picture, header
+    case pictureDescription, headerDescription, sites, automated, indexed, coversMedia, coversPosts
 }
 
 /// How long a source says each thing of an own account may be, and how many fields it may have.
@@ -89,10 +124,14 @@ public struct OwnLimits: Sendable, Hashable {
     public var fieldValue: Int?
     /// How many bytes a picture may be: what the host says of any picture it takes.
     public var picture: Int?
+    /// How long the words for those who cannot see the picture may be.
+    public var pictureDescription: Int?
+    /// How long the words for those who cannot see the header may be.
+    public var headerDescription: Int?
 
     public init(
         name: Int? = nil, words: Int? = nil, fields: Int? = nil, fieldName: Int? = nil, fieldValue: Int? = nil,
-        picture: Int? = nil
+        picture: Int? = nil, pictureDescription: Int? = nil, headerDescription: Int? = nil
     ) {
         self.name = name
         self.words = words
@@ -100,6 +139,8 @@ public struct OwnLimits: Sendable, Hashable {
         self.fieldName = fieldName
         self.fieldValue = fieldValue
         self.picture = picture
+        self.pictureDescription = pictureDescription
+        self.headerDescription = headerDescription
     }
 
     public static let none = OwnLimits()
@@ -212,6 +253,12 @@ public struct MastodonOwnAccount: Sendable {
     static let refusalLength = 16_384
     /// How long the source's sentence, and each of its words about a row, is kept.
     static let sentenceLength = 200
+    /// How many sites a source's answer is read for: what a real 4.6.6 holds at most.
+    static let sitesRead = 100
+    /// How long one site may be: the longest name a domain has.
+    static let siteLength = 253
+    /// How much of a description is read: what the longest a Mastodon takes of a picture's is.
+    static let descriptionLength = 1_500
 
     /// The account as its owner sees it now.
     public func read() async throws -> OwnAccount {
@@ -231,6 +278,9 @@ public struct MastodonOwnAccount: Sendable {
     /// sign-in that holds the account part, `.locked` for one to a sign-in that does not; and
     /// what the door threw otherwise.
     ///
+    /// `again` is sent as well, changed or not: rows of an earlier change whose answer was lost,
+    /// which the source may hold either way.
+    ///
     /// **With pictures**, the rows and every chosen picture go as one PATCH of several parts,
     /// and then each removal as a DELETE of its own, in `OwnPicture`'s order; the answer is the
     /// source's word after the last that was taken. **A picture over its limit is not sent**,
@@ -242,9 +292,9 @@ public struct MastodonOwnAccount: Sendable {
     /// thrown as it is.
     public func change(
         from before: OwnAccount, to after: OwnAccount, pictures: [OwnPicture: OwnPictureChange] = [:],
-        limit: Int? = nil
+        limit: Int? = nil, again: Set<OwnRow> = []
     ) async throws -> OwnAnswer? {
-        let form = Self.form(from: before, to: after)
+        let form = Self.form(from: before, to: after, again: again)
         let chosen = OwnPicture.allCases.compactMap { which -> MultipartPart? in
             guard case .chosen(let data, let type, let name) = pictures[which] else { return nil }
             return .file(which.said, named: name, type: type, data)
@@ -296,13 +346,36 @@ public struct MastodonOwnAccount: Sendable {
         return try Self.answer(from: body, host: door.token.host)
     }
 
-    /// The form that changes `before` into `after`: each thing that differs, in `OwnRow`'s
-    /// order. A switch the change leaves unsaid is not sent.
-    static func form(from before: OwnAccount, to after: OwnAccount) -> [(String, String)] {
+    /// The rows that differ from `before` to `after`. A row the change leaves unsaid is not one.
+    public static func rows(from before: OwnAccount, to after: OwnAccount) -> Set<OwnRow> {
+        var rows = Set<OwnRow>()
+        func differs<Value: Equatable>(_ row: OwnRow, _ now: Value?, _ was: Value?) {
+            if let now, now != was { rows.insert(row) }
+        }
+        differs(.name, after.name, before.name)
+        differs(.words, after.words, before.words)
+        differs(.fields, after.fields.map(\.pair), before.fields.map(\.pair))
+        differs(.followWithoutAsking, after.followWithoutAsking, before.followWithoutAsking)
+        differs(.findable, after.findable, before.findable)
+        differs(.listsShown, after.listsShown, before.listsShown)
+        differs(.pictureDescription, after.pictureDescription, before.pictureDescription)
+        differs(.headerDescription, after.headerDescription, before.headerDescription)
+        differs(.sites, after.sites, before.sites)
+        differs(.automated, after.automated, before.automated)
+        differs(.indexed, after.indexed, before.indexed)
+        differs(.coversMedia, after.coversMedia, before.coversMedia)
+        differs(.coversPosts, after.coversPosts, before.coversPosts)
+        return rows
+    }
+
+    /// The form that changes `before` into `after`: each thing that differs, and each of `again`
+    /// whether it differs or not, in `OwnRow`'s order. A switch the change leaves unsaid is not sent.
+    static func form(from before: OwnAccount, to after: OwnAccount, again: Set<OwnRow> = []) -> [(String, String)] {
+        let sent = rows(from: before, to: after).union(again)
         var form: [(String, String)] = []
-        if after.name != before.name { form.append(("display_name", after.name)) }
-        if after.words != before.words { form.append(("note", after.words)) }
-        if after.fields.map(\.pair) != before.fields.map(\.pair) {
+        if sent.contains(.name) { form.append(("display_name", after.name)) }
+        if sent.contains(.words) { form.append(("note", after.words)) }
+        if sent.contains(.fields) {
             // One field with nothing in it is no field: the set the source keeps is emptied.
             let fields = after.fields.isEmpty ? [OwnAccount.Field(name: "", value: "")] : after.fields
             for (place, field) in fields.enumerated() {
@@ -311,12 +384,30 @@ public struct MastodonOwnAccount: Sendable {
             }
         }
         // The source's words for the two turned round are said the other way.
-        for (key, now, was) in [
-            ("locked", after.followWithoutAsking.map(!), before.followWithoutAsking.map(!)),
-            ("discoverable", after.findable, before.findable),
-            ("hide_collections", after.listsShown.map(!), before.listsShown.map(!)),
+        for (row, key, now) in [
+            (OwnRow.followWithoutAsking, "locked", after.followWithoutAsking.map(!)),
+            (.findable, "discoverable", after.findable),
+            (.listsShown, "hide_collections", after.listsShown.map(!)),
         ] {
-            if let now, now != was { form.append((key, now ? "true" : "false")) }
+            if sent.contains(row), let now { form.append((key, now ? "true" : "false")) }
+        }
+        for (row, key, now) in [
+            (OwnRow.pictureDescription, "avatar_description", after.pictureDescription),
+            (.headerDescription, "header_description", after.headerDescription),
+        ] {
+            if sent.contains(row), let now { form.append((key, now)) }
+        }
+        if sent.contains(.sites), let sites = after.sites {
+            // One site with nothing in it is no site: the set the source keeps is emptied.
+            form += (sites.isEmpty ? [""] : sites).map { ("attribution_domains[]", $0) }
+        }
+        for (row, key, now) in [
+            (OwnRow.automated, "bot", after.automated),
+            (.indexed, "indexable", after.indexed),
+            (.coversMedia, "source[sensitive]", after.coversMedia),
+            (.coversPosts, "source[spoiler_field]", after.coversPosts),
+        ] {
+            if sent.contains(row), let now { form.append((key, now ? "true" : "false")) }
         }
         return form
     }
@@ -345,6 +436,10 @@ public struct MastodonOwnAccount: Sendable {
             let fields: L<[L<Field>]>?
             let discoverable: L<Bool>?
             let hideCollections: L<Bool>?
+            let attributionDomains: L<[L<String>]>?
+            let indexable: L<Bool>?
+            let sensitive: L<Bool>?
+            let spoilerField: L<Bool>?
         }
         struct Wire: Decodable, Sendable {
             let displayName: L<String>?
@@ -353,6 +448,10 @@ public struct MastodonOwnAccount: Sendable {
             let hideCollections: L<Bool>?
             let avatar: L<String>?
             let header: L<String>?
+            let avatarDescription: L<String>?
+            let headerDescription: L<String>?
+            let bot: L<Bool>?
+            let indexable: L<Bool>?
             let source: Source
         }
         guard let wire = try? MastodonJSON.decoder.decode(Wire.self, from: body) else {
@@ -371,8 +470,34 @@ public struct MastodonOwnAccount: Sendable {
             findable: source.discoverable?.value ?? wire.discoverable?.value,
             listsShown: (source.hideCollections?.value ?? wire.hideCollections?.value).map(!),
             picture: held(wire.avatar?.value, .picture),
-            header: held(wire.header?.value, .header)
+            header: held(wire.header?.value, .header),
+            pictureDescription: wire.avatarDescription?.value.map(description),
+            headerDescription: wire.headerDescription?.value.map(description),
+            sites: source.attributionDomains?.value.map(sites),
+            automated: wire.bot?.value,
+            indexed: source.indexable?.value ?? wire.indexable?.value,
+            coversMedia: source.sensitive?.value,
+            coversPosts: source.spoilerField?.value
         )
+    }
+
+    /// A description a source says, bounded and made fit to stand on its row.
+    private static func description(_ said: String) -> String {
+        LineText.oneLine(said, limit: descriptionLength)
+    }
+
+    /// The sites a source says, bounded and made fit to stand on a row: each once, and none
+    /// that could not be the name of one — a stranger's server may send anything here.
+    private static func sites(_ said: [StatusDTO.Lenient<String>]) -> [String] {
+        var seen = Set<String>()
+        return said.prefix(sitesRead).compactMap { $0.value }.compactMap { site in
+            let site = site.trimmingCharacters(in: .whitespacesAndNewlines)
+            let fit = !site.isEmpty && site.utf8.count <= siteLength && site.unicodeScalars.allSatisfy { scalar in
+                !"/:@?#".unicodeScalars.contains(scalar) && !CharacterSet.whitespacesAndNewlines.contains(scalar)
+                    && !CharacterSet.controlCharacters.contains(scalar)
+            }
+            return fit && seen.insert(site).inserted ? site : nil
+        }
     }
 
     /// A picture's address where it is one the account holds: a web address, and not the
@@ -403,6 +528,8 @@ public struct MastodonOwnAccount: Sendable {
             let maxProfileFields: L<Int>?
             let profileFieldNameLimit: L<Int>?
             let profileFieldValueLimit: L<Int>?
+            let maxAvatarDescriptionLength: L<Int>?
+            let maxHeaderDescriptionLength: L<Int>?
         }
         struct Media: Decodable, Sendable { let imageSizeLimit: L<Int>? }
         struct Configuration: Decodable, Sendable {
@@ -420,7 +547,9 @@ public struct MastodonOwnAccount: Sendable {
             name: stated(accounts?.maxDisplayNameLength), words: stated(accounts?.maxNoteLength),
             fields: stated(accounts?.maxProfileFields), fieldName: stated(accounts?.profileFieldNameLimit),
             fieldValue: stated(accounts?.profileFieldValueLimit),
-            picture: stated(configuration.mediaAttachments?.value?.imageSizeLimit)
+            picture: stated(configuration.mediaAttachments?.value?.imageSizeLimit),
+            pictureDescription: stated(accounts?.maxAvatarDescriptionLength),
+            headerDescription: stated(accounts?.maxHeaderDescriptionLength)
         )
     }
 
@@ -455,6 +584,13 @@ public struct MastodonOwnAccount: Sendable {
         case "hide_collections": .listsShown
         case "avatar": .picture
         case "header": .header
+        case "avatar_description": .pictureDescription
+        case "header_description": .headerDescription
+        case "attribution_domains": .sites
+        case "bot": .automated
+        case "indexable": .indexed
+        case "sensitive": .coversMedia
+        case "spoiler_field": .coversPosts
         default: name.hasPrefix("fields") ? .fields : nil
         }
     }

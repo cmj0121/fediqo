@@ -140,7 +140,8 @@ struct MastodonOwnAccountTests {
         let account = try MastodonOwnAccount.account(from: Data(MastodonPartsCaptures.taken.utf8))
         #expect(account == OwnAccount(
             name: "", words: MastodonPartsCaptures.note, fields: [], followWithoutAsking: true, findable: nil, listsShown: nil,
-            picture: URL(string: "https://mastodon.localhost/system/accounts/avatars/117/419/563/845/369/311/original/e956f8d85d609ba7.png")
+            picture: URL(string: "https://mastodon.localhost/system/accounts/avatars/117/419/563/845/369/311/original/e956f8d85d609ba7.png"),
+            pictureDescription: "", headerDescription: "", sites: [], automated: false, indexed: false, coversMedia: false
         ))
     }
 
@@ -164,10 +165,131 @@ struct MastodonOwnAccountTests {
         }
     }
 
-    @Test("A limit is one the host states — a real Mastodon's document states five — and a host that states none, or a value of nothing, has none")
+    // MARK: - The rest of the profile (#436)
+
+    /// What a real 4.6.6 answered the account check with, of what #436 reads, 2026-10-30.
+    private static let tended = #"""
+    {"id":"1","username":"ada","acct":"ada","display_name":"Ada","locked":false,"bot":true,"note":"","fields":[],
+     "indexable":true,"avatar_description":"pic","header_description":"",
+     "source":{"privacy":"public","sensitive":true,"language":null,"note":"","fields":[],"follow_requests_count":0,
+      "hide_collections":null,"discoverable":null,"indexable":true,"attribution_domains":["a.example","b.example"],"quote_policy":"public"}}
+    """#
+
+    @Test("What a real 4.6.6 says of the rest is read as said; the content warning default, 5.0's, is read from its documents' shape alone; none of it is anything where it is not said, or of another shape")
+    func theRestRead() throws {
+        let read = try MastodonOwnAccount.account(from: Data(Self.tended.utf8))
+        #expect(read.pictureDescription == "pic" && read.headerDescription == "")
+        #expect(read.sites == ["a.example", "b.example"])
+        #expect(read.automated == true && read.indexed == true && read.coversMedia == true && read.coversPosts == nil)
+
+        // The shape of 5.0 as its documents give it: no real one was asked.
+        let five = try MastodonOwnAccount.account(from: Data(#"{"source":{"spoiler_field":true,"attribution_domains":[]}}"#.utf8))
+        #expect(five.coversPosts == true && five.sites == [])
+
+        let silent = try MastodonOwnAccount.account(from: Data(#"{"source":{}}"#.utf8))
+        #expect(silent == OwnAccount())
+        let odd = try MastodonOwnAccount.account(from: Data(
+            #"{"bot":"yes","avatar_description":3,"header_description":null,"source":{"attribution_domains":"a.example","sensitive":"no","indexable":1}}"#.utf8
+        ))
+        #expect(odd == OwnAccount())
+    }
+
+    @Test("A stranger's sites are bounded and cleaned: each once, trimmed, none that could not be a name, none with a hidden mark, and a hundred at most")
+    func aStrangersSites() throws {
+        func read(_ sites: [String]) throws -> [String]? {
+            let json = String(data: try JSONSerialization.data(withJSONObject: ["source": ["attribution_domains": sites]]), encoding: .utf8)
+            return try MastodonOwnAccount.account(from: Data((json ?? "").utf8)).sites
+        }
+        #expect(try read([
+            " a.example ", "a.example", "", "   ", "two words.example", "https://b.example/x", "c\u{202E}.example", "d\n.example",
+            String(repeating: "x", count: 254), "bücher.example",
+        ]) == ["a.example", "bücher.example"])
+        let long = String(repeating: "x", count: 5_000)
+        let described = try MastodonOwnAccount.account(from: Data(#"{"avatar_description":"a\#u{202E}b\nc","header_description":"\#(long)","source":{}}"#.utf8))
+        #expect(described.pictureDescription?.contains("\u{202E}") == false && described.pictureDescription?.contains("\n") == false)
+        #expect(described.headerDescription?.count == 1_501, "cut, and its mark")
+        let many = try read((0..<500).map { "s\($0).example" })
+        #expect(many?.count == 100 && many?.first == "s0.example" && many?.last == "s99.example")
+    }
+
+    @Test("Only what changed is sent, in the rows' order, a site for each; what is not said is never sent; a change of the rest goes beside a picture as parts")
+    func theRestSent() async throws {
+        let before = OwnAccount(
+            pictureDescription: "old", headerDescription: "", sites: ["a.example"], automated: false, indexed: false,
+            coversMedia: false, coversPosts: false
+        )
+        #expect(MastodonOwnAccount.form(from: before, to: before).isEmpty)
+        var after = before
+        after.pictureDescription = ""
+        after.headerDescription = "a wide river"
+        after.sites = ["a.example", "b.example"]
+        after.automated = true
+        after.indexed = true
+        after.coversMedia = true
+        after.coversPosts = true
+        #expect(MastodonOwnAccount.form(from: before, to: after).map { [$0.0, $0.1] } == [
+            ["avatar_description", ""], ["header_description", "a wide river"],
+            ["attribution_domains[]", "a.example"], ["attribution_domains[]", "b.example"],
+            ["bot", "true"], ["indexable", "true"], ["source[sensitive]", "true"], ["source[spoiler_field]", "true"],
+        ])
+        var one = before
+        one.coversMedia = true
+        #expect(MastodonOwnAccount.form(from: before, to: one).map { [$0.0, $0.1] } == [["source[sensitive]", "true"]])
+        #expect(MastodonOwnAccount.form(from: OwnAccount(), to: OwnAccount()).isEmpty, "nothing said, nothing sent")
+
+        let chosen = OwnAccount(pictureDescription: "a", sites: ["a.example"], automated: true)
+        #expect(MastodonOwnAccount.form(from: OwnAccount(), to: chosen).map { [$0.0, $0.1] } == [
+            ["avatar_description", "a"], ["attribution_domains[]", "a.example"], ["bot", "true"],
+        ], "not said before, a value now: sent")
+        #expect(MastodonOwnAccount.form(from: chosen, to: OwnAccount()).isEmpty, "a value before, unsaid now: nothing sent")
+        #expect(MastodonOwnAccount.form(from: before, to: before, again: [.coversMedia, .sites]).map { [$0.0, $0.1] } == [
+            ["attribution_domains[]", "a.example"], ["source[sensitive]", "false"],
+        ], "a row whose answer was lost goes again, though it reads as it did")
+
+        let (own, server, _) = try Self.reader([Self.change: .json(Self.tended)])
+        _ = try await own.change(
+            from: before, to: one, pictures: [.picture: .chosen(Data([1]), type: "image/png", name: "p.png")]
+        )
+        let parts = String(decoding: try #require(await server.requests.last?.httpBody), as: UTF8.self)
+        #expect(parts.contains(#"name="source[sensitive]""#) && parts.contains(#"name="avatar""#))
+    }
+
+    @Test("Every site taken away is one site with nothing in it, which is what empties them on a real 4.6.6")
+    func sitesEmptied() {
+        let form = MastodonOwnAccount.form(from: OwnAccount(sites: ["a.example"]), to: OwnAccount(sites: []))
+        #expect(form.map { [$0.0, $0.1] } == [["attribution_domains[]", ""]])
+    }
+
+    @Test("A refusal names the row where a real 4.6.6's details do, in its first word; a name of its this app does not send is in its sentence alone")
+    func theRestRefused() {
+        let sites = MastodonOwnAccount.refusal(from: Data(#"""
+        {"error":"Validation failed: Attribution domains not a domain is not a valid domain name","details":{"attribution_domains":[{"error":"ERR_INVALID_DOMAIN_ON_LINE","description":"not a domain is not a valid domain name"}]}}
+        """#.utf8))
+        #expect(sites == .refused(
+            sentence: "Validation failed: Attribution domains not a domain is not a valid domain name",
+            rows: [.sites: "not a domain is not a valid domain name"]
+        ))
+        let long = MastodonOwnAccount.refusal(from: Data(#"""
+        {"error":"Validation failed: Avatar description is too long (maximum is 150 characters)","details":{"avatar_description":[{"error":"ERR_TOO_LONG","description":"is too long (maximum is 150 characters)"}]}}
+        """#.utf8))
+        #expect(long == .refused(
+            sentence: "Validation failed: Avatar description is too long (maximum is 150 characters)",
+            rows: [.pictureDescription: "is too long (maximum is 150 characters)"]
+        ))
+        let elsewhere = MastodonOwnAccount.refusal(from: Data(#"{"error":"No","details":{"something_else":[{"description":"x"}]}}"#.utf8))
+        #expect(elsewhere == .refused(sentence: "No", rows: [:]))
+    }
+
+    @Test("A host's word on how long a description may be is read where it states one")
+    func descriptionLimits() {
+        let limits = MastodonOwnAccount.limits(from: Data(#"{"configuration":{"accounts":{"max_avatar_description_length":150,"max_header_description_length":120}}}"#.utf8))
+        #expect(limits == OwnLimits(pictureDescription: 150, headerDescription: 120))
+    }
+
+    @Test("A limit is one the host states — a real Mastodon's document states these — and a host that states none, or a value of nothing, has none")
     func limits() {
         let mastodon = MastodonOwnAccount.limits(from: Data(MastodonHostCaptures.document.utf8))
-        #expect(mastodon == OwnLimits(name: 40, words: 500, fields: 4, fieldName: 255, fieldValue: 255, picture: 16_777_216))
+        #expect(mastodon == OwnLimits(name: 40, words: 500, fields: 4, fieldName: 255, fieldValue: 255, picture: 16_777_216, pictureDescription: 150, headerDescription: 150))
         #expect(MastodonOwnAccount.limits(from: Data(#"{"configuration":{"statuses":{"max_characters":5000}}}"#.utf8)) == .none)
         #expect(MastodonOwnAccount.limits(from: Data(#"{"configuration":{"accounts":{"max_note_length":0,"max_profile_fields":"4"}}}"#.utf8)) == .none)
         #expect(MastodonOwnAccount.limits(from: Data("<html>".utf8)) == .none)
