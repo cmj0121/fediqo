@@ -107,6 +107,7 @@ struct FeaturingTests {
         #expect(!menu.whys.contains(L10n.t("part.account.unasked")))
         #expect(Array(menu.items.map(\.name).prefix(2)) == [PersonActing.name(.feature), PersonActing.name(.unfollow)])
         var rest = (before.keeping + before.reporting).map { PersonActing.name($0, server: before.server) }
+        if before.collections { rest.insert(L10n.t("collections.title"), at: 0) }
         if before.lists { rest.insert(L10n.t("lists.section.title"), at: 0) }
         #expect(Array(menu.items.map(\.name).dropFirst(2)) == rest)
         #expect(menu.items.first?.isDanger == false && menu.items.first?.look == .live, "plain, and at once")

@@ -124,10 +124,17 @@ struct PeopleList: Hashable, Sendable, Identifiable {
     /// The words a source was asked to find people for, as they were sent: nothing on any
     /// other list.
     var words = ""
+    /// Who put the collection together, by the source's own name for them: nothing on any other list.
+    var owner: String?
 
     /// The list itself: two openings of one list are one page, whatever was counted each time.
     /// The people found for other words are another list.
     var id: String { "\(host)\u{1e}\(which.rawValue)\u{1e}\(accountID)" + (which == .found ? "\u{1e}" + words : "") }
+
+    /// The `id` of the people of a collection, known without its name or who put it together.
+    static func collectionKey(_ collection: String, at host: String) -> String {
+        "\(host)\u{1e}\(Which.collection.rawValue)\u{1e}\(collection)"
+    }
 
     /// The words as a line of ours says them.
     var lineWords: String { LineText.oneLine(words, limit: SearchBands.wordsShown) }
@@ -159,6 +166,7 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         counted = collection.count
         hidden = false
         words = collection.name
+        owner = person.accountID
     }
 
     /// Who boosted or favourited the post `id` at `host` (#334), written by `author`: the post's
@@ -420,6 +428,15 @@ final class ShellPeoplePages {
             pages[id] = nil
             order.forget(id)
         }
+    }
+
+    /// The people kept of a collection let go: who is in it has changed (#433).
+    func forgetCollection(_ id: String, at host: String) {
+        let key = PeopleList.collectionKey(id, at: host)
+        asks[key]?.cancel()
+        asks[key] = nil
+        pages[key] = nil
+        order.forget(key)
     }
 
     /// One list let go, and its ask called off: somebody's page was asked again with another
@@ -1087,9 +1104,16 @@ final class ShellPeoplePages {
             }
         }
         if list.which == .collection {
+            let id = list.accountID
+            // The reader's own, where the sign-in holds the word (#433): as its owner, as what counts
+            // it was read, so the list has everyone the count has and one not to be found is read.
+            if let held, let owner = list.owner, session.mastodon.reader(host: source.host)?.id == owner,
+               MastodonParts.holds(.seeing, of: .collections, in: held.scopes) {
+                let own = session.reach.collections(session.mastodon.authorized(token: held, within: deadline, for: .people))
+                return { _ in PeopleStretch(people: try await own.whole(id, source: source).members.map(\.person), next: nil) }
+            }
             // Given to anyone, and refused to a sign-in without its own word (#340): read unsigned.
             let collections = session.reach.unsignedCollections(source.host, for: .people, within: deadline)
-            let id = list.accountID
             return { _ in PeopleStretch(people: try await collections.people(in: id, source: source), next: nil) }
         }
         guard let asked = list.asked else {

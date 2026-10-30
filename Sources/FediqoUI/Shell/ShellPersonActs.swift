@@ -278,6 +278,9 @@ final class ShellPersonActs {
             acting.listsLock = session.mastodon.place(.lists, host: host)
                 ?? PartWords.Place(kind: .unasked, key: "part.lists.unasked")
         }
+        // Collections they can be put in (#433), the same way.
+        acting.collections = source.kind.offers.tendsCollections && hosts?.has(.collections, at: host) != .absent
+        acting.collectionsLock = session.mastodon.collectionsLock(host: host)
         if !Self.blocks(at: host, in: session) {
             acting.blocksLock = session.mastodon.place(PersonAct.mute.needs, host: host)
                 ?? PartWords.Place(kind: .none, key: "part.ask.partly")

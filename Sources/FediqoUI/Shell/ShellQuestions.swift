@@ -627,6 +627,39 @@ enum ShellQuestion {
         )
     }
 
+    /// Taking oneself out of another's collection: the source lets nobody add them back.
+    static func takeOutOfCollection(named name: String, by who: String, at host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "person.crop.circle.badge.minus",
+            title: String(format: L10n.t("collections.takeOut.title", language: language), name),
+            line: String(format: L10n.t("collections.takeOut.line", language: language), name, who, host), help: nil,
+            choices: [.init(yes, L10n.t("collections.takeOut", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// Removing one of the reader's collections.
+    static func removeCollection(named name: String, at host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "trash",
+            title: String(format: L10n.t("collections.remove.title", language: language), name),
+            line: String(format: L10n.t("collections.remove.line", language: language), name, host), help: nil,
+            choices: [.init(yes, L10n.t("collections.remove", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// Taking somebody out of one of the reader's collections.
+    static func dropFromCollection(person: String, named name: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "person.crop.circle.badge.minus",
+            title: String(format: L10n.t("collections.drop.title", language: language), person),
+            line: String(format: L10n.t("collections.drop.line", language: language), person, name), help: nil,
+            choices: [.init(yes, L10n.t("collections.drop", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
     /// Removing a timeline. Its line already says it all, so there is no (?).
     static func removeTimeline(named name: String, language: DummyLanguage? = nil) -> ShellConfirmation {
         ShellConfirmation(

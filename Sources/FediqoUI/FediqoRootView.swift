@@ -2393,6 +2393,9 @@ public struct FediqoRootView: View {
             return true
         case .takeOff:
             return false
+        case .tendCollections, .takeOut:
+            guard let person = walk.openedPerson else { return false }
+            return people.collections.pressed(press, on: person, in: people, session: session)
         }
     }
 
@@ -3395,6 +3398,7 @@ private struct PersonPresenters: ViewModifier {
             .modifier(BlockedServersPresenter(servers: people.servers, session: session))
             .modifier(ReportSheetPresenter(people: people, session: session))
             .modifier(ServerListsPresenter(lists: people.serverLists, session: session))
+            .modifier(CollectionsPresenter(collections: people.collections, session: session))
             .modifier(AccountActSheetPresenter(people: people.tending.people, session: session))
             .modifier(FederationAskSheetPresenter(servers: people.tending.servers, session: session))
             .modifier(DirectsPresenter(directs: session.directs, session: session, onOpen: onOpenThread))

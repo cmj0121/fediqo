@@ -74,6 +74,8 @@ struct PersonPageActs {
     var onStaffAct: (TendingStaffSaid) -> Void = { _ in }
     /// Which of the reader's lists they are on (#337), from the page's `…`.
     var onLists: () -> Void = {}
+    /// Which of the reader's collections they are in (#433), from the page's `…`.
+    var onCollections: () -> Void = {}
 }
 
 /// What the post rows of somebody's page are drawn with: the thread pane's own fittings,
@@ -160,7 +162,7 @@ struct PersonPage: View {
     private var heading: some View {
         PersonHead(
             head: head, front: PageFrame.stripDrawn(tabs) ? front : nil, onTab: acts.onTab, onAct: acts.onAct,
-            onAskFollows: acts.onAskFollows, onChange: acts.onChange, onLists: acts.onLists
+            onAskFollows: acts.onAskFollows, onChange: acts.onChange, onLists: acts.onLists, onCollections: acts.onCollections
         )
         ShellRule()
         if line != nil || lookUp != nil || homeOverTabs != nil {

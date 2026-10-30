@@ -108,7 +108,7 @@ struct PersonAboutSaid: Equatable {
             case .fields: person?.fields.isEmpty == false
             case .featuredTags: featured?.tagsDrawn == true
             case .featuredPeople: featured?.people != nil
-            case .collections: featured?.collections.isEmpty == false
+            case .collections: featured?.collectionsDrawn == true
             case .figures: figures != nil
             case .none: none != nil
             case .stands: standsDrawn
@@ -689,25 +689,59 @@ struct PersonAbout<Lead: View>: View {
     /// name and how many are in it, and the mark that says it leads on.
     @ViewBuilder
     private var collections: some View {
-        if let featured = said.featured, !featured.collections.isEmpty {
+        if let featured = said.featured, featured.collectionsDrawn {
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 Text(L10n.t("person.collections")).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme))
+                if featured.tendsCollections { tendCollections(featured) }
                 ForEach(featured.collections, id: \.id) { list in
                     let words = FeaturedSaid.collectionWords(list)
-                    Button { onFeatured(.people(list)) } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
-                            Text(words).fixedSize(horizontal: false, vertical: true)
-                            Image(systemName: "chevron.right").shellFont(.mark).accessibilityHidden(true)
+                    HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                        Button { onFeatured(.people(list)) } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                                Text(words).fixedSize(horizontal: false, vertical: true)
+                                Image(systemName: "chevron.right").shellFont(.mark).accessibilityHidden(true)
+                            }
+                            .shellFont(.reading)
+                            .foregroundStyle(ShellChrome.ink(colorScheme))
+                            .contentShape(Rectangle())
                         }
-                        .shellFont(.reading)
-                        .foregroundStyle(ShellChrome.ink(colorScheme))
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(words)
+                        if let more = featured.more(ofCollection: list, act: { onFeatured(.takeOut(list)) }, ask: { onFeatured(.tendCollections) }) {
+                            ShellMoreButton(more).fixedSize()
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(words)
                 }
             }
         }
+    }
+
+    /// The way to the reader's own collections: words and the mark that says it leads on; or,
+    /// where the sign-in lacks the part, the part's sentence dim, a press where it may be asked.
+    private func tendCollections(_ featured: FeaturedSaid) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let lock = featured.collectionsLock {
+                locked(String(format: L10n.t(lock.key), said.source), asks: lock.asks, press: { onFeatured(.tendCollections) })
+            } else {
+                let words = L10n.t("collections.tend")
+                Button { onFeatured(.tendCollections) } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                        Text(words).fixedSize(horizontal: false, vertical: true)
+                        Image(systemName: "chevron.right").shellFont(.mark).accessibilityHidden(true)
+                    }
+                    .shellFont(.reading)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(words)
+            }
+        }
+        .padding(.horizontal, ShellSpace.pad)
+        .padding(.vertical, ShellSpace.hair)
+        .modifier(FeaturedSaid.tendLamp(lit))
+        .padding(.horizontal, -ShellSpace.pad)
+        .id(FeaturedSaid.tendID)
     }
 
     @ViewBuilder
