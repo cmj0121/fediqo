@@ -55,7 +55,7 @@ struct MarkTests {
             }
         }
         // A glyph with no twin is itself when on, rather than a symbol that does not exist.
-        for symbol in ["arrow.2.squarepath", "quote.bubble", "checklist"] {
+        for symbol in ["repeat", "quote.opening", "checklist"] {
             #expect(ShellMark.drawn(symbol, on: true) == symbol)
         }
         // A bookmark that is on and must be asked again is still the filled bookmark, dim.

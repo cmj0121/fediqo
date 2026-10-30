@@ -118,7 +118,7 @@ struct TrendsPageTests {
         #expect(TrendsTab.tabs(posts: false, rising: []).isEmpty)
         #expect(TrendsTab.posts.rising == nil && TrendsTab.tags.rising == .tags && TrendsTab.links.rising == .links)
         #expect(TrendsTab(.tags) == .tags && TrendsTab(.links) == .links)
-        #expect(TrendsTab.tags.titleKey == "rising.tab.tags" && TrendsTab.links.symbol == "link" && TrendsTab.posts.titleKey == "trends.tab.posts")
+        #expect(TrendsTab.tags.titleKey == "rising.tab.tags" && TrendsTab.links.symbol == "flame" && TrendsTab.posts.titleKey == "trends.tab.posts")
 
         let (microblogs, pages, _) = await session(sources: [Source(host: Self.one, kind: .mastodon)])
         #expect(TrendsTab.tabs(in: microblogs) == [.posts, .tags, .links])

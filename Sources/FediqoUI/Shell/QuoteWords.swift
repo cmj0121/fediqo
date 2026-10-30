@@ -22,7 +22,7 @@ enum QuoteWords {
     /// The question before a quote drops what the draft carries (D3).
     static func dropQuestion(_ ask: ShellQuoting.Ask, language: DummyLanguage? = nil) -> ShellConfirmation {
         ShellConfirmation(
-            symbol: "quote.bubble",
+            symbol: "quote.opening",
             title: L10n.t("compose.quote.drop.title", language: language),
             line: L10n.t("compose.quote.drop.line", language: language),
             help: nil,

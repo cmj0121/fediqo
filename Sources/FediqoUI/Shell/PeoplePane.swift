@@ -616,7 +616,7 @@ struct KeepingEntry: Equatable, Identifiable {
     var symbol: String {
         switch which {
         case .muted: "speaker.slash"
-        case .blocked: "hand.raised"
+        case .blocked: "nosign"
         case .servers: PersonActing.serverBlockedSymbol
         }
     }

@@ -877,7 +877,7 @@ struct PersonStandingTests {
         }
         let rows = acting(Self.followed()).narrows()
         #expect(rows.map(\.which) == [.boosts, .notices] && rows.map(\.on) == [true, false])
-        #expect(rows.map(\.act) == [.hideBoosts, .notify] && rows.map(\.symbol) == ["arrow.2.squarepath", "bell"])
+        #expect(rows.map(\.act) == [.hideBoosts, .notify] && rows.map(\.symbol) == ["repeat", "bell"])
         #expect(rows.map { $0.words(language: .english) } == ["Their boosts: Shown", "A notice of each post: Off"])
         #expect(rows.map { $0.words(language: .taiwanese) } == ["他們的轉發：顯示", "每則貼文都通知：關"])
         let other = acting(Self.followed(boosts: false, notify: true)).narrows()

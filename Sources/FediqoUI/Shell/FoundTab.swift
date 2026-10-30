@@ -20,7 +20,7 @@ enum FoundWhich: String, ShellTab, CaseIterable, Sendable {
     var symbol: String {
         switch self {
         case .people: "person.2"
-        case .tags: "number"
+        case .tags: "number.square"
         }
     }
 

@@ -77,12 +77,12 @@ struct PreferencesPane: View {
 
         var symbol: String {
             switch self {
-            case .choices: "slider.horizontal.3"
+            case .choices: "dial.low"
             case .build: "info.circle"
-            case .work: "arrow.up.arrow.down"
+            case .work: "arrow.up.arrow.down.circle"
             case .reach: "checkmark.shield"
             case .hosts: "globe"
-            case .move: "arrow.left.arrow.right"
+            case .move: "arrow.left.arrow.right.circle"
             case .gestures: "hand.draw"
             }
         }

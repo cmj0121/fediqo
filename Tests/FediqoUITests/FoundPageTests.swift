@@ -122,7 +122,7 @@ struct FoundPageTests {
         #expect(FoundWhich.tabs(gave: [.people, .tags]) { $0 == .people } == [.people])
         #expect(FoundWhich.front(.tags, among: [.people, .tags]) == .tags && FoundWhich.front(.tags, among: [.people]) == .people)
         #expect(FoundWhich.front(.people, among: []) == nil)
-        #expect(FoundWhich.people.titleKey == "search.found.tab.people" && FoundWhich.people.symbol == "person.2" && FoundWhich.tags.symbol == "number")
+        #expect(FoundWhich.people.titleKey == "search.found.tab.people" && FoundWhich.people.symbol == "person.2" && FoundWhich.tags.symbol == "number.square")
 
         for (people, tags, gave) in [(5, 5, [FoundWhich.people, .tags]), (5, 0, [.people]), (0, 5, [.tags]), (5, 2, [.people, .tags])] {
             let (session, _) = try await session(Self.answer(people: people, tags: tags))

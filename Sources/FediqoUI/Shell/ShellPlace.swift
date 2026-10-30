@@ -66,7 +66,7 @@ public enum ShellPlace: String, CaseIterable, Identifiable, Hashable, Sendable {
         // designer found meaning three different things with two of them on the Account page at
         // once; with the row's sign-in now a `key`, it has no caller left in FediqoUI.
         case .account: "square.stack.3d.up"
-        case .usage: "chart.bar.xaxis"
+        case .usage: "chart.bar.doc.horizontal"
         case .preferences: "gearshape"
         }
     }

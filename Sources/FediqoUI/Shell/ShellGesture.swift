@@ -18,6 +18,9 @@ public enum ShellGesture: String, CaseIterable, Identifiable, Sendable {
     case stop
     /// The system's own press on the top of the screen goes to the top of the list.
     case top
+    /// On a wide page, the place on the rail already in front, pressed again, goes to the top of
+    /// its list — as the keyboard's `g` does.
+    case again
     /// The name at the top, pressed, lists what it is one of: every timeline, with a new one and
     /// changing this one there; or, on a page with tabs, its tabs.
     case name
@@ -49,6 +52,7 @@ public enum ShellGesture: String, CaseIterable, Identifiable, Sendable {
         case .pull: "arrow.down"
         case .stop: "stop.circle"
         case .top: "arrow.up.to.line"
+        case .again: "arrow.up.to.line.circle"
         case .name: "list.bullet"
         case .swipe: "arrow.left.arrow.right"
         case .back: ShellBackButton.symbol
@@ -68,7 +72,7 @@ public enum ShellGesture: String, CaseIterable, Identifiable, Sendable {
     static func listed(narrow: Bool) -> [ShellGesture] {
         narrow
             ? [.press, .hold, .pull, .stop, .top, .name, .swipe, .back]
-            : [.press, .hold, .pull, .stop, .top, .pill, .pillHold, .swipe, .back]
+            : [.press, .hold, .pull, .stop, .top, .again, .pill, .pillHold, .swipe, .back]
     }
 
     /// The gestures the keys' table names, across all its lines.

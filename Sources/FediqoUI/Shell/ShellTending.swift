@@ -62,13 +62,13 @@ enum AdminTab: String, ShellTab, Sendable, CaseIterable {
 
     var symbol: String {
         switch self {
-        case .reports: "exclamationmark.bubble"
-        case .people: "person.badge.clock"
-        case .federation: "network"
-        case .blocks: "hand.raised"
+        case .reports: "flag"
+        case .people: "person.2"
+        case .federation: "point.3.connected.trianglepath.dotted"
+        case .blocks: "nosign.app"
         case .dashboard: "chart.bar"
         case .rising: "arrow.up.forward.circle"
-        case .rules: "list.number"
+        case .rules: "list.clipboard"
         }
     }
 

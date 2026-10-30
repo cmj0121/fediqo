@@ -63,8 +63,7 @@ struct PageHead<Marks: View>: View {
     private func name(_ travel: Int) -> some View {
         Button(action: onPress) {
             HStack(spacing: ShellSpace.tight) {
-                Image(systemName: front.symbol)
-                    .symbolVariant(.fill)
+                Image(systemName: ShellGlyph.drawn(front.symbol, chosen: true))
                     // One room for every glyph, so the head is one height and the name starts
                     // in one place whichever of them is in front.
                     .frame(width: drawn, height: drawn * 0.6)
@@ -279,7 +278,7 @@ struct PageListSheet<Extra: View>: View {
         } label: {
             ShellListRowFace(
                 title: entry.name, brief: entry.brief, figure: nil, leads: false, selected: entry.current,
-                mark: Image(systemName: entry.symbol)
+                mark: Image(systemName: ShellGlyph.drawn(entry.symbol, chosen: entry.current))
             )
             .background(
                 RoundedRectangle(cornerRadius: RailView.Metrics.wellRadius, style: .continuous)

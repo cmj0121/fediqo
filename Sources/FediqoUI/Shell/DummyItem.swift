@@ -30,12 +30,15 @@ public enum DummyAudience: String, Sendable, Hashable, CaseIterable {
     case followers
     case mentioned
 
+    /// The glyph the post's head and every audience picker draw. Followers are the people they
+    /// are, and a post for those it names is the one closed to everybody else: the four shapes
+    /// glacial draws them with, so a reader who keeps both reads one mark in each.
     var symbolName: String {
         switch self {
         case .everyone: "globe"
         case .unlisted: "moon"
-        case .followers: "lock"
-        case .mentioned: "at"
+        case .followers: "person.2"
+        case .mentioned: "lock"
         }
     }
 

@@ -144,7 +144,7 @@ struct PersonPageTests {
 
         // A strip only where there is more than one tab, and the names and glyphs each tab has.
         #expect(!PageFrame.stripDrawn([PersonTab.posts]) && PageFrame.stripDrawn([PersonTab.about, .posts]))
-        #expect(PersonTab.allCases.map(\.symbol) == ["person.text.rectangle", "person.line.dotted.person", "person.2", "pin", "text.bubble"])
+        #expect(PersonTab.allCases.map(\.symbol) == ["person.text.rectangle", "star", "eye", "pin", "doc.text"])
         #expect(PersonTab.allCases.map { L10n.t($0.titleKey, language: .english) } == ["About", "Following", "Followers", "Pinned", "Posts"])
         #expect(PersonTab.allCases.map { L10n.t($0.titleKey, language: .taiwanese) } == ["關於", "跟隨中", "跟隨者", "釘選", "貼文"])
         #expect(ShellTabs<PersonTab>.listed(PersonTab.allCases, selected: .about, language: .english).map(\.current) == [true, false, false, false, false])
@@ -263,7 +263,7 @@ struct PersonPageTests {
             accountID: "42", following: true, followedBy: true, requested: true, muting: true, mutedUntil: until, blocking: true
         )
         let stands = PersonActing.marks(of: standing, language: en)
-        #expect(stands.map(\.symbol) == ["person.fill.checkmark", "person.badge.plus", "person.badge.clock", "speaker.slash", "hand.raised"])
+        #expect(stands.map(\.symbol) == ["person.fill.checkmark", "person.badge.plus", "person.badge.clock", "speaker.slash", "nosign"])
         #expect(stands.map(\.words).prefix(3) == ["You follow them", "Follows you", "Asked"] && stands[3].words.hasPrefix("Muted until") && stands[4].words == "Blocked")
         #expect(Set(stands.map(\.words)) == Set(PersonActing.pills(of: standing, language: en)), "the words a row says them in")
         #expect(PersonActing.spoken(stands, language: en) == stands.map(\.words).joined(separator: ", "))

@@ -48,11 +48,11 @@ enum NoticeWords {
     static func symbol(_ notice: Notice) -> String {
         switch notice.kind {
         case .mention: notice.answers ? "arrowshape.turn.up.left" : "at"
-        case .reblog: "arrow.2.squarepath"
+        case .reblog: "repeat"
         case .favourite: "star"
         case .follow: "person.badge.plus"
         case .followRequest: "person.badge.clock"
-        case .quote: "quote.bubble"
+        case .quote: "quote.opening"
         case .poll: "chart.bar"
         case .update: "pencil"
         case .server: "server.rack"

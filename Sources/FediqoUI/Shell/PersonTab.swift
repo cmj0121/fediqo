@@ -17,10 +17,10 @@ enum PersonTab: String, ShellTab, CaseIterable, Sendable {
     var symbol: String {
         switch self {
         case .about: "person.text.rectangle"
-        case .following: "person.line.dotted.person"
-        case .followers: "person.2"
+        case .following: "star"
+        case .followers: "eye"
         case .pinned: "pin"
-        case .posts: "text.bubble"
+        case .posts: "doc.text"
         }
     }
 

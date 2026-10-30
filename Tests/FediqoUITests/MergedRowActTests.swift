@@ -254,7 +254,7 @@ struct MergedRowActTests {
         let out = session.acting(on: row)
         #expect(out.standings[.boost] == .pressed(to: true))
         let pressed = ItemActs.mark(.boost, on: row, acting: out)
-        #expect(pressed.done && pressed.glyph == "arrow.2.squarepath", "the acting copy's mark is drawn boosted")
+        #expect(pressed.done && pressed.glyph == "repeat", "the acting copy's mark is drawn boosted")
         #expect(pressed.spoken == "Take the boost back through b.example")
         await session.toggle(.boost, on: row)
         #expect(await server.paths.count == 1, "one act, not two")

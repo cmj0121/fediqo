@@ -731,7 +731,7 @@ struct DummyThreadPane: View {
     /// Who reblogged the opened post, on one line under it, with a reblog's own mark.
     private func reblogged(_ line: String) -> some View {
         HStack(spacing: ShellSpace.tight) {
-            Image(systemName: "arrow.2.squarepath")
+            Image(systemName: "repeat")
                 .accessibilityHidden(true)
             Text(line)
                 .fixedSize(horizontal: false, vertical: true)

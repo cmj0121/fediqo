@@ -638,7 +638,7 @@ struct ShownFirstTests {
         #expect(session.acts.standings.isEmpty, "\"did not arrive\" stands beside a mark the source says is set")
         #expect(session.said.lines.isEmpty)
         let now = try mark(.boost, session)
-        #expect(now.done && now.spoken == "Take the boost back" && now.glyph == "arrow.2.squarepath")
+        #expect(now.done && now.spoken == "Take the boost back" && now.glyph == "repeat")
     }
 
     // MARK: - The line

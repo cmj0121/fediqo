@@ -225,7 +225,7 @@ struct HiddenHere: Equatable {
             symbol = "speaker.slash"
             words = String(format: L10n.t("hidden.muted", language: language), LineText.oneLine(hide.handle ?? ""), hide.host)
         case .blocked:
-            symbol = "hand.raised"
+            symbol = "nosign"
             words = String(format: L10n.t("hidden.blocked", language: language), LineText.oneLine(hide.handle ?? ""), hide.host)
         case .server:
             symbol = PersonActing.serverBlockedSymbol
