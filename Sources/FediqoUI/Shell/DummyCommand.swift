@@ -588,7 +588,7 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         // the first post — is `.press` on that post, which is the line above.
         //
         // And the system's own press on the top of the screen, which goes there in one (#308).
-        DummyShortcut(group: .move, keys: ["g"], name: "top", commands: [.goTop], touch: .scroll, gestures: [.top]),
+        DummyShortcut(group: .move, keys: ["g"], name: "top", commands: [.goTop], touch: .scroll, gestures: [.top, .again]),
         // The named pills along the top of the timeline, pressed.
         // On a narrow page: a sideways swipe to the one beside (#305), or the timeline's name
         // pressed for the list of them all (#304).

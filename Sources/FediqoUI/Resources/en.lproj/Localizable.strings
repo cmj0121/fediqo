@@ -1403,6 +1403,8 @@
 "gesture.stop.detail" = "While a page is reading, its reload mark is Stop, and stops it — on every page alike.";
 "gesture.top" = "Press the top of the screen";
 "gesture.top.detail" = "Goes to the top of the list.";
+"gesture.again" = "Press the place you are on";
+"gesture.again.detail" = "On the left bar, goes to the top of its list.";
 "gesture.name" = "Press the name at the top";
 "gesture.name.detail" = "On a timeline, lists every timeline; a new one is made there, and this one changed. On a page with tabs, lists its tabs.";
 "gesture.swipe" = "Swipe sideways";

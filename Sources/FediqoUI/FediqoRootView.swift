@@ -3055,6 +3055,7 @@ public struct FediqoRootView: View {
                 expanded: $railExpanded,
                 availability: availability,
                 counts: [.notices: session.noticesTold.count],
+                onAgain: { _ = apply(.goTop) },
                 onCompose: {
                     guard availability.canCompose else { return }
                     composing = true

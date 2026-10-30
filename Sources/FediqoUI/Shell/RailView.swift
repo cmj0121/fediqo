@@ -10,6 +10,9 @@ struct RailView: View {
     var availability: ShellAvailability
     /// What waits at a place, counted: the notices told since that page was last in front (#324).
     var counts: [ShellPlace: Int] = [:]
+    /// The place already in front, pressed again: the top of its list, as `g` goes (glacial's
+    /// sidebar does the same).
+    var onAgain: () -> Void = {}
     var onCompose: () -> Void
 
     /// Layout numbers. Here rather than as statics on the View: a View's static is
@@ -87,7 +90,9 @@ struct RailView: View {
                     glyph: glyph,
                     enabled: availability.allows(item),
                     count: counts[item] ?? 0,
-                    action: { place = availability.placing(place, as: item) }
+                    action: {
+                        if place == item { onAgain() } else { place = availability.placing(place, as: item) }
+                    }
                 )
             }
 

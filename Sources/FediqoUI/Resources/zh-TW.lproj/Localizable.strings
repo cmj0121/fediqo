@@ -1374,6 +1374,8 @@
 "gesture.stop.detail" = "任何一頁在讀的時候，它的重新載入記號都會變成「停止」，按下就停。";
 "gesture.top" = "按螢幕最上方";
 "gesture.top.detail" = "回到列表的最上面。";
+"gesture.again" = "再按一次所在的地方";
+"gesture.again.detail" = "在左側欄上，回到它列表的最上面。";
 "gesture.name" = "按最上方的名稱";
 "gesture.name.detail" = "在時間軸上，列出每一條時間軸；新增一條、修改這一條，都在那裡。在有分頁的頁面上，列出它的分頁。";
 "gesture.swipe" = "左右滑";
