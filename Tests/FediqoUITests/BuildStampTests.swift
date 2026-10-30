@@ -180,7 +180,7 @@ struct BuildStampTests {
         #expect(PreferencesPane.Purpose.allCases == [.choices, .build, .work, .reach, .hosts, .move])
         #expect(L10n.t("prefs.tab.move", language: .english) == "Move")
         #expect(L10n.t("prefs.tab.move", language: .taiwanese) == "搬移")
-        #expect(PreferencesPane.Purpose.move.symbol == "arrow.left.arrow.right")
+        #expect(PreferencesPane.Purpose.move.symbol == "arrow.left.arrow.right.circle")
         #expect(L10n.t("prefs.tab.hosts", language: .english) == "Your hosts")
         #expect(L10n.t("prefs.tab.hosts", language: .taiwanese) == "自訂主機")
         #expect(L10n.t("prefs.tab.reach", language: .english) == "Allowed")

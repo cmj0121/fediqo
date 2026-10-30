@@ -302,7 +302,7 @@ struct TimelineEditor: View {
     /// The glyph a kind of rule leads with, on its pill and on every rule of it in the list.
     static func kindSymbol(_ tag: RuleKind.Tag) -> String {
         switch tag {
-        case .source: "server.rack"
+        case .source: "externaldrive"
         case .author: "person"
         case .keyword: "text.magnifyingglass"
         case .category: "tray.2"
@@ -736,7 +736,7 @@ private struct RuleFormFoot: View {
     static func scopeSymbol(_ scope: RuleScope) -> String {
         switch scope {
         case .every: "globe"
-        case .source: "server.rack"
+        case .source: "externaldrive"
         }
     }
 }

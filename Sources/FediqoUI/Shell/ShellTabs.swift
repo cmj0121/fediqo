@@ -180,8 +180,7 @@ struct ShellTabPill: View {
 
     private var face: some View {
         HStack(spacing: ShellSpace.tight) {
-            Image(systemName: symbol)
-                .symbolVariant(selected ? .fill : .none)
+            Image(systemName: ShellGlyph.drawn(symbol, chosen: selected))
                 .accessibilityHidden(true)
             Text(title)
                 .lineLimit(1)

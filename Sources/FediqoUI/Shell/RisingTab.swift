@@ -13,8 +13,8 @@ extension RisingWhich: ShellTab {
 
     var symbol: String {
         switch self {
-        case .tags: "number"
-        case .links: "link"
+        case .tags: "number.square"
+        case .links: "link.circle"
         }
     }
 

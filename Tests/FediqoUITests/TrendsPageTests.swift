@@ -57,7 +57,7 @@ struct TrendsPageTests {
     @Test("Trends stands on the rail between Timeline and Notices where some source has anything trending, and is absent — not dim — where none has: a Discourse-only store has no Trends, so neither the rail, the places nor `h` reach it")
     func thePlace() async {
         #expect(ShellPlace.allCases == [.timeline, .trends, .notices, .admin, .account, .usage, .preferences])
-        #expect(ShellPlace.trends.symbolName == "chart.line.uptrend.xyaxis")
+        #expect(ShellPlace.trends.symbolName == "chart.line.uptrend.xyaxis.circle")
         #expect(ShellPlace.timeline.isStream && ShellPlace.trends.isStream)
         #expect(ShellPlace.allCases.filter(\.isStream) == [.timeline, .trends])
         #expect(ShellStream(.trends) == .trends && ShellStream(.timeline) == .timeline && ShellStream(.notices) == nil)
@@ -118,7 +118,7 @@ struct TrendsPageTests {
         #expect(TrendsTab.tabs(posts: false, rising: []).isEmpty)
         #expect(TrendsTab.posts.rising == nil && TrendsTab.tags.rising == .tags && TrendsTab.links.rising == .links)
         #expect(TrendsTab(.tags) == .tags && TrendsTab(.links) == .links)
-        #expect(TrendsTab.tags.titleKey == "rising.tab.tags" && TrendsTab.links.symbol == "link" && TrendsTab.posts.titleKey == "trends.tab.posts")
+        #expect(TrendsTab.tags.titleKey == "rising.tab.tags" && TrendsTab.links.symbol == "link.circle" && TrendsTab.posts.titleKey == "trends.tab.posts")
 
         let (microblogs, pages, _) = await session(sources: [Source(host: Self.one, kind: .mastodon)])
         #expect(TrendsTab.tabs(in: microblogs) == [.posts, .tags, .links])

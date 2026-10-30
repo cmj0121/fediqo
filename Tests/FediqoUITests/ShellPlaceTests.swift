@@ -233,7 +233,7 @@ struct ShellPlaceTests {
 
     @Test("Usage is a place, with the statistic bar")
     func usageIsAPlace() {
-        #expect(ShellPlace.usage.symbolName == "chart.bar.xaxis")
+        #expect(ShellPlace.usage.symbolName == "chart.bar.doc.horizontal")
         #expect(!ShellPlace.usage.summary.isEmpty)
     }
 

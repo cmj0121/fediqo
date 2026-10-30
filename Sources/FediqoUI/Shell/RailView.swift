@@ -209,9 +209,8 @@ private struct RailButton: View {
     }
 
     private var glyphView: some View {
-        Image(systemName: symbol)
+        Image(systemName: ShellGlyph.drawn(symbol, chosen: selected))
             .font(.system(size: glyph, weight: selected ? .semibold : .regular))
-            .symbolVariant(selected ? .fill : .none)
             .symbolRenderingMode(.hierarchical)
             .overlay(alignment: .topTrailing) { countMark }
     }

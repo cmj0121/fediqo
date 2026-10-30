@@ -65,7 +65,7 @@ struct AccountPane: View {
         var symbol: String {
             switch self {
             case .sources: "square.stack.3d.up"
-            case .add: "plus"
+            case .add: "plus.circle"
             }
         }
     }

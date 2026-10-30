@@ -877,7 +877,7 @@ enum EditorTab: String, CaseIterable, Identifiable, ShellTab {
 
     var symbol: String {
         switch self {
-        case .timeline: "pencil.line"
+        case .timeline: "pencil.circle"
         case .rules: "line.3.horizontal.decrease.circle"
         }
     }

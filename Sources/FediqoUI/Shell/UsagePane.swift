@@ -128,7 +128,7 @@ struct UsagePane: View {
             switch self {
             case .source: "square.stack.3d.up"
             case .time: "clock"
-            case .keep: "hourglass"
+            case .keep: "hourglass.circle"
             case .copies: "internaldrive"
             }
         }

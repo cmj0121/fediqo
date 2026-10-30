@@ -64,11 +64,11 @@ enum AdminTab: String, ShellTab, Sendable, CaseIterable {
         switch self {
         case .reports: "exclamationmark.bubble"
         case .people: "person.badge.clock"
-        case .federation: "network"
+        case .federation: "point.3.connected.trianglepath.dotted"
         case .blocks: "hand.raised"
         case .dashboard: "chart.bar"
         case .rising: "arrow.up.forward.circle"
-        case .rules: "list.number"
+        case .rules: "list.clipboard"
         }
     }
 

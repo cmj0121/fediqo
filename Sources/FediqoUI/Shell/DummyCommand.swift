@@ -535,7 +535,7 @@ public enum DummyShortcutGroup: String, CaseIterable, Identifiable, Sendable {
         case .move: "arrow.up.arrow.down.circle"
         case .read: "text.book.closed"
         case .act: "hand.tap"
-        case .app: "macwindow"
+        case .app: "app"
         }
     }
 
