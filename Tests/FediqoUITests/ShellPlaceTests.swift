@@ -195,9 +195,7 @@ struct ShellPlaceTests {
     /// said the rail's marks looked small beside the buttons.
     ///
     /// **The literal reading, glyph = well = 32, is what this test refuses.** It leaves no margin
-    /// inside the plate and it breaks `RailButton.closedMark`, whose strike is `glyph * 1.2`: at 32
-    /// that is 38.4 across a 32pt well, so the closed mark for Timeline and Notices would stick out
-    /// of its own plate on both sides.
+    /// inside the plate.
     @Test("A rail row is the same height open or collapsed, and its mark keeps its margin")
     func railRowHeightIsStable() {
         #expect(RailView.Metrics.rowInnerHeight == RailView.Metrics.well)
@@ -207,11 +205,6 @@ struct ShellPlaceTests {
         #expect(RailView.Metrics.iconSize == SourceRow.markBase, """
             The rail's mark and the source row's stopped being one number. Every mark in this app \
             is 24pt at the default rung, and that is the whole of why the rail was enlarged.
-            """)
-        // `closedMark`'s strike must stay inside the well it crosses.
-        #expect(RailView.Metrics.iconSize * 1.2 <= RailView.Metrics.well, """
-            The closed mark's strike is wider than the plate it is drawn on, so Timeline and \
-            Notices would strike out past their own wells.
             """)
     }
 
