@@ -141,7 +141,8 @@ struct MastodonOwnAccountTests {
         #expect(account == OwnAccount(
             name: "", words: MastodonPartsCaptures.note, fields: [], followWithoutAsking: true, findable: nil, listsShown: nil,
             picture: URL(string: "https://mastodon.localhost/system/accounts/avatars/117/419/563/845/369/311/original/e956f8d85d609ba7.png"),
-            pictureDescription: "", headerDescription: "", sites: [], automated: false, indexed: false, coversMedia: false
+            pictureDescription: "", headerDescription: "", sites: [], automated: false, indexed: false, coversMedia: false,
+            quotePolicy: .anyone
         ))
     }
 
@@ -181,6 +182,7 @@ struct MastodonOwnAccountTests {
         #expect(read.pictureDescription == "pic" && read.headerDescription == "")
         #expect(read.sites == ["a.example", "b.example"])
         #expect(read.automated == true && read.indexed == true && read.coversMedia == true && read.coversPosts == nil)
+        #expect(read.quotePolicy == .anyone)
 
         // The shape of 5.0 as its documents give it: no real one was asked.
         let five = try MastodonOwnAccount.account(from: Data(#"{"source":{"spoiler_field":true,"attribution_domains":[]}}"#.utf8))
@@ -192,6 +194,26 @@ struct MastodonOwnAccountTests {
             #"{"bot":"yes","avatar_description":3,"header_description":null,"source":{"attribution_domains":"a.example","sensitive":"no","indexable":1}}"#.utf8
         ))
         #expect(odd == OwnAccount())
+    }
+
+    @Test("Who may quote a new post is read only as one of the three, and sent alone as `source[quote_policy]` only where it changed; a refusal naming it stands on its row")
+    func whoMayQuoteANewPost() throws {
+        for word in ["\"Public\"", "\"everyone\"", "\"\"", "3", "null"] {
+            let read = try MastodonOwnAccount.account(from: Data(#"{"source":{"quote_policy":\#(word)}}"#.utf8))
+            #expect(read.quotePolicy == nil, "\(word) is nothing")
+        }
+        let before = OwnAccount(name: "Ada", quotePolicy: .anyone)
+        var after = before
+        after.quotePolicy = .nobody
+        #expect(MastodonOwnAccount.form(from: before, to: after).map { [$0.0, $0.1] } == [["source[quote_policy]", "nobody"]])
+        after.quotePolicy = .followers
+        #expect(MastodonOwnAccount.form(from: before, to: after).map { [$0.0, $0.1] } == [["source[quote_policy]", "followers"]])
+        #expect(MastodonOwnAccount.form(from: before, to: before).isEmpty)
+        after.quotePolicy = nil
+        #expect(MastodonOwnAccount.form(from: before, to: after, again: [.quotePolicy]).isEmpty, "unsaid is not sent")
+
+        let refused = MastodonOwnAccount.refusal(from: Data(#"{"error":"Bad","details":{"quote_policy":[{"description":"is not valid"}]}}"#.utf8))
+        #expect(refused == .refused(sentence: "Bad", rows: [.quotePolicy: "is not valid"]))
     }
 
     @Test("A stranger's sites are bounded and cleaned: each once, trimmed, none that could not be a name, none with a hidden mark, and a hundred at most")

@@ -24,14 +24,14 @@ struct MastodonSettingsTests {
     @Test("What a real server sent is read: who a new post is for, its language as the tag the server gave, and whether its media is covered — asked once, at its own address, of the host the sign-in is of, as the person")
     func whatARealServerSent() async throws {
         let (reader, server, _) = try Self.reader([Self.path: .json(MastodonSettingsCaptures.untouched)])
-        #expect(try await reader.postingDefaults() == PostingDefaults(reach: .known(.everyone), language: "en", coversMedia: false))
+        #expect(try await reader.postingDefaults() == PostingDefaults(reach: .known(.everyone), language: "en", coversMedia: false, quotePolicy: .anyone))
         let requests = await server.requests
         #expect(requests.count == 1 && requests.first?.url?.absoluteString == "https://\(MastodonFixture.host)/api/v1/preferences")
         #expect(requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer \(MastodonFixture.token.accessToken)")
         #expect(requests.first?.httpMethod == "GET")
 
-        #expect(try Self.read(MastodonSettingsCaptures.unlistedCovered) == PostingDefaults(reach: .known(.unlisted), language: "zh-TW", coversMedia: true))
-        #expect(try Self.read(MastodonSettingsCaptures.followersOnly) == PostingDefaults(reach: .known(.followers), language: "zh", coversMedia: false))
+        #expect(try Self.read(MastodonSettingsCaptures.unlistedCovered) == PostingDefaults(reach: .known(.unlisted), language: "zh-TW", coversMedia: true, quotePolicy: .anyone))
+        #expect(try Self.read(MastodonSettingsCaptures.followersOnly) == PostingDefaults(reach: .known(.followers), language: "zh", coversMedia: false, quotePolicy: .anyone))
         #expect(try Self.read(#"{"posting:default:visibility":"direct"}"#).reach == .known(.mentioned))
     }
 
@@ -51,6 +51,26 @@ struct MastodonSettingsTests {
         }
         // An error's sentence, answered 200, is a list of no settings: it says nothing.
         #expect(try Self.read(MastodonSettingsCaptures.notGiven) == PostingDefaults())
+    }
+
+    @Test("Who may quote a new post is read under its one name as one of the three; any other spelling or value is unsaid, and takes nothing else with it")
+    func whoMayQuote() throws {
+        #expect(try Self.read(MastodonSettingsCaptures.untouched).quotePolicy == .anyone)
+        for (body, said) in [
+            (#"{"posting:default:quote_policy":"followers"}"#, QuotePolicy.followers),
+            (#"{"posting:default:quote_policy":"nobody"}"#, .nobody),
+        ] {
+            #expect(try Self.read(body).quotePolicy == said)
+        }
+        for body in [
+            #"{"posting:default:quote_policy":"Public"}"#, #"{"posting:default:quote_policy":"somebody"}"#,
+            #"{"posting:default:quote_policy":null}"#, #"{"posting:default:quote_policy":true}"#,
+            #"{"posting:default:quotePolicy":"public"}"#, #"{"quote_policy":"public"}"#,
+        ] {
+            #expect(try Self.read(body).quotePolicy == nil, "\(body)")
+        }
+        let beside = try Self.read(#"{"posting:default:quote_policy":"odd","posting:default:sensitive":true}"#)
+        #expect(beside.coversMedia == true)
     }
 
     @Test("What the source wrote is a stranger's word: a reach it does not know and a language are made fit for a line and kept short, whatever was sent")

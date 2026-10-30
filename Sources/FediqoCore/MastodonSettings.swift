@@ -1,15 +1,15 @@
 import Foundation
 
 // What the person set at a Mastodon for the posts they write there (#321): who a new post is
-// for, its language, and whether its media is covered.
+// for, its language, whether its media is covered, and who may quote it (#437).
 //
 // **Asked of a real one first** (`MastodonSettingsCaptures`). It is given only to somebody
 // signed in — with no sign-in, and with a token that is none, the server answers that the
 // token is not valid — and to this app's reading sign-in as to one that may do everything.
 // A sign-in without the word for reading the person's own account is refused it, which is a
 // refusal of that sign-in and not the end of it. The answer is one flat list of settings named
-// by the server; three of them are read here, and the rest — how the person reads, who may
-// quote them — are other units' to read. **Where the person set no language the server still
+// by the server; four of them are read here, and the rest — how the person reads — are other
+// units' to read. **Where the person set no language the server still
 // answers one**, and not the same one to every asker: the language read here is the source's
 // word, and is not known to be a thing the person chose.
 //
@@ -17,7 +17,8 @@ import Foundation
 // known or it is kept as the server wrote it, bounded and made fit for a line of ours. Nothing
 // here is an address, and nothing here is believed about anybody else.
 //
-// **Read, and never written**: changing what the person set there is not this app's to do.
+// **Read, and never written here**: what little of it this app changes, it changes as the
+// account's own (`MastodonOwnAccount`), which is where the source takes it.
 
 /// What somebody set at a source for the posts they write there, as the source says it.
 public struct PostingDefaults: Sendable, Hashable {
@@ -36,14 +37,17 @@ public struct PostingDefaults: Sendable, Hashable {
     public let language: String?
     /// Whether a new post's media is covered, where the source said.
     public let coversMedia: Bool?
+    /// Who may quote a new post, where the source said one of the three this app knows.
+    public let quotePolicy: QuotePolicy?
 
     /// How long a word of the source's is kept: a reach is a word, a language a short tag.
     public static let wordLength = 35
 
-    public init(reach: Reach? = nil, language: String? = nil, coversMedia: Bool? = nil) {
+    public init(reach: Reach? = nil, language: String? = nil, coversMedia: Bool? = nil, quotePolicy: QuotePolicy? = nil) {
         self.reach = reach
         self.language = language.flatMap(Self.word)
         self.coversMedia = coversMedia
+        self.quotePolicy = quotePolicy
     }
 
     /// A word of the source's made fit for a line of ours, or nothing where nothing is left.
@@ -82,6 +86,7 @@ public struct MastodonSettings: Sendable {
     static let reachKey = "posting:default:visibility"
     static let languageKey = "posting:default:language"
     static let coversKey = "posting:default:sensitive"
+    static let quotePolicyKey = "posting:default:quote_policy"
 
     /// What the person set for the posts they write. **Setting by setting**: one that is
     /// missing, or of another shape, is that one not said — and never the others.
@@ -97,7 +102,8 @@ public struct MastodonSettings: Sendable {
         }
         return PostingDefaults(
             reach: said[reachKey]?.text.flatMap(PostingDefaults.reach), language: said[languageKey]?.text,
-            coversMedia: said[coversKey]?.flag
+            coversMedia: said[coversKey]?.flag,
+            quotePolicy: said[quotePolicyKey]?.text.flatMap(QuotePolicy.init(rawValue:))
         )
     }
 

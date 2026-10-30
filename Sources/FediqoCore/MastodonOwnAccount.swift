@@ -26,6 +26,9 @@ import Foundation
 // its brackets changes nothing; a description outlives the picture it describes, through a new
 // picture and through a removal; the host takes up to a hundred sites, though its documents say
 // ten. `source.spoiler_field` is 5.0's and is read from its documents alone, not from a real one.
+// Who may quote a new post (#437) is read and sent the same way: anything but the three this app
+// knows is nothing, and draws no row. Asked of a real 4.6.6: each of the three is taken and is then
+// what the answer, the account check and the preferences all say; another word is a 500.
 //
 // **Nothing here writes anywhere on this device**: what is read lands in what it returns.
 
@@ -81,12 +84,15 @@ public struct OwnAccount: Sendable, Hashable {
     public var coversMedia: Bool?
     /// Whether a new post carries a content warning by default. Nothing where the source did not say.
     public var coversPosts: Bool?
+    /// Who may quote a new post by default. Nothing where the source did not say one this app knows.
+    public var quotePolicy: QuotePolicy?
 
     public init(
         name: String = "", words: String = "", fields: [Field] = [], followWithoutAsking: Bool? = nil,
         findable: Bool? = nil, listsShown: Bool? = nil, picture: URL? = nil, header: URL? = nil,
         pictureDescription: String? = nil, headerDescription: String? = nil, sites: [String]? = nil,
-        automated: Bool? = nil, indexed: Bool? = nil, coversMedia: Bool? = nil, coversPosts: Bool? = nil
+        automated: Bool? = nil, indexed: Bool? = nil, coversMedia: Bool? = nil, coversPosts: Bool? = nil,
+        quotePolicy: QuotePolicy? = nil
     ) {
         self.name = name
         self.words = words
@@ -103,6 +109,7 @@ public struct OwnAccount: Sendable, Hashable {
         self.indexed = indexed
         self.coversMedia = coversMedia
         self.coversPosts = coversPosts
+        self.quotePolicy = quotePolicy
     }
 
 }
@@ -110,7 +117,7 @@ public struct OwnAccount: Sendable, Hashable {
 /// One thing of an own account a change sends and a refusal may name.
 public enum OwnRow: String, Sendable, CaseIterable {
     case name, words, fields, followWithoutAsking, findable, listsShown, picture, header
-    case pictureDescription, headerDescription, sites, automated, indexed, coversMedia, coversPosts
+    case pictureDescription, headerDescription, sites, automated, indexed, coversMedia, coversPosts, quotePolicy
 }
 
 /// How long a source says each thing of an own account may be, and how many fields it may have.
@@ -365,6 +372,7 @@ public struct MastodonOwnAccount: Sendable {
         differs(.indexed, after.indexed, before.indexed)
         differs(.coversMedia, after.coversMedia, before.coversMedia)
         differs(.coversPosts, after.coversPosts, before.coversPosts)
+        differs(.quotePolicy, after.quotePolicy, before.quotePolicy)
         return rows
     }
 
@@ -409,6 +417,7 @@ public struct MastodonOwnAccount: Sendable {
         ] {
             if sent.contains(row), let now { form.append((key, now ? "true" : "false")) }
         }
+        if sent.contains(.quotePolicy), let policy = after.quotePolicy { form.append(("source[quote_policy]", policy.rawValue)) }
         return form
     }
 
@@ -440,6 +449,7 @@ public struct MastodonOwnAccount: Sendable {
             let indexable: L<Bool>?
             let sensitive: L<Bool>?
             let spoilerField: L<Bool>?
+            let quotePolicy: L<String>?
         }
         struct Wire: Decodable, Sendable {
             let displayName: L<String>?
@@ -477,7 +487,8 @@ public struct MastodonOwnAccount: Sendable {
             automated: wire.bot?.value,
             indexed: source.indexable?.value ?? wire.indexable?.value,
             coversMedia: source.sensitive?.value,
-            coversPosts: source.spoilerField?.value
+            coversPosts: source.spoilerField?.value,
+            quotePolicy: source.quotePolicy?.value.flatMap(QuotePolicy.init(rawValue:))
         )
     }
 
@@ -591,6 +602,7 @@ public struct MastodonOwnAccount: Sendable {
         case "indexable": .indexed
         case "sensitive": .coversMedia
         case "spoiler_field": .coversPosts
+        case "quote_policy": .quotePolicy
         default: name.hasPrefix("fields") ? .fields : nil
         }
     }
