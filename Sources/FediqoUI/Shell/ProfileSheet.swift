@@ -92,6 +92,12 @@ struct ProfileDraft: Equatable {
         }
     }
 
+    /// One site that may credit the account, as a row.
+    struct Site: Equatable, Identifiable {
+        let id: Int
+        var name: String
+    }
+
     /// A field's count is drawn only within this many of its limit: four counts on every row are noise.
     static let near = 10
 
@@ -103,6 +109,14 @@ struct ProfileDraft: Equatable {
     var follow: Bool?
     var found: Bool?
     var lists: Bool?
+    var automated: Bool?
+    var indexed: Bool?
+    var coversMedia: Bool?
+    var coversPosts: Bool?
+    /// The words for those who cannot see each, where the source said them.
+    var descriptions: [OwnPicture: String]
+    /// The sites that may credit the account, as rows, where the source said them.
+    var sites: [Site]
     /// The picture and the header as the sheet holds them: as read, chosen, or taken away.
     private(set) var pictures: [OwnPicture: PictureStage]
     /// Why the last choice of each was not taken, until the next choice, Keep current or Save.
@@ -110,6 +124,7 @@ struct ProfileDraft: Equatable {
     private var made: Int
     /// How many choices have been staged: each one's id.
     private var chosen = 0
+    private var madeSites = 0
 
     init(_ account: OwnAccount, limits: OwnLimits = .none) {
         before = account
@@ -121,6 +136,15 @@ struct ProfileDraft: Equatable {
         follow = account.followWithoutAsking
         found = account.findable
         lists = account.listsShown
+        automated = account.automated
+        indexed = account.indexed
+        coversMedia = account.coversMedia
+        coversPosts = account.coversPosts
+        descriptions = [:]
+        descriptions[.picture] = account.pictureDescription
+        descriptions[.header] = account.headerDescription
+        sites = (account.sites ?? []).enumerated().map { Site(id: $0.offset, name: $0.element) }
+        madeSites = sites.count
         pictures = [.picture: .held(account.picture), .header: .held(account.header)]
     }
 
@@ -130,9 +154,72 @@ struct ProfileDraft: Equatable {
         OwnAccount(
             name: name, words: words,
             fields: fields.filter { !$0.blank }.map { OwnAccount.Field(name: $0.label, value: $0.content) },
-            followWithoutAsking: follow, findable: found, listsShown: lists
+            followWithoutAsking: follow, findable: found, listsShown: lists,
+            pictureDescription: description(.picture), headerDescription: description(.header),
+            sites: before.sites == nil ? nil : sitesNamed, automated: automated, indexed: indexed,
+            coversMedia: coversMedia, coversPosts: coversPosts
         )
     }
+
+    /// What is sent of a description: what is typed while there is a picture for it to describe,
+    /// and what was read otherwise, the row being gone.
+    private func description(_ which: OwnPicture) -> String? {
+        describes(which) ? descriptions[which] : read(which)
+    }
+
+    private func read(_ which: OwnPicture) -> String? {
+        switch which {
+        case .picture: before.pictureDescription
+        case .header: before.headerDescription
+        }
+    }
+
+    /// Whether the row of words for `which` is drawn: the source said them, and a picture is
+    /// held or chosen.
+    func describes(_ which: OwnPicture) -> Bool {
+        guard read(which) != nil else { return false }
+        switch stage(of: which) {
+        case .held(let url): return url != nil
+        case .chosen: return true
+        case .removed: return false
+        }
+    }
+
+    func descriptionCount(_ which: OwnPicture) -> ProfileCount? {
+        let limit = which == .picture ? limits.pictureDescription : limits.headerDescription
+        return ProfileCount.of(descriptions[which] ?? "", limit: limit)
+    }
+
+    /// The sites named on the rows: each once, with no row that names nothing.
+    private var sitesNamed: [String] {
+        var seen = Set<String>()
+        return sites.map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    /// Whether the sites stand in the sheet: the source said them.
+    var offersSites: Bool { before.sites != nil }
+
+    /// An empty site at the end; its id. **No limit is held here**: the host states none it
+    /// holds to, so its refusal says it.
+    @discardableResult
+    mutating func addSite() -> Int? {
+        guard offersSites else { return nil }
+        let id = madeSites
+        madeSites += 1
+        sites.append(Site(id: id, name: ""))
+        return id
+    }
+
+    mutating func removeSite(_ id: Int) {
+        sites.removeAll { $0.id == id }
+    }
+
+    /// Rows of a change whose answer was lost: the source may hold them either way, so Save
+    /// sends them again and Cancel asks, whatever the rows say now.
+    var unsure: Set<OwnRow> = []
+    /// Whether there is anything Save would send, or Cancel would lose.
+    var unsettled: Bool { changed || !unsure.isEmpty }
 
     /// Whether anything differs from what was read. A switch left unsaid differs from nothing.
     var changed: Bool {
@@ -142,9 +229,12 @@ struct ProfileDraft: Equatable {
         }
         let switches: [(Bool?, Bool?)] = [
             (now.followWithoutAsking, before.followWithoutAsking), (now.findable, before.findable),
-            (now.listsShown, before.listsShown),
+            (now.listsShown, before.listsShown), (now.automated, before.automated), (now.indexed, before.indexed),
+            (now.coversMedia, before.coversMedia), (now.coversPosts, before.coversPosts),
         ]
         return now.name != before.name || now.words != before.words || pairs(now.fields) != pairs(before.fields)
+            || now.pictureDescription != before.pictureDescription || now.headerDescription != before.headerDescription
+            || now.sites != before.sites
             || switches.contains { now, was in now != nil && now != was } || !pictureChanges.isEmpty
     }
 
@@ -292,7 +382,7 @@ struct ProfileSaid: Equatable {
     var offersSave: Bool { state != .ended }
 
     var canSave: Bool {
-        guard reading.isEmpty, draft?.changed == true else { return false }
+        guard reading.isEmpty, draft?.unsettled == true else { return false }
         switch state {
         case .read, .refused, .forbidden, .failed, .partly: return true
         case .asking, .readFailed, .sending, .partGone, .ended: return false
@@ -301,7 +391,7 @@ struct ProfileSaid: Equatable {
 
     /// Whether Cancel asks before the typing is let go.
     var cancelAsks: Bool {
-        guard draft?.changed == true else { return false }
+        guard draft?.unsettled == true else { return false }
         switch state {
         case .read, .refused, .forbidden, .partGone, .failed, .partly: return true
         case .asking, .readFailed, .sending, .ended: return false
@@ -396,15 +486,46 @@ struct ProfileSheetActs {
     var onPicked: (Int, OwnPicture, PicturePicked) -> Void = { _, _, _ in }
 }
 
-/// The three switches, by the row each is.
+/// The switches, by the row each is.
 enum ProfileSwitch: CaseIterable {
-    case follow, found, lists
+    case follow, found, lists, indexed, automated, coversMedia, coversPosts
+
+    /// What others can do: those always drawn, a menu where the source did not say; then one
+    /// drawn only where it did.
+    static let others: [ProfileSwitch] = [.follow, .found, .lists, .indexed]
+    static let about: [ProfileSwitch] = [.automated]
+    static let newPosts: [ProfileSwitch] = [.coversMedia, .coversPosts]
+
+    /// Whether the row is drawn for an account as read: **one that came with #436 only where
+    /// the source said it** (D5).
+    func drawn(for account: OwnAccount) -> Bool {
+        switch self {
+        case .follow, .found, .lists: true
+        case .indexed, .automated, .coversMedia, .coversPosts: account[keyPath: read] != nil
+        }
+    }
+
+    var read: KeyPath<OwnAccount, Bool?> {
+        switch self {
+        case .follow: \.followWithoutAsking
+        case .found: \.findable
+        case .lists: \.listsShown
+        case .indexed: \.indexed
+        case .automated: \.automated
+        case .coversMedia: \.coversMedia
+        case .coversPosts: \.coversPosts
+        }
+    }
 
     var row: OwnRow {
         switch self {
         case .follow: .followWithoutAsking
         case .found: .findable
         case .lists: .listsShown
+        case .indexed: .indexed
+        case .automated: .automated
+        case .coversMedia: .coversMedia
+        case .coversPosts: .coversPosts
         }
     }
 
@@ -413,6 +534,10 @@ enum ProfileSwitch: CaseIterable {
         case .follow: "profile.switch.follow"
         case .found: "profile.switch.found"
         case .lists: "profile.switch.lists"
+        case .indexed: "profile.switch.indexed"
+        case .automated: "profile.switch.automated"
+        case .coversMedia: "profile.switch.coversMedia"
+        case .coversPosts: "profile.switch.coversPosts"
         }
     }
 
@@ -421,6 +546,10 @@ enum ProfileSwitch: CaseIterable {
         case .follow: \.follow
         case .found: \.found
         case .lists: \.lists
+        case .indexed: \.indexed
+        case .automated: \.automated
+        case .coversMedia: \.coversMedia
+        case .coversPosts: \.coversPosts
         }
     }
 
@@ -447,7 +576,7 @@ struct ProfileSheet: View {
     var framed = true
 
     enum Focus: Hashable {
-        case name, words, label(Int), content(Int)
+        case name, words, label(Int), content(Int), site(Int)
     }
 
     @Environment(\.colorScheme) private var colorScheme
@@ -571,9 +700,28 @@ struct ProfileSheet: View {
             ShellSectionHead(
                 L10n.t("profile.others"), line: String(format: L10n.t("profile.others.line"), said.host)
             )
-            ForEach(ProfileSwitch.allCases, id: \.self) { which in switchRow(which) }
+            switchRows(ProfileSwitch.others)
+            if draft.offersSites || ProfileSwitch.about.contains(where: drawn) {
+                ShellRule()
+                ShellSectionHead(L10n.t("profile.about"))
+                switchRows(ProfileSwitch.about)
+                if draft.offersSites { sitesBlock }
+            }
+            if ProfileSwitch.newPosts.contains(where: drawn) {
+                ShellRule()
+                ShellSectionHead(
+                    L10n.t("profile.newPosts"), line: String(format: L10n.t("profile.newPosts.line"), said.host)
+                )
+                switchRows(ProfileSwitch.newPosts)
+            }
         }
         .disabled(!said.editable)
+    }
+
+    private func drawn(_ which: ProfileSwitch) -> Bool { which.drawn(for: draft.before) }
+
+    private func switchRows(_ which: [ProfileSwitch]) -> some View {
+        ForEach(which.filter(drawn), id: \.self) { switchRow($0) }
     }
 
     /// The picture and the header, their reads told which opening they belong to.
@@ -582,39 +730,6 @@ struct ProfileSheet: View {
         return ProfilePicturesBlock(
             said: said, draft: $draft, onReading: { acts.onReading(opening, $0) }, onPicked: { acts.onPicked(opening, $0, $1) }
         )
-    }
-
-    /// A row's name, and its count beside it where one is drawn — under it where both do not fit.
-    private func rowHead(_ title: String, count: ProfileCount?) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
-                rowName(title)
-                Spacer(minLength: 0)
-                countText(count)
-            }
-            VStack(alignment: .leading, spacing: ShellSpace.hair) {
-                rowName(title)
-                countText(count)
-            }
-        }
-        .accessibilityHidden(true)
-    }
-
-    private func rowName(_ title: String) -> some View {
-        Text(title)
-            .shellFont(.meta)
-            .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    @ViewBuilder
-    private func countText(_ count: ProfileCount?) -> some View {
-        if let count {
-            Text(count.words(host: said.host))
-                .shellFont(.reading)
-                .foregroundStyle(count.over ? ShellChrome.ink(colorScheme) : ShellChrome.inkFaint(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-        }
     }
 
     /// The source's word under a row its refusal named.
@@ -635,7 +750,7 @@ struct ProfileSheet: View {
 
     private var nameRow: some View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            rowHead(L10n.t("profile.name"), count: draft.nameCount)
+            ProfileRowHead(title: L10n.t("profile.name"), count: draft.nameCount, host: said.host)
             TextField("", text: $draft.name)
                 .shellFont(.body)
                 .shellField(.alone)
@@ -650,7 +765,7 @@ struct ProfileSheet: View {
 
     private var wordsRow: some View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            rowHead(L10n.t("profile.words"), count: draft.wordsCount)
+            ProfileRowHead(title: L10n.t("profile.words"), count: draft.wordsCount, host: said.host)
             TextEditor(text: $draft.words)
                 .shellFont(.body)
                 .scrollContentBackground(.hidden)
@@ -671,12 +786,12 @@ struct ProfileSheet: View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
-                    rowName(L10n.t("profile.fields"))
+                    ProfileRowName(title: L10n.t("profile.fields"))
                     Spacer(minLength: 0)
                     fieldsLine
                 }
                 VStack(alignment: .leading, spacing: ShellSpace.hair) {
-                    rowName(L10n.t("profile.fields"))
+                    ProfileRowName(title: L10n.t("profile.fields"))
                     fieldsLine
                 }
             }
@@ -737,8 +852,8 @@ struct ProfileSheet: View {
         let label = draft.labelCount(field), content = draft.contentCount(field)
         if label != nil || content != nil {
             VStack(alignment: .leading, spacing: ShellSpace.hair) {
-                if let label { countText(label).accessibilityLabel(L10n.t("profile.field.label") + " " + label.words(host: said.host)) }
-                if let content { countText(content).accessibilityLabel(L10n.t("profile.field.value") + " " + content.words(host: said.host)) }
+                if let label { ProfileRowCount(count: label, host: said.host).accessibilityLabel(L10n.t("profile.field.label") + " " + label.words(host: said.host)) }
+                if let content { ProfileRowCount(count: content, host: said.host).accessibilityLabel(L10n.t("profile.field.value") + " " + content.words(host: said.host)) }
             }
         }
     }
@@ -805,6 +920,53 @@ struct ProfileSheet: View {
         return ShellMore(items: items)
     }
 
+    // MARK: - The sites that may credit the account
+
+    private var sitesBlock: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.snug) {
+            ProfileRowName(title: L10n.t("profile.sites"))
+            Text(L10n.t("profile.sites.line"))
+                .shellFont(.reading)
+                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(Array(draft.sites.enumerated()), id: \.element.id) { place, site in
+                siteRow(site, place: place)
+            }
+            ShellLinkButton(L10n.t("profile.site.add"), symbol: "plus") {
+                if let id = draft.addSite() { focus = .site(id) }
+            }
+            .fixedSize()
+            refusal(.sites)
+        }
+    }
+
+    private func siteRow(_ site: ProfileDraft.Site, place: Int) -> some View {
+        HStack(alignment: .center, spacing: ShellSpace.snug) {
+            TextField("example.com", text: Binding(
+                get: { draft.sites.first { $0.id == site.id }?.name ?? "" },
+                set: { name in
+                    guard let at = draft.sites.firstIndex(where: { $0.id == site.id }) else { return }
+                    draft.sites[at].name = name
+                }
+            ))
+            .shellFont(.body)
+            .shellField(.alone)
+            .modifier(ProfileSiteTyping())
+            .focused($focus, equals: .site(site.id))
+            .accessibilityLabel(String(format: L10n.t("profile.site.spoken"), place + 1))
+            .accessibilityHint(said.refusal(of: .sites) ?? "")
+            Button { draft.removeSite(site.id) } label: {
+                Image(systemName: "minus.circle")
+                    .shellFont(.mark)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(L10n.t("profile.field.remove"))
+            .accessibilityLabel(String(format: L10n.t("profile.site.remove.spoken"), place + 1))
+        }
+    }
+
     // MARK: - What others can do
 
     private func switchRow(_ which: ProfileSwitch) -> some View {
@@ -844,7 +1006,7 @@ struct ProfileSheet: View {
     private func switchControl(_ which: ProfileSwitch) -> some View {
         let value = draft[keyPath: which.path]
         let spoken = ProfileSwitch.word(value, host: said.host)
-        if draft.before[keyPath: Self.read(which)] == nil {
+        if draft.before[keyPath: which.read] == nil {
             Picker(L10n.t(which.key), selection: $draft[dynamicMember: which.path]) {
                 Text(ProfileSwitch.word(nil, host: said.host)).tag(Bool?.none)
                 Text(ProfileSwitch.word(true, host: said.host)).tag(Bool?.some(true))
@@ -876,13 +1038,56 @@ struct ProfileSheet: View {
             .fixedSize()
         }
     }
+}
 
-    private static func read(_ which: ProfileSwitch) -> KeyPath<OwnAccount, Bool?> {
-        switch which {
-        case .follow: \.followWithoutAsking
-        case .found: \.findable
-        case .lists: \.listsShown
+/// A row's name.
+struct ProfileRowName: View {
+    let title: String
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Text(title)
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// A row's count against what the host states, where one is drawn.
+struct ProfileRowCount: View {
+    let count: ProfileCount?
+    let host: String
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if let count {
+            Text(count.words(host: host))
+                .shellFont(.reading)
+                .foregroundStyle(count.over ? ShellChrome.ink(colorScheme) : ShellChrome.inkFaint(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+/// A row's name, and its count beside it where one is drawn — under it where both do not fit.
+struct ProfileRowHead: View {
+    let title: String
+    let count: ProfileCount?
+    let host: String
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+                ProfileRowName(title: title)
+                Spacer(minLength: 0)
+                ProfileRowCount(count: count, host: host)
+            }
+            VStack(alignment: .leading, spacing: ShellSpace.hair) {
+                ProfileRowName(title: title)
+                ProfileRowCount(count: count, host: host)
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -920,6 +1125,17 @@ private struct ProfileSheetRoom: ViewModifier {
         if framed { content.frame(width: 600).frame(minHeight: 560) } else { content }
         #else
         content.presentationDetents([.large])
+        #endif
+    }
+}
+
+/// A site's name is no sentence: on a phone, typed as it is.
+private struct ProfileSiteTyping: ViewModifier {
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content.textInputAutocapitalization(.never).autocorrectionDisabled()
+        #else
+        content
         #endif
     }
 }

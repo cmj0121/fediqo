@@ -433,6 +433,30 @@ struct ComposeTests {
         #expect(!late.composeTouchedAudience)
     }
 
+    @Test("What a source said a new post starts from, let go by a change of it, is asked again; an answer out before that lands nowhere")
+    func aChangeLetsTheDefaultsGo() async throws {
+        let prefs = #"{"posting:default:sensitive":true}"#
+        let gate = Gate()
+        let watchdog = watching(gate, "the defaults, held on the wire")
+        defer { watchdog.cancel() }
+        let (session, server, _) = try await shell(
+            scopes: writing, routes: ["/api/v1/preferences": .json(prefs)],
+            holding: "/api/v1/preferences", gate: gate
+        )
+        session.prepareCompose()
+        let host = try #require(session.composeHost)
+        let loading = Task { await session.loadComposeDefaults() }
+        await met("the defaults are on the wire", by: loading) { await server.paths.contains("/api/v1/preferences") }
+        session.postingDefaultsChanged(at: host)
+        await gate.open()
+        await loading.value
+        #expect(session.composeDraft.coversMedia != true, "said before the change: lands nowhere")
+
+        await session.loadComposeDefaults()
+        #expect(session.composeDraft.coversMedia == true, "asked again")
+        #expect(await server.paths.filter { $0 == "/api/v1/preferences" }.count == 2)
+    }
+
     @Test("Two described pictures are sent to that source alone, and the post names both")
     func twoDescribedPicturesGoWithThePost() async throws {
         let posted = Self.status(body: "with pictures", extra: #"""

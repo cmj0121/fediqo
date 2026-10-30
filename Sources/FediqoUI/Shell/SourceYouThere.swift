@@ -186,7 +186,7 @@ struct YouThereBlock: View {
                 YouThereSection(said: said, onAgain: { Task { await you.again(host, in: session) } })
                 HomeStoppedControl(host: host, session: session)
             }
-            .task(id: ShellYouThere.opening(host, in: session)) { await you.opened(host, in: session) }
+            .task(id: you.opening(host, in: session)) { await you.opened(host, in: session) }
         }
     }
 }

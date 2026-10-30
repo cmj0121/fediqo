@@ -58,6 +58,31 @@ struct ProfileSheetHostedTests {
         }
     }
 
+    @Test("The rest of the profile lays out at 600, 390 and 320 at the largest text, in light and in dark, no wider than its room, refused or not", arguments: 0..<2)
+    func theRestLaidOut(_ dark: Int) {
+        let scheme: ColorScheme = dark == 1 ? .dark : .light
+        let account = OwnAccount(
+            name: "Alice", picture: URL(string: "https://files.example/p.png"), header: URL(string: "https://files.example/h.png"),
+            pictureDescription: "A river at evening", headerDescription: "", sites: ["alice.example", "writing.alice.example"],
+            automated: false, indexed: true, coversMedia: false, coversPosts: true
+        )
+        for state in [ProfileState.read, .refused(sentence: "No", rows: [.sites: "is not a domain", .pictureDescription: "is too long"])] {
+            for (width, size) in Self.arrangements {
+                let draft = ProfileDraft(account, limits: OwnLimits(pictureDescription: 150, headerDescription: 150))
+                let sheet = ProfileSheet(
+                    said: ProfileSaid(host: Self.host, state: state, draft: draft), draft: .constant(draft), framed: false
+                )
+                let view = NSHostingView(
+                    rootView: sheet.frame(width: width, height: 900)
+                        .environment(\.colorScheme, scheme).environment(\.dynamicTypeSize, size)
+                )
+                view.layoutSubtreeIfNeeded()
+                #expect(view.fittingSize.height > 0, "\(state) at \(width)")
+                #expect(view.fittingSize.width <= width + 0.5, "\(state) at \(width)")
+            }
+        }
+    }
+
     @Test("The picture and the header lay out held, chosen, removed, absent, refused and saved in part at 600, 390 and 320 at the largest text, in light and in dark, no wider than the room", arguments: 0..<2)
     func picturesLaidOut(_ dark: Int) {
         let scheme: ColorScheme = dark == 1 ? .dark : .light

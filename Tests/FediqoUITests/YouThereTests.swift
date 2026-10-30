@@ -109,7 +109,7 @@ struct YouThereTests {
         await you.opened(Self.host, in: session)
         await you.again(Self.host, in: session)
         #expect(await server.asked.count == 1, "answered: asked once a run")
-        #expect(ShellYouThere.opening(Self.host, in: session) == ShellPersonPages.Opening(id: Self.host, askedAs: .reader(nil)))
+        #expect(you.opening(Self.host, in: session) == ShellPersonPages.Opening(id: Self.host, askedAs: .reader(nil)))
     }
 
     @Test("With no sign-in there is no block and nobody is asked; a forum has none, signed in or not; and what a sign-in was given is not drawn once it has ended")

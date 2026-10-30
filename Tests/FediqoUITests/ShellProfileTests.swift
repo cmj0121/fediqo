@@ -81,6 +81,7 @@ struct ShellProfileTests {
     /// The reader's own page, opened, and the pages it is one of.
     private func ownPage(_ session: ShellSession) async throws -> (ShellPersonPages, DummyPerson) {
         let pages = ShellPersonPages()
+        session.personPages = pages
         let me = try #require(ShellPersonPages.own(at: Self.host, in: session))
         await pages.opened(me, in: session)
         return (pages, me)
@@ -116,6 +117,7 @@ struct ShellProfileTests {
         let (session, _) = await session()
         try await signIn(session)
         let pages = ShellPersonPages()
+        session.personPages = pages
         let me = try #require(ShellPersonPages.own(at: Self.host, in: session))
         #expect(pages.head(of: me, in: session).change == nil, "not while asking who they are")
         await pages.opened(me, in: session)
@@ -251,6 +253,51 @@ struct ShellProfileTests {
         #expect(pages.you.said(at: Self.host, in: session)?.reading == .asking, "the source's page asked nothing")
     }
 
+    @Test("The rest of the profile, said by the source, is sent as changed; a refusal changes nothing and the composer's word stays; an answer has the composer and the source's page ask again")
+    func theRest() async throws {
+        let tended = Self.own().replacingOccurrences(of: #""source":{"#, with: #""bot":false,"avatar_description":"","source":{"sensitive":false,"attribution_domains":["a.example"],"#)
+        let prefs = "/api/v1/preferences"
+        let (session, server) = await session(Self.served([
+            Self.who: PageServer.Answer(body: tended),
+            prefs: PageServer.Answer(body: #"{"posting:default:sensitive":false}"#),
+            Self.change: PageServer.Answer(body: #"{"error":"No","details":{"attribution_domains":[{"description":"is no domain"}]}}"#, status: 422),
+        ]))
+        try await signIn(session)
+        let (pages, _) = try await ownPage(session)
+        session.composeHost = Self.host
+        await session.loadComposeDefaults()
+        #expect(await server.arrivals(of: prefs) == 1)
+        await pages.you.opened(Self.host, in: session)
+        #expect(await server.arrivals(of: prefs) == 2)
+        let shown = pages.you.opening(Self.host, in: session)
+        guard case .said = pages.you.said(at: Self.host, in: session)?.reading else {
+            Issue.record("the source's page was told")
+            return
+        }
+
+        let said = try await opened(pages, session)
+        #expect(said.draft?.offersSites == true && said.draft?.before.automated == false && said.draft?.before.indexed == nil)
+        pages.profile.draft?.coversMedia = true
+        pages.profile.draft?.sites = []
+        await pages.profile.save(in: session)?.value
+        #expect(await form(server) == ["source[sensitive]": "true", "attribution_domains[]": ""])
+        #expect(pages.profile.said(in: session)?.refusal(of: .sites) == "is no domain")
+        #expect(pages.profile.draft?.coversMedia == true, "every choice kept")
+        await session.loadComposeDefaults()
+        #expect(await server.arrivals(of: prefs) == 2, "refused: nothing let go")
+        #expect(pages.you.opening(Self.host, in: session) == shown)
+
+        await server.answer(Self.change, PageServer.Answer(body: tended))
+        await pages.profile.save(in: session)?.value
+        #expect(pages.profile.open == nil)
+        await session.loadComposeDefaults()
+        #expect(await server.arrivals(of: prefs) == 3, "changed: asked again")
+        #expect(pages.you.said(at: Self.host, in: session)?.reading == .asking, "the source's page let go")
+        #expect(pages.you.opening(Self.host, in: session) != shown, "and a block already up is told to ask")
+        await pages.you.opened(Self.host, in: session)
+        #expect(await server.arrivals(of: prefs) == 4)
+    }
+
     @Test("Nothing changed sends nothing; a row with nothing in it is left out of what is sent; a field changed sends every field, and a moved one sends them in the new order")
     func whatIsSent() async throws {
         let (session, server) = await session()
@@ -345,14 +392,33 @@ struct ShellProfileTests {
 
     @Test("A change that gets no answer says whether it took is not known, keeps what was typed and changes nothing held — the page stays as last read — and Save sends the same again")
     func aFailure() async throws {
-        let (session, server) = await session(Self.served([Self.change: PageServer.Answer(body: "", status: 502)]))
+        let prefs = "/api/v1/preferences"
+        let (session, server) = await session(Self.served([
+            Self.change: PageServer.Answer(body: "", status: 502),
+            prefs: PageServer.Answer(body: #"{"posting:default:sensitive":false}"#),
+        ]))
         try await signIn(session)
         let (pages, me) = try await ownPage(session)
+        session.composeHost = Self.host
+        await session.loadComposeDefaults()
+        await pages.you.opened(Self.host, in: session)
+        #expect(await server.arrivals(of: prefs) == 2)
         _ = try await opened(pages, session)
         pages.profile.draft?.name = "River Me"
         await pages.profile.save(in: session)?.value
         let said = try #require(pages.profile.said(in: session))
         #expect(said.state == .failed && said.canSave && said.draft?.name == "River Me")
+        #expect(pages.you.said(at: Self.host, in: session)?.reading == .asking, "it may have landed: the source's page lets go")
+        await session.loadComposeDefaults()
+        #expect(await server.arrivals(of: prefs) == 3, "and the composer asks again")
+
+        // Turned back, it may still be what the source holds: Save stays, and says it.
+        pages.profile.draft?.name = "Me"
+        let back = try #require(pages.profile.said(in: session))
+        #expect(back.canSave && back.cancelAsks)
+        await pages.profile.save(in: session)?.value
+        #expect(await form(server) == ["display_name": "Me"])
+        pages.profile.draft?.name = "River Me"
         #expect(said.stateLine(language: .english) == "m.example did not answer, so whether it took the change is not known. What you typed is kept: Save sends it again.")
         #expect(pages.head(of: me, in: session).name == "Me" && session.mastodon.asking(host: Self.host) == 3)
         await server.answer(Self.change, PageServer.Answer(body: Self.own(name: "River Me", locked: true, asking: 3)))
@@ -539,17 +605,26 @@ struct ShellProfileTests {
 
     @Test("A change that lands while a removal fails: the page draws the answer, the sheet stays up on it with the removal still staged and says what was not taken off; Save sends the removal alone again")
     func savedInPart() async throws {
+        let prefs = "/api/v1/preferences"
         let (session, server) = await session(Self.served([
             Self.who: PageServer.Answer(body: Self.pictured()),
             Self.change: PageServer.Answer(body: Self.pictured(name: "River Me")),
             Self.header: PageServer.Answer(body: "", status: 502),
+            prefs: PageServer.Answer(body: #"{"posting:default:sensitive":false}"#),
         ]))
         try await signIn(session)
         let (pages, me) = try await ownPage(session)
+        session.composeHost = Self.host
+        await session.loadComposeDefaults()
+        await pages.you.opened(Self.host, in: session)
+        #expect(await server.arrivals(of: prefs) == 2)
         _ = try await opened(pages, session)
         pages.profile.draft?.name = "River Me"
         pages.profile.draft?.remove(.header)
         await pages.profile.save(in: session)?.value
+        #expect(pages.you.said(at: Self.host, in: session)?.reading == .asking, "landed in part: the source's page lets go")
+        await session.loadComposeDefaults()
+        #expect(await server.arrivals(of: prefs) == 3, "and the composer asks again")
 
         let said = try #require(pages.profile.said(in: session))
         #expect(said.state == .partly(failed: [.header]) && said.canSave && said.cancelAsks)

@@ -73,6 +73,8 @@ final class ShellYouThere {
     }
 
     private var pages: [String: Page] = [:]
+    /// How many times each host's settings were changed from here: part of a block's opening.
+    private var settingsTurned: [String: Int] = [:]
     /// The ask on the wire for each host: what a second opening waits on, and asks nothing.
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private let errands: PageErrands
@@ -90,8 +92,8 @@ final class ShellYouThere {
 
     /// A source's page opening, as this block's task is named: which host **and who asks**, so
     /// a page in front whose reader ends, begins or changes opens again by itself.
-    static func opening(_ host: String, in session: ShellSession) -> ShellPersonPages.Opening {
-        ShellPersonPages.Opening(id: host, askedAs: ShellPersonPages.askedAs(at: host, in: session))
+    func opening(_ host: String, in session: ShellSession) -> ShellPersonPages.Opening {
+        ShellPersonPages.Opening(id: host, askedAs: ShellPersonPages.askedAs(at: host, in: session), under: settingsTurned[host] ?? 0)
     }
 
     /// What was told of `host` let go, and its ask called off: its reader is no longer who
@@ -100,6 +102,13 @@ final class ShellYouThere {
         asks[host]?.cancel()
         asks[host] = nil
         pages[host] = nil
+    }
+
+    /// What was told of `host` let go because the setting itself changed, **and a block already
+    /// up told to ask**: its opening is another from here on, so its task runs again.
+    func settingsChanged(at host: String) {
+        letGo(at: host)
+        settingsTurned[host, default: 0] += 1
     }
 
     // MARK: - What the page is handed

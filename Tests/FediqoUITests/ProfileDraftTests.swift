@@ -161,7 +161,7 @@ struct ProfileDraftTests {
         #expect(ProfileSwitch.word(nil, host: Self.host, language: .english) == "m.example did not say")
         #expect(said(.read, ProfileDraft(Self.account, limits: OwnLimits(fields: 4))).fieldsLine(language: .english) == "Up to 4, shown in this order.")
         #expect(said(.read).fieldsLine(language: .english) == "Shown in this order.")
-        #expect(ProfileSwitch.allCases.map { L10n.t($0.key, language: .english) }
+        #expect(([.follow, .found, .lists] as [ProfileSwitch]).map { L10n.t($0.key, language: .english) }
             == ["Follow you without asking", "Find you, and see you suggested", "See who you follow and who follows you"])
     }
 
@@ -174,7 +174,7 @@ struct ProfileDraftTests {
             guard line.hasPrefix("\"profile.") else { return nil }
             return String(line.dropFirst().prefix { $0 != "\"" })
         }
-        #expect(keys.count == 79)
+        #expect(keys.count == 93)
         for key in keys where key != "profile.switch.follow.waiting.one" {
             let english = L10n.t(key, language: .english), taiwanese = L10n.t(key, language: .taiwanese)
             #expect(english != key && taiwanese != key, "\(key)")
@@ -186,6 +186,84 @@ struct ProfileDraftTests {
         #expect(L10n.t("shortcut.follow", language: .english).hasSuffix("— or, on your own page, change your profile"))
         #expect(L10n.t("profile.title", language: .english) == "Your profile" && L10n.t("profile.title", language: .taiwanese) == "你的個人檔案")
         #expect(!keys.contains { L10n.t($0, language: .taiwanese).contains("帳號") }, "the profile is 個人檔案, as the part's own words say")
+    }
+
+    // MARK: - The rest of the profile (#436)
+
+    private static let tended = OwnAccount(
+        name: "Me", picture: URL(string: "https://f.example/p.png"), pictureDescription: "A river", headerDescription: "",
+        sites: ["a.example"], automated: false, indexed: true, coversMedia: false, coversPosts: false
+    )
+
+    @Test("Each row of the rest stands only where the source said it: a source that said nothing draws none, and is no change")
+    func rowsOnlyWhereSaid() {
+        let silent = ProfileDraft(Self.account)
+        #expect(!silent.offersSites && !silent.describes(.picture) && !silent.describes(.header))
+        for which in [ProfileSwitch.indexed, .automated, .coversMedia, .coversPosts] {
+            #expect(!which.drawn(for: silent.before) && which.drawn(for: Self.tended))
+        }
+        #expect([ProfileSwitch.follow, .found, .lists].allSatisfy { $0.drawn(for: silent.before) }, "the three stand as they did")
+        #expect(!silent.changed && silent.after.sites == nil && silent.after.pictureDescription == nil && silent.after.automated == nil)
+    }
+
+    @Test("A description's row stands only for a picture held or chosen: removed, or with none held, the row goes and what was typed is not sent; Keep current brings it back")
+    func descriptionRow() {
+        var draft = ProfileDraft(Self.tended)
+        #expect(draft.describes(.picture) && !draft.describes(.header), "one held; the header has none")
+        draft.descriptions[.picture] = "A wide river"
+        #expect(draft.changed && draft.after.pictureDescription == "A wide river")
+        draft.remove(.picture)
+        #expect(!draft.describes(.picture) && draft.after.pictureDescription == "A river")
+        draft.keep(.picture)
+        #expect(draft.describes(.picture) && draft.after.pictureDescription == "A wide river")
+
+        draft.descriptions[.header] = "typed"
+        #expect(draft.after.headerDescription == "", "no header to describe")
+        draft.stage(.header, data: Self.png(), type: .png, name: "h.png")
+        #expect(draft.describes(.header) && draft.after.headerDescription == "typed")
+    }
+
+    @Test("A description counts against the host's own limit, where it states one")
+    func descriptionCount() {
+        var draft = ProfileDraft(Self.tended, limits: OwnLimits(pictureDescription: 5))
+        draft.descriptions[.picture] = "A wide river"
+        #expect(draft.descriptionCount(.picture)?.over == true && draft.descriptionCount(.header) == nil)
+    }
+
+    @Test("Sites: a row naming nothing is none, each once and trimmed; all taken away is an empty set; adding holds to no limit of its own")
+    func sitesRows() {
+        var draft = ProfileDraft(Self.tended)
+        let added = draft.addSite()
+        #expect(added != nil && !draft.changed, "a row with nothing in it is no site")
+        draft.sites[1].name = " b.example "
+        #expect(draft.changed && draft.after.sites == ["a.example", "b.example"])
+        draft.sites[1].name = "a.example"
+        #expect(!draft.changed && draft.after.sites == ["a.example"])
+        for site in draft.sites { draft.removeSite(site.id) }
+        #expect(draft.changed && draft.after.sites == [])
+
+        var many = ProfileDraft(OwnAccount(sites: (0..<11).map { "s\($0).example" }))
+        #expect(many.sites.count == 11 && !many.changed)
+        #expect(many.addSite() != nil, "no limit the host did not state: its refusal says it")
+        var silent = ProfileDraft(OwnAccount())
+        #expect(silent.addSite() == nil)
+    }
+
+    @Test("After a lost answer a row turned back still leaves Save live and has Cancel ask, for the source may hold the other value; with nothing unsure it is no change")
+    func aLostAnswerStaysUnsettled() {
+        var draft = ProfileDraft(Self.tended)
+        #expect(!said(.read, draft).canSave && !said(.failed, draft).canSave)
+        draft.unsure = [.coversMedia]
+        #expect(!draft.changed && said(.failed, draft).canSave && said(.failed, draft).cancelAsks)
+    }
+
+    @Test("A switch of the rest is a change once turned, and a refusal naming it stands on its row")
+    func theRestSwitches() {
+        var draft = ProfileDraft(Self.tended)
+        draft[keyPath: ProfileSwitch.coversMedia.path] = true
+        #expect(draft.changed && draft.after.coversMedia == true)
+        let refused = said(.refused(sentence: "No", rows: [.sites: "is not a domain"]), draft)
+        #expect(refused.refusal(of: .sites) == "is not a domain" && refused.refusal(of: .coversMedia) == nil)
     }
 
     // MARK: - The picture and the header

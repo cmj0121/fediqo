@@ -1126,6 +1126,9 @@ final class ShellSession {
     /// What each source said a new post starts from, asked once a run.
     @ObservationIgnored private var composeDefaults: [String: PostingDefaults] = [:]
     @ObservationIgnored private var composeDefaultsAsked: Set<String> = []
+    /// How many times each source's word on a new post was let go: what tells an answer out
+    /// before that from one still wanted.
+    @ObservationIgnored private var composeDefaultsLetGo: [String: Int] = [:]
 
     var availability: ShellAvailability {
         ShellAvailability(
@@ -1242,19 +1245,32 @@ final class ShellSession {
             return
         }
         composeDefaultsAsked.insert(host)
+        let letGo = composeDefaultsLetGo[host]
         guard let door = mastodon.authorized(host: host, for: .write) else {
             composeDefaults[host] = PostingDefaults()
             return
         }
         do {
             let defaults = try await MastodonSettings(door: door).postingDefaults()
+            guard composeDefaultsLetGo[host] == letGo else { return }
             composeDefaults[host] = defaults
             if composeHost == host { adoptComposeDefaults(for: host) }
         } catch where DarkNetwork.caused(error) {
+            guard composeDefaultsLetGo[host] == letGo else { return }
             composeDefaultsAsked.remove(host)
         } catch {
+            guard composeDefaultsLetGo[host] == letGo else { return }
             composeDefaults[host] = PostingDefaults()
         }
+    }
+
+    /// What `host` said a new post starts from let go, its settings having just been changed
+    /// here: the next composer asks again. **An answer already out lands nowhere**, since it may
+    /// say what the change replaced.
+    func postingDefaultsChanged(at host: String) {
+        composeDefaults[host] = nil
+        composeDefaultsAsked.remove(host)
+        composeDefaultsLetGo[host, default: 0] += 1
     }
 
     /// Takes the cached defaults for `host` into the fields the person has not touched.

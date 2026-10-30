@@ -408,6 +408,13 @@ final class ShellPersonPages {
         session.mastodon.changes[host, default: 0]
     }
 
+    /// What was told of how `host` sets up a new post let go, its settings having just been
+    /// changed here: the next composer asks again, and a block of them up reads again.
+    static func settingsChanged(at host: String, in session: ShellSession) {
+        session.postingDefaultsChanged(at: host)
+        session.personPages?.you.settingsChanged(at: host)
+    }
+
     /// Every page of `host` let go, and its ask called off: its reader is no longer who they
     /// were given to. Whatever an ask already out brings, it brings to no page.
     private func letGo(at host: String) {
