@@ -3142,7 +3142,12 @@ public struct FediqoRootView: View {
         TabView(selection: tabSelection) {
             ForEach(availability.tabbedPlaces) { item in
                 placedPage(item.drawn(standingOn: place))
-                    .tabItem { Label(item.title, systemImage: item.symbolName) }
+                    .tabItem {
+                        // The bar fills whatever it is given unless told not to, and a glyph with
+                        // no filled twin then looks the same chosen as not.
+                        Label(item.title, systemImage: Self.tabGlyph(item, standingOn: place))
+                            .environment(\.symbolVariants, .none)
+                    }
                     // What was told since the notices page was last in front (#324).
                     .badge(item == .notices ? session.noticesTold.count : 0)
                     .tag(item)
@@ -3158,6 +3163,12 @@ public struct FediqoRootView: View {
             get: { place.tab },
             set: { place = Self.selecting($0, standingOn: place) }
         )
+    }
+
+    /// The glyph a tab of the bar is drawn with: its chosen twin on the tab lit for where the
+    /// reader stands, as on the rail.
+    static func tabGlyph(_ tab: ShellPlace, standingOn place: ShellPlace) -> String {
+        ShellGlyph.drawn(tab.symbolName, chosen: tab == place.tab)
     }
 
     /// Where a tab set by the bar stands the reader: on that tab's place, but **a set of the tab

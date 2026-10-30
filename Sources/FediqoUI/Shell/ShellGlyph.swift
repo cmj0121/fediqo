@@ -7,9 +7,11 @@
 /// up (`ShellGlyphTests`), so a glyph without a twin stops the suite instead of the eye.
 enum ShellGlyph {
     /// The twins that are not the glyph's own name and `.fill` after it. Trends is glacial's: a
-    /// line rising where it is not chosen, and the bars it is read in where it is.
+    /// line rising where it is not chosen, and thin bars rising where it is. A timeline that has
+    /// lost a rule's source says so with the same dashed circle, in front or not.
     static let twins: [String: String] = [
-        "chart.line.uptrend.xyaxis": "chart.bar.fill",
+        "chart.line.uptrend.xyaxis": "chart.bar.xaxis.ascending",
+        "circle.dashed": "circle.dashed",
         "point.3.connected.trianglepath.dotted": "point.3.filled.connected.trianglepath.dotted",
     ]
 

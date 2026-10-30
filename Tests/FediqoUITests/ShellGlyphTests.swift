@@ -33,11 +33,19 @@ struct ShellGlyphTests {
         }
     }
 
+    @Test("The tab bar draws the chosen twin on the tab lit for where the reader stands, Preferences' while on Usage")
+    func theBarDrawsTheTwin() {
+        #expect(FediqoRootView.tabGlyph(.trends, standingOn: .trends) == "chart.bar.xaxis.ascending")
+        #expect(FediqoRootView.tabGlyph(.trends, standingOn: .timeline) == "chart.line.uptrend.xyaxis")
+        #expect(FediqoRootView.tabGlyph(.preferences, standingOn: .usage) == "gearshape.fill")
+    }
+
     @Test("Not chosen is the glyph itself, and a glyph already filled stays as it is")
     func unchosenIsItself() {
         #expect(ShellGlyph.drawn("bell", chosen: false) == "bell")
         #expect(ShellGlyph.drawn("bell", chosen: true) == "bell.fill")
-        #expect(ShellGlyph.drawn(ShellPlace.trends.symbolName, chosen: true) == "chart.bar.fill", "Trends is a line rising, and bars once chosen")
+        #expect(ShellGlyph.drawn(ShellPlace.trends.symbolName, chosen: true) == "chart.bar.xaxis.ascending", "Trends is a line rising, and thin bars once chosen")
+        #expect(ShellGlyph.drawn("circle.dashed", chosen: true) == "circle.dashed", "a lost source says the same in front")
         #expect(ShellGlyph.drawn("hand.tap.fill", chosen: true) == "hand.tap.fill")
         #expect(ShellGlyph.drawn("", chosen: true) == "")
     }
