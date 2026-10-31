@@ -3007,3 +3007,33 @@
 "collections.again" = "Try again";
 "collections.notAllowed" = "The server does not allow this. Nothing was changed.";
 "collections.notAllowed.add" = "The server does not allow this. A person who is locked, or does not let themselves be found, cannot be put in a collection. Nothing was changed.";
+
+/* #435: an account made at a server */
+"account.signup.act" = "Make an account at %@";
+"account.signup.help" = "%1$@ makes the account on its own page, and Fediqo keeps no account of its own. Once its form is sent, the account stays at %1$@ whatever is done here. Until you are signed in, nothing is added to this device.";
+"account.signup.invitation" = "Invitation code or link";
+"account.signup.invitation.unread" = "That does not read as an invitation to %@.";
+"account.signup.approval" = "%@ reviews a new account before it can be used.";
+"account.signup.minAge" = "%@ asks that you are at least %d.";
+"account.signup.ask.title" = "Make an account at %@?";
+"account.signup.ask.line" = "The form is the server's own. Choose what Fediqo may do once you are signed in. Either answer also lets Fediqo change your profile: the server wants that before it sends its confirming mail again.";
+"account.signup.adding" = "Adding %@…";
+"account.signup.mail.title" = "Check your mail";
+"account.signup.mail.line" = "%@ sent a link to the address you gave. Open it, then come back here.";
+"account.signup.mail.early" = "Do not sign in on the page at %@ yet: that page has no way back to Fediqo.";
+"account.signup.mail.stays" = "The account stays at %@ if you leave this. You can sign in from Fediqo once it is confirmed.";
+"account.signup.mail.check" = "I opened it";
+"account.signup.mail.resend" = "Send it again";
+"account.signup.mail.leave" = "Not now";
+"account.signup.mail.note.waiting" = "%@ says the account still waits for its mail to be opened.";
+"account.signup.mail.note.unreachable" = "%@ could not be reached just now. Try again.";
+"account.signup.mail.note.resent" = "%@ was asked to send the mail again.";
+"account.signup.mail.note.resendFailed" = "%@ would not send the mail again just now.";
+"account.signup.told.confirm" = "Your account at %@ is made. Add this source and sign in once it is confirmed; signing in on its page before that has no way back.";
+"account.signup.told.approval" = "Your account at %@ is made and waits for approval. Add this source and sign in once it is approved; signing in on its page before that has no way back.";
+"account.signup.told.invitation" = "%@ showed no form? It did not take that invitation. Nothing was made, and nothing changed here.";
+"account.signup.told.failed" = "%@ did not finish. Nothing changed here, but if you sent its form the account stays there.";
+"account.signup.told.gone" = "%@ no longer knows that account. Nothing changed here.";
+"account.signup.told.notAdded" = "Your account at %@ works, but the source could not be added just now. Try adding it again, then sign in.";
+"account.signup.held" = "Your new account at %@ waits for its mail to be opened.";
+"account.signup.mail.quit" = "If Fediqo is quit before this ends, the sign-in it began stays allowed at %@ until you end it there.";

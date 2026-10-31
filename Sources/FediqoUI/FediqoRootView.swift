@@ -3402,6 +3402,7 @@ private struct PersonPresenters: ViewModifier {
             .modifier(AccountActSheetPresenter(people: people.tending.people, session: session))
             .modifier(FederationAskSheetPresenter(servers: people.tending.servers, session: session))
             .modifier(DirectsPresenter(directs: session.directs, session: session, onOpen: onOpenThread))
+            .modifier(SignUpPresenter(session: session))
     }
 }
 

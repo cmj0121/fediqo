@@ -2947,3 +2947,33 @@
 "collections.again" = "再試一次";
 "collections.notAllowed" = "來源不允許這麼做。沒有任何變更。";
 "collections.notAllowed.add" = "來源不允許這麼做。鎖定帳號或不讓人找到的人，無法被放進收藏集。沒有任何變更。";
+
+/* #435: an account made at a server */
+"account.signup.act" = "在 %@ 建立帳號";
+"account.signup.help" = "帳號由 %1$@ 在它自己的頁面上建立，Fediqo 不保存自己的帳號。表單送出後，無論這裡怎麼做，帳號都會留在 %1$@。登入之前，這個裝置不會加入任何東西。";
+"account.signup.invitation" = "邀請碼或連結";
+"account.signup.invitation.unread" = "這看起來不是 %@ 的邀請。";
+"account.signup.approval" = "%@ 會先審核新帳號，通過後才能使用。";
+"account.signup.minAge" = "%@ 要求你至少年滿 %d 歲。";
+"account.signup.ask.title" = "要在 %@ 建立帳號嗎？";
+"account.signup.ask.line" = "表單是來源自己的。請選擇登入後 Fediqo 可以做什麼。兩種選擇都會同時允許 Fediqo 修改你的個人檔案：來源要有這個權限，才會再寄一次確認信。";
+"account.signup.adding" = "正在加入 %@…";
+"account.signup.mail.title" = "請查看你的信箱";
+"account.signup.mail.line" = "%@ 已將連結寄到你填寫的信箱。請開啟連結，再回到這裡。";
+"account.signup.mail.early" = "請先不要在 %@ 的頁面上登入：那個頁面回不到 Fediqo。";
+"account.signup.mail.stays" = "即使離開這裡，帳號仍會留在 %@。確認後即可從 Fediqo 登入。";
+"account.signup.mail.check" = "我已開啟";
+"account.signup.mail.resend" = "再寄一次";
+"account.signup.mail.leave" = "先不要";
+"account.signup.mail.note.waiting" = "%@ 表示這個帳號仍在等待開啟信件。";
+"account.signup.mail.note.unreachable" = "現在連不上 %@。請再試一次。";
+"account.signup.mail.note.resent" = "已請 %@ 再寄一次信。";
+"account.signup.mail.note.resendFailed" = "%@ 現在無法再寄一次信。";
+"account.signup.told.confirm" = "你在 %@ 的帳號已建立。請加入這個來源，等帳號確認後再登入；在那之前於它的頁面登入會回不來。";
+"account.signup.told.approval" = "你在 %@ 的帳號已建立，正在等待審核。請加入這個來源，等審核通過後再登入；在那之前於它的頁面登入會回不來。";
+"account.signup.told.invitation" = "%@ 沒有顯示表單嗎？它沒有接受這份邀請。沒有建立任何帳號，這裡也沒有變更。";
+"account.signup.told.failed" = "%@ 沒有完成。這裡沒有變更，但如果你已送出表單，帳號會留在那裡。";
+"account.signup.told.gone" = "%@ 已經不認得這個帳號。這裡沒有變更。";
+"account.signup.told.notAdded" = "你在 %@ 的帳號可以使用，但現在無法加入這個來源。請再加入一次，然後登入。";
+"account.signup.held" = "你在 %@ 的新帳號正在等待開啟信件。";
+"account.signup.mail.quit" = "如果在這之前結束 Fediqo，它開始的登入仍會在 %@ 保持允許，直到你在那裡結束它。";

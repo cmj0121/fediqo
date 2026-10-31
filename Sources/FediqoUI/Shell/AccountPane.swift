@@ -100,6 +100,13 @@ struct AccountPane: View {
                 VStack(alignment: .leading, spacing: ShellSpace.room) {
                     // What the page stands under stays where it is: a swipe begins under it.
                     masthead.headOfPage()
+                    if let held = session.signUp.heldStep {
+                        SignUpHeldLine(
+                            said: held,
+                            onCheck: { Task { await session.signUp.check(in: session) } },
+                            onLeave: { session.signUp.leave(in: session) }
+                        )
+                    }
                     page
                 }
                 .padding(ShellSpace.pad)
@@ -144,6 +151,9 @@ struct AccountPane: View {
             .modifier(SignInChoiceQuestion(session: session) { ask, writing in
                 Task { await chose(host: ask.host, writing: writing, noticesSaid: ask.notices, answering: ask.drawn) }
             })
+            .modifier(SignUpQuestion(session: session) { ask, writing in
+                Task { await chose(ask, writing: writing) }
+            })
             // The key pressed while signed in: the question, and only its yes signs out.
             .modifier(SignOutQuestion(session: session, signOut: signOutAnswered))
         }
@@ -178,6 +188,10 @@ struct AccountPane: View {
             ShellRule()
             previewActions(preview)
                 .padding(.vertical, ShellSpace.pad)
+            // The one act a host that offers it has beyond these; nothing on any other.
+            SignUpOfferHost(preview: preview, session: session)
+                .id(preview.host)
+                .disabled(!Self.actionsLive(at: session.stage))
         }
     }
 
@@ -289,6 +303,7 @@ struct AccountPane: View {
     private var addPage: some View {
         VStack(alignment: .leading, spacing: ShellSpace.room) {
             adding
+            if let told = session.signUp.told { SignUpToldLine(told: told) }
             if let preview = session.stage?.inlinePreview {
                 inlinePreview(preview)
                     .id(Self.previewAnchor)
@@ -854,6 +869,15 @@ struct AccountPane: View {
         await session.signIn(
             host: host, through: WebAuthBrowser(session: webAuthenticationSession),
             writing: writing, noticesSaid: noticesSaid, answering: drawn
+        )
+    }
+
+    /// The answer to the question before a host's form: the same seam as `chose`, with the same
+    /// thing a test cannot reach, and `ShellSignUp.answer` what a test drives with a page fixture.
+    func chose(_ ask: ShellSignUp.Ask, writing: Bool) async {
+        session.signUp.putDownAsk()
+        await session.signUp.answer(
+            ask, writing: writing, through: WebAuthBrowser(session: webAuthenticationSession), in: session
         )
     }
 

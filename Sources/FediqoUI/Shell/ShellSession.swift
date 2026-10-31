@@ -214,6 +214,8 @@ final class ShellSession {
     /// The question open about asking a sign-in for more where it stands, and the asks on
     /// their way (#347, `ShellPartAsk`): what a press on a locked act raises.
     let partAsks = ShellPartAsks()
+    /// An account being made from the add-source flow (#435).
+    let signUp = ShellSignUp()
     /// What the sign-in question open about a host said of notices, kept from when it was first
     /// drawn until it is answered or put down (`ShellNoticeAsk`). Not observed: it is read by
     /// the question being drawn, and must not draw it again.
@@ -2210,6 +2212,7 @@ final class ShellSession {
         offerSignIn = nil
         unread = []
         unreadAll = 0
+        signUp.putDownTold()
         let parsed: String
         do {
             parsed = try Host.parse(raw)
@@ -3897,6 +3900,50 @@ final class ShellSession {
         guard isAdded(host) else { return }
         // A source that cannot be asked again this run is said to be that, not to have failed.
         rowRefusal = (host: host, key: mastodon.stranded(host: host) ? "part.ask.stranded" : Self.signInFailureKey(failure))
+    }
+
+    /// An account made on a host's own form works (#435): now the source is added, and then the
+    /// sign-in kept, **the source first**, so no token is ever on this device without its row. A
+    /// source that cannot be added leaves nothing, and the person is told. A sign-in that cannot
+    /// be kept leaves a source added and signed out, and is said under its row as any such.
+    func signedUp(_ preview: SourcePreview, _ traded: MastodonSessions.SignUpTraded, as who: MastodonWho) async {
+        let host = preview.host.lowercased()
+        let report = ProgressReport(owner: .page, key: "account.signup.adding")
+        let reports = progress == nil
+        if reports {
+            progressHost = host
+            progress = report
+        }
+        defer { if reports, progress == report { progress = nil } }
+        if !isAdded(host) {
+            do {
+                _ = try await joiner(for: host, for: .joining).begin(preview)
+            } catch {
+                await mastodon.letGoSignedUp(traded)
+                if !Cancellation.happened(error) { signUp.tell(.notAdded, host: host) }
+                return
+            }
+            if stage?.host?.lowercased() == host {
+                errand += 1
+                stage = nil
+            }
+            await adopt()
+        }
+        // Removed in the wait: there is no row for a sign-in to stand under.
+        guard isAdded(host) else {
+            await mastodon.letGoSignedUp(traded)
+            return
+        }
+        showJoined()
+        switch await mastodon.keepSignedUp(traded, as: who) {
+        case .kept:
+            await forgetReaderMarksDue()
+            await readAsYou(host: host)
+        case .another:
+            rowRefusal = (host: host, key: "account.signin.replaced")
+        case .failed:
+            rowRefusal = (host: host, key: Self.signInFailureKey(.keychain))
+        }
     }
 
     /// Home and the lists this source reads, read as the reader (#25) — right after a sign-in.
