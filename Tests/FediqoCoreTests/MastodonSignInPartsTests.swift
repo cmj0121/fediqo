@@ -33,6 +33,7 @@ struct MastodonSignInPartsTests {
         (.filters, "read:filters write:filters", ""),
         (.lists, "write:lists", ""),
         (.conversations, "write:conversations", ""),
+        (.collections, "read:collections write:collections", ""),
         (.tending, "admin:read admin:write", ""),
     ]
 
@@ -174,7 +175,7 @@ struct MastodonSignInPartsTests {
     @Test("A held word the table does not know is on no page — the whole of reading, as a source names what an older or another app's token holds, among them — and no page names a word that is neither held nor a ticked part's")
     func anUnknownHeldWordIsLeftOut() {
         let reading = MastodonOAuth.reading
-        #expect(MastodonParts.page(held: "\(reading) read:collections write:nonsense", ticked: [.notices]) == "\(reading) read:notifications")
+        #expect(MastodonParts.page(held: "\(reading) read:nonsense write:nonsense", ticked: [.notices]) == "\(reading) read:notifications")
         #expect(MastodonParts.page(held: "read write", ticked: [.reading]) == MastodonOAuth.readingWithoutSearch)
         // What a real source said a sign-in for everything holds (`MastodonSignInCaptures.wholeInfo`).
         #expect(MastodonParts.page(held: "read write", ticked: []) == "")
@@ -220,13 +221,39 @@ struct MastodonSignInPartsTests {
         return all
     }
 
+    /// The parts a page treats apart from plain adding, or that `helds` holds or the check below
+    /// names a word of: every set of these is tried.
+    private static let apart: [Part] = [.reading, .search, .acting, .bookmarks, .notices, .follows, .blocks, .filters]
+
+    /// The rest only add their words: each ticked alone, all of them, and none, over every set of
+    /// `apart`. **Bounded on purpose**: every set of every part took minutes and doubled with
+    /// each part added, and what these add to a page is the same alone as among others.
+    private static var plain: [Part] { Part.allCases.filter { !apart.contains($0) } }
+
     private static var everyTick: [Set<Part>] {
-        (0 ..< (1 << Part.allCases.count)).map { bits in
-            Set(Part.allCases.enumerated().filter { bits & (1 << $0.offset) != 0 }.map(\.element))
+        let plains: [Set<Part>] = [[], Set(plain)] + plain.map { [$0] }
+        return (0 ..< (1 << apart.count)).flatMap { bits in
+            let ticked = Set(apart.enumerated().filter { bits & (1 << $0.offset) != 0 }.map(\.element))
+            return plains.map { ticked.union($0) }
         }
     }
 
-    @Test("Over every sign-in a device could hold, every set of parts ticked and both answers to read-or-act, a page carries no word its question did not name: only what is held and known, and the words of what was ticked; a rider only where ticked; no word that acts where the answer was to read only; and each word once, in the table's order")
+    @Test("A part left out of every set of parts ticked only adds its words: it has no word beside acting, is no rider, and holds no word any sign-in below is made of; and it adds them the same ticked among others as alone")
+    func aPlainPartOnlyAdds() {
+        let held = Set(Self.helds.flatMap { Self.words($0 ?? "") })
+        for part in Self.plain {
+            #expect(part.wordsBesideActing.isEmpty && !part.rider, "\(part)")
+            #expect(held.isDisjoint(with: part.words), "\(part)")
+            for readOnly in [false, true] {
+                let alone = Set(Self.words(MastodonParts.page(held: nil, ticked: [part], readOnly: readOnly)))
+                let among = Set(Self.words(MastodonParts.page(held: nil, ticked: Set(Self.apart).union([part]), readOnly: readOnly)))
+                let without = Set(Self.words(MastodonParts.page(held: nil, ticked: Set(Self.apart), readOnly: readOnly)))
+                #expect(among == without.union(alone), "\(part)")
+            }
+        }
+    }
+
+    @Test("Over every sign-in a device could hold, every set of the parts a page treats apart, each other part alone, all of them or none, and both answers to read-or-act, a page carries no word its question did not name: only what is held and known, and the words of what was ticked; a rider only where ticked; no word that acts where the answer was to read only; and each word once, in the table's order")
     func noPageCarriesAWordItsQuestionDidNotName() async {
         let table = Self.shipped.flatMap { Self.words($0.own) + Self.words($0.besideActing) }
         let acting = Set(Self.words(Self.w))
@@ -286,7 +313,7 @@ struct MastodonSignInPartsTests {
         #expect(MastodonParts.page(held: nil, ticked: reads, readOnly: true) == MastodonOAuth.reading)
         #expect(MastodonParts.page(held: nil, ticked: reads.union([.notices]), readOnly: true) == MastodonOAuth.scopes(writing: false, notices: true))
         // Ticking what acts beside that answer asks for none of it: of follows, the word that reads.
-        #expect(MastodonParts.page(held: everything, ticked: Set(Part.allCases), readOnly: true) == "\(r) read:search \(n) read:follows read:bookmarks read:favourites read:mutes read:blocks read:filters admin:read")
+        #expect(MastodonParts.page(held: everything, ticked: Set(Part.allCases), readOnly: true) == "\(r) read:search \(n) read:follows read:bookmarks read:favourites read:mutes read:blocks read:filters read:collections admin:read")
         #expect(MastodonParts.page(held: nil, ticked: [.acting, .bookmarks], readOnly: true) == "")
 
         let acts = reads.union([.acting, .bookmarks])

@@ -174,7 +174,7 @@ private struct ComposeChoices: View {
         .shellFont(.meta)
         .accessibilityLabel(L10n.t("compose.visibility"))
         if let host = session.composeHost, session.quotesOffered(host: host) == true {
-            QuotePolicyMenu(draft: $session.composeDraft, host: host)
+            QuotePolicyMenu(draft: $session.composeDraft, host: host, set: session.composeQuoteSet(host: host))
         }
     }
 }

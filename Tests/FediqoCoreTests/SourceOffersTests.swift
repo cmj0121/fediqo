@@ -16,9 +16,10 @@ struct SourceOffersTests {
             fields: [.audience, .language, .covered, .reblog, .reblogOf],
             loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true, people: true,
             follows: true, polls: true, marks: true, blocks: true, reports: true, changesPosts: true, sendsLater: true,
-            tendsLists: true, conversations: true
+            tendsLists: true, tendsCollections: true, conversations: true
         ))
         #expect(ProtocolKind.allCases.filter(\.offers.tendsLists) == [.mastodon], "only at a Mastodon are lists kept (#337)")
+        #expect(ProtocolKind.allCases.filter(\.offers.tendsCollections) == [.mastodon], "only at a Mastodon are collections tended (#433)")
         #expect(ProtocolKind.allCases.filter(\.offers.reports) == [.mastodon], "only at a Mastodon is anything reported (#339)")
         #expect(ProtocolKind.allCases.filter(\.offers.blocks) == [.mastodon], "only at a Mastodon is somebody muted or blocked (#314)")
         #expect(ProtocolKind.allCases.filter(\.offers.polls) == [.mastodon], "only a Mastodon's posts carry a poll voted in here (#331)")

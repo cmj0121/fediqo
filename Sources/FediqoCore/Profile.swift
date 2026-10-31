@@ -90,6 +90,10 @@ public struct SourceProfile: Sendable, Hashable, Identifiable {
     /// date on its own description, so the alternative is a stamp invented at decode time that
     /// would then be written down as the server's. `ItemStore.said(_:at:)` is the one writer.
     public let asOf: Date?
+    /// A host's terms for an account made in its own sign-in (#435), for a look just made. **Never
+    /// kept** (`said(at:)`): a host's doors change while the app is closed, and only a preview
+    /// goes by this.
+    public let signUp: MastodonSignUp?
 
     public enum Registration: String, Sendable, Hashable {
         case open
@@ -110,7 +114,8 @@ public struct SourceProfile: Sendable, Hashable, Identifiable {
         registration: Registration? = nil,
         readsWithoutAccount: Bool? = nil,
         rules: [String] = [],
-        asOf: Date? = nil
+        asOf: Date? = nil,
+        signUp: MastodonSignUp? = nil
     ) {
         self.host = host
         self.kind = kind
@@ -125,6 +130,7 @@ public struct SourceProfile: Sendable, Hashable, Identifiable {
         self.readsWithoutAccount = readsWithoutAccount
         self.rules = rules
         self.asOf = asOf
+        self.signUp = signUp
     }
 
     /// The same answer, marked as said at `moment` — and under the host folded once, as every

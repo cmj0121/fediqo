@@ -176,7 +176,9 @@ final class ShellProfile {
         state = .sending
         let own = session.reach.ownAccount(session.mastodon.authorized(token: held, within: deadline, for: .write))
         self.draft?.refusals = [:]
-        let change = ProfileChange(before: draft.before, after: draft.after, pictures: draft.pictureChanges, limit: draft.limits.picture)
+        let change = ProfileChange(
+            before: draft.before, after: draft.after, pictures: draft.pictureChanges, limit: draft.limits.picture, again: draft.unsure
+        )
         let task = Task { await self.saving(change, at: source, through: own, errand: errand, in: session) }
         self.task = task
         return task
@@ -187,12 +189,15 @@ final class ShellProfile {
     ) async {
         let host = source.host
         do {
-            let answer = try await own.change(from: change.before, to: change.after, pictures: change.pictures, limit: change.limit)
+            let answer = try await own.change(
+                from: change.before, to: change.after, pictures: change.pictures, limit: change.limit, again: change.again
+            )
             guard awaits == errand, open?.host == host else { return }
             // **Drawn only for the account it was sent as**: the reader become another
             // meanwhile, it is neither drawn on their page nor counted for them.
             let theirs = isTheReader(at: host, strictly: true, in: session)
             close()
+            if answer != nil { ShellPersonPages.settingsChanged(at: host, in: session) }
             guard let answer, theirs else { return }
             announce(String(format: L10n.t("profile.saved"), host))
             session.mastodon.askingAnswered(answer.asking, of: answer.person.accountID, host: host)
@@ -219,7 +224,15 @@ final class ShellProfile {
             case .locked: state = .partGone
             case .unreadable, nil:
                 ShellPersonPages.concluded(error, at: source, askedAs: askedAs, in: session)
-                state = (error as? MastodonAuthError) == .signedOut ? .ended : .failed
+                guard (error as? MastodonAuthError) != .signedOut else {
+                    state = .ended
+                    return
+                }
+                // No answer: it may have landed. Asking again is all that letting go costs, and
+                // Save says those rows again, whatever they read by then.
+                state = .failed
+                draft?.unsure.formUnion(MastodonOwnAccount.rows(from: change.before, to: change.after).union(change.again))
+                ShellPersonPages.settingsChanged(at: host, in: session)
             }
         }
     }
@@ -229,6 +242,7 @@ final class ShellProfile {
     private func landedInPart(_ part: OwnChangedInPart, at source: Source, errand: Int, in session: ShellSession) async {
         let host = source.host
         guard awaits == errand, open?.host == host else { return }
+        ShellPersonPages.settingsChanged(at: host, in: session)
         guard isTheReader(at: host, strictly: true, in: session) else {
             close()
             return
@@ -326,6 +340,7 @@ private struct ProfileChange: Sendable {
     let after: OwnAccount
     let pictures: [OwnPicture: OwnPictureChange]
     let limit: Int?
+    let again: Set<OwnRow>
 }
 
 // MARK: - Change, on the reader's own page

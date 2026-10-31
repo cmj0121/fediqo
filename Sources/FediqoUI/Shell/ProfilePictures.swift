@@ -103,6 +103,21 @@ extension OwnPicture {
         }
     }
 
+    var descriptionKey: String {
+        switch self {
+        case .picture: "profile.description.picture"
+        case .header: "profile.description.header"
+        }
+    }
+
+    /// The row a source's refusal of its words names.
+    var descriptionRow: OwnRow {
+        switch self {
+        case .picture: .pictureDescription
+        case .header: .headerDescription
+        }
+    }
+
     /// The row a source's refusal of it names.
     var refusedAs: OwnRow {
         switch self {
@@ -180,6 +195,7 @@ struct ProfilePicturesBlock: View {
             }
             stageLine(.picture)
             refusal(.picture)
+            description(.picture)
         }
     }
 
@@ -190,14 +206,12 @@ struct ProfilePicturesBlock: View {
             presses(.header)
             stageLine(.header)
             refusal(.header)
+            description(.header)
         }
     }
 
     private func rowName(_ which: OwnPicture) -> some View {
-        Text(L10n.t(which.key))
-            .shellFont(.meta)
-            .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            .fixedSize(horizontal: false, vertical: true)
+        ProfileRowName(title: L10n.t(which.key))
             .accessibilityHidden(true)
     }
 
@@ -344,6 +358,33 @@ struct ProfilePicturesBlock: View {
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityFocused($refusalFocused, equals: which)
+        }
+    }
+
+    // MARK: - The words for those who cannot see it
+
+    /// Its row of words: only where the source said them and a picture is held or chosen.
+    @ViewBuilder
+    private func description(_ which: OwnPicture) -> some View {
+        if draft.describes(which) {
+            let title = L10n.t(which.descriptionKey), count = draft.descriptionCount(which)
+            let text = draft.descriptions[which] ?? ""
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                ProfileRowHead(title: title, count: count, host: said.host)
+                TextField("", text: Binding(get: { draft.descriptions[which] ?? "" }, set: { draft.descriptions[which] = $0 }), axis: .vertical)
+                    .lineLimit(1...4)
+                    .shellFont(.body)
+                    .shellField(.alone)
+                    .accessibilityLabel(title)
+                    .accessibilityValue(count.map { [text, $0.words(host: said.host)].joined(separator: L10n.t("people.row.between")) } ?? text)
+                    .accessibilityHint(said.refusal(of: which.descriptionRow) ?? "")
+                if let words = said.refusal(of: which.descriptionRow) {
+                    Label(words, systemImage: PersonHead.failedSymbol)
+                        .shellFont(.meta)
+                        .foregroundStyle(ShellChrome.ink(colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 

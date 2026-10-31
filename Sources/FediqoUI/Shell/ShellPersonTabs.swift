@@ -576,7 +576,7 @@ extension ShellPersonPages {
         case .askFollows: session.askFor([PersonAct.follow.needs], host: who.host)
         case .act(let pressed): Task { await act(pressed, on: who, in: session) }
         // A hashtag's page and the list of people are steps of the walk: whoever holds it takes them.
-        case .featured(.tag), .featured(.people), .featured(.takeOff): return false
+        case .featured(.tag), .featured(.people), .featured(.takeOff), .featured(.tendCollections), .featured(.takeOut): return false
         }
         return true
     }

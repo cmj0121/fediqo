@@ -1106,6 +1106,7 @@ struct PartAskTests {
         .filters: ["read:filters", "write:filters"],
         .lists: ["write:lists"],
         .conversations: ["write:conversations"],
+        .collections: ["read:collections", "write:collections"],
         .tending: ["admin:read", "admin:write"],
     ]
 

@@ -62,6 +62,11 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     /// sign-in that reads can see the list, and this part is only what changes it. Stands
     /// without `acting`. The coarse word `write` is not this part.
     case conversations
+    /// The person's own collections of people (#433), made, changed and removed; who is in one;
+    /// and taking themselves out of another's. **Stands without `acting`**, as lists do. The read
+    /// is here as well as the write: anyone may read what is to be found with no sign-in, and
+    /// only the word lets a sign-in read at all and shows the owner what is not to be found.
+    case collections
     /// Tending the server the reader answers for (#380): what was reported to it, who asks to
     /// join, the servers and addresses it refuses, and what it lets rise. **The larger thing,
     /// asked only from its own lock and alone** — never ridden on another question — and of use
@@ -87,6 +92,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
         case .filters: ["read:filters", "write:filters"]
         case .lists: ["write:lists"]
         case .conversations: ["write:conversations"]
+        case .collections: ["read:collections", "write:collections"]
         case .tending: ["admin:read", "admin:write"]
         }
     }
@@ -96,7 +102,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var wordsBesideActing: [String] {
         switch self {
         case .notices: ["write:notifications"]
-        case .reading, .search, .acting, .bookmarks, .follows, .account, .media, .marks, .blocks, .reports, .filters, .tending, .lists, .conversations: []
+        case .reading, .search, .acting, .bookmarks, .follows, .account, .media, .marks, .blocks, .reports, .filters, .tending, .lists, .conversations, .collections: []
         }
     }
 
@@ -106,7 +112,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var rider: Bool {
         switch self {
         case .search, .bookmarks: true
-        case .reading, .acting, .notices, .follows, .account, .media, .marks, .blocks, .reports, .filters, .tending, .lists, .conversations: false
+        case .reading, .acting, .notices, .follows, .account, .media, .marks, .blocks, .reports, .filters, .tending, .lists, .conversations, .collections: false
         }
     }
 
@@ -115,7 +121,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var needsActing: Bool {
         switch self {
         case .bookmarks, .media: true
-        case .reading, .search, .acting, .notices, .follows, .account, .marks, .blocks, .reports, .filters, .tending, .lists, .conversations: false
+        case .reading, .search, .acting, .notices, .follows, .account, .marks, .blocks, .reports, .filters, .tending, .lists, .conversations, .collections: false
         }
     }
 }

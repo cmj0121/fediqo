@@ -30,7 +30,8 @@ struct MastodonOwnAccountSaysTests {
     private static let start = OwnAccount(
         name: "Own 312", words: "Words of my own.",
         fields: [.init(name: "site", value: "own.example"), .init(name: "pronouns", value: "they")],
-        followWithoutAsking: true, findable: false, listsShown: true
+        followWithoutAsking: true, findable: false, listsShown: true,
+        pictureDescription: "", headerDescription: "", sites: [], automated: false, indexed: false, coversMedia: false
     )
 
     private struct Seeded {
@@ -84,7 +85,7 @@ struct MastodonOwnAccountSaysTests {
         let seeded = try seeded()
         try await restoring(seeded) { (own: MastodonOwnAccount) async throws in
             #expect(try await own.read() == Self.start, "as the seed left it")
-            #expect(try await own.limits() == OwnLimits(name: 40, words: 500, fields: 4, fieldName: 255, fieldValue: 255, picture: 16_777_216))
+            #expect(try await own.limits() == OwnLimits(name: 40, words: 500, fields: 4, fieldName: 255, fieldValue: 255, picture: 16_777_216, pictureDescription: 150, headerDescription: 150))
 
             var name = Self.start, words = Self.start, fields = Self.start
             name.name = "Own 312, renamed"
@@ -94,7 +95,17 @@ struct MastodonOwnAccountSaysTests {
             asking.followWithoutAsking = false
             found.findable = true
             hidden.listsShown = false
-            let changes = [("name", name), ("words", words), ("fields", fields), ("follow without asking", asking), ("found", found), ("lists", hidden)]
+            var described = Self.start, sites = Self.start, automated = Self.start, indexed = Self.start, covered = Self.start
+            described.pictureDescription = "A river"
+            described.headerDescription = "A wider river"
+            sites.sites = ["a.example", "b.example"]
+            automated.automated = true
+            indexed.indexed = true
+            covered.coversMedia = true
+            let changes = [
+                ("name", name), ("words", words), ("fields", fields), ("follow without asking", asking), ("found", found), ("lists", hidden),
+                ("described", described), ("sites", sites), ("automated", automated), ("indexed", indexed), ("covered", covered),
+            ]
 
             for (what, changed) in changes {
                 let answer = try #require(try await own.change(from: Self.start, to: changed), "\(what)")

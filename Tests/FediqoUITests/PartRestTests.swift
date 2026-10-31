@@ -211,7 +211,10 @@ struct PartRestTests {
         #expect(session.mastodon.place(.follows, host: "nobody.example") == nil)
         // Every part that can be held in part and asked for the rest has its line written.
         let multi = MastodonPart.allCases.filter { $0.words.count > 1 && $0 != .reading }
-        #expect(multi == [.acting, .follows, .marks, .blocks, .filters, .tending])
+        #expect(multi == [.acting, .follows, .marks, .blocks, .filters, .collections, .tending])
+        let (halfHeld, _, _) = try await shell(holding: "\(Self.sees) read:collections")
+        let collections = try #require(halfHeld.mastodon.place(.collections, host: host))
+        #expect(L10n.t(collections.key, language: .english) != collections.key, "the line for the rest of collections is written")
         let marks = PartWords.place(.partly, of: .marks, rest: true)
         #expect(marks?.key == "part.marks.partly")
         for key in [place.key, unseen.key, acting.key, marks?.key ?? ""] {

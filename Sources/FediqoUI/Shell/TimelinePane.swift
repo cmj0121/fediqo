@@ -773,6 +773,8 @@ struct TimelinePane: View {
                 switch press {
                 case .takeOff(let tag):
                     Task { await people?.features.takeOff(tag, of: person, said: people?.said(of: person, in: session), in: session) }
+                case .tendCollections, .takeOut:
+                    if let people { people.collections.pressed(press, on: person, in: people, session: session) }
                 case .tag, .people:
                     onOpenFeatured(press)
                 }
@@ -816,6 +818,10 @@ struct TimelinePane: View {
                     return
                 }
                 people?.serverLists.openPerson(account.accountID, named: account.lineHandle, at: person.host, in: session)
+            },
+            onCollections: {
+                guard let account = people?.said(of: person, in: session)?.person else { return }
+                Task { await people?.collections.opening(at: person.host, person: (account.accountID, account.lineHandle), in: session) }
             }
         )
     }

@@ -18,6 +18,12 @@ struct FeaturedSaid: Equatable {
     /// The collections of people they put together and let be found (#340), each the list of its
     /// people: a row each, which opens it.
     var collections: [PeopleList] = []
+    /// Whether About has the way to the reader's own collections: on their own page alone (#433).
+    var tendsCollections = false
+    /// How the sign-in stands where it lacks the collections part. Nothing where it holds it.
+    var collectionsLock: PartWords.Place?
+    /// The reader's place in each collection of another's they are in, by the collection's id.
+    var takeOuts: [String: String] = [:]
     /// Whether a row's `…` holds Take off your profile: on the reader's own page alone.
     var takesOff = false
     /// How the sign-in stands where it lacks the account part Take off wants: the item is dim
@@ -36,7 +42,31 @@ struct FeaturedSaid: Equatable {
     static func lamp(ofCollection list: PeopleList) -> String { "about.collection:" + list.accountID }
 
     /// The rows `j` and `k` walk among the collections.
-    var collectionRows: [String] { collections.map(Self.lamp(ofCollection:)) }
+    var collectionRows: [String] { (tendsCollections ? [Self.tendID] : []) + collections.map(Self.lamp(ofCollection:)) }
+
+    static let tendID = "about.collections.tend"
+
+    /// How the way to the reader's collections is lit, whichever way it stands, with the lamp on `lit`.
+    static func tendLamp(_ lit: String?) -> AboutBlockLit { AboutBlockLit(lit: tendID == lit) }
+
+    /// Whether the collections' block has anything to draw.
+    var collectionsDrawn: Bool { tendsCollections || !collections.isEmpty }
+
+    /// The `…` of a collection's row, only where the reader is in it: taking themselves out —
+    /// which asks first — or dim with the part's lock, its press `ask`.
+    @MainActor
+    func more(ofCollection list: PeopleList, act: @escaping () -> Void, ask: @escaping () -> Void, language: DummyLanguage? = nil) -> ShellMore? {
+        guard takeOuts[list.accountID] != nil else { return nil }
+        let name = L10n.t("collections.takeOut", language: language)
+        guard let lock = collectionsLock else {
+            let question = ShellQuestion.takeOutOfCollection(named: list.lineWords, by: list.lineHandle, at: source, language: language)
+            return ShellMore(items: [.danger("person.crop.circle.badge.minus", name, asks: question, act: act)])
+        }
+        return ShellMore.ending(
+            in: .plain(ShellMark(SourceRow.permissionSymbol, name, look: .dim(.askAgain)), ask: lock.asks ? ask : nil, act: {}),
+            dimFor: String(format: L10n.t(lock.key, language: language), source)
+        )
+    }
 
     /// A collection's row as it is drawn and heard: its name, and how many are in it.
     static func collectionWords(_ list: PeopleList, language: DummyLanguage? = nil) -> String {
@@ -107,6 +137,8 @@ struct FeaturedSaid: Equatable {
     /// What Return does with the lamp on the row `id`, where that row is one of these.
     func press(on id: String) -> FeaturedPress? {
         if id == Self.peopleID, let people { return .people(people) }
+        // As the pointer: a lock that cannot be asked is words, with nothing to press.
+        if id == Self.tendID, tendsCollections { return collectionsLock?.asks == false ? nil : .tendCollections }
         if let list = collections.first(where: { Self.lamp(ofCollection: $0) == id }) { return .people(list) }
         return tags.first { Self.lamp(of: $0.tag) == id }.map { .tag($0.tag) }
     }
@@ -118,6 +150,10 @@ enum FeaturedPress: Equatable {
     case people(PeopleList)
     /// Take off your profile, from the `…` of a row of the reader's own (#318).
     case takeOff(PostTag)
+    /// The reader's own collections, from the way to them on their own page (#433).
+    case tendCollections
+    /// The reader's place in another's collection given up, from its row's `…` (#433).
+    case takeOut(PeopleList)
 }
 
 

@@ -287,6 +287,8 @@ final class ShellPersonPages {
     /// The lists a source keeps, for that source's own page and for a person's page (#337):
     /// numbered on the same count, and let go with the same reader.
     let serverLists: ShellServerLists
+    /// A person's own collections, made and tended (#433).
+    let collections: ShellCollections
     /// What a source announces to the reader there, for that source's own page and its row's
     /// mark (#321): numbered on the same count, and let go with the same reader.
     let announcements: ShellAnnouncements
@@ -356,6 +358,8 @@ final class ShellPersonPages {
         let features = ShellFeatures(errands: count, readers: looks, hosts: hosts)
         self.features = features
         tags.features = features
+        let collections = ShellCollections(errands: count, readers: looks, features: features, lists: lists)
+        self.collections = collections
         let followed = ShellFollowedTags(errands: count, readers: looks, tags: tags)
         self.followed = followed
         let acts = ShellPersonActs(errands: count, readers: looks)
@@ -381,6 +385,7 @@ final class ShellPersonPages {
         looks.whenChanged { [weak tending] host in tending?.letGo(at: host) }
         looks.whenChanged { [weak you] host in you?.letGo(at: host) }
         looks.whenChanged { [weak serverLists] host in serverLists?.letGo(at: host) }
+        looks.whenChanged { [weak collections] host in collections?.letGo(at: host) }
         looks.whenChanged { [weak announcements] host in announcements?.letGo(at: host) }
         looks.whenChanged { [weak tags] host in tags?.letGo(at: host) }
         looks.whenChanged { [weak features] host in features?.letGo(at: host) }
@@ -406,6 +411,19 @@ final class ShellPersonPages {
     /// that is drawn by it.
     static func signIns(at host: String, in session: ShellSession) -> Int {
         session.mastodon.changes[host, default: 0]
+    }
+
+    /// What was told of how `host` sets up a new post let go, its settings having just been
+    /// changed here: the next composer asks again, and a block of them up reads again.
+    static func settingsChanged(at host: String, in session: ShellSession) {
+        session.postingDefaultsChanged(at: host)
+        session.personPages?.you.settingsChanged(at: host)
+    }
+
+    /// Whether whoever would ask at `host` now is who something was asked as, under that count of
+    /// sign-ins: **by the count too**, since a reader not yet named is the same as any by name alone.
+    static func stillAsked(host: String, askedAs: AskedAs, under: Int, in session: ShellSession) -> Bool {
+        signIns(at: host, in: session) == under && Self.askedAs(at: host, in: session).isTheSame(as: askedAs)
     }
 
     /// Every page of `host` let go, and its ask called off: its reader is no longer who they

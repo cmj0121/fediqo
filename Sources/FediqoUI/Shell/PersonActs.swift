@@ -84,6 +84,10 @@ struct PersonActing: Equatable {
     var lists = false
     /// How the sign-in stands where it holds less than changing lists needs, or nothing where it holds it.
     var listsLock: PartWords.Place?
+    /// Whether the source keeps collections the reader can put them in (#433).
+    var collections = false
+    /// How the sign-in stands where it lacks the collections part, or nothing where it holds it.
+    var collectionsLock: PartWords.Place?
     /// Whether the page offers the reader's own note on them (#377): where how the reader stands
     /// to them is read here, which is where the source keeps it.
     var notes = false
@@ -292,7 +296,7 @@ struct PersonActing: Equatable {
     var reporting: [PersonAct] { reportable && doing == nil ? [.report] : [] }
 
     /// Whether the page's `…` has anything to offer, lists included (#337).
-    var hasMenu: Bool { !more.isEmpty || !keeping.isEmpty || !reporting.isEmpty || lists }
+    var hasMenu: Bool { !more.isEmpty || !keeping.isEmpty || !reporting.isEmpty || lists || collections }
 
     /// Whether the page's `…` offers `act`: among `more`, `keeping` or `reporting`.
     func offersInMenu(_ act: PersonAct) -> Bool { more.contains(act) || keeping.contains(act) || reporting.contains(act) }
@@ -551,7 +555,7 @@ struct PersonActing: Equatable {
     /// part, is dim with the lock**, saying the part's sentence after its name, and its press is
     /// `act`'s too — which only asks (`asksForPart`).
     @MainActor
-    func menu(act: @escaping (PersonAct) -> Void, onLists: @escaping () -> Void = {}) -> ShellMore {
+    func menu(act: @escaping (PersonAct) -> Void, onLists: @escaping () -> Void = {}, onCollections: @escaping () -> Void = {}) -> ShellMore {
         func item(_ offered: PersonAct) -> ShellMoreItem {
             let symbol = Self.symbol(offered), name = Self.name(offered, server: server)
             if let lock = lock(of: offered) {
@@ -575,9 +579,21 @@ struct PersonActing: Equatable {
                 items.append(.plain("list.bullet", name, act: onLists))
             }
         }
+        if collections {
+            let name = L10n.t("collections.title")
+            if let lock = collectionsLock {
+                let mark = ShellMark(Self.collectionsSymbol, name, look: .dim(.askAgain))
+                let why = String(format: L10n.t(lock.key), source)
+                items.append(ShellMoreItem.plain(mark, ask: lock.asks ? onCollections : nil, act: {}).because(why))
+            } else {
+                items.append(.plain(Self.collectionsSymbol, name, act: onCollections))
+            }
+        }
         items += (keeping + reporting).map(item)
         return ShellMore(items: items)
     }
+
+    static let collectionsSymbol = "person.2.square.stack"
 
     /// The acts whose question is a sheet of their own: muting and blocking's (`asksOnASheet`), and
     /// a report, asked what it says on `ReportSheet`. Each is red in the page's `…`.
@@ -621,6 +637,7 @@ struct PersonHeadActs: View {
     var onAct: (PersonAct) -> Void
     var onAsk: () -> Void
     var onLists: () -> Void = {}
+    var onCollections: () -> Void = {}
     @Environment(\.colorScheme) private var colorScheme
 
     /// Whether there is anything to draw: a press, or a menu with something in it.
@@ -651,7 +668,7 @@ struct PersonHeadActs: View {
                 EmptyView()
             }
             if acting.hasMenu {
-                ShellMoreButton(label: ShellMore.label()) { acting.menu(act: onAct, onLists: onLists) }
+                ShellMoreButton(label: ShellMore.label()) { acting.menu(act: onAct, onLists: onLists, onCollections: onCollections) }
                     .fixedSize()
             }
         }

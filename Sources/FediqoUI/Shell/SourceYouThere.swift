@@ -10,9 +10,10 @@ import SwiftUI
 // language — the language following the one this device asks in. So no sentence here says
 // "you set".
 //
-// **Read only, except one choice.** What the person set there is changed there, and nothing
-// here starts a post. The one control is whether this source is told where Home was left
-// (#316), and it stays off until that is chosen.
+// **Read only, except two choices.** What the person set there is changed there, and nothing
+// here starts a post. One control is whether this source is told where Home was left (#316),
+// which stays off until that is chosen; the other is who may quote a new post (#437), which
+// changes the setting at the source and is drawn only where the source has quotes.
 //
 // **Each value is the source's word about the person's own settings.** The ones this app has
 // words for are said in them — a reach as a row's is, a language by its name in the shell's
@@ -184,9 +185,88 @@ struct YouThereBlock: View {
         if let said = you.said(at: host, in: session) {
             VStack(alignment: .leading, spacing: 0) {
                 YouThereSection(said: said, onAgain: { Task { await you.again(host, in: session) } })
+                YouThereQuotesRow(host: host, you: you, session: session)
                 HomeStoppedControl(host: host, session: session)
             }
-            .task(id: ShellYouThere.opening(host, in: session)) { await you.opened(host, in: session) }
+            .task(id: you.opening(host, in: session)) { await you.opened(host, in: session) }
+        }
+    }
+}
+
+/// Who may quote a new post at this source (#437): nothing at all where it has no quotes.
+struct YouThereQuotesRow: View {
+    let host: String
+    let you: ShellYouThere
+    let session: ShellSession
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            if let quotes = you.quotes(at: host, in: session) { row(quotes) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, ShellSpace.pad)
+        .padding(.bottom, you.quotes(at: host, in: session) == nil ? 0 : ShellSpace.step)
+        .task(id: you.quotesOpening(host, in: session)) { await you.quotesOpened(host, in: session) }
+    }
+
+    @ViewBuilder
+    private func row(_ quotes: YouThereQuotes) -> some View {
+        let label = L10n.t("source.you.quotes")
+        switch quotes.shape {
+        case .locked(let sentence, let set):
+            if let set { ShellDetailFact(label: label, value: QuoteWords.policy(set)) }
+            Button(sentence) { session.askFor([.account], host: quotes.source) }
+                .buttonStyle(.plain)
+                .shellFont(.reading)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(sentence)
+        case .asking:
+            ShellStatusLine(String(format: L10n.t("source.you.quotes.asking"), quotes.source))
+        case .failed:
+            line(String(format: L10n.t("source.you.quotes.failed"), quotes.source))
+            ShellLinkButton(L10n.t("person.retry")) { Task { await you.quotesAgain(host, in: session) } }
+                .fixedSize()
+        case .held(let policy, let sending, let told):
+            Text(label)
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .accessibilityHidden(true)
+            picker(policy, label: label, source: quotes.source)
+                .disabled(sending)
+            if let told { line(YouThereQuotesRow.words(told, source: quotes.source)) }
+        }
+    }
+
+    private func picker(_ policy: QuotePolicy, label: String, source: String) -> some View {
+        Picker(label, selection: Binding(get: { policy }, set: { you.chooseQuotes($0, at: host, in: session) })) {
+            ForEach(QuotePolicy.allCases, id: \.self) { Text(QuoteWords.policy($0)).tag($0) }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .fixedSize()
+        .shellFont(.reading)
+        .accessibilityLabel(label)
+        .shellHelp(verbatim: String(format: L10n.t("source.you.quotes.help"), source), about: label)
+    }
+
+    private func line(_ text: String) -> some View {
+        Text(text)
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.ink(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// What became of the last change, in words.
+    static func words(_ told: YouThereQuotes.Told, source: String, language: DummyLanguage? = nil) -> String {
+        switch told {
+        case .refused(let said) where !said.isEmpty: said
+        case .refused: String(format: L10n.t("source.you.quotes.refused", language: language), source)
+        case .forbidden: String(format: L10n.t("source.you.quotes.forbidden", language: language), source)
+        case .missed: String(format: L10n.t("source.you.quotes.missed", language: language), source)
+        case .partGone: String(format: L10n.t("source.you.quotes.partGone", language: language), source)
         }
     }
 }

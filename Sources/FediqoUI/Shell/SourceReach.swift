@@ -129,6 +129,11 @@ struct SourceReach {
         MastodonCollections(http: wire(small(), for: purpose, within: limit), host: host)
     }
 
+    /// A sign-in's own collections, and every change to one (#433), as the reader, through `door`.
+    func collections(_ door: MastodonAuthorized) -> MastodonCollectionWrites {
+        MastodonCollectionWrites(door: door)
+    }
+
     /// A source's directory of people (#315), as the reader, through `door`: the source then
     /// leaves out the people they block or mute.
     func directory(_ door: MastodonAuthorized) -> MastodonDirectory {

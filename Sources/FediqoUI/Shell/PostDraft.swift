@@ -33,7 +33,7 @@ struct PostDraft: Equatable {
     /// is the composer's own draft: Don't quote it gives the post back plain.
     var quoting: Unsent.Changes?
     /// Who may quote it (#330): chosen, or nothing — the account's own default, and nothing sent
-    /// (Decision 8, §7.6).
+    /// (Decision 8, §7.6). What the account's default is, is only ever said beside it (#437).
     var quotePolicy: QuotePolicy?
 
     /// Who may quote it as sent: a post only its followers or those it names may read is quoted by

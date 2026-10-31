@@ -851,9 +851,26 @@ public final class MastodonSessions {
             if let unkeepable { await end(unkeepable, why: .leftBehind) }
             return .failed(.keychain)
         }
+        noteKept(filed, token: token, account: account, handle: handle, staff: staff)
+        // **After the new one is safely kept**, and never a token with the same string (`end`).
+        if let replaced, !widening, !unsaid {
+            // The read-or-act question says this first (`signInEnds`).
+            await end(MastodonLeft(replaced, as: .left, accountID: owner), why: .leftBehind)
+        }
+        await settleKept(host: host, token: token, account: account, replaced: replaced, askedInPlace: place != nil)
+        // **Not shown to be the reader who was here before** (#285): another account, or one
+        // nobody could name on either side — by the id, never by a handle. What the source
+        // said that reader had done to its posts is not this one's to be told.
+        if reader == nil || reader != account { readersChanged.insert(host) }
+        return .kept
+    }
+
+    /// What a sign-in just filed comes to, read straight after its filing: `sign`'s and a new
+    /// account's alike.
+    private func noteKept(_ filed: MastodonToken, token: MastodonToken, account: String?, handle: String?, staff: MastodonStaff?) {
         // Held, it is nothing this device let go of — whatever a sign-out before left unended.
         unended.removeAll { $0.isToken(filed) }
-        _ = endings.takeSaid(host)
+        _ = endings.takeSaid(filed.host)
         // What is held is read again **before the wait below** (#323): a second sign-in started
         // while the server is being asked to forget the old token carries what this one holds,
         // not what the one it replaced did.
@@ -863,19 +880,18 @@ public final class MastodonSessions {
         // named. After the look, which lets go of what was known of the sign-in before —
         // **and only where that look found this very sign-in**: one filed from another thread
         // since the swap is nobody until its own source says (`noteFilings`).
-        if self.token(host: host)?.accessToken == token.accessToken {
+        if self.token(host: filed.host)?.accessToken == token.accessToken {
             // Its words are the ones its own trade named, to this device and nobody else.
-            wordsConfirmed[host] = token.accessToken
-            readers[host] = account.map { Reader(id: $0, handle: handle, accessToken: token.accessToken, staff: staff) }
-            handles[host] = handle
-            unlearned.remove(host)
+            wordsConfirmed[filed.host] = token.accessToken
+            readers[filed.host] = account.map { Reader(id: $0, handle: handle, accessToken: token.accessToken, staff: staff) }
+            handles[filed.host] = handle
+            unlearned.remove(filed.host)
             readersLearnt += 1
         }
-        // **After the new one is safely kept**, and never a token with the same string (`end`).
-        if let replaced, !widening, !unsaid {
-            // The read-or-act question says this first (`signInEnds`).
-            await end(MastodonLeft(replaced, as: .left, accountID: owner), why: .leftBehind)
-        }
+    }
+
+    /// What is left to tidy once a sign-in is kept and anything it replaced has been asked to end.
+    private func settleKept(host: String, token: MastodonToken, account: String?, replaced: MastodonToken?, askedInPlace: Bool) async {
         await endLeft(host: host) { left in
             // The one just asked about is not asked twice in one sign-in.
             if let replaced, left.isToken(replaced) { return false }
@@ -903,14 +919,9 @@ public final class MastodonSessions {
         noticesTurnedAway.remove(host)
         // What the source would register for none of is no answer about a token: it stands
         // through a sign-in asked for more where it stood, and goes with any other.
-        if place == nil { gaveNone[host] = nil }
+        if !askedInPlace { gaveNone[host] = nil }
         registering.signedIn(host)
         refresh()
-        // **Not shown to be the reader who was here before** (#285): another account, or one
-        // nobody could name on either side — by the id, never by a handle. What the source
-        // said that reader had done to its posts is not this one's to be told.
-        if reader == nil || reader != account { readersChanged.insert(host) }
-        return .kept
     }
 
     /// Writes down beside the sign-in held that `place`'s parts were refused on the source's
@@ -971,7 +982,8 @@ public final class MastodonSessions {
     /// part where it stands: a registration that would carry it only with a word left off
     /// does not serve, since the word left off is the one pressed for.
     private func registration(
-        host: String, for chosen: String, orLess narrower: [String], since before: Int, exactly: Bool = false
+        host: String, for chosen: String, orLess narrower: [String], since before: Int, exactly: Bool = false,
+        filing: Bool = true
     ) async throws -> Registration? {
         var stillWanted: Bool { signOuts[host, default: 0] == before }
         // The sign-in held, as its attributes say it. The value itself was read once before
@@ -993,6 +1005,7 @@ public final class MastodonSessions {
         // for exactly `words`, or — everything being no longer tried here — carries a page
         // that takes nothing from the sign-in held.
         func kept(for words: String? = nil) -> (stored: MastodonApp?, page: String?) {
+            guard filing else { return (nil, nil) }
             let stored = (try? tokens.app(host: host)) ?? nil
             guard let stored, let scopes = stored.scopes, let page = paged(scopes) else { return (stored, nil) }
             let carries = !registering.mayTryWhole(host)
@@ -1038,7 +1051,7 @@ public final class MastodonSessions {
                 if step > 0 { registering.made(words, after: tries[step - 1], at: host) }
                 registering.made(at: host, confirmed: answer.echoed || registering.list(host) != nil)
                 let stored = try? tokens.app(host: host) as MastodonApp??
-                if let stored, stored == seen.stored { try? tokens.save(answer.app) }
+                if filing, let stored, stored == seen.stored { try? tokens.save(answer.app) }
                 return Registration(app: answer.app, page: page, wasKept: false)
             } catch MastodonSignInError.invalidScope {
                 if words == everything { registering.refusedWhole(host) }
@@ -1047,6 +1060,128 @@ public final class MastodonSessions {
             }
         }
         throw MastodonSignInError.invalidScope
+    }
+
+    // MARK: - An account made on a host's own form (#435)
+
+    /// A form that came back, its code traded. **Held in memory by whoever asked, and nothing of
+    /// it is on this device** until `keepSignedUp`.
+    struct SignUpTraded: Sendable {
+        let token: MastodonToken
+        let app: MastodonApp
+        let handedBack: Bool
+    }
+
+    /// What a form came to.
+    enum SignUpPaged: Sendable {
+        case traded(SignUpTraded)
+        /// Closed by the person, or the source let go of meanwhile.
+        case closed
+        case failed(MastodonSignInError)
+    }
+
+    /// What keeping a new account's sign-in came to.
+    enum SignUpKept: Sendable {
+        case kept
+        /// Another sign-in was filed at the host meanwhile. It stays, and this one does not.
+        case another
+        case failed
+    }
+
+    /// How many sign-outs this run has seen of `host`: another by the time something comes back
+    /// is the person having let that host go.
+    func signOutCount(host raw: String) -> Int {
+        signOuts[raw.lowercased(), default: 0]
+    }
+
+    /// The host's form, for the words a first sign-in answering `writing` asks.
+    ///
+    /// **A registration of its own, and none of it filed** (`registration(filing:)`): one kept from
+    /// before is not used, and this one is not kept unless the account comes to be signed in. A
+    /// form closed part way leaves it at the host, which shows it to nobody, and nothing here —
+    /// **and is not taken for a page with no way back**: nothing is learnt of the host by it.
+    func signUpPage(host raw: String, writing: Bool, invite: String?, through browser: any OAuthBrowser) async -> SignUpPaged {
+        let host = raw.lowercased()
+        let before = signOuts[host, default: 0]
+        let first = drawn(host: host, held: nil, signedIn: false, named: false, notices: false, ticked: [])
+        // Either answer, and the word its mail is asked for again by (`ShellSignUp`): the question says so.
+        func withMail(_ page: String) -> String { MastodonParts.page(held: page, ticked: [.account]) }
+        let chosen = withMail(first.page(writing: writing))
+        let narrower = [
+            withMail(first.page(writing: writing, bookmarks: false)),
+            withMail(first.page(search: false, writing: writing, bookmarks: false)),
+        ]
+        do {
+            guard let made = try await registration(host: host, for: chosen, orLess: narrower, since: before, filing: false) else {
+                return .closed
+            }
+            let asked = MastodonRegistration.asked(chosen, on: made.page) { registering.hasNone(of: $0, at: host) }
+            let oauth = MastodonOAuth(host: host, sender: WatchedHTTP(sender: sender, for: .signIn, in: work))
+            let signed = try await oauth.signUp(as: made.app, asking: made.page, invite: invite, through: browser)
+            // The page came back and its code was traded: the host knows this registration.
+            registering.made(at: host, confirmed: true)
+            let traded = SignUpTraded(token: signed.token.recorded(asked: asked), app: made.app, handedBack: signed.handedBack)
+            guard signOuts[host, default: 0] == before else {
+                await letGoSignedUp(traded)
+                return .closed
+            }
+            return .traded(traded)
+        } catch MastodonSignInError.cancelled {
+            return .closed
+        } catch let error as MastodonSignInError {
+            return .failed(error)
+        } catch {
+            return .failed(.unreachable)
+        }
+    }
+
+    /// How a form's account stands now.
+    func signUpStanding(_ traded: SignUpTraded) async throws -> MastodonNewAccount {
+        try await signUpOAuth(traded).standing(of: traded.token)
+    }
+
+    /// Asks for the mail to be sent again.
+    func signUpResend(_ traded: SignUpTraded) async throws {
+        try await signUpOAuth(traded).resendConfirmation(traded.token)
+    }
+
+    /// The token handed back to its source, where it is one this attempt made: asked once, through
+    /// the one place that ends a sign-in, and **nothing else of it** (`Ending.signUp`).
+    func letGoSignedUp(_ traded: SignUpTraded) async {
+        guard !traded.handedBack else { return }
+        await end(MastodonLeft(traded.token, as: .pending), why: .signUp)
+    }
+
+    /// A new account's sign-in kept, as any sign-in that held nothing before it, its registration
+    /// filed with it. **Only over nothing**: the swap expects no token at the host, and one filed
+    /// since the form was opened is neither replaced nor ended.
+    func keepSignedUp(_ traded: SignUpTraded, as who: MastodonWho) async -> SignUpKept {
+        let host = traded.token.host
+        let token = who.id.map { traded.token.named(accountID: $0, handle: who.handle) } ?? traded.token
+        let kept: Bool
+        do {
+            kept = try tokens.swap(expecting: nil, with: token)
+        } catch {
+            refresh()
+            await letGoSignedUp(traded)
+            return .failed
+        }
+        guard kept else {
+            refresh()
+            await letGoSignedUp(traded)
+            return .another
+        }
+        try? tokens.save(traded.app)
+        // The same two steps as any sign-in. What `sign` does beyond them does not arise: nothing
+        // was held, so nothing is replaced, journalled over or asked in place.
+        noteKept(token, token: token, account: who.id, handle: who.handle, staff: who.staff)
+        await settleKept(host: host, token: token, account: who.id, replaced: nil, askedInPlace: false)
+        readersChanged.insert(host)
+        return .kept
+    }
+
+    private func signUpOAuth(_ traded: SignUpTraded) -> MastodonOAuth {
+        MastodonOAuth(host: traded.token.host, sender: WatchedHTTP(sender: sender, for: .signIn, in: work))
     }
 
     /// How long a host's own list of words is waited for before the registration is asked
@@ -1570,6 +1705,10 @@ public final class MastodonSessions {
         /// One asked again from memory: ended only where it is neither the one held nor
         /// written down again since it left this device.
         case unended
+        /// A new account's token no sign-in came of (#435), made on a registration of its own so
+        /// never the one held. Asked once and whatever the Keychain says; **whatever is answered
+        /// nothing is written, kept to ask again or told**: the person stopped, and was told so.
+        case signUp
     }
 
     /// Asks a source to end a sign-in — **the one place that does** (#347).
@@ -1597,7 +1736,7 @@ public final class MastodonSessions {
     /// What the source answers is written down by `settle`, after the wait.
     private func end(_ left: MastodonLeft, why ending: Ending, forgotten: Bool = false) async {
         let host = left.host
-        if ending != .signedOut {
+        if ending != .signedOut, ending != .signUp {
             do {
                 if try left.isToken(tokens.token(host: host)) {
                     // The journal is a set by token string: the one held is not in it.
@@ -1622,6 +1761,7 @@ public final class MastodonSessions {
         let purpose: SourceWork.Purpose = ending == .signedOut ? .signOut : .signIn
         let answer = await MastodonOAuth(host: host, sender: WatchedHTTP(sender: sender, for: purpose, in: work))
             .revoke(left)
+        guard ending != .signUp else { return }
         let overtaken = signOuts[host, default: 0] != since
         settle(left, answered: answer, forgotten: forgotten || overtaken || ending == .signedOut || ending == .unended)
     }

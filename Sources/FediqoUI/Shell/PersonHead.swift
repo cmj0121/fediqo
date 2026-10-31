@@ -128,6 +128,7 @@ struct PersonHead: View {
     var onChange: () -> Void = {}
     /// Lists, from the page's `…`: which of the reader's lists they are on (#337).
     var onLists: () -> Void = {}
+    var onCollections: () -> Void = {}
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.shellLayout) private var shellLayout
@@ -473,7 +474,7 @@ struct PersonHead: View {
             OwnChangeAct(entry: change, onChange: onChange)
                 .modifier(HeadProbed(.acts, probe: probe))
         } else if let acting, PersonHeadActs.draws(acting) {
-            PersonHeadActs(acting: acting, onAct: onAct, onAsk: onAskFollows, onLists: onLists)
+            PersonHeadActs(acting: acting, onAct: onAct, onAsk: onAskFollows, onLists: onLists, onCollections: onCollections)
                 .modifier(HeadProbed(.acts, probe: probe))
         }
     }
