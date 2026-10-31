@@ -119,6 +119,97 @@ struct PKCE: Equatable {
     }
 }
 
+/// A host's terms for an account made in its own sign-in (#435), as its document gave them.
+///
+/// **Told, never enforced**: approval and an age are the host's to apply on its own form.
+public struct MastodonSignUp: Sendable, Hashable {
+    /// Whether anybody may make one. Where not, only somebody with an invitation may.
+    public let open: Bool
+    public let approvalRequired: Bool
+    public let minAge: Int?
+
+    /// The longest an invitation's code is believed to be.
+    static let inviteLength = 64
+
+    public init(open: Bool, approvalRequired: Bool = false, minAge: Int? = nil) {
+        self.open = open
+        self.approvalRequired = approvalRequired
+        self.minAge = minAge
+    }
+
+    /// What the person typed, reduced to the code a page at `host` may be asked with: a bare code,
+    /// or the last segment of `https://host/invite/:code`. **Nothing for anything else**, an
+    /// invitation to another host among them: that host's code is no business of this one's, and
+    /// a closed host answers a code it does not know with a page that has no way back.
+    public static func invitation(_ typed: String, at host: String) -> String? {
+        let raw = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard raw.contains("/") || raw.contains(":") else { return safe(raw) }
+        guard let url = URLComponents(string: raw), url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == host.lowercased(), url.user == nil, url.password == nil
+        else { return nil }
+        let segments = url.path.split(separator: "/", omittingEmptySubsequences: true)
+        guard segments.count == 2, segments[0] == "invite" else { return nil }
+        return safe(String(segments[1]))
+    }
+
+    /// `code`, where it can stand as one path segment and nothing more.
+    private static func safe(_ code: String) -> String? {
+        guard !code.isEmpty, code.utf8.count <= inviteLength,
+              code.utf8.allSatisfy({ byte in
+                  (48...57).contains(byte) || (65...90).contains(byte) || (97...122).contains(byte) || byte == 45 || byte == 95
+              })
+        else { return nil }
+        return code
+    }
+}
+
+/// How an account made on a host's own form stands (#435), by its own `state`.
+public enum MastodonNewAccount: Equatable, Sendable {
+    /// It works: a sign-in as any other. A check that names no `state` is the usual check's yes.
+    case functional(MastodonWho)
+    /// It waits for its person to open the mail the host sent.
+    case awaitingMail
+    /// It waits for the host's people to approve it.
+    case awaitingApproval
+    /// Refused, or held for a reason this build has no word for: not to be gone on with here.
+    case unsaid
+
+    /// **By `error_code`, and never `error`**, which is written in the reader's language. **Works
+    /// only on the host's plain word for it**, and of an account named by a usable id:
+    /// `state.functional` true, or no `state` at all, as a server without the word answers. Anything else,
+    /// a stranger's other shapes among them, is `unsaid`.
+    init(said body: Data, at host: String) {
+        struct Answer: Decodable {
+            struct State: Decodable {
+                let functional: StatusDTO.Lenient<Bool>?
+                let errorCode: StatusDTO.Lenient<String>?
+            }
+            let state: StatusDTO.Lenient<State>?
+        }
+        guard let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let answer = try? MastodonJSON.decoder.decode(Answer.self, from: body)
+        else {
+            self = .unsaid
+            return
+        }
+        let who = MastodonWho.said(body, at: host)
+        guard object["state"] != nil else {
+            self = who.id != nil ? .functional(who) : .unsaid
+            return
+        }
+        let state = answer.state?.value
+        if state?.functional?.value == true {
+            self = who.id != nil ? .functional(who) : .unsaid
+        } else if state?.errorCode?.value == "pending_confirmation" {
+            self = .awaitingMail
+        } else if state?.errorCode?.value == "pending_approval" {
+            self = .awaitingApproval
+        } else {
+            self = .unsaid
+        }
+    }
+}
+
 /// One host's sign-in, each step a function a test can drive.
 public struct MastodonOAuth: Sendable {
     public static let callbackScheme = "fediqo"
@@ -267,11 +358,45 @@ public struct MastodonOAuth: Sendable {
         if let page, !MastodonRegistration.holds(page, on: app.scopes) {
             throw MastodonSignInError.unreadable
         }
+        let (token, handedBack) = try await traded(as: app, asking: page, through: browser)
+        do {
+            if !handedBack { try await pending?(token) }
+        } catch {
+            return (token, .keychain, nil, nil, handedBack, nil)
+        }
+        do {
+            let who = try await verify(token)
+            return (token, nil, who.id, who.handle, handedBack, who.staff)
+        } catch {
+            return (token, error as? MastodonSignInError ?? .unreachable, nil, nil, handedBack, nil)
+        }
+    }
+
+    /// The same page, opened on the host's own form for making an account (#435), the invitation
+    /// beside it where one is handed, and the same trade after it. **Nothing is checked or saved
+    /// here**: the usual check refuses a new account (`standing(of:)`), and what a token is kept
+    /// as is for whoever reads that.
+    ///
+    /// `invite` is what `MastodonSignUp.invitation` reduced, and nothing else. The state is
+    /// checked as it is for a sign-in, by the one reading of the answer there is.
+    public func signUp(
+        as app: MastodonApp, asking page: String, invite: String? = nil, through browser: any OAuthBrowser
+    ) async throws -> (token: MastodonToken, handedBack: Bool) {
+        guard MastodonRegistration.holds(page, on: app.scopes) else { throw MastodonSignInError.unreadable }
+        return try await traded(as: app, asking: page, creating: true, invite: invite, through: browser)
+    }
+
+    /// The source's page, its answer read, and the code traded.
+    private func traded(
+        as app: MastodonApp, asking page: String?, creating: Bool = false, invite: String? = nil,
+        through browser: any OAuthBrowser
+    ) async throws -> (token: MastodonToken, handedBack: Bool) {
         let pkce = PKCE.make()
         let state = PKCE.random(bytes: 16)
         let scopes = page ?? app.scopes ?? Self.reading
         guard let page = authorizeURL(
-            clientID: app.clientID, challenge: pkce.challenge, state: state, scopes: scopes
+            clientID: app.clientID, challenge: pkce.challenge, state: state, scopes: scopes,
+            creating: creating, invite: invite
         ) else { throw MastodonSignInError.unreadable }
         let callback = try await browser.authorize(page, callbackScheme: Self.callbackScheme)
         let code = try Self.code(from: callback, state: state)
@@ -301,18 +426,7 @@ public struct MastodonOAuth: Sendable {
             scopes: Self.granted(issued.scope, of: scopes),
             asked: scopes
         )
-        let handedBack = issued.handedBack
-        do {
-            if !handedBack { try await pending?(token) }
-        } catch {
-            return (token, .keychain, nil, nil, handedBack, nil)
-        }
-        do {
-            let who = try await verify(token)
-            return (token, nil, who.id, who.handle, handedBack, who.staff)
-        } catch {
-            return (token, error as? MastodonSignInError ?? .unreachable, nil, nil, handedBack, nil)
-        }
+        return (token, issued.handedBack)
     }
 
     /// What a sign-in that asked for `asked` is written down as holding, from the server's own
@@ -417,9 +531,15 @@ public struct MastodonOAuth: Sendable {
     }
 
     func authorizeURL(
-        clientID: String, challenge: String, state: String, scopes: String = MastodonOAuth.reading
+        clientID: String, challenge: String, state: String, scopes: String = MastodonOAuth.reading,
+        creating: Bool = false, invite: String? = nil
     ) -> URL? {
-        Host.httpsURL(host: host, path: "/oauth/authorize", query: [
+        // Only on a page asked to make an account, an invitation on no other.
+        let making = creating
+            ? [URLQueryItem(name: "prompt", value: "create")]
+                + (invite.map { [URLQueryItem(name: "invite_code", value: $0)] } ?? [])
+            : []
+        return Host.httpsURL(host: host, path: "/oauth/authorize", query: [
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "client_id", value: clientID),
             URLQueryItem(name: "redirect_uri", value: Self.redirect),
@@ -427,7 +547,7 @@ public struct MastodonOAuth: Sendable {
             URLQueryItem(name: "state", value: state),
             URLQueryItem(name: "code_challenge", value: challenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
-        ])
+        ] + making)
     }
 
     /// The code in the server's answer, once the answer is shown to be this attempt's: at this
@@ -497,6 +617,42 @@ public struct MastodonOAuth: Sendable {
             throw MastodonSignInError.http(response.statusCode)
         }
         return MastodonWho.said(body, at: host)
+    }
+
+    /// How a token just traded on the form for a new account stands (#435), asked as the usual
+    /// check never is: that one answers 403 until the account works, and **a new account is no
+    /// failed sign-in**.
+    ///
+    /// The source's own 401 is the token gone, thrown as `verify` throws it; a 403 is `unsaid`.
+    public func standing(of token: MastodonToken) async throws -> MastodonNewAccount {
+        guard let url = Host.httpsURL(
+            host: host, path: "/api/v1/accounts/verify_credentials",
+            query: [URLQueryItem(name: "allow_nonfunctional", value: "true")]
+        ) else { throw MastodonSignInError.unreadable }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token.accessToken)", forHTTPHeaderField: "Authorization")
+        let (body, response) = try await send(request)
+        if response.statusCode == 403 { return .unsaid }
+        // Only the source's own 401 is the token gone: a bare one is something in front of it.
+        if response.statusCode == 401, !MastodonEndings.isSourcesOwn(body) { throw MastodonSignInError.unreachable }
+        guard (200..<300).contains(response.statusCode) else {
+            throw MastodonSignInError.http(response.statusCode)
+        }
+        return MastodonNewAccount(said: body, at: host)
+    }
+
+    /// Asks the source to send the confirming mail again, through the token its form led to.
+    /// Thrown where it would not: a 403 is an account already confirmed, or a token without
+    /// `write:accounts`, which is what the source asks of this (`signUp`'s page holds it).
+    public func resendConfirmation(_ token: MastodonToken) async throws {
+        guard var request = Self.form(host: host, path: "/api/v1/emails/confirmations", []) else {
+            throw MastodonSignInError.unreadable
+        }
+        request.setValue("Bearer \(token.accessToken)", forHTTPHeaderField: "Authorization")
+        let (_, response) = try await send(request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw MastodonSignInError.http(response.statusCode)
+        }
     }
 
     /// Where a source gives its own account of a token (#347). Fixed on the host, as every

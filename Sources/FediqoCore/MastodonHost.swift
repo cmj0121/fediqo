@@ -125,6 +125,9 @@ public struct MastodonHostSays: Sendable, Hashable {
     /// Which version of Mastodon's API the host says it speaks (`api_versions.mastodon`), where it
     /// says one: what says whether it has quotes. Bounded as the figures are.
     public let apiVersion: Int?
+    /// Whether, and on what terms, an account may be made in the host's own sign-in (#435): nothing
+    /// where its document does not say `registrations.oauth` true.
+    public let signUp: MastodonSignUp?
 
     /// The API version quotes came in.
     public static let quotesFrom = 7
@@ -138,11 +141,15 @@ public struct MastodonHostSays: Sendable, Hashable {
     /// A host that has said nothing.
     public static let nothing = MastodonHostSays(featuredTagLimit: nil)
 
-    public init(featuredTagLimit: Int?, pinLimit: Int? = nil, translates: Bool? = nil, apiVersion: Int? = nil) {
+    public init(
+        featuredTagLimit: Int?, pinLimit: Int? = nil, translates: Bool? = nil, apiVersion: Int? = nil,
+        signUp: MastodonSignUp? = nil
+    ) {
         self.featuredTagLimit = Self.bounded(featuredTagLimit)
         self.pinLimit = Self.bounded(pinLimit)
         self.translates = translates
         self.apiVersion = Self.bounded(apiVersion)
+        self.signUp = signUp
     }
 
     /// A figure as believed: none below nothing, and none past `most`.
@@ -160,7 +167,19 @@ public struct MastodonHostSays: Sendable, Hashable {
         self.init(
             featuredTagLimit: accounts?.maxFeaturedTags?.value, pinLimit: accounts?.maxPinnedStatuses?.value,
             translates: configuration?.translation?.value?.enabled?.value,
-            apiVersion: wire?.apiVersions?.value?.mastodon?.value
+            apiVersion: wire?.apiVersions?.value?.mastodon?.value,
+            signUp: Self.signUp(wire?.registrations?.value)
+        )
+    }
+
+    /// The terms the document gives, where it offers making an account through its sign-in at all.
+    /// **`enabled` tells closed from open, and anything but its own yes is closed**: `oauth` stays
+    /// true on a server closed to all but an invitation.
+    private static func signUp(_ said: Wire.Registrations?) -> MastodonSignUp? {
+        guard let said, said.oauth?.value == true else { return nil }
+        return MastodonSignUp(
+            open: said.enabled?.value == true, approvalRequired: said.approvalRequired?.value == true,
+            minAge: bounded(said.minAge?.value).flatMap { $0 > 0 ? $0 : nil }
         )
     }
 
@@ -191,6 +210,14 @@ public struct MastodonHostSays: Sendable, Hashable {
         typealias Lenient = StatusDTO.Lenient
         let configuration: Lenient<Configuration>?
         let apiVersions: Lenient<APIVersions>?
+        let registrations: Lenient<Registrations>?
+
+        struct Registrations: Decodable, Sendable {
+            let enabled: Lenient<Bool>?
+            let approvalRequired: Lenient<Bool>?
+            let minAge: Lenient<Int>?
+            let oauth: Lenient<Bool>?
+        }
 
         struct APIVersions: Decodable, Sendable {
             let mastodon: Lenient<Int>?

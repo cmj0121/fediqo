@@ -152,7 +152,8 @@ public struct MastodonClient: Sendable {
         } catch MastodonRequestError.http(let status) {
             throw ProfileError.of(status: status)
         }
-        return try MastodonJSON.decoder.decode(InstanceDTO.self, from: data).asProfile(host: host)
+        return try MastodonJSON.decoder.decode(InstanceDTO.self, from: data)
+            .asProfile(host: host, signUp: MastodonHostSays(document: data).signUp)
     }
 
     /// `/api/v2/instance`, fetched — **the one place its address is built and its status read**.
@@ -366,7 +367,7 @@ struct InstanceDTO: Decodable, Sendable {
         let text: String?
     }
 
-    func asProfile(host: String, kind: ProtocolKind = .mastodon) -> SourceProfile {
+    func asProfile(host: String, kind: ProtocolKind = .mastodon, signUp: MastodonSignUp? = nil) -> SourceProfile {
         SourceProfile(
             host: host,
             kind: kind,
@@ -380,7 +381,8 @@ struct InstanceDTO: Decodable, Sendable {
             registration: Self.registration(registrations),
             // The rules a server did not send and the rules a server has none of are the same
             // nothing to draw. See `SourceProfile.rules`.
-            rules: (rules ?? []).compactMap(\.text)
+            rules: (rules ?? []).compactMap(\.text),
+            signUp: signUp
         )
     }
 
