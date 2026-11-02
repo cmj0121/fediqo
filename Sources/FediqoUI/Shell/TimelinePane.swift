@@ -1195,11 +1195,30 @@ struct TimelinePane: View {
             if !searching, session.timelineLoading(latest: prefs.latestDate) {
                 TimelineReading()
             } else {
-                empty
+                emptyStream
             }
         } else {
             list(items, under: bands)
         }
+    }
+
+    /// Settled empty is still the timeline's list (#445): the same pull, with nobody on it.
+    /// Loading has its own drawing, and searching never asks the timeline again.
+    private var emptyStream: some View {
+        ScrollView { empty }
+            .scrollIndicators(.never)
+            .clearsFloatingCorner()
+            .modifier(PullsToReload(
+                offered: { ReloadMark.pulls(canReload: ways.canReload, searching: searching, reading: !session.reload.asking.isEmpty) },
+                reload: {
+                    session.readingMark.pulled()
+                    ways.onReload()
+                },
+                settled: {
+                    await session.reload.settled(.timeline)
+                    session.readingMark.pullSettled()
+                }
+            ))
     }
 
     private func list(_ items: [DummyItem], under bands: [SearchBands] = []) -> some View {
@@ -2097,8 +2116,8 @@ enum ReloadMark: Equatable, Sendable {
 
     /// Whether pulling the list down reads it again: exactly where the mark is offered, and
     /// never over a search's results, which are not a timeline to read again.
-    static func pulls(canReload: Bool, searching: Bool) -> Bool {
-        canReload && !searching
+    static func pulls(canReload: Bool, searching: Bool, reading: Bool = false) -> Bool {
+        canReload && !searching && !reading
     }
 }
 
