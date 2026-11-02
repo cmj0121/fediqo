@@ -29,6 +29,7 @@ struct ReloadPullTests {
         #expect(ReloadMark.pulls(canReload: true, searching: false))
         #expect(!ReloadMark.pulls(canReload: false, searching: false))
         #expect(!ReloadMark.pulls(canReload: true, searching: true))
+        #expect(!ReloadMark.pulls(canReload: true, searching: false, reading: true), "an empty timeline being read cannot be pulled again")
     }
 
     @Test("What a reader pressed for can be stopped; what the app asks by itself — the wait, more, a tag, a search, a renewal — cannot be, and is no reason to draw Stop")

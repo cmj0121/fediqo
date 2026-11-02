@@ -504,6 +504,7 @@ final class ShellPeoplePages {
         handed.stands = page.stands
         handed.asking = page.asking
         handed.foot = Self.foot(of: page)
+        handed.footFailed = page.footFailed
         return handed
     }
 

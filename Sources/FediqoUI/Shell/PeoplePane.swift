@@ -62,6 +62,8 @@ struct PeopleSaid: Equatable {
     /// Whether the list is being asked from the top.
     var asking = false
     var foot: Foot?
+    /// A next stretch that missed waits for a press, never another appearance (#445).
+    var footFailed = false
     /// How a directory is asked for — its order, and whether only the people who live there —
     /// or nothing where the list is somebody's, which has no such choice.
     var sorting: DirectoryChoice?
