@@ -20,6 +20,14 @@ import Observation
 // **Nothing is written down on this device.** After a write the page behind the sheet reads again
 // (`ShellFeatures.collectionsChanged`), and the list of people kept for it is let go.
 
+/// Which way a changed draft was about to be let go (#446).
+enum CollectionsLeave: Equatable {
+    /// The sheet, by Close or a swipe.
+    case sheet
+    /// The form, by Cancel.
+    case form
+}
+
 /// What the sheet is handed.
 struct CollectionsSaid: Equatable, Identifiable {
     struct Row: Equatable, Identifiable {
@@ -47,6 +55,14 @@ struct CollectionsSaid: Equatable, Identifiable {
         /// What is changed, or nothing where one is being made.
         var changing: String?
         var draft: CollectionDraft
+        /// What the form opened on. Leaving asks only where the draft differs from this.
+        var basis: CollectionDraft
+
+        init(changing: String?, draft: CollectionDraft, basis: CollectionDraft? = nil) {
+            self.changing = changing
+            self.draft = draft
+            self.basis = basis ?? draft
+        }
     }
 
     struct Opened: Equatable {
@@ -67,6 +83,8 @@ struct CollectionsSaid: Equatable, Identifiable {
     var failed: String?
     var form: Form?
     var opened: Opened?
+    /// A changed draft waiting to be let go, and by which way.
+    var askingLeave: CollectionsLeave?
 
     /// How much of a stranger's words a line keeps.
     static let lineLength = 200
@@ -99,6 +117,7 @@ final class ShellCollections {
         var failed: String?
         var form: CollectionsSaid.Form?
         var opened: CollectionRead?
+        var askingLeave: CollectionsLeave?
 
         /// Whether an act of the sheet does anything now.
         var live: Bool { !asking && !writing && failed == nil }
@@ -128,8 +147,33 @@ final class ShellCollections {
         takingOut = takingOut.filter { !$0.hasPrefix(host + "\n") }
     }
 
-    /// Closing does not outrun a write: a sheet opened after it could send a second.
-    func close() { if open?.writing != true { open = nil } }
+    /// Closing does not outrun a write, and a changed draft asks first. Close and a swipe both
+    /// come here; Cancel comes through `cancelForm`.
+    func close() { leave(.sheet) }
+
+    /// The question was answered Discard: do the leaving it was about. A write still in flight
+    /// is not left.
+    func giveUp(_ route: CollectionsLeave) {
+        guard open?.writing != true else { return }
+        open?.askingLeave = nil
+        switch route {
+        case .sheet: open = nil
+        case .form: open?.form = nil
+        }
+    }
+
+    /// What the question's binding writes. Keep editing clears it and changes nothing else.
+    func setAskingLeave(_ route: CollectionsLeave?) { open?.askingLeave = route }
+
+    /// A changed draft asks; anything else leaves. A write in flight does neither.
+    private func leave(_ route: CollectionsLeave) {
+        guard open?.writing != true else { return }
+        if let form = open?.form, form.draft.differs(from: form.basis) {
+            open?.askingLeave = route
+            return
+        }
+        giveUp(route)
+    }
 
     // MARK: - What the sheet is handed
 
@@ -155,7 +199,8 @@ final class ShellCollections {
                         person: DummyPerson(member.person)
                     )
                 })
-            }
+            },
+            askingLeave: open.askingLeave
         )
     }
 
@@ -271,7 +316,8 @@ final class ShellCollections {
     func startMaking() {
         guard open?.live == true else { return }
         open?.sentence = nil
-        open?.form = CollectionsSaid.Form(changing: nil, draft: CollectionDraft())
+        let blank = CollectionDraft()
+        open?.form = CollectionsSaid.Form(changing: nil, draft: blank, basis: blank)
     }
 
     func startChanging(_ id: String) {
@@ -279,12 +325,13 @@ final class ShellCollections {
               let collection = open?.collections.first(where: { $0.id == id })
         else { return }
         open?.sentence = nil
-        open?.form = CollectionsSaid.Form(changing: id, draft: CollectionDraft(collection))
+        let basis = CollectionDraft(collection)
+        open?.form = CollectionsSaid.Form(changing: id, draft: basis, basis: basis)
     }
 
     func setDraft(_ draft: CollectionDraft) { open?.form?.draft = draft }
 
-    func cancelForm() { if open?.writing == false { open?.form = nil } }
+    func cancelForm() { leave(.form) }
 
     /// Sends the form. A refusal leaves it up with what was typed, and says why.
     func save(in session: ShellSession) async {
@@ -292,10 +339,7 @@ final class ShellCollections {
         if let id = form.changing {
             guard let before = open?.collections.first(where: { $0.id == id }) else { return }
             let was = CollectionDraft(before)
-            func trimmed(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
-            guard trimmed(was.name) != trimmed(form.draft.name) || trimmed(was.words) != trimmed(form.draft.words)
-                || was.sensitive != form.draft.sensitive || was.discoverable != form.draft.discoverable
-            else {
+            guard form.draft.differs(from: was) else {
                 open?.form = nil
                 return
             }
@@ -534,6 +578,15 @@ final class ShellCollections {
         case MastodonCollectionError.gone: L10n.t("collections.gone", language: language)
         default: L10n.t("collections.readFailed", language: language)
         }
+    }
+}
+
+extension CollectionDraft {
+    /// Whether sending this would differ from `basis`. Blank edges do not count, as a save ignores them.
+    func differs(from basis: CollectionDraft) -> Bool {
+        func trimmed(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+        return trimmed(name) != trimmed(basis.name) || trimmed(words) != trimmed(basis.words)
+            || sensitive != basis.sensitive || discoverable != basis.discoverable
     }
 }
 
