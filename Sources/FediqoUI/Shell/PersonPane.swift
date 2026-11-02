@@ -20,6 +20,8 @@ struct PostRowsSaid: Equatable {
     /// What stands where rows would and none are drawn.
     var quiet: String?
     var foot: Foot?
+    /// A miss is still a press, but reaching it never retries it (#445).
+    var footFailed = false
 
     /// The Posts tab of a page: the source's posts once it has answered, and what this device
     /// holds of theirs until then — and for good where it did not answer, has not heard of
@@ -36,7 +38,8 @@ struct PostRowsSaid: Equatable {
         return PostRowsSaid(
             items: said.posts ?? held,
             quiet: said.emptyLine(held: held.count, standing: standing, language: language),
-            foot: said.foot.map { Foot(symbol: $0.symbol, words: $0.words(said.source, language: language), presses: $0.presses) }
+            foot: said.foot.map { Foot(symbol: $0.symbol, words: $0.words(said.source, language: language), presses: $0.presses) },
+            footFailed: said.footFailed
         )
     }
 
@@ -45,7 +48,8 @@ struct PostRowsSaid: Equatable {
         PostRowsSaid(
             items: said.posts,
             quiet: said.nothing(language: language),
-            foot: said.foot.map { Foot(symbol: $0.symbol, words: said.footWords($0, language: language), presses: $0.presses) }
+            foot: said.foot.map { Foot(symbol: $0.symbol, words: said.footWords($0, language: language), presses: $0.presses) },
+            footFailed: said.footFailed
         )
     }
 }
@@ -122,8 +126,9 @@ struct PersonPane<Lead: View>: View {
     var jumpToTop: Int
     /// The foot's press: the stretch after what is drawn.
     var onReadOn: () -> Void = {}
-    /// The foot come into view, where reaching it reads on as reaching the end of a timeline
-    /// does (#379): nothing on somebody's page, whose foot reads on only when pressed.
+    /// The foot come into view reads on, as reaching the end of a timeline does (#379, #445).
+    /// A shared link may supply its own reach; somebody's page uses the foot's press. A stretch
+    /// that failed is asked for only when pressed, never just because its foot appeared again.
     var onReachFoot: (() -> Void)?
     /// A face on a row pressed, where the list is not one person's: nothing on their own page.
     var onOpenPerson: ((DummyPerson) -> Void)?
@@ -155,7 +160,7 @@ struct PersonPane<Lead: View>: View {
                     if let foot = said.foot {
                         ShellRule()
                         PersonFootRow(symbol: foot.symbol, words: foot.words, presses: foot.presses, onPress: onReadOn)
-                            .onAppear { if foot.presses { onReachFoot?() } }
+                            .onAppear { if Self.readsOn(foot: foot, failed: said.footFailed) { (onReachFoot ?? onReadOn)() } }
                     }
                 }
             }
@@ -183,6 +188,11 @@ struct PersonPane<Lead: View>: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(ShellSpace.pad)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Whether reaching a foot reads on: the next stretch alone, and no automatic retry.
+    static func readsOn(foot: PostRowsSaid.Foot, failed: Bool) -> Bool {
+        foot.presses && !failed
     }
 
     /// One of theirs.

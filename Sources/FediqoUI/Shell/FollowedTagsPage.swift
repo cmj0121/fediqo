@@ -143,6 +143,7 @@ struct FollowedTagsList<Lead: View>: View {
                             symbol: said.footSymbol(foot), words: said.footWords(foot), presses: foot.presses,
                             onPress: acts.onReadOn
                         )
+                        .onAppear { if foot.presses, !said.footFailed { acts.onReadOn() } }
                     }
                 }
             }

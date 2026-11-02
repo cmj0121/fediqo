@@ -60,6 +60,7 @@ struct PeopleRows<Lead: View>: View {
                             symbol: said.footSymbol(foot), words: said.footWords(foot), presses: foot.presses,
                             onPress: onReadOn
                         )
+                        .onAppear { if foot.presses, !said.footFailed { onReadOn() } }
                     }
                 }
             }
