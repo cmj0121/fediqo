@@ -153,8 +153,13 @@ struct NoticesHeldPage: View {
                 )
                 ShellRule()
             }
+            if listed.count > 1, NoticeActs.why(host: host, in: session) == nil { together(host, listed: listed) }
             ForEach(listed) { request in
-                NoticeRequestRow(request: request, more: { NoticeActs.more(request, in: session) }, asks: asks)
+                NoticeRequestRow(
+                    request: request, more: { NoticeActs.more(request, in: session) }, asks: asks,
+                    chosen: NoticeActs.why(host: host, in: session) == nil && listed.count > 1 ? acts.chosen.contains(request.id) : nil,
+                    onChoose: { acts.toggleChosen(request) }
+                )
                 ShellRule()
             }
             // The source counts more people than it listed — or listed nobody at all: said,
@@ -166,6 +171,34 @@ struct NoticesHeldPage: View {
                 )
                 ShellRule()
             }
+        }
+    }
+}
+
+extension NoticesHeldPage {
+    /// Answering several at once (#431): choosing all of a source's or none, and once some are
+    /// chosen, how many and what can be done with them behind three dots, each asked first.
+    private func together(_ host: String, listed: [NoticeRequest]) -> some View {
+        let count = acts.chosenRequests(host: host).count
+        let all = listed.allSatisfy { acts.chosen.contains($0.id) }
+        return VStack(spacing: 0) {
+            HStack(spacing: ShellSpace.snug) {
+                ShellLinkButton(L10n.t(all ? "notices.held.chooseNone" : "notices.held.chooseAll"), symbol: all ? "circle" : "checkmark.circle") {
+                    acts.toggleAllChosen(host: host)
+                }
+                .fixedSize()
+                Spacer(minLength: 0)
+                if count > 0 {
+                    Text(L10n.count("notices.held.chosenCount", count))
+                        .shellFont(.meta)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    ShellMoreButton(label: ShellMore.label(), asks: asks, more: { NoticeActs.moreChosen(host: host, in: session) })
+                        .fixedSize()
+                }
+            }
+            .padding(.horizontal, ShellSpace.pad)
+            .padding(.vertical, ShellSpace.snug)
+            ShellRule()
         }
     }
 }

@@ -1151,4 +1151,63 @@ struct NoticeActsTests {
         #expect(acts.said.isEmpty && acts.holdings[Self.a] == nil && acts.requests.isEmpty && acts.opened.isEmpty)
         #expect(ids(session.noticeList.lines) == ["b8"])
     }
+
+    // MARK: - Answered together (#431)
+
+    @Test("Chosen requests are answered in one ask; the rest stay as they were, and the source having moved them reads the list by itself")
+    func chosenTogether() async throws {
+        let accept = F.post(Self.a, Self.requests + "/accept")
+        let merged = F.get(Self.a, Self.requests + "/merged")
+        let (session, server, _) = try await holding([accept: .body("{}"), merged: .body(#"{"merged":true}"#)])
+        let acts = session.noticeList.acts
+        acts.mergeWait = .milliseconds(1)
+        let eve = try #require(acts.requests[Self.a]?.first)
+        acts.toggleChosen(eve)
+        #expect(acts.chosenRequests(host: Self.a) == [eve])
+        await server.set(F.get(Self.a), F.page(F.one(9, by: "Eve", minutes: 0)))
+
+        await acts.letThroughChosen(host: Self.a, in: session)
+        #expect(await server.count(accept) == 1)
+        #expect(acts.requests[Self.a]?.map(\.requestID) == ["72"], "the one not chosen stays")
+        #expect(acts.chosen.isEmpty && acts.held(host: Self.a) == NoticesHeld(requests: 1, notices: 1))
+        let landed = await met("what was let through listed, with no press") { ids(session.noticeList.lines).contains("a9") }
+        #expect(landed)
+        #expect(acts.onItsWay.isEmpty, "the read that shows them takes the words down")
+    }
+
+    @Test("A refusal says so for each chosen, and nothing on this device moves")
+    func chosenRefused() async throws {
+        let go = F.post(Self.a, Self.requests + "/dismiss")
+        let (session, server, _) = try await holding([go: .status(403)])
+        let acts = session.noticeList.acts
+        let before = try #require(acts.requests[Self.a])
+        for request in before { acts.toggleChosen(request) }
+        await acts.letGoChosen(host: Self.a, in: session)
+        #expect(await server.count(go) == 1)
+        #expect(acts.requests[Self.a] == before)
+        #expect(acts.listed(host: Self.a) == before, "drawn again where it was")
+        #expect(acts.chosen == Set(before.map(\.id)), "still chosen, to be asked again")
+        #expect(acts.held(host: Self.a) != nil, "what the source said it holds stands")
+        #expect(!strip(session).isEmpty, "said")
+    }
+
+    @Test("Choosing all and none; a menu of the chosen is asked first, in each language, and dim where the sign-in only reads")
+    func chosenMenu() async throws {
+        let (session, _, _) = try await holding([:])
+        let acts = session.noticeList.acts
+        acts.toggleAllChosen(host: Self.a)
+        #expect(acts.chosenRequests(host: Self.a).count == 2)
+        for language in [DummyLanguage.english, .taiwanese] {
+            let menu = NoticeActs.moreChosen(host: Self.a, in: session, language: language)
+            #expect(menu.items.count == 2 && menu.items.allSatisfy(\.answers))
+            let through = ShellQuestion.letThroughChosen(2, host: Self.a, language: language)
+            #expect(through.title.contains("2") && through.title.contains(Self.a) && through.help?.contains(Self.a) == true)
+            #expect(ShellQuestion.letGoChosen(1, host: Self.a, language: language).title.contains("1"))
+            for key in ["notices.held.choose", "notices.held.unchoose", "notices.held.chosen", "notices.held.chooseAll", "notices.held.chooseNone"] {
+                #expect(L10n.t(key, language: language) != key)
+            }
+        }
+        acts.toggleAllChosen(host: Self.a)
+        #expect(acts.chosenRequests(host: Self.a).isEmpty)
+    }
 }

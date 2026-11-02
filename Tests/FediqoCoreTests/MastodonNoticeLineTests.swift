@@ -78,3 +78,43 @@ struct NoticeNewerKindsTests {
         #expect(lines.allSatisfy { $0.collection == "Close friends" && $0.people.count == 1 })
     }
 }
+
+/// #431: several held-back requests answered in one ask.
+@Suite("Held-back requests answered together")
+struct NoticeRequestsTogetherTests {
+    private let source = Source(host: "mastodon.localhost", kind: .mastodon)
+
+    private func request(_ id: String, source: Source? = nil) -> NoticeRequest {
+        NoticeRequest(
+            requestID: id, source: source ?? self.source, person: NoticePerson(handle: "@a@b", name: "A"), at: Date(timeIntervalSince1970: 0)
+        )
+    }
+
+    private func notices(_ routes: [String: FixtureSender.Outcome]) -> (MastodonNotices, FixtureSender) {
+        let sender = FixtureSender(routes)
+        let token = MastodonToken(host: source.host, accessToken: "t", clientID: "c", clientSecret: "s")
+        return (MastodonNotices(door: MastodonAuthorized(token: token, sender: sender, store: MemoryMastodonTokens())), sender)
+    }
+
+    @Test("One ask names every one chosen, as the source's own field")
+    func oneAsk() async throws {
+        let (notices, sender) = notices(["/api/v1/notifications/requests/accept": .json("{}"), "/api/v1/notifications/requests/dismiss": .json("{}")])
+        try await notices.letThrough([request("1"), request("2")])
+        try await notices.letGo([request("3")])
+        let sent = await sender.requests
+        #expect(sent.map { $0.url?.path } == ["/api/v1/notifications/requests/accept", "/api/v1/notifications/requests/dismiss"])
+        let form = String(decoding: try #require(sent.first?.httpBody), as: UTF8.self)
+        #expect(form.components(separatedBy: "&").count == 2 && form.contains("=1") && form.contains("=2"))
+    }
+
+    @Test("None chosen asks nothing; another source's is asked of nobody; a refusal is thrown as it came")
+    func guards() async throws {
+        let (notices, sender) = notices(["/api/v1/notifications/requests/accept": .json("{}", status: 403)])
+        try await notices.letThrough([])
+        await #expect(throws: MastodonNoticeError.elsewhere) {
+            try await notices.letThrough([request("1"), request("2", source: Source(host: "other.example", kind: .mastodon))])
+        }
+        #expect(await sender.requests.isEmpty)
+        await #expect(throws: MastodonAuthError.http(403)) { try await notices.letThrough([request("1")]) }
+    }
+}

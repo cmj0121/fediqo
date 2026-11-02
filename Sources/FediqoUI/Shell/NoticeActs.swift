@@ -97,6 +97,26 @@ enum NoticeActs {
         return menu([through, go], why: why)
     }
 
+    /// The chosen requests' `…` at one source (#431): Let through and Let go, **each asked first**,
+    /// each saying how many. Only where some are chosen; dim, saying why, where the sign-in may not.
+    static func moreChosen(host: String, in session: ShellSession, language: DummyLanguage? = nil) -> ShellMore {
+        let acts = session.noticeList.acts
+        let why = why(host: host, in: session, language: language)
+        let count = acts.chosenRequests(host: host).count
+        let look = look(why, busy: false)
+        let through = ShellMoreItem.danger(
+            throughSymbol, L10n.count("notices.held.throughChosen", count, language: language), look: look,
+            asks: ShellQuestion.letThroughChosen(count, host: host, language: language),
+            act: { Task { await acts.letThroughChosen(host: host, in: session) } }
+        )
+        let go = ShellMoreItem.danger(
+            dismissSymbol, L10n.count("notices.held.goChosen", count, language: language), look: look,
+            asks: ShellQuestion.letGoChosen(count, host: host, language: language),
+            act: { Task { await acts.letGoChosen(host: host, in: session) } }
+        )
+        return menu([through, go], why: why)
+    }
+
     /// `d` on the line the lamp is on: the question the line's own `…` puts, by pressing that
     /// menu's item — so the key and the menu cannot differ. Whether a question was put.
     @discardableResult
@@ -191,6 +211,10 @@ struct NoticeRequestRow: View {
     let request: NoticeRequest
     let more: () -> ShellMore
     let asks: Binding<ShellMoreAsk?>
+    /// Whether it is chosen to be answered with others, and the press that turns it (#431). Nothing
+    /// where the sign-in may not answer.
+    var chosen: Bool?
+    var onChoose: () -> Void = {}
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.shellNoticesProbe) private var probe
     @Environment(\.shellOpens) private var opens
@@ -204,6 +228,15 @@ struct NoticeRequestRow: View {
     var body: some View {
         let spoken = NoticeActs.spoken(request)
         HStack(alignment: .top, spacing: ShellSpace.snug) {
+            if let chosen {
+                Button(action: onChoose) {
+                    Image(systemName: chosen ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(chosen ? ShellChrome.ink(colorScheme) : ShellChrome.inkFaint(colorScheme))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(L10n.t(chosen ? "notices.held.unchoose" : "notices.held.choose"))
+            }
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 Text(NoticeActs.name(request.person))
                     .shellFont(.name)
@@ -233,8 +266,12 @@ struct NoticeRequestRow: View {
         .modifier(NoticeRowMenu(menu: NoticeRow.Menu(more: more, asks: asks)))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken)
+        .accessibilityValue(chosen == true ? L10n.t("notices.held.chosen") : "")
         .accessibilityAction { openPerson() }
-        .accessibilityActions { NoticeMenuActions(more: more, asks: asks) }
+        .accessibilityActions {
+            if let chosen { Button(L10n.t(chosen ? "notices.held.unchoose" : "notices.held.choose"), action: onChoose) }
+            NoticeMenuActions(more: more, asks: asks)
+        }
         .modifier(NoticesProbed(.request(request.id), says: spoken, probe: probe))
     }
 }

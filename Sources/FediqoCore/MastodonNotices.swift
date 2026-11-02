@@ -262,11 +262,45 @@ public struct MastodonNotices: Sendable {
         try await answer(request, "dismiss")
     }
 
+    /// Lets several held-back requests through in one ask (#431). **As one letting through is:** the
+    /// source says yes and moves them afterwards (`merged`). An id it no longer has is passed over by
+    /// it (`MastodonLiveCaptures`), which is that request being answered already.
+    public func letThrough(_ requests: [NoticeRequest]) async throws {
+        try await answer(requests, "accept")
+    }
+
+    /// Lets several held-back requests go in one ask.
+    public func letGo(_ requests: [NoticeRequest]) async throws {
+        try await answer(requests, "dismiss")
+    }
+
+    /// Whether the source has finished moving what was let through. It says so here, and on the
+    /// line where one is held (`saysMerged`).
+    public func merged() async throws -> Bool {
+        let data = try await door.get(path: "\(Self.requestsPath)/merged")
+        guard let read = try? MastodonJSON.decoder.decode(MergedDTO.self, from: data) else {
+            throw MastodonNoticeError.unreadable
+        }
+        return read.merged
+    }
+
+    private func answer(_ requests: [NoticeRequest], _ act: String) async throws {
+        guard !requests.isEmpty else { return }
+        guard requests.allSatisfy({ $0.source.host == door.token.host }) else { throw MastodonNoticeError.elsewhere }
+        guard requests.allSatisfy({ ListSubscription.isPathSegment($0.requestID) }) else { throw MastodonRequestError.invalidURL }
+        _ = try await door.post(path: "\(Self.requestsPath)/\(act)", form: requests.map { ("id[]", $0.requestID) })
+    }
+
     private func answer(_ request: NoticeRequest, _ act: String) async throws {
         guard request.source.host == door.token.host else { throw MastodonNoticeError.elsewhere }
         guard ListSubscription.isPathSegment(request.requestID) else { throw MastodonRequestError.invalidURL }
         _ = try await door.post(path: "\(Self.requestsPath)/\(request.requestID)/\(act)", form: [])
     }
+}
+
+/// `/api/v1/notifications/requests/merged`.
+private struct MergedDTO: Decodable, Sendable {
+    let merged: Bool
 }
 
 /// `/api/v1/notifications/unread_count`.
