@@ -226,6 +226,8 @@ struct PersonPage: View {
         }
     }
 
+    @Environment(\.shellOpens) private var opens
+
     private func postRows<Lead: View>(
         _ said: PostRowsSaid, readOn: @escaping () -> Void, @ViewBuilder lead: () -> Lead
     ) -> some View {
@@ -233,7 +235,8 @@ struct PersonPage: View {
             said: said, catalogues: rows.catalogues, catalogueSettled: rows.catalogueSettled, posts: rows.posts,
             selectedID: $selectedID, acting: rows.acting, decks: $decks, playback: rows.playback,
             onPlayRow: rows.onPlayRow, onViewRow: rows.onViewRow, onTurnRow: rows.onTurnRow,
-            onOpenThread: rows.onOpenThread, jumpToTop: jumpToTop, onReadOn: readOn, lead: lead
+            onOpenThread: rows.onOpenThread, jumpToTop: jumpToTop, onReadOn: readOn,
+            onOpenPerson: opens?.person, page: person, lead: lead
         )
     }
 }

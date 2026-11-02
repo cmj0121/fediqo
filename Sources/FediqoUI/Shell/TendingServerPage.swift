@@ -271,7 +271,7 @@ struct TendingServerList<Lead: View>: View {
             .modifier(NoticeRowMenu(menu: menu, label: L10n.t("tend.more.label")))
             // A post is drawn as a post's row, as it is everywhere.
             if case .post(let note) = item.what {
-                DummyItemRow(item: DummyItem(note, among: ReblogTargets([note])), catalogues: catalogues, posts: posts, onOpenPerson: onOpenPerson)
+                TendedPostRow(note: note, item: DummyItem(note, among: ReblogTargets([note])), catalogues: catalogues, posts: posts, onOpenPerson: onOpenPerson)
             }
         }
         .padding(.vertical, ShellSpace.step)

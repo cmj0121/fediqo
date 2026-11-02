@@ -39,6 +39,8 @@ struct CollectionsSaid: Equatable, Identifiable {
         var name: String
         var handle: String
         var waits: Bool
+        /// Who a press on the line opens (#443).
+        var person: DummyPerson?
     }
 
     struct Form: Equatable {
@@ -149,7 +151,8 @@ final class ShellCollections {
                 CollectionsSaid.Opened(id: read.collection.id, name: Self.line(read.collection.name), members: read.members.map { member in
                     CollectionsSaid.Member(
                         id: member.item.id, name: Self.line(member.person.name.isEmpty ? member.person.handle : member.person.name),
-                        handle: Self.line(member.person.handle), waits: member.item.state == .pending
+                        handle: Self.line(member.person.handle), waits: member.item.state == .pending,
+                        person: DummyPerson(member.person)
                     )
                 })
             }

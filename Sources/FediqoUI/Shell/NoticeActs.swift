@@ -193,6 +193,13 @@ struct NoticeRequestRow: View {
     let asks: Binding<ShellMoreAsk?>
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.shellNoticesProbe) private var probe
+    @Environment(\.shellOpens) private var opens
+
+    /// Who it names, opened by a press (#443); what can be done about them stays behind `…`.
+    private func openPerson() {
+        guard let person = DummyPerson(request.person, host: request.source.host) else { return }
+        opens?.person(person)
+    }
 
     var body: some View {
         let spoken = NoticeActs.spoken(request)
@@ -222,9 +229,11 @@ struct NoticeRequestRow: View {
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.snug)
         .contentShape(Rectangle())
+        .onTapGesture(perform: openPerson)
         .modifier(NoticeRowMenu(menu: NoticeRow.Menu(more: more, asks: asks)))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken)
+        .accessibilityAction { openPerson() }
         .accessibilityActions { NoticeMenuActions(more: more, asks: asks) }
         .modifier(NoticesProbed(.request(request.id), says: spoken, probe: probe))
     }
