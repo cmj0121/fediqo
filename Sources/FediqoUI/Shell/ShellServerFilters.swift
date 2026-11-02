@@ -85,6 +85,13 @@ final class ShellServerFilters {
         }
     }
 
+    /// The source said its filters changed (#427): the list read again where it was read this run.
+    /// A list not read is read as its page opens.
+    func heard(host raw: String, in session: ShellSession) async {
+        guard reading[raw.lowercased()] != nil else { return }
+        await read(host: raw, in: session)
+    }
+
     /// One act on a source's filters, then the list read again. What it could not do is said, and
     /// nothing changes here for it.
     private func act(_ host: String, in session: ShellSession, _ body: (MastodonFilters) async throws -> Void) async -> Bool {

@@ -8,6 +8,12 @@ import os
 // that reads notices, each notice (`MastodonLineCaptures`), which #324 may hear on the same line.
 // Lists and the public timeline each want a line of their own, and are read as they always were.
 //
+// **Direct posts have a line of their own too** (#427): the reader's own line never says
+// `conversation`, only the direct line does (`/api/v1/streaming/direct`, `MastodonLiveCaptures`).
+// **What an announcement does is said on the reader's own line. A filter changing is said on
+// neither** at the Mastodon this was asked of: `filters_changed` has no payload, and its streaming
+// service sends nothing without one. What a post caught is on each post that arrives (`filtered`).
+//
 // **Only to the token's own host.** The line is asked of the source at the address every other ask
 // of it goes to, through the source's proxy, as the fixture's Caddy and the usual one in front of a
 // Mastodon route it. Where the instance names another host for it (`configuration.urls.streaming`)
@@ -41,6 +47,7 @@ public struct MastodonLine: Sendable {
     }
 
     static let userPath = "/api/v1/streaming/user"
+    static let directPath = "/api/v1/streaming/direct"
 
     /// Opens the line and returns once the source has answered — which is when it is open, and
     /// from when what it tells is heard. Throws `MastodonLineRefused` where the answer was no 2xx,
@@ -49,7 +56,16 @@ public struct MastodonLine: Sendable {
     /// **A refusal signs nobody out**, a 401 included: a sign-in is ended where a read's answer and
     /// the account check both say so (`MastodonAuthorized`), and a line is not a read.
     public func open() async throws -> AsyncThrowingStream<LineEvent, any Error> {
-        guard let url = Host.httpsURL(host: token.host, path: Self.userPath) else { throw URLError(.badURL) }
+        try await open(path: Self.userPath)
+    }
+
+    /// The direct line (#427), opened and refused as the reader's own is. It tells `conversation`.
+    public func openDirect() async throws -> AsyncThrowingStream<LineEvent, any Error> {
+        try await open(path: Self.directPath)
+    }
+
+    private func open(path: String) async throws -> AsyncThrowingStream<LineEvent, any Error> {
+        guard let url = Host.httpsURL(host: token.host, path: path) else { throw URLError(.badURL) }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token.accessToken)", forHTTPHeaderField: "Authorization")
         let line = try await opener.open(request)
@@ -81,6 +97,13 @@ public enum MastodonLineLanded: Equatable, Sendable {
 extension MastodonLine {
     /// The events this source tells that land in Home.
     public static let homeEvents: Set<String> = ["update", "status.update", "delete"]
+    /// The events that say an announcement came, changed, was reacted to or went. Each carries
+    /// less than the source's own read does (`me` is always false on a reaction).
+    public static let announcementEvents: Set<String> = ["announcement", "announcement.reaction", "announcement.delete"]
+    /// The event that would say the person's filters changed elsewhere.
+    public static let filtersEvent = "filters_changed"
+    /// The event of the direct line that says a conversation has something new.
+    public static let conversationEvent = "conversation"
 
     /// `event` landed as a read of Home would land it, while `source` is still here.
     public static func land(_ event: LineEvent, of source: Source, in store: ItemStore) async -> MastodonLineLanded {

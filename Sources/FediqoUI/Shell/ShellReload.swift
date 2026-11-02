@@ -1539,13 +1539,15 @@ struct AsksOnAWait: ViewModifier {
     let minutes: Int
     /// Whether the notices page is in front, for the lines (`HearsLines.noticesInFront`).
     var noticesInFront = false
+    /// A press on the system's notice (`HearsLines.onToldPressed`).
+    var onToldPressed: (Notice?) -> Void = { _ in }
 
     func body(content: Content) -> some View {
         content
             .task(id: minutes) {
                 await session.reload.keepAsking(every: Self.wait(minutes), in: session)
             }
-            .modifier(HearsLines(session: session, noticesInFront: noticesInFront))
+            .modifier(HearsLines(session: session, noticesInFront: noticesInFront, onToldPressed: onToldPressed))
     }
 
     static func wait(_ minutes: Int) -> Duration { .seconds(minutes * 60) }
@@ -1563,6 +1565,13 @@ struct AnnouncementsAsk: ViewModifier {
             session.reload.sourceAnswered = { [weak session, weak announcements] host in
                 guard let session, let announcements else { return }
                 announcements.checked(host, in: session)
+                Task { await session.noticesTold.roundAnswered(host: host, in: session) }
+            }
+            // What each source says it has, for what a source's notices page lists (#430).
+            session.quoting.hosts = announcements.hosts
+            session.lines.announced = { [weak session, weak announcements] host in
+                guard let session, let announcements else { return }
+                await announcements.heard(host, in: session)
             }
         }
     }

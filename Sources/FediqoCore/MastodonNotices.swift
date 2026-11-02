@@ -93,6 +93,48 @@ public struct MastodonNotices: Sendable {
         return entry.asNotice(source: source, sent: ReadMoment.now())
     }
 
+    /// Whether `event` is the source saying the notices of requests let through have now joined
+    /// the ordinary list (#426). It carries none of them: a read brings them.
+    public static func saysMerged(_ event: LineEvent) -> Bool {
+        event.name == "notifications_merged"
+    }
+
+    // MARK: - What is unread
+
+    static let unreadCountPath = "/api/v1/notifications/unread_count"
+    static let markersPath = "/api/v1/markers"
+    /// The most a source counts when asked (`MastodonLiveCaptures`): past it, it says this many.
+    static let countedAtMost = 1_000
+    /// The form field a place among the notices is told by.
+    static let readField = "notifications[last_read_id]"
+
+    /// How many notices the source itself says are unread (#429), leaving out `excluding`, each a
+    /// word of the source's own: above the place it holds, whoever told it that. Asks nothing of
+    /// this device, and a 404 — a source with no such count — is thrown as any other answer is.
+    public func unreadCount(excluding kinds: [String] = []) async throws -> Int {
+        var query = [URLQueryItem(name: "limit", value: String(Self.countedAtMost))]
+        query += kinds.map { URLQueryItem(name: "exclude_types%5B%5D", value: $0) }
+        let data = try await door.get(path: Self.unreadCountPath, query: query)
+        guard let read = try? MastodonJSON.decoder.decode(UnreadDTO.self, from: data), read.count >= 0 else {
+            throw MastodonNoticeError.unreadable
+        }
+        return read.count
+    }
+
+    /// Tells the source the person has read up to `newest`, **and never lower than it holds**: the
+    /// source takes a lower id and moves back (`MastodonLiveCaptures`), which would make notices read
+    /// on another client unread again. So its place is read first, and nothing is told where it is
+    /// there or past. Needs the sign-in to write statuses, which the source's own rule asks for here.
+    public func tellRead(upTo newest: String) async throws {
+        guard !newest.isEmpty, !newest.contains(where: \.isWhitespace) else { throw MastodonRequestError.invalidURL }
+        let asked = [URLQueryItem(name: "timeline%5B%5D", value: "notifications")]
+        guard let held = try? MastodonJSON.decoder.decode(MarkersDTO.self, from: try await door.get(path: Self.markersPath, query: asked)) else {
+            throw MastodonNoticeError.unreadable
+        }
+        if let place = held.notifications?.lastReadId, !StatusID.later(newest, than: place) { return }
+        _ = try await door.post(path: Self.markersPath, form: [(Self.readField, newest)])
+    }
+
     // MARK: - Dismissing
 
     static let clearPath = "/api/v1/notifications/clear"
@@ -220,11 +262,60 @@ public struct MastodonNotices: Sendable {
         try await answer(request, "dismiss")
     }
 
+    /// Lets several held-back requests through in one ask (#431). **As one letting through is:** the
+    /// source says yes and moves them afterwards (`merged`). An id it no longer has is passed over by
+    /// it (`MastodonLiveCaptures`), which is that request being answered already.
+    public func letThrough(_ requests: [NoticeRequest]) async throws {
+        try await answer(requests, "accept")
+    }
+
+    /// Lets several held-back requests go in one ask.
+    public func letGo(_ requests: [NoticeRequest]) async throws {
+        try await answer(requests, "dismiss")
+    }
+
+    /// Whether the source has finished moving what was let through. It says so here, and on the
+    /// line where one is held (`saysMerged`).
+    public func merged() async throws -> Bool {
+        let data = try await door.get(path: "\(Self.requestsPath)/merged")
+        guard let read = try? MastodonJSON.decoder.decode(MergedDTO.self, from: data) else {
+            throw MastodonNoticeError.unreadable
+        }
+        return read.merged
+    }
+
+    private func answer(_ requests: [NoticeRequest], _ act: String) async throws {
+        guard !requests.isEmpty else { return }
+        guard requests.allSatisfy({ $0.source.host == door.token.host }) else { throw MastodonNoticeError.elsewhere }
+        guard requests.allSatisfy({ ListSubscription.isPathSegment($0.requestID) }) else { throw MastodonRequestError.invalidURL }
+        _ = try await door.post(path: "\(Self.requestsPath)/\(act)", form: requests.map { ("id[]", $0.requestID) })
+    }
+
     private func answer(_ request: NoticeRequest, _ act: String) async throws {
         guard request.source.host == door.token.host else { throw MastodonNoticeError.elsewhere }
         guard ListSubscription.isPathSegment(request.requestID) else { throw MastodonRequestError.invalidURL }
         _ = try await door.post(path: "\(Self.requestsPath)/\(request.requestID)/\(act)", form: [])
     }
+}
+
+/// `/api/v1/notifications/requests/merged`.
+private struct MergedDTO: Decodable, Sendable {
+    let merged: Bool
+}
+
+/// `/api/v1/notifications/unread_count`.
+private struct UnreadDTO: Decodable, Sendable {
+    let count: Int
+}
+
+/// `/api/v1/markers`, in the one place read. `last_read_id` under `MastodonJSON.decoder`'s
+/// snake-case strategy, which writes `id` as `Id`.
+private struct MarkersDTO: Decodable, Sendable {
+    struct Place: Decodable, Sendable {
+        let lastReadId: String
+    }
+
+    let notifications: Place?
 }
 
 /// `/api/v2/notifications/policy`, in the one part of it read: how much is waiting. The counts
@@ -386,6 +477,7 @@ private struct GatheredDTO: Decodable, Sendable {
         let sampleAccountIds: StatusDTO.Lenient<[StatusDTO.Lenient<WireNumber>]>?
         let statusId: StatusDTO.Lenient<WireNumber>?
         let report: StatusDTO.Lenient<ReportIDDTO>?
+        let collection: StatusDTO.Lenient<NamedCollectionDTO>?
     }
 
     /// What makes a notice of one of this answer's lines, with the side lists joined once.
@@ -408,7 +500,7 @@ private struct GatheredDTO: Decodable, Sendable {
                 people: (line.sampleAccountIds?.value ?? []).compactMap { ($0.value?.text).flatMap { people[$0] } },
                 count: max(1, line.notificationsCount?.value?.count ?? 1),
                 post: post, at: at, newestID: newest, oldestID: line.pageMinId?.value?.text ?? newest,
-                report: line.report?.value?.named
+                report: line.report?.value?.named, collection: line.collection?.value?.named
             )
         }
     }
@@ -423,6 +515,7 @@ private struct SingleDTO: Decodable, Sendable {
     let account: StatusDTO.Lenient<PersonDTO>?
     let status: StatusDTO.Lenient<StatusDTO>?
     let report: StatusDTO.Lenient<ReportIDDTO>?
+    let collection: StatusDTO.Lenient<NamedCollectionDTO>?
 
     /// A line of one: one person, a count of one, named by its own id. Placed as a gathered
     /// line is: at its own moment, at its post's where it has none, and nothing where it has
@@ -433,8 +526,19 @@ private struct SingleDTO: Decodable, Sendable {
         return Notice(
             source: source, handle: .one(id: id.text), kind: Notice.Kind(type: type),
             people: (account?.value).map { [$0.asPerson(host: source.host)] } ?? [],
-            post: post, at: at, newestID: id.text, oldestID: id.text, report: report?.value?.named
+            post: post, at: at, newestID: id.text, oldestID: id.text, report: report?.value?.named,
+            collection: collection?.value?.named
         )
+    }
+}
+
+/// The collection a notice of one carries (#430), as far as what it is called.
+private struct NamedCollectionDTO: Decodable, Sendable {
+    let name: String
+
+    var named: String? {
+        let line = LineText.oneLine(name)
+        return line.isEmpty ? nil : line
     }
 }
 

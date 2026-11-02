@@ -24,6 +24,13 @@ public struct Notice: Hashable, Sendable, Identifiable {
         case quote
         case poll
         case update
+        /// A post the person quoted was changed by whoever wrote it (`quoted_update`). What it
+        /// carries is the person's own post that quotes it (`MastodonLiveCaptures`).
+        case quotedUpdate
+        /// Somebody put the person in a collection of theirs (`added_to_collection`).
+        case addedToCollection
+        /// A collection the person is in was changed by its owner (`collection_update`).
+        case collectionUpdate
         /// The server speaking for itself, under its own word: `severed_relationships`,
         /// `moderation_warning`, `admin.sign_up`, `admin.report`.
         case server(String)
@@ -47,6 +54,9 @@ public struct Notice: Hashable, Sendable, Identifiable {
             case "quote": self = .quote
             case "poll": self = .poll
             case "update": self = .update
+            case "quoted_update": self = .quotedUpdate
+            case "added_to_collection": self = .addedToCollection
+            case "collection_update": self = .collectionUpdate
             default: self = Self.servers.contains(type) ? .server(type) : .unknown(type)
             }
         }
@@ -62,6 +72,9 @@ public struct Notice: Hashable, Sendable, Identifiable {
             case .quote: "quote"
             case .poll: "poll"
             case .update: "update"
+            case .quotedUpdate: "quoted_update"
+            case .addedToCollection: "added_to_collection"
+            case .collectionUpdate: "collection_update"
             case .server(let word), .unknown(let word): word
             }
         }
@@ -94,6 +107,10 @@ public struct Notice: Hashable, Sendable, Identifiable {
     /// what opens it among the reports of the server tended. Held for the run: a notice read
     /// back from this device's store names none, and opens the reports at their top.
     public let report: String?
+    /// The name of the collection a notice of one is about (#430), as its source says it, fit for a
+    /// line. Held for the run, as `report` is: a notice read back from the store names none, and says
+    /// so in words that need none.
+    public let collection: String?
     /// The oldest notice id it stands for **on the pages read so far**: a gathered line the
     /// source cut at a page edge reaches further down once the next page is folded in.
     public let oldestID: String
@@ -104,9 +121,10 @@ public struct Notice: Hashable, Sendable, Identifiable {
 
     public init(
         source: Source, handle: Handle, kind: Kind, people: [NoticePerson], count: Int = 1, post: Note? = nil,
-        at: Date, newestID: String, oldestID: String, report: String? = nil
+        at: Date, newestID: String, oldestID: String, report: String? = nil, collection: String? = nil
     ) {
         self.report = report
+        self.collection = collection
         self.source = source
         self.handle = handle
         self.kind = kind
@@ -127,7 +145,7 @@ public struct Notice: Hashable, Sendable, Identifiable {
     public func carrying(_ post: Note?) -> Notice {
         Notice(
             source: source, handle: handle, kind: kind, people: people, count: count, post: post, at: at,
-            newestID: newestID, oldestID: oldestID, report: report
+            newestID: newestID, oldestID: oldestID, report: report, collection: collection
         )
     }
 
@@ -149,7 +167,7 @@ public struct Notice: Hashable, Sendable, Identifiable {
             count: max(count, older.count), post: post ?? older.post, at: max(at, older.at),
             newestID: StatusID.later(older.newestID, than: newestID) ? older.newestID : newestID,
             oldestID: StatusID.later(oldestID, than: older.oldestID) ? older.oldestID : oldestID,
-            report: report ?? older.report
+            report: report ?? older.report, collection: collection ?? older.collection
         )
     }
 }

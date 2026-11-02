@@ -158,9 +158,11 @@ final class ShellAnnouncements {
     private var pages: [String: Page] = [:]
     private var presses = PressGuard<PressName, AnnouncementAct>()
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
+    /// The sources that said something on their line while an ask was out.
+    @ObservationIgnored private var heardMeanwhile: Set<String> = []
     @ObservationIgnored private let errands: PageErrands
     @ObservationIgnored private let readers: PageReaders
-    @ObservationIgnored private let hosts: ShellHostsKnown
+    @ObservationIgnored let hosts: ShellHostsKnown
     /// How long one ask may take. A test shortens it.
     @ObservationIgnored var deadline: Duration = .seconds(30)
     /// The clock the fifteen minutes are read on. A test turns it by hand.
@@ -345,6 +347,25 @@ final class ShellAnnouncements {
         await begin(source, as: askedAs, with: held, in: session).value
     }
 
+    /// The source said on its line that an announcement came, changed, was reacted to or went
+    /// (#427): asked at once, whatever the fifteen minutes say, and its answer is what is drawn.
+    /// **Told while an ask is out, whoever's**, that ask is followed by one more (`ask`). Nothing of a
+    /// source that will not show this sign-in its announcements.
+    func heard(_ host: String, in session: ShellSession) async {
+        guard let source = ShellPersonPages.source(at: host, in: session),
+              let (_, askedAs) = asker(at: source.host, in: session)
+        else { return }
+        if let page = standing(at: source.host, as: askedAs) {
+            if page.reading == .forbidden { return }
+            if page.asking {
+                heardMeanwhile.insert(source.host)
+                return
+            }
+        }
+        guard let held = readers.look(at: source.host, in: session).held else { return }
+        await begin(source, as: askedAs, with: held, in: session).value
+    }
+
     private func door(_ held: MastodonToken, for purpose: SourceWork.Purpose, in session: ShellSession) -> MastodonAnnouncements {
         reaching?(held) ?? session.reach.announcements(session.mastodon.authorized(token: held, within: deadline, for: purpose))
     }
@@ -395,6 +416,12 @@ final class ShellAnnouncements {
             }
         }
         pages[host]?.asking = false
+        // What the source said while this was out: asked once more, by the ask that was out.
+        if heardMeanwhile.remove(host) != nil, !Task.isCancelled,
+           let held = readers.look(at: host, in: session).held, let (_, now) = asker(at: host, in: session),
+           pages[host]?.reading != .forbidden {
+            await begin(source, as: now, with: held, in: session).value
+        }
     }
 
     private func stillTheirs(_ host: String, errand: Int, askedAs: AskedAs, in session: ShellSession) -> Bool {

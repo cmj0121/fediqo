@@ -17,6 +17,11 @@ import Observation
 /// asked to be told of holds the same line while Fediqo runs, whatever page is in front. One line
 /// a source, whatever it is held for (`Want`): a change of what it is held for opens it again.
 ///
+/// **And what else the line says** (#427): an announcement coming, changing or going, and a filter
+/// changing, are each read again from the source as its own page reads them, on whatever line is
+/// held. **No line is held that nobody chose**: a source the person chose holds it while its own page
+/// is in front (`sourcePage`), and its direct line while its conversations are up (`directWanted`).
+///
 /// **What it brings lands as a read would** (`MastodonLine.land`), and only over a Home read
 /// through to now: as the line opens, Home is read on first (`MastodonAccount.catchUp`), so what
 /// was missed while no line was open is read or said to be missing, and only then is anything the
@@ -65,6 +70,19 @@ final class ShellLines {
     /// The timeline in front, and whether it is in front of the reader now: told by the timeline's
     /// pane (`ShowsLineFront`), nothing while that pane is not drawn.
     var front: Front?
+
+    /// The joined source whose own page is drawn: what it announces is said there as it happens,
+    /// where the person chose that source's line.
+    var sourcePage: String?
+    /// What the line saying something of announcements does: handed in with the one keeper of them,
+    /// which is not the session's. Nothing in a session that has none.
+    @ObservationIgnored var announced: (String) async -> Void = { _ in }
+    /// The sources whose direct line was refused for good, by the sign-in refused: not asked again
+    /// under that sign-in. Another is asked afresh.
+    private var directRefused: [String: String] = [:]
+    /// The answers that say a direct line will not be had by asking again. A sign-in doubted (401, which
+    /// reads settle) and a source busy (429) are drops, and waited out.
+    nonisolated static let directRefusals: Set<Int> = [400, 403, 404, 410]
 
     struct Front: Equatable {
         let timeline: TimelineQuery
@@ -132,9 +150,36 @@ final class ShellLines {
             if case .refused? = standing[host] { return false }
             return true
         }
-        return Set(home).union(notices).sorted().map {
+        return Set(home).union(notices).union(page(in: session)).sorted().map {
             Want(host: $0, home: home.contains($0), notices: notices.contains($0))
         }
+    }
+
+    /// The source whose own page is in front, as a line wanted: where its line was chosen, it is
+    /// signed in, a Mastodon, and not refused this run.
+    private func page(in session: ShellSession) -> [String] {
+        guard let host = sourcePage?.lowercased(), mayHold(host, in: session) else { return [] }
+        return [host]
+    }
+
+    /// Whether the person chose `host`'s line, one way or the other, and it can be held.
+    private func mayHold(_ host: String, in session: ShellSession) -> Bool {
+        guard chosen.contains(host) || session.noticesTold.hosts(in: session).contains(host),
+              session.sources.contains(where: { $0.host.lowercased() == host && $0.kind == .mastodon }),
+              session.mastodon.isSignedIn(host: host)
+        else { return false }
+        if case .refused? = standing[host] { return false }
+        return true
+    }
+
+    /// The host whose direct line is wanted now: its conversations are up, they can be read, and
+    /// the person chose its line. Nothing else holds one: a list not up is read as it opens.
+    func directWanted(running: Bool, in session: ShellSession) -> String? {
+        guard running, let host = session.directs.shown?.lowercased(), session.directsReads(host: host),
+              mayHold(host, in: session)
+        else { return nil }
+        if let refused = directRefused[host], refused == session.mastodon.token(host: host)?.accessToken { return nil }
+        return host
     }
 
     // MARK: - The source's page
@@ -237,6 +282,37 @@ final class ShellLines {
         }
     }
 
+    /// `host`'s direct line, held until cancelled or refused, and its list read for what was missed
+    /// each time it opens, the first of a holding too. **It has no standing of its own**: reading goes on beside it, and
+    /// the place on the source's page speaks of the reader's own line.
+    func hearDirect(_ host: String, in session: ShellSession) async {
+        var wait = Self.firstWait
+        while !Task.isCancelled {
+            guard let token = session.mastodon.token(host: host) else { return }
+            let work = session.mastodon.work
+            guard let admission = work.admission(reached: host, source: nil, for: .line), work.spend(admission, at: host) else { return }
+            let record = work.begin(host: host, for: .line, name: nil, allowedBy: admission.allowedBy)
+            defer { work.endLine(record) }
+            let opened = now()
+            do {
+                let events = try await Outward.$admitted.withValue(true) {
+                    try await MastodonLine(token: token, opener: opener).openDirect()
+                }
+                await session.directs.heard(host, in: session)
+                for try await event in events where event.name == MastodonLine.conversationEvent {
+                    await session.directs.heard(host, in: session)
+                }
+            } catch let refused as MastodonLineRefused where Self.directRefusals.contains(refused.status) {
+                directRefused[host] = token.accessToken
+                return
+            } catch {}
+            guard !Task.isCancelled else { return }
+            if now().timeIntervalSince(opened) >= Double(Self.held.components.seconds) { wait = Self.firstWait }
+            do { try await sleep(wait) } catch { return }
+            wait = min(wait * 2, Self.longestWait)
+        }
+    }
+
     private enum End {
         case dropped
         case refused(Int)
@@ -282,11 +358,28 @@ final class ShellLines {
             guard !Task.isCancelled else { return .dropped }
             await session.reloadFromStore()
         }
+        // What was told while no line was open, read now the line is hearing what comes after (#426).
+        if want.notices {
+            guard !Task.isCancelled else { return .dropped }
+            await session.noticesTold.caughtUp(host: host, in: session)
+        }
         standing[host] = .open(since: now())
         do {
             for try await event in events {
                 if want.notices, let notice = MastodonNotices.told(event, source: source) {
                     await session.noticesTold.told(notice, in: session)
+                    continue
+                }
+                if want.notices, MastodonNotices.saysMerged(event) {
+                    await session.noticesTold.caughtUp(host: host, in: session)
+                    continue
+                }
+                if MastodonLine.announcementEvents.contains(event.name) {
+                    await announced(host)
+                    continue
+                }
+                if event.name == MastodonLine.filtersEvent {
+                    await session.serverFilters.heard(host: host, in: session)
                     continue
                 }
                 guard want.home, MastodonLine.homeEvents.contains(event.name) else { continue }

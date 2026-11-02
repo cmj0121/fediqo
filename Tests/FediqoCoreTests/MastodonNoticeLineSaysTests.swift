@@ -8,7 +8,7 @@ import Testing
 /// back is not told at all.
 ///
 /// **Passed over unless asked for**, as `MastodonLineSaysTests` is.
-@Suite("What a Mastodon tells of notices on the reader's own line", .enabled(if: LocalServers.streamingRequested), .watched)
+@Suite("What a Mastodon tells of notices on the reader's own line", .enabled(if: LocalServers.streamingRequested), .serialized, .watched)
 struct MastodonNoticeLineSaysTests {
     private static let host = LocalServers.mastodon
 
@@ -67,5 +67,44 @@ struct MastodonNoticeLineSaysTests {
         #expect(notice.people.first?.handle.contains("fediqo_other") == true)
         #expect(!heard.all.contains { $0.data.contains(held) }, "a mention held back is not told")
         _ = try await act(seeded.other, "DELETE", "/api/v1/statuses/\(named)")
+    }
+
+    @Test("The count is the source's own, falls when it is told, and is never moved back (#429)")
+    func unreadCount() async throws {
+        try await LocalServers.requireHealthy()
+        let seeded = try LocalServers.seeded()
+        let token = MastodonToken(host: Self.host, accessToken: seeded.writer, clientID: "", clientSecret: "")
+        let door = MastodonAuthorized(token: token, sender: try LocalHTTP.client(), store: MemoryMastodonTokens())
+        let notices = MastodonNotices(door: door)
+        let source = Source(host: Self.host, kind: .mastodon)
+        // The worker may still be handing over what an earlier check did: told again until quiet.
+        let quiet = await met("the source says nothing is unread") {
+            guard let newest = try? await notices.page(source: source, gathered: false).notices.first?.newestID else { return false }
+            try? await notices.tellRead(upTo: newest)
+            return (try? await notices.unreadCount()) == 0
+        }
+        try #require(quiet)
+        try await notices.tellRead(upTo: "1")
+        #expect(try await notices.unreadCount() == 0, "a lower place is not told: the source would have gone back")
+    }
+
+    @Test("A request let through with others in one ask leaves, the rest stay, and the source says when it has moved them (#431)")
+    func requestsTogether() async throws {
+        try await LocalServers.requireHealthy()
+        let seeded = try LocalServers.seeded()
+        let token = MastodonToken(host: Self.host, accessToken: seeded.writer, clientID: "", clientSecret: "")
+        let notices = MastodonNotices(door: MastodonAuthorized(token: token, sender: try LocalHTTP.client(), store: MemoryMastodonTokens()))
+        let source = Source(host: Self.host, kind: .mastodon)
+        // One of the seed's strangers: letting a person through stops holding them for good, so never
+        // the one `tellsNotices` needs held. Each run uses one up, as the checks that dismiss do.
+        let all = try await notices.requests(source: source)
+        let chosen = Array(all.filter { $0.person.handle.contains("fediqo_stranger") }.prefix(2))
+        try #require(chosen.count == 2, "seed the servers again")
+        try await notices.letThrough(chosen)
+        let after = try await notices.requests(source: source)
+        #expect(!after.contains { chosen.contains($0) })
+        #expect(Set(after.map(\.id)) == Set(all.map(\.id)).subtracting(chosen.map(\.id)), "the rest stay as they were")
+        let merged = await met("the source finished") { (try? await notices.merged()) == true }
+        #expect(merged)
     }
 }

@@ -32,6 +32,8 @@ final class ShellDirects {
         var removeFailed: Set<String> = []
         /// Conversations removed here: a read that still lists one does not put it back.
         var gone: Set<String> = []
+        /// The source said something new while a read was out: it is read once more after that.
+        var heardMeanwhile = false
     }
 
     /// The host whose list is up, where one is.
@@ -76,6 +78,19 @@ final class ShellDirects {
     /// The list asked from the top.
     func again(_ raw: String, in session: ShellSession) async {
         await load(raw.lowercased(), in: session)
+    }
+
+    /// The source said a conversation has something new (#427): the list read from the top, each
+    /// line landing in its place, and what was read on to below it staying. Only of a list opened
+    /// this run. **Told while a read is out, whoever's**, that read's owner reads once more (`load`).
+    func heard(_ raw: String, in session: ShellSession) async {
+        let host = raw.lowercased()
+        guard pages[host] != nil else { return }
+        guard pages[host]?.asking != true else {
+            pages[host]?.heardMeanwhile = true
+            return
+        }
+        await load(host, in: session, keepingBelow: true)
     }
 
     /// The foot's press: the page after what is drawn.
@@ -148,9 +163,20 @@ final class ShellDirects {
         return []
     }
 
-    private func load(_ host: String, in session: ShellSession, onward: Bool = false) async {
+    /// One read, by whoever finds none out. **That owner settles it**: `asking` comes down whichever
+    /// way the read ended, and what the source said meanwhile is read for now.
+    private func load(_ host: String, in session: ShellSession, onward: Bool = false, keepingBelow: Bool = false) async {
         guard session.isSignedIn(host: host), session.directsReads(host: host) else { return }
         if pages[host]?.asking == true { return }
+        await read(host, in: session, onward: onward, keepingBelow: keepingBelow)
+        pages[host]?.asking = false
+        if pages[host]?.heardMeanwhile == true, !Task.isCancelled {
+            pages[host]?.heardMeanwhile = false
+            await load(host, in: session, keepingBelow: true)
+        }
+    }
+
+    private func read(_ host: String, in session: ShellSession, onward: Bool, keepingBelow: Bool) async {
         if pages[host] == nil { pages[host] = Held() }
         pages[host]?.generation += 1
         let generation = pages[host]?.generation ?? 0
@@ -174,13 +200,19 @@ final class ShellDirects {
                 let had = Set(pages[host]?.lines.map(\.id) ?? [])
                 pages[host]?.lines += arrived.filter { !had.contains($0.id) }
                 for (id, note) in notes where pages[host]?.notes[id] == nil { pages[host]?.notes[id] = note }
+            } else if keepingBelow {
+                let new = Set(arrived.map(\.id))
+                let below = (pages[host]?.lines ?? []).filter { !new.contains($0.id) }
+                pages[host]?.lines = arrived + below
+                pages[host]?.notes.merge(notes) { _, told in told }
             } else {
                 pages[host]?.lines = arrived
                 pages[host]?.notes = notes
                 pages[host]?.old = []
                 pages[host]?.removeFailed = []
             }
-            pages[host]?.next = read.next
+            // What was read on to below stays where it reached.
+            if !keepingBelow || pages[host]?.next == nil { pages[host]?.next = read.next }
             pages[host]?.answered = true
             pages[host]?.failed = false
             pages[host]?.footFailed = false

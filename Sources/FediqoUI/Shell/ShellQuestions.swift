@@ -440,6 +440,30 @@ enum ShellQuestion {
         )
     }
 
+    /// Letting several people's notices through at once (#431): as for one, of each.
+    static func letThroughChosen(_ count: Int, host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: NoticeActs.throughSymbol,
+            title: counted("notices.held.throughChosen.title", count, host, language: language),
+            line: L10n.t("notices.held.through.line", language: language),
+            help: String(format: L10n.t("notices.held.throughChosen.detail", language: language), host),
+            choices: [.init(yes, L10n.t("notices.held.through", language: language), role: .keyed)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// Letting go of several people's notices at once (#431). **A loss**, as for one.
+    static func letGoChosen(_ count: Int, host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: NoticeActs.dismissSymbol,
+            title: counted("notices.held.goChosen.title", count, host, language: language),
+            line: L10n.t("notices.held.go.line", language: language),
+            help: nil,
+            choices: [.init(yes, L10n.t("notices.held.go", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
     /// Letting go of one person's notices a source is holding back (#323). **A loss**: they
     /// are dismissed there without having been shown.
     static func letGo(_ request: NoticeRequest, language: DummyLanguage? = nil) -> ShellConfirmation {

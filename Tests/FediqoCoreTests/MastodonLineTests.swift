@@ -189,3 +189,19 @@ struct MastodonLineTests {
         #expect(await store.all().isEmpty)
     }
 }
+
+/// #427: the events `MastodonLiveCaptures` records, by the names the line is heard for.
+@Suite("What else a Mastodon's line says")
+struct MastodonLiveLineTests {
+    @Test("Each thing an announcement does is named as the server named it, and the direct line says conversation")
+    func names() throws {
+        #expect(MastodonLine.announcementEvents == ["announcement", "announcement.reaction", "announcement.delete"])
+        #expect(MastodonLine.conversationEvent == "conversation")
+        let announcement = try JSONSerialization.jsonObject(with: Data(MastodonLiveCaptures.announcement.utf8)) as? [String: Any]
+        #expect(announcement?["id"] as? String == "3")
+        let reaction = try JSONSerialization.jsonObject(with: Data(MastodonLiveCaptures.announcementReaction.utf8)) as? [String: Any]
+        #expect(reaction?["announcement_id"] as? String == "3")
+        let conversation = try JSONSerialization.jsonObject(with: Data(MastodonLiveCaptures.conversation.utf8)) as? [String: Any]
+        #expect(conversation?["unread"] as? Bool == true)
+    }
+}

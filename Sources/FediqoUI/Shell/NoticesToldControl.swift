@@ -34,6 +34,8 @@ struct NoticesToldControl: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, ShellSpace.pad)
             .padding(.bottom, ShellSpace.step)
+            // What the source says of itself decides which kinds are listed: asked as the page opens.
+            .task(id: host) { await session.quoting.hosts?.hear(host, in: session) }
         }
     }
 
@@ -44,7 +46,14 @@ struct NoticesToldControl: View {
         Toggle(title, isOn: Binding(get: { choice.on }, set: { told.choose($0, host: host) }))
             .shellFont(.reading)
             .shellHelp(verbatim: String(format: L10n.t("source.told.help"), host), about: title)
+        // **Said where it is chosen, on or off** (#432), and not only in the help a phone keeps a
+        // press away: someone who expects a notice while Fediqo is closed would take this for a fault.
+        Text(L10n.t("source.told.open"))
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
         if choice.on {
+            countSaid
             let system = L10n.t("source.told.system")
             Toggle(system, isOn: Binding(
                 get: { choice.system },
@@ -63,7 +72,7 @@ struct NoticesToldControl: View {
                 .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .padding(.top, ShellSpace.tight)
-            ForEach(Self.kinds, id: \.self) { kind in
+            ForEach(session.noticesTold.kinds(host: host, in: session), id: \.self) { kind in
                 Toggle(NoticeWords.kindName(kind), isOn: Binding(
                     get: { !choice.off.contains(kind) },
                     set: { told.tell(kind, $0, host: host) }
@@ -73,6 +82,15 @@ struct NoticesToldControl: View {
         }
     }
 
-    /// The kinds the choice lists: every kind a source may send, then everything else as one.
-    static let kinds: [String] = NoticeWords.named.map(\.narrowedAs) + [Notice.Kind.unknownKinds]
+    /// Why the count beside notices may not move as the person expects, where it may not (#429): the
+    /// source did not answer, has no count, or this sign-in cannot tell it what was read.
+    @ViewBuilder
+    private var countSaid: some View {
+        if let words = session.noticesTold.countWords(host: host, in: session) {
+            Text(words)
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
 }

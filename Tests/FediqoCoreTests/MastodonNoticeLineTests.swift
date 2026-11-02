@@ -24,10 +24,97 @@ struct MastodonNoticeLineTests {
         #expect(notices[3].people.first?.handle.contains("fediqo_hidden") == true)
     }
 
+    @Test("The source saying requests let through have landed is heard by its own name, and is no notice")
+    func merged() {
+        let said = LineEvent(name: "notifications_merged", data: "1")
+        #expect(MastodonNotices.saysMerged(said))
+        #expect(MastodonNotices.told(said, source: Self.source) == nil)
+        #expect(!MastodonNotices.saysMerged(LineEvent(name: "update", data: "{}")))
+    }
+
     @Test("Any other event, or words that will not read, is no notice")
     func notNotices() throws {
         let told = try Self.told()
         #expect(MastodonNotices.told(told[0], source: Self.source) == nil)
         #expect(MastodonNotices.told(LineEvent(name: "notification", data: "{not json"), source: Self.source) == nil)
+    }
+}
+
+/// #430: the three newer kinds, as `MastodonLiveCaptures` records a real server sending them.
+@Suite("A quoted post changed, and a collection's news")
+struct NoticeNewerKindsTests {
+    private let source = Source(host: "mastodon.localhost", kind: .mastodon)
+
+    private func page(_ path: String, _ body: String) async throws -> NoticePage {
+        let tokens = MemoryMastodonTokens()
+        let token = MastodonToken(host: source.host, accessToken: "t", clientID: "c", clientSecret: "s")
+        let door = MastodonAuthorized(token: token, sender: FixtureSender([path: .json(body)]), store: tokens)
+        return try await MastodonNotices(door: door).page(source: source, gathered: path.contains("v2"))
+    }
+
+    @Test("Each word is a kind of its own, and comes back as it was sent", arguments: [
+        ("quoted_update", Notice.Kind.quotedUpdate), ("added_to_collection", .addedToCollection), ("collection_update", .collectionUpdate),
+    ])
+    func words(word: String, kind: Notice.Kind) {
+        #expect(Notice.Kind(type: word) == kind)
+        #expect(kind.type == word)
+    }
+
+    @Test("A quoted post changed carries the person's own quoting post, on both reads")
+    func quoted() async throws {
+        let one = try #require(try await page("/api/v1/notifications", MastodonLiveCaptures.quotedUpdate).notices.first)
+        #expect(one.kind == .quotedUpdate && one.post != nil && one.people.count == 1)
+        let line = try #require(try await page("/api/v2/notifications", MastodonLiveCaptures.quotedUpdateGathered).notices.first)
+        #expect(line.kind == .quotedUpdate && line.people.count == 1)
+    }
+
+    @Test("A collection's news names the collection and its owner, on both reads")
+    func collections() async throws {
+        let ones = try await page("/api/v1/notifications", MastodonLiveCaptures.collectionNews).notices
+        #expect(ones.map(\.kind) == [.collectionUpdate, .addedToCollection])
+        #expect(ones.allSatisfy { $0.collection == "Close friends" && $0.people.count == 1 && $0.post == nil })
+        let lines = try await page("/api/v2/notifications", MastodonLiveCaptures.collectionNewsGathered).notices
+        #expect(lines.map(\.kind) == [.collectionUpdate, .addedToCollection])
+        #expect(lines.allSatisfy { $0.collection == "Close friends" && $0.people.count == 1 })
+    }
+}
+
+/// #431: several held-back requests answered in one ask.
+@Suite("Held-back requests answered together")
+struct NoticeRequestsTogetherTests {
+    private let source = Source(host: "mastodon.localhost", kind: .mastodon)
+
+    private func request(_ id: String, source: Source? = nil) -> NoticeRequest {
+        NoticeRequest(
+            requestID: id, source: source ?? self.source, person: NoticePerson(handle: "@a@b", name: "A"), at: Date(timeIntervalSince1970: 0)
+        )
+    }
+
+    private func notices(_ routes: [String: FixtureSender.Outcome]) -> (MastodonNotices, FixtureSender) {
+        let sender = FixtureSender(routes)
+        let token = MastodonToken(host: source.host, accessToken: "t", clientID: "c", clientSecret: "s")
+        return (MastodonNotices(door: MastodonAuthorized(token: token, sender: sender, store: MemoryMastodonTokens())), sender)
+    }
+
+    @Test("One ask names every one chosen, as the source's own field")
+    func oneAsk() async throws {
+        let (notices, sender) = notices(["/api/v1/notifications/requests/accept": .json("{}"), "/api/v1/notifications/requests/dismiss": .json("{}")])
+        try await notices.letThrough([request("1"), request("2")])
+        try await notices.letGo([request("3")])
+        let sent = await sender.requests
+        #expect(sent.map { $0.url?.path } == ["/api/v1/notifications/requests/accept", "/api/v1/notifications/requests/dismiss"])
+        let form = String(decoding: try #require(sent.first?.httpBody), as: UTF8.self)
+        #expect(form.components(separatedBy: "&").count == 2 && form.contains("=1") && form.contains("=2"))
+    }
+
+    @Test("None chosen asks nothing; another source's is asked of nobody; a refusal is thrown as it came")
+    func guards() async throws {
+        let (notices, sender) = notices(["/api/v1/notifications/requests/accept": .json("{}", status: 403)])
+        try await notices.letThrough([])
+        await #expect(throws: MastodonNoticeError.elsewhere) {
+            try await notices.letThrough([request("1"), request("2", source: Source(host: "other.example", kind: .mastodon))])
+        }
+        #expect(await sender.requests.isEmpty)
+        await #expect(throws: MastodonAuthError.http(403)) { try await notices.letThrough([request("1")]) }
     }
 }

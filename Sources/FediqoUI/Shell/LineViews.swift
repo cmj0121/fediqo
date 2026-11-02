@@ -1,3 +1,5 @@
+import FediqoCore
+import Combine
 import SwiftUI
 
 /// On a joined source's page: whether what is new in its Home arrives as it happens (#325). Draws
@@ -105,17 +107,31 @@ struct ShowsLineFront: ViewModifier {
 
 /// While Fediqo runs and its window is not in the background, the lines wanted are held: Home's
 /// for the timeline in front (#325) and the notices told of (#324). A change of what is wanted, or
-/// the background, lets them go. And the notices page in front has nothing waiting to be seen.
+/// the background, lets them go. And the notices page in front tells the source they are read.
 /// On the root, inside `AsksOnAWait`'s group, so the chain gains no line.
 struct HearsLines: ViewModifier {
     let session: ShellSession
     let noticesInFront: Bool
+    /// A press on the system's notice: the notice to open, or nothing known of it (#428).
+    let onToldPressed: (Notice?) -> Void
     @Environment(\.scenePhase) private var phase
 
     func body(content: Content) -> some View {
         let wants = session.lines.wants(running: phase != .background, in: session)
         content
             .task(id: wants) { await session.lines.hear(wants, in: session) }
-            .task(id: noticesInFront) { session.noticesTold.pageInFront = noticesInFront }
+            .task(id: session.lines.directWanted(running: phase != .background, in: session)) {
+                if let host = session.lines.directWanted(running: phase != .background, in: session) {
+                    await session.lines.hearDirect(host, in: session)
+                }
+            }
+            .task(id: noticesInFront) { await session.noticesTold.pageCame(noticesInFront, in: session) }
+            .task { SystemNoticePresses.shared.told = session.noticesTold }
+            .onReceive(NotificationCenter.default.publisher(for: .fediqoCameForward)) { _ in
+                Task { await session.noticesTold.cameForward(in: session) }
+            }
+            .onChange(of: session.noticesTold.pressedID) { _, id in
+                if id != nil { onToldPressed(session.noticesTold.takePressed()) }
+            }
     }
 }

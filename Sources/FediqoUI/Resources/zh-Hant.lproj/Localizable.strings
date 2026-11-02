@@ -1686,6 +1686,14 @@
 "notices.what.favourite" = "收藏了你的貼文";
 "notices.what.follow" = "跟隨了你";
 "notices.what.followRequest" = "請求跟隨你";
+"notices.what.quoted_update" = "修改了一則你引用的貼文";
+"notices.what.added_to_collection" = "把你加進了一個收藏集";
+"notices.what.added_to_collection.named" = "把你加進了收藏集 %@";
+"notices.what.collection_update" = "修改了一個你在其中的收藏集";
+"notices.what.collection_update.named" = "修改了你在其中的收藏集 %@";
+"notices.kind.quoted_update" = "引用的貼文被修改";
+"notices.kind.added_to_collection" = "被加進收藏集";
+"notices.kind.collection_update" = "收藏集被修改";
 "notices.what.quote" = "引用了你的貼文";
 "notices.what.poll" = "發起的投票結束了";
 "notices.what.update" = "編輯了一則你轉發過的貼文";
@@ -1786,6 +1794,21 @@
 "notices.held.partial" = "%@ 擋下的通知，來自比這裡列出的更多人。";
 "notices.held.count" = "擋下 %d 則通知";
 "notices.held.spoken" = "%1$@，%2$@";
+"notices.held.choose" = "選取";
+"notices.held.unchoose" = "取消選取";
+"notices.held.chosen" = "已選取";
+"notices.held.chooseAll" = "全選";
+"notices.held.chooseNone" = "全不選";
+"notices.held.chosenCount" = "已選 %d 個";
+"notices.held.throughChosen" = "放行 %d 個";
+"notices.held.throughChosen.one" = "放行 %d 個";
+"notices.held.goChosen" = "放下 %d 個";
+"notices.held.goChosen.one" = "放下 %d 個";
+"notices.held.throughChosen.title" = "要放行 %2$@ 上 %1$d 個人的通知嗎？";
+"notices.held.throughChosen.title.one" = "要放行 %2$@ 上 %1$d 個人的通知嗎？";
+"notices.held.throughChosen.detail" = "%@ 會把擋下的這些人的通知移進你的通知，之後不再擋下他們發給你的內容。它搬完後就會出現在這裡。Fediqo 無法要求它收回。";
+"notices.held.goChosen.title" = "要放下 %2$@ 上擋下的 %1$d 個人的通知嗎？";
+"notices.held.goChosen.title.one" = "要放下 %2$@ 上擋下的 %1$d 個人的通知嗎？";
 "notices.held.through" = "放行";
 "notices.held.go" = "放下";
 "notices.held.go.title" = "放下 %2$@ 擋下的 %1$@ 的通知？";
@@ -2785,10 +2808,15 @@
 
 /* #324 — the person is told of a new notice while Fediqo runs. */
 "source.told" = "Fediqo 開著時，告訴我 %@ 的新通知";
-"source.told.help" = "預設關閉，由你開啟。開啟時，只要 Fediqo 開著，就與 %1$@ 保持一條連線：每則新通知立刻列在通知裡，並在打開通知的地方計數，直到你打開為止。%1$@ 擋下的通知不會告訴你。除了那個來源，不會送往任何地方。";
+"source.told.help" = "預設關閉，由你開啟。開啟時，只要 Fediqo 開著，就與 %1$@ 保持一條連線：每則新通知立刻列在通知裡，而打開通知處的數字就是 %1$@ 給的數字。%1$@ 擋下的通知不會告訴你。除了那個來源，不會送往任何地方。通知只在 Fediqo 開著時才會來：沒有 Fediqo 服務端，所以它關著的時候沒有人能告訴它任何事。";
 "source.told.system" = "也用系統的通知告訴我";
-"source.told.system.help" = "預設關閉，由你開啟。開啟的那一刻，系統才會詢問 Fediqo 能否顯示通知；啟動時從不詢問。只會顯示下方開著的種類。";
+"source.told.system.help" = "預設關閉，由你開啟。開啟的那一刻，系統才會詢問 Fediqo 能否顯示通知；啟動時從不詢問。只會顯示下方開著的種類。通知只在 Fediqo 開著時才會來：沒有 Fediqo 服務端，所以它關著的時候沒有人能告訴它任何事。";
 "source.told.system.refused" = "系統設定裡關掉了 Fediqo 的通知。計數照常運作，也不會再詢問。";
+"source.told.open" = "通知只在 Fediqo 開著時才會來：沒有 Fediqo 服務端，所以它關著的時候沒有人能告訴它任何事。";
+"source.told.count.failed" = "%@ 沒有回答有多少則未讀通知。數字維持它上次說的。";
+"source.told.count.none" = "%@ 不提供未讀通知的數字，所以不顯示它的數字。";
+"source.told.count.readOnly" = "這次登入只能讀，打開通知不會告訴 %@ 已讀。它的數字要等其他客戶端告訴它才會下降。";
+"source.told.mark.failed" = "沒能告訴 %@ 這些通知已讀。它的數字不變。";
 "source.told.kinds" = "會告訴你的種類";
 "source.told.signIn" = "登入 %@ 並允許讀取通知，Fediqo 開著時就會告訴你新通知。";
 "source.told.cannot" = "%@ 沒有通知可說，照舊讀取。";

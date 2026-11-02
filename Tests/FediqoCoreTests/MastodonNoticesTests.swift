@@ -212,11 +212,12 @@ struct MastodonNoticesTests {
 
     // MARK: - Every kind, and one nobody knows
 
-    @Test("Every word a source can send is a kind and gives its word back: the eight this app names, the server's own four, and anything else kept as unknown")
+    @Test("Every word a source can send is a kind and gives its word back: the ones this app names, the server's own four, and anything else kept as unknown")
     func everyKind() {
         let named: [(String, Notice.Kind)] = [
             ("mention", .mention), ("reblog", .reblog), ("favourite", .favourite), ("follow", .follow),
             ("follow_request", .followRequest), ("quote", .quote), ("poll", .poll), ("update", .update),
+            ("quoted_update", .quotedUpdate), ("added_to_collection", .addedToCollection), ("collection_update", .collectionUpdate),
         ]
         for (word, kind) in named {
             #expect(Notice.Kind(type: word) == kind && kind.type == word)
@@ -224,7 +225,7 @@ struct MastodonNoticesTests {
         for word in ["severed_relationships", "moderation_warning", "admin.sign_up", "admin.report"] {
             #expect(Notice.Kind(type: word) == .server(word) && Notice.Kind(type: word).type == word)
         }
-        for word in ["status", "quoted_update", "annual_report", "Mention", "pleroma:emoji_reaction", ""] {
+        for word in ["status", "annual_report", "Mention", "pleroma:emoji_reaction", ""] {
             #expect(Notice.Kind(type: word) == .unknown(word) && Notice.Kind(type: word).type == word)
         }
     }

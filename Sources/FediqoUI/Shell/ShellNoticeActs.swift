@@ -107,6 +107,16 @@ final class ShellNoticeActs {
     /// (`ShellNoticeList.took`), for requests.
     @ObservationIgnored private var moved: [String: UInt64] = [:]
     private var onWay: [String: [NoticeRequest]] = [:]
+    /// The requests chosen to be answered together, by their ids (#431). This run's, and let go of
+    /// as each is answered or its source is.
+    private(set) var chosen: Set<String> = []
+    /// What each source's move of what was let through is being waited on by.
+    @ObservationIgnored private var merging: [String: Task<Void, Never>] = [:]
+    /// How long is first waited before asking whether the source has finished, doubling to
+    /// `mergeWaitLongest`. A check shortens it.
+    @ObservationIgnored var mergeWait: Duration = .seconds(2)
+    nonisolated static let mergeWaitLongest: Duration = .seconds(30)
+    nonisolated static let mergeAsks = 10
     /// The destructive item of a menu on the notices page that was chosen and not yet answered.
     /// Held here and not by a row, for `ShellSession.rowAsk`'s reason: a row scrolled away must
     /// not drop a question still open, and the key that asks puts the same one.
@@ -185,8 +195,8 @@ final class ShellNoticeActs {
         holdings.keys.compactMap { shownHeld(host: $0) }.reduce(0) { $0 + max($1.notices, $1.requests) }
     }
 
-    /// The requests let through and said to be on their way, in host order. **Never asked
-    /// after**: each stands until that source's newest stretch is next read and lands
+    /// The requests let through and said to be on their way, in host order. **Asked after only where
+    /// several were answered together** (`waitForMerge`): each stands until that source's newest stretch is next read and lands
     /// (`read(host:)`) — the read that shows what the source has moved, whatever it brings.
     var onItsWay: [NoticeRequest] {
         onWay.keys.sorted().flatMap { onWay[$0] ?? [] }
@@ -439,6 +449,111 @@ final class ShellNoticeActs {
         await answer(request, .letGo, in: session, { try await $0.letGo(request) }) {}
     }
 
+    // MARK: - Several at once (#431)
+
+    func toggleChosen(_ request: NoticeRequest) {
+        if !chosen.insert(request.id).inserted { chosen.remove(request.id) }
+    }
+
+    /// The requests of one source the page lists that are chosen now.
+    func chosenRequests(host: String) -> [NoticeRequest] {
+        listed(host: host).filter { chosen.contains($0.id) }
+    }
+
+    /// Every request a source lists chosen, or none where all of them are.
+    func toggleAllChosen(host: String) {
+        let ids = Set(listed(host: host).map(\.id))
+        if ids.isSubset(of: chosen) { chosen.subtract(ids) } else { chosen.formUnion(ids) }
+    }
+
+    /// The chosen requests of one source let through, in one ask. Its yes means they are gone and
+    /// their notices on their way: **those are then waited for, and read when the source has moved
+    /// them**, with no act of the person's, where no line will say so.
+    func letThroughChosen(host raw: String, in session: ShellSession) async {
+        let host = raw.lowercased()
+        await answerChosen(host, .letThrough, in: session, { try await $0.letThrough($1) }) { requests in
+            self.onWay[host, default: []].append(contentsOf: requests)
+            self.waitForMerge(host: host, in: session)
+        }
+    }
+
+    /// The chosen requests of one source let go, in one ask.
+    func letGoChosen(host raw: String, in session: ShellSession) async {
+        await answerChosen(raw.lowercased(), .letGo, in: session, { try await $0.letGo($1) }) { _ in }
+    }
+
+    /// `perform`'s states, for several names sent as one ask: **the source answers them together, so
+    /// all land or none do**, and those not chosen are not named at all.
+    private func answerChosen(
+        _ host: String, _ act: Act, in session: ShellSession,
+        _ work: @escaping @Sendable (MastodonNotices, [NoticeRequest]) async throws -> Void,
+        then: ([NoticeRequest]) -> Void
+    ) async {
+        guard session.mastodon.dismisses(host: host) else { return }
+        let going = chosenRequests(host: host).compactMap { request in
+            out.begin(request.id, showing: Out(host: host, act: act)).map { (request: request, flight: $0) }
+        }
+        guard !going.isEmpty else { return }
+        let sent = session.mastodon.token(host: host)?.accessToken
+        let list = session.noticeList
+        said[host] = nil
+        list.redraw(atYes: true)
+        let asked = going.map(\.request)
+        let answer = await ask(host, for: .write, in: session) { try await work($0, asked) }
+        let still = going.filter { out.isStill($0.flight, $0.request.id) }.map(\.request)
+        switch answer {
+        case .yes where session.mastodon.token(host: host)?.accessToken == sent:
+            let ids = Set(still.map(\.id))
+            let leaving = (requests[host] ?? []).filter { ids.contains($0.id) }
+            requests[host]?.removeAll { ids.contains($0.id) }
+            moved[host] = ReadMoment.now().place
+            if let held = holdings[host]?.held {
+                holdings[host] = .holds(NoticesHeld(
+                    requests: max(0, held.requests - leaving.count),
+                    notices: max(0, held.notices - leaving.reduce(0) { $0 + $1.count })
+                ))
+            }
+            if self.held(host: host) == nil { opened.remove(host) }
+            chosen.subtract(ids)
+            then(still)
+            for request in still { out.settle(request.id) }
+            list.redraw()
+            settle(host: host, in: session)
+        case .no(let why) where session.mastodon.token(host: host)?.accessToken == sent:
+            for request in still { out.settle(request.id) }
+            list.redraw()
+            for request in still where requests[host]?.contains(where: { $0.id == request.id }) == true {
+                miss(Miss(name: request.id, about: .person(request.person)), act, why, at: host, in: session)
+            }
+        case .yes, .no, .nothing:
+            for request in still { out.settle(request.id) }
+            list.redraw()
+        }
+    }
+
+    /// Asks after what was let through until the source has moved it, and reads it then. Where the
+    /// source's line is open for notices that says so (`MastodonNotices.saysMerged`), and nothing is
+    /// asked. A bounded wait: past it, or on a refusal, what is on its way stays said until a read.
+    private func waitForMerge(host: String, in session: ShellSession) {
+        merging[host]?.cancel()
+        let first = mergeWait
+        merging[host] = Task { [weak self] in
+            var wait = first
+            for _ in 0..<Self.mergeAsks {
+                do { try await Task.sleep(for: wait) } catch { return }
+                guard let self, !Task.isCancelled else { return }
+                if session.noticesTold.hosts(in: session).contains(host), case .open? = session.lines.standing[host] { return }
+                let answer = await self.ask(host, for: .notices, in: session) { try await $0.merged() }
+                guard case .yes(let merged) = answer else { return }
+                if merged {
+                    await session.noticeList.read(in: session)
+                    return
+                }
+                wait = min(wait * 2, Self.mergeWaitLongest)
+            }
+        }
+    }
+
     private func answer(
         _ request: NoticeRequest, _ act: Act, in session: ShellSession,
         _ work: @escaping @Sendable (MastodonNotices) async throws -> Void, then: () -> Void
@@ -607,8 +722,11 @@ final class ShellNoticeActs {
         policies[host] = nil
         choosing[host] = nil
         policyMoved[host] = nil
+        chosen.subtract((requests[host] ?? []).map(\.id))
         requests[host] = nil
         onWay[host] = nil
+        merging[host]?.cancel()
+        merging[host] = nil
         opened.remove(host)
     }
 
