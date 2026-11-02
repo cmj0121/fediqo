@@ -165,10 +165,12 @@ public struct PersonCollection: Hashable, Sendable, Identifiable {
     public let discoverable: Bool?
     /// Who is in it as the asker may see: each by the id a removal or a taking out goes by.
     public let items: [CollectionItem]
+    /// Who put it together, by the id their source gives them, where it said.
+    public let ownerID: String?
 
     public init(
         id: String, name: String, words: String?, count: Int, sensitive: Bool? = nil, discoverable: Bool? = nil,
-        items: [CollectionItem] = []
+        items: [CollectionItem] = [], ownerID: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -177,6 +179,21 @@ public struct PersonCollection: Hashable, Sendable, Identifiable {
         self.sensitive = sensitive
         self.discoverable = discoverable
         self.items = items
+        self.ownerID = ownerID
+    }
+}
+
+/// A collection somebody else may have put together that the reader appears in (#434), and who
+/// put it together where their source could name them.
+public struct CollectionAppearance: Hashable, Sendable, Identifiable {
+    public let collection: PersonCollection
+    public let owner: Person?
+
+    public var id: String { collection.id }
+
+    public init(collection: PersonCollection, owner: Person?) {
+        self.collection = collection
+        self.owner = owner
     }
 }
 
@@ -259,6 +276,15 @@ enum CollectionWire {
         (try? MastodonJSON.decoder.decode(CollectionDTO.self, from: body))?.collection.collection
     }
 
+    /// The people a list of accounts names, each by the id its source gives them: one that cannot
+    /// be read costs itself.
+    static func people(_ body: Data, source: Source) -> [String: Person] {
+        let read = (try? MastodonJSON.decoder.decode([StatusDTO.Lenient<AccountDTO>].self, from: body)) ?? []
+        return Dictionary(
+            read.compactMap { $0.value?.asPerson(source: source) }.map { ($0.accountID, $0) }, uniquingKeysWith: { first, _ in first }
+        )
+    }
+
     /// The people in one, in its order — not who put it together, unless they put themselves in.
     static func whole(_ body: Data, source: Source) -> CollectionRead? {
         guard let read = try? MastodonJSON.decoder.decode(CollectionDTO.self, from: body), let collection = read.collection.collection else {
@@ -304,6 +330,7 @@ private struct CollectionDTO: Decodable {
     struct Body: Decodable {
         let id: String
         let name: String
+        let accountId: String?
         let description: String?
         let itemCount: Int?
         let sensitive: Bool?
@@ -315,7 +342,8 @@ private struct CollectionDTO: Decodable {
             return PersonCollection(
                 id: id, name: LineText.oneLine(name), words: description.map(HTMLText.plain).flatMap { $0.isEmpty ? nil : $0 },
                 count: max(0, itemCount ?? items?.count ?? 0), sensitive: sensitive, discoverable: discoverable,
-                items: (items ?? []).compactMap { $0.value?.item }
+                items: (items ?? []).compactMap { $0.value?.item },
+                ownerID: accountId.flatMap { ListSubscription.isPathSegment($0) ? $0 : nil }
             )
         }
     }

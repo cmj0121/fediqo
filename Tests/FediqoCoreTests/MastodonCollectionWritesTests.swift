@@ -38,6 +38,52 @@ struct MastodonCollectionWritesTests {
         #expect(MastodonParts.unknown(in: Self.whole).isEmpty)
     }
 
+    @Test("The collections a person appears in are read as they are sent, each named by who put it together; one they left stays, with no place of theirs")
+    func appearing() async throws {
+        let list = "GET /api/v1/accounts/\(Captures.appearsInReader)/in_collections?limit=100"
+        let owners = "GET /api/v1/accounts?id%5B%5D=\(Captures.appearsInOwner)"
+        let (writes, _) = try door([
+            list: .init(body: Captures.appearsIn),
+            owners: .init(body: #"[{"id":"\#(Captures.appearsInOwner)","username":"own_312","acct":"own_312","display_name":"Own 312"}]"#),
+        ])
+        let read = try await writes.appearances(of: Captures.appearsInReader, source: Self.source)
+        #expect(read.map(\.collection.name) == ["Friends", "Hidden"])
+        #expect(read.allSatisfy { $0.owner?.handle.contains("own_312") == true && $0.collection.ownerID == Captures.appearsInOwner })
+        #expect(read[0].collection.items.map(\.accountID) == [Captures.appearsInReader] && read[1].collection.items.isEmpty)
+        #expect(read[1].collection.discoverable == false)
+    }
+
+    @Test("A row is not lost to an owner who cannot be read, and in none is none; of another it is the source's refusal; with no word nothing is asked")
+    func appearingElse() async throws {
+        let list = "GET /api/v1/accounts/\(Captures.appearsInReader)/in_collections?limit=100"
+        let (unnamed, _) = try door([list: .init(body: Captures.appearsIn)])
+        #expect(try await unnamed.appearances(of: Captures.appearsInReader, source: Self.source).map(\.owner) == [nil, nil])
+
+        let (none, noneServer) = try door([list: .init(body: Captures.appearsInNone)])
+        #expect(try await none.appearances(of: Captures.appearsInReader, source: Self.source).isEmpty)
+        #expect(await noneServer.asked.count == 1, "nobody to name")
+
+        let (refused, _) = try door([list: .init(body: Captures.appearsInOfAnother, status: 403)])
+        await #expect(throws: MastodonCollectionError.notAllowed) {
+            try await refused.appearances(of: Captures.appearsInReader, source: Self.source)
+        }
+
+        let (locked, lockedServer) = try door([:], scopes: Self.reading)
+        await #expect(throws: MastodonCollectionError.locked) {
+            try await locked.appearances(of: Captures.appearsInReader, source: Self.source)
+        }
+        #expect(await lockedServer.asked.isEmpty)
+    }
+
+    @Test("A host with no such address says so as one, for its page to leave no trace")
+    func appearingNowhere() async throws {
+        let list = "GET /api/v1/accounts/\(Captures.appearsInReader)/in_collections?limit=100"
+        let (writes, _) = try door([list: .init(body: "<!DOCTYPE html><html></html>", status: 404)])
+        await #expect(throws: MastodonHostMoreError.noSuchAddress) {
+            try await writes.appearances(of: Captures.appearsInReader, source: Self.source)
+        }
+    }
+
     @Test("Making sends the name, both choices and what words there are, and what the source made comes back with them")
     func making() async throws {
         let (writes, server) = try door(["POST /api/v1/collections": .init(body: Captures.created)])

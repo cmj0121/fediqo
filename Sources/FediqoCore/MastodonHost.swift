@@ -92,6 +92,9 @@ public enum MastodonHostThing: String, Sendable, Hashable, CaseIterable {
     /// The collections of people somebody put together (#340), at an address a host older than
     /// them answers not-found of.
     case collections
+    /// The collections the reader appears in (#434), at an address of its own: asked apart from
+    /// the ones they keep, so a host without this one loses this one alone.
+    case inCollections
 }
 
 /// What is known of one thing at one host.
@@ -199,7 +202,7 @@ public struct MastodonHostSays: Sendable, Hashable {
             guard let apiVersion else { return .unsaid }
             return apiVersion >= Self.linkPostsFrom ? .present : .absent
         case .suggestions, .directory, .featuredPeople, .risingTags, .risingLinks, .announcements,
-             .longerAccount, .knownServers, .activity, .pinnedPosts, .yearsLookedBack, .collections:
+             .longerAccount, .knownServers, .activity, .pinnedPosts, .yearsLookedBack, .collections, .inCollections:
             return .unsaid
         }
     }
