@@ -227,7 +227,7 @@ struct AdminHostsList: View {
             .scrollIndicators(.never)
             .clearsFloatingCorner()
             .onAppear {
-                if let id = DummyCommand.centredOnAppear(selected: lamp) { proxy.scrollTo(id, anchor: .center) }
+                if let id = DummyCommand.returning(selected: &lamp, touch: touch) { proxy.scrollTo(id, anchor: .center) }
             }
             .onChange(of: lamp) { _, id in
                 guard let id else { return }

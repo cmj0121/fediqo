@@ -199,6 +199,7 @@ struct TagPane: View {
                     said: about, lit: selectedID, jumpToTop: jumpToTop, onPress: acts.onFollow, onUnfollow: acts.onUnfollow,
                     onAsk: acts.onAskFollows, onFeature: acts.onFeature, onUnfeature: acts.onUnfeature, lead: lead
                 )
+                .onAppear { if touch { selectedID = nil } }
             }
         case .posts:
             rows(lead: lead())
@@ -226,7 +227,7 @@ struct TagPane: View {
             // Come back to from a conversation, or brought in front again, the row the lamp is
             // on is in view.
             .onAppear {
-                if let id = DummyCommand.centredOnAppear(selected: selectedID) { proxy.scrollTo(id, anchor: .center) }
+                if let id = DummyCommand.returning(selected: &selectedID, touch: touch) { proxy.scrollTo(id, anchor: .center) }
             }
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }

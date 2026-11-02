@@ -90,7 +90,7 @@ struct TendingServerList<Lead: View>: View {
             .scrollIndicators(.never)
             .clearsFloatingCorner()
             .onAppear {
-                if let id = DummyCommand.centredOnAppear(selected: selectedID) { proxy.scrollTo(id, anchor: .center) }
+                if let id = DummyCommand.returning(selected: &selectedID, touch: touch) { proxy.scrollTo(id, anchor: .center) }
             }
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }
@@ -271,7 +271,7 @@ struct TendingServerList<Lead: View>: View {
             .modifier(NoticeRowMenu(menu: menu, label: L10n.t("tend.more.label")))
             // A post is drawn as a post's row, as it is everywhere.
             if case .post(let note) = item.what {
-                DummyItemRow(item: DummyItem(note, among: ReblogTargets([note])), catalogues: catalogues, posts: posts, onOpenPerson: onOpenPerson)
+                TendedPostRow(note: note, item: DummyItem(note, among: ReblogTargets([note])), catalogues: catalogues, posts: posts, onOpenPerson: onOpenPerson)
             }
         }
         .padding(.vertical, ShellSpace.step)

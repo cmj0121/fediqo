@@ -122,6 +122,7 @@ struct FollowedTagsList<Lead: View>: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    PageTopMark()
                     lead
                     ForEach(Array(said.rows.enumerated()), id: \.element.id) { index, row in
                         self.row(row)
@@ -142,6 +143,7 @@ struct FollowedTagsList<Lead: View>: View {
                             symbol: said.footSymbol(foot), words: said.footWords(foot), presses: foot.presses,
                             onPress: acts.onReadOn
                         )
+                        .onAppear { if foot.presses, !said.footFailed { acts.onReadOn() } }
                     }
                 }
             }
@@ -149,15 +151,14 @@ struct FollowedTagsList<Lead: View>: View {
             .clearsFloatingCorner()
             // Come back to from a hashtag's page, the row it was opened from is in view.
             .onAppear {
-                if let id = DummyCommand.centredOnAppear(selected: selectedID) { proxy.scrollTo(id, anchor: .center) }
+                if let id = DummyCommand.returning(selected: &selectedID, touch: touch) { proxy.scrollTo(id, anchor: .center) }
             }
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }
                 withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) }
             }
             .onChange(of: jumpToTop) { _, _ in
-                guard let first = said.rows.first else { return }
-                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(first.id, anchor: .top) }
+                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(ShellPageTop.id, anchor: .top) }
             }
         }
     }

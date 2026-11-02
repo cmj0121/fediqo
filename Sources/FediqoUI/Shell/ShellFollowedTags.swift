@@ -167,6 +167,8 @@ struct FollowedTagsSaid: Equatable {
     /// Whether the list is being asked from the top.
     var asking = false
     var foot: Foot?
+    /// A next stretch that missed waits for a press, never another appearance (#445).
+    var footFailed = false
     /// How the sign-in stands where it sees who the reader follows and may not change it.
     var changing: PartWords.Place?
 
@@ -380,6 +382,7 @@ final class ShellFollowedTags {
         let pressable = handed.changing == nil
         handed.rows = stood.read.tags.prefix(most).map { row(of: $0, on: stood, at: source, pressable: pressable, in: session) }
         handed.foot = foot(of: stood)
+        handed.footFailed = stood.footFailed
         return handed
     }
 

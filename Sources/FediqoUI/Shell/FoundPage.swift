@@ -114,6 +114,7 @@ struct FoundTagsList<Lead: View>: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    PageTopMark()
                     lead
                     ForEach(said.rows) { row in
                         SearchFoundRowView(row: row, selected: row.id == selectedID, onPress: { press(row) }, onOpen: { onOpen(row) })
@@ -131,15 +132,14 @@ struct FoundTagsList<Lead: View>: View {
             .scrollIndicators(.never)
             .clearsFloatingCorner()
             .onAppear {
-                if let id = DummyCommand.centredOnAppear(selected: selectedID) { proxy.scrollTo(id, anchor: .center) }
+                if let id = DummyCommand.returning(selected: &selectedID, touch: touch) { proxy.scrollTo(id, anchor: .center) }
             }
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }
                 withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) }
             }
             .onChange(of: jumpToTop) { _, _ in
-                guard let first = said.rows.first else { return }
-                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(first.id, anchor: .top) }
+                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(ShellPageTop.id, anchor: .top) }
             }
         }
     }

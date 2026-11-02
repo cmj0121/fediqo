@@ -120,7 +120,7 @@ struct RisingPane: View {
             .clearsFloatingCorner()
             // Come back to from a hashtag's page, the row it was opened from is in view.
             .onAppear {
-                if let id = DummyCommand.centredOnAppear(selected: selectedID) { proxy.scrollTo(id, anchor: .center) }
+                if let id = DummyCommand.returning(selected: &selectedID, touch: touch) { proxy.scrollTo(id, anchor: .center) }
             }
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }

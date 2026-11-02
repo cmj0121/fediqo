@@ -75,6 +75,8 @@ struct PersonSaid: Equatable {
     /// Whether their newest posts are being asked for.
     var askingPosts = false
     var foot: Foot?
+    /// A next stretch that missed waits for a press, never another appearance (#445).
+    var footFailed = false
 
     var person: Person? {
         if case .said(let person) = reading { person } else { nil }
@@ -396,6 +398,8 @@ struct PersonPinnedSaid: Equatable {
     var answered = false
     var posts: [DummyItem] = []
     var foot: PersonSaid.Foot?
+    /// A failed next stretch is retried only by the foot's press (#445).
+    var footFailed = false
 
     /// What stands where rows would, once the source has answered with none.
     func nothing(language: DummyLanguage? = nil) -> String? {

@@ -20,6 +20,8 @@ struct PostRowsSaid: Equatable {
     /// What stands where rows would and none are drawn.
     var quiet: String?
     var foot: Foot?
+    /// A miss is still a press, but reaching it never retries it (#445).
+    var footFailed = false
 
     /// The Posts tab of a page: the source's posts once it has answered, and what this device
     /// holds of theirs until then — and for good where it did not answer, has not heard of
@@ -36,7 +38,8 @@ struct PostRowsSaid: Equatable {
         return PostRowsSaid(
             items: said.posts ?? held,
             quiet: said.emptyLine(held: held.count, standing: standing, language: language),
-            foot: said.foot.map { Foot(symbol: $0.symbol, words: $0.words(said.source, language: language), presses: $0.presses) }
+            foot: said.foot.map { Foot(symbol: $0.symbol, words: $0.words(said.source, language: language), presses: $0.presses) },
+            footFailed: said.footFailed
         )
     }
 
@@ -45,7 +48,8 @@ struct PostRowsSaid: Equatable {
         PostRowsSaid(
             items: said.posts,
             quiet: said.nothing(language: language),
-            foot: said.foot.map { Foot(symbol: $0.symbol, words: said.footWords($0, language: language), presses: $0.presses) }
+            foot: said.foot.map { Foot(symbol: $0.symbol, words: said.footWords($0, language: language), presses: $0.presses) },
+            footFailed: said.footFailed
         )
     }
 }
@@ -122,11 +126,14 @@ struct PersonPane<Lead: View>: View {
     var jumpToTop: Int
     /// The foot's press: the stretch after what is drawn.
     var onReadOn: () -> Void = {}
-    /// The foot come into view, where reaching it reads on as reaching the end of a timeline
-    /// does (#379): nothing on somebody's page, whose foot reads on only when pressed.
+    /// The foot come into view reads on, as reaching the end of a timeline does (#379, #445).
+    /// A shared link may supply its own reach; somebody's page uses the foot's press. A stretch
+    /// that failed is asked for only when pressed, never just because its foot appeared again.
     var onReachFoot: (() -> Void)?
     /// A face on a row pressed, where the list is not one person's: nothing on their own page.
     var onOpenPerson: ((DummyPerson) -> Void)?
+    /// Whose page this is, where it is somebody's: their own face is no press there (#443).
+    var page: DummyPerson?
     /// What stands over the rows and scrolls away with them: the page's head, at a text size
     /// where it would fill the page.
     @ViewBuilder var lead: Lead
@@ -153,7 +160,7 @@ struct PersonPane<Lead: View>: View {
                     if let foot = said.foot {
                         ShellRule()
                         PersonFootRow(symbol: foot.symbol, words: foot.words, presses: foot.presses, onPress: onReadOn)
-                            .onAppear { if foot.presses { onReachFoot?() } }
+                            .onAppear { if foot.presses, !said.footFailed { (onReachFoot ?? onReadOn)() } }
                     }
                 }
             }
@@ -162,7 +169,7 @@ struct PersonPane<Lead: View>: View {
             // Come back to from a conversation, or brought in front again, the row the lamp is
             // on is in view.
             .onAppear {
-                if let id = DummyCommand.centredOnAppear(selected: selectedID) { proxy.scrollTo(id, anchor: .center) }
+                if let id = DummyCommand.returning(selected: &selectedID, touch: touch) { proxy.scrollTo(id, anchor: .center) }
             }
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }
@@ -188,7 +195,8 @@ struct PersonPane<Lead: View>: View {
     /// **One closure is deliberately nothing on their page.** `onOpenPerson` is nothing there
     /// because this *is* their page — a face that opened the page it is already on is a control
     /// that promises a journey and stands still, so it is absent rather than drawn and refused.
-    /// A list of anybody's posts (#379) hands one in.
+    /// A list of anybody's posts (#379) hands one in, and so does their page for a post of somebody
+    /// else's that they boosted, whose face is not theirs (#443): `opensAuthor`.
     private func row(_ item: DummyItem) -> some View {
         DummyItemRow(
             item: item,
@@ -211,7 +219,7 @@ struct PersonPane<Lead: View>: View {
             },
             // Lit and opened in one, for the reader who activates a row once.
             onOpen: { onOpenThread(item.id) },
-            onOpenPerson: onOpenPerson,
+            onOpenPerson: page?.opensAuthor(of: item) ?? true ? onOpenPerson : nil,
             quoteLifted: decks.isQuoteLifted(of: item),
             onToggleQuoteCover: { decks.toggleQuoteCover(of: item) },
             onToggleCover: { _ = decks.toggleCover(item.id) },

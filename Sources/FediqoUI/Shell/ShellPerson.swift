@@ -508,7 +508,7 @@ final class ShellPersonPages {
         return PersonSaid(
             source: source.host, reading: page.reading, again: page.again,
             posts: page.answered ? built.rows(of: who.id, page.read, in: session) : nil,
-            asking: page.asking, askingPosts: page.askingPosts, foot: Self.foot(of: page)
+            asking: page.asking, askingPosts: page.askingPosts, foot: Self.foot(of: page), footFailed: page.footFailed
         )
     }
 

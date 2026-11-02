@@ -19,6 +19,8 @@ struct CollectionsSheetBody: View {
     var onCancel: () -> Void = {}
     var onClose: () -> Void = {}
     var onAgain: () -> Void = {}
+    /// A member pressed: that person, with the sheet out of their way (#443).
+    var onOpenPerson: ((DummyPerson) -> Void)?
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -138,10 +140,17 @@ struct CollectionsSheetBody: View {
                 Text(spoken).shellFont(.meta).foregroundStyle(member.waits ? ShellChrome.inkDim(colorScheme) : ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { open(member) }
                     .accessibilityLabel(spoken)
+                    .accessibilityAction { open(member) }
                 ShellMoreButton(more(member, of: opened.name)).fixedSize()
             }
         }
+    }
+
+    private func open(_ member: CollectionsSaid.Member) {
+        if let person = member.person { onOpenPerson?(person) }
     }
 
     /// A person's `…` in a collection: taking them out, asked first.
@@ -196,6 +205,7 @@ struct CollectionsSheetBody: View {
 /// The sheet up, over its keeper.
 struct CollectionsSheet: View {
     let collections: ShellCollections
+    @Environment(\.shellOpens) private var opens
     let session: ShellSession
 
     var body: some View {
@@ -214,11 +224,24 @@ struct CollectionsSheet: View {
                     onSave: { Task { await collections.save(in: session) } },
                     onCancel: { collections.cancelForm() },
                     onClose: { collections.close() },
-                    onAgain: { Task { await collections.again(in: session) } }
+                    onAgain: { Task { await collections.again(in: session) } },
+                    onOpenPerson: opens.map { opens in
+                        { person in
+                            collections.close()
+                            opens.person(person)
+                        }
+                    }
                 )
             }
-            .interactiveDismissDisabled(said.writing)
+            // A changed draft is not swiped away unasked, as a profile's is not.
+            .interactiveDismissDisabled(said.writing || said.form.map { $0.draft.differs(from: $0.basis) } == true)
+            .modifier(CollectionsDiscardAsks(leaving: leaving, host: said.source, onDiscard: collections.giveUp))
         }
+    }
+
+    /// The question's binding. Keep editing writes nothing; Discard is `giveUp`.
+    private var leaving: Binding<CollectionsLeave?> {
+        Binding(get: { collections.open?.askingLeave }, set: { collections.setAskingLeave($0) })
     }
 }
 
@@ -231,11 +254,32 @@ struct CollectionsPresenter: ViewModifier {
         content.sheet(item: open) { _ in CollectionsSheet(collections: collections, session: session) }
     }
 
+    /// Clearing this: `close` asks before a changed draft is let go, and refuses while a write is out.
     private var open: Binding<CollectionsPresented?> {
         Binding(
             get: { collections.open.map { CollectionsPresented(id: $0.id) } },
             set: { if $0 == nil { collections.close() } }
         )
+    }
+}
+
+/// Close, a swipe and Cancel with a changed draft ask first (#446). Discard does that leaving;
+/// Keep editing does nothing. The words are the profile's.
+struct CollectionsDiscardAsks: ViewModifier {
+    @Binding var leaving: CollectionsLeave?
+    let host: String
+    let onDiscard: (CollectionsLeave) -> Void
+
+    func body(content: Content) -> some View {
+        content.shellConfirm($leaving, question: { _ in Self.question(host) }, onChoice: chose)
+    }
+
+    private func chose(_ route: CollectionsLeave, _ id: String) {
+        if id == "discard" { onDiscard(route) }
+    }
+
+    static func question(_ host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ProfileDiscardAsks.question(host, language: language)
     }
 }
 

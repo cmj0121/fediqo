@@ -360,16 +360,15 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         canWalk(whenOpen: open) && !open.contains(.person)
     }
 
-    /// What a press of a finger on a row means: the lamp, or the conversation (#33).
+    /// What a press on a row means: the lamp, or opening it (#33, #303, #446).
     ///
     /// Pure, and separate from the acting, for the reason `focused(in:selected:)` is: inside a
-    /// view neither case can be asserted. Both lists that draw a row read this one function, so
-    /// the stream and an open thread cannot come to answer a press differently.
+    /// view neither case can be asserted. The stream, an open thread and `ShellListRow` read this
+    /// one function, so they cannot come to answer a press differently.
     ///
-    /// **Under a finger one press opens** (#303). There the reader selects nothing — the post
-    /// being read is marked by the list as it scrolls — so a press has one meaning, and it is
-    /// the one a second press has with a keyboard or a pointer.
-    public static func tapped(_ id: String, selected: String?, touch: Bool = false) -> DummyRowTap {
+    /// **Under a finger one press opens.** A pointer or the keyboard lights a row that is not lit,
+    /// and opens the one that is (`ShellListEntry.pressed`).
+    public static func tapped<ID: Equatable>(_ id: ID, selected: ID?, touch: Bool = false) -> DummyRowTap {
         touch ? .open : ShellListEntry.pressed(id, selected: selected)
     }
 
@@ -381,6 +380,16 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     public static func centredOnAppear(selected: String?, opening root: String? = nil) -> String? {
         guard let selected, selected != root else { return nil }
         return selected
+    }
+
+    /// A list brought back under a finger centres what was opened, then leaves nothing lit
+    /// (#444). The destination is read before the selection goes; with a keyboard or pointer
+    /// both the destination and the lamp stay as they were. A newly opened thread still starts
+    /// at its head, as `centredOnAppear` says.
+    static func returning(selected: inout String?, touch: Bool, opening root: String? = nil) -> String? {
+        let row = centredOnAppear(selected: selected, opening: root)
+        if touch { selected = nil }
+        return row
     }
 }
 

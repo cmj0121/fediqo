@@ -102,6 +102,7 @@ struct NoticesHeldPage: View {
         let hosts = Self.hosts(in: acts)
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+                PageTopMark()
                 if hosts.isEmpty {
                     NoticesSentence(words: L10n.t("notices.held.empty"), part: .heldEmpty, ink: ShellChrome.inkFaint(colorScheme))
                 }
@@ -111,6 +112,7 @@ struct NoticesHeldPage: View {
             }
         }
         .scrollIndicators(.never)
+        .modifier(GoesToPageTop())
     }
 
     @ViewBuilder

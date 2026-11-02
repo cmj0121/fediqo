@@ -71,7 +71,7 @@ struct TendingPeopleList<Lead: View>: View {
             .clearsFloatingCorner()
             .onAppear {
                 words = said.filter.words
-                if let id = DummyCommand.centredOnAppear(selected: selectedID) { proxy.scrollTo(id, anchor: .center) }
+                if let id = DummyCommand.returning(selected: &selectedID, touch: touch) { proxy.scrollTo(id, anchor: .center) }
             }
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }

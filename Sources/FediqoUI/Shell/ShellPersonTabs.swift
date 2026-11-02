@@ -194,6 +194,7 @@ final class ShellPersonTabs {
         handed.answered = page.answered
         handed.posts = page.answered ? built.rows(of: who.id, page.read, in: session) : []
         handed.foot = Self.foot(of: page)
+        handed.footFailed = page.footFailed
         return handed
     }
 

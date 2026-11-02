@@ -193,6 +193,9 @@ struct LaterTests {
 
         let more = WaitingSheet.more(said.rows[0], host: Self.host, change: { _ in }, move: { _ in }, withdraw: { _ in })
         #expect(more.dangers.count == 1 && more.ordinary.count == 2)
+        #expect(WaitingSheet.offersActs(locked: nil, busy: false))
+        #expect(!WaitingSheet.offersActs(locked: "The sign-in cannot write.", busy: false))
+        #expect(!WaitingSheet.offersActs(locked: nil, busy: true))
         session.later.withdraw(said.rows[0], at: "elsewhere.example", in: session)
         await session.later.settled()
         #expect(session.later.posts.map(\.id) == ["1", "2"], "a row of another source's list is not let go here")

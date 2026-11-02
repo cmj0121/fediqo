@@ -126,6 +126,9 @@ struct TimelinePane: View {
     /// Nothing here but a finger (#303): the list marks the post being read as it scrolls, one
     /// press opens a row, and the selection is neither drawn nor followed. See `ShellReadingMark`.
     @Environment(\.shellTouch) private var touch
+    @Environment(\.shellPressedAgain) private var again
+    /// The head of the list, over what the sources found as well as the posts.
+    private static let top = "timeline.list.top"
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.shellLayout) private var shellLayout
     /// Counted up each time a timeline returned to has a post to put back at the top (#303).
@@ -1192,11 +1195,35 @@ struct TimelinePane: View {
             if !searching, session.timelineLoading(latest: prefs.latestDate) {
                 TimelineReading()
             } else {
-                empty
+                emptyStream
             }
         } else {
             list(items, under: bands)
         }
+    }
+
+    /// Settled empty is still the timeline's list (#445): the same pull, with nobody on it.
+    /// Loading has its own drawing, and searching never asks the timeline again.
+    private var emptyStream: some View {
+        ScrollView { empty }
+            .scrollIndicators(.never)
+            .clearsFloatingCorner()
+            .modifier(timelinePull(reading: !session.reload.asking.isEmpty))
+    }
+
+    /// The one pull of a timeline, with rows or with none: the same press as the reload mark.
+    private func timelinePull(reading: Bool = false) -> PullsToReload {
+        PullsToReload(
+            offered: { ReloadMark.pulls(canReload: ways.canReload, searching: searching, reading: reading) },
+            reload: {
+                session.readingMark.pulled()
+                ways.onReload()
+            },
+            settled: {
+                await session.reload.settled(.timeline)
+                session.readingMark.pullSettled()
+            }
+        )
     }
 
     private func list(_ items: [DummyItem], under bands: [SearchBands] = []) -> some View {
@@ -1223,6 +1250,7 @@ struct TimelinePane: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    PageTopMark(id: Self.top)
                     // What the sources found beside posts (#319): short bands over the posts,
                     // which begin under them exactly as they always did.
                     if !bands.isEmpty {
@@ -1313,17 +1341,7 @@ struct TimelinePane: View {
             .scrollIndicators(.never)
             // Pulled down from its top, the list is read again as the reload mark reads it
             // (#307) — the same press, by the same function — wherever that mark is offered.
-            .modifier(PullsToReload(
-                offered: { ReloadMark.pulls(canReload: ways.canReload, searching: searching) },
-                reload: {
-                    session.readingMark.pulled()
-                    ways.onReload()
-                },
-                settled: {
-                    await session.reload.settled(.timeline)
-                    session.readingMark.pullSettled()
-                }
-            ))
+            .modifier(timelinePull())
             // The end of the list stops short of whatever floats over the page (#112).
             .clearsFloatingCorner()
             .modifier(KeepsTopRow(session: session, placing: searching ? nil : timeline, latest: prefs.latestDate))
@@ -1422,7 +1440,8 @@ struct TimelinePane: View {
                 if !now { mark.handed = next }
                 selectedID = next
             }
-            .onChange(of: jumpToTop) { _, _ in jumpedToTop(first: items.first?.id, proxy: proxy) }
+            // Over found rows the top is theirs, which is where `g` lights (#442).
+            .onChange(of: jumpToTop) { _, _ in jumpedToTop(first: bands.isEmpty ? items.first?.id : Self.top, proxy: proxy) }
             // The press that goes up to what arrived on a line (#325) goes where `g` goes.
             .onChange(of: session.lines.wentUp) { _, _ in jumpedToTop(first: items.first?.id, proxy: proxy) }
         }
@@ -1638,7 +1657,9 @@ struct TimelinePane: View {
             accessory: missing ? "circle.dashed" : nil,
             hint: missing ? L10n.t("timeline.pill.missing.hint") : nil
         ) {
-            session.goToTimeline(query)
+            // The one in front pressed again goes to its top (#442). A second press or a hold
+            // still edits it: these do not wait to see which it was.
+            if query == session.timelineID { again?.go() } else { session.goToTimeline(query) }
         }
         .simultaneousGesture(
             TapGesture(count: 2).onEnded { session.editTimeline(query) }
@@ -2090,8 +2111,8 @@ enum ReloadMark: Equatable, Sendable {
 
     /// Whether pulling the list down reads it again: exactly where the mark is offered, and
     /// never over a search's results, which are not a timeline to read again.
-    static func pulls(canReload: Bool, searching: Bool) -> Bool {
-        canReload && !searching
+    static func pulls(canReload: Bool, searching: Bool, reading: Bool = false) -> Bool {
+        canReload && !searching && !reading
     }
 }
 

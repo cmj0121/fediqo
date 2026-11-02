@@ -124,6 +124,11 @@ struct WaitingSheet: View {
         .frame(minWidth: 320, idealWidth: 420, minHeight: 320, idealHeight: 480)
     }
 
+    /// Whether Move and Withdraw are offered: the press and the `…` ask the same thing.
+    static func offersActs(locked: String?, busy: Bool) -> Bool {
+        locked == nil && !busy
+    }
+
     /// One row's `…`: change it, move it, and — under the divider, asked first — don't send it.
     static func more(
         _ post: WaitingPost, host: String, change: @escaping (WaitingPost) -> Void, move: @escaping (WaitingPost) -> Void,
@@ -173,6 +178,7 @@ struct WaitingSheet: View {
 
     private func row(_ post: WaitingPost, named: String? = nil) -> some View {
         let busy = said.moving.contains(post.id) || said.changing.contains(post.id)
+        let offered = Self.offersActs(locked: said.locked, busy: busy)
         let goes = said.moving.contains(post.id)
             ? L10n.t("waiting.move.moving")
             : said.changing.contains(post.id) ? L10n.t("waiting.changing")
@@ -186,7 +192,7 @@ struct WaitingSheet: View {
                     Text(reach).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme))
                 }
                 Spacer(minLength: ShellSpace.step)
-                if said.locked == nil, !busy {
+                if offered {
                     ShellMoreButton(Self.more(post, host: said.host, change: onChange, move: onMove, withdraw: onWithdrawNow))
                         .fixedSize()
                 }
@@ -201,13 +207,30 @@ struct WaitingSheet: View {
         }
         .padding(ShellSpace.pad)
         .contentShape(Rectangle())
-        .onTapGesture { if said.locked == nil, !busy { onChange(post) } }
+        .onTapGesture { if offered { onChange(post) } }
         .shellMoreHeld()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(LaterWords.spoken(post))
-        .accessibilityAction { if said.locked == nil, !busy { onChange(post) } }
-        .accessibilityAction(named: Text(L10n.t("waiting.move"))) { onMove(post) }
-        .accessibilityAction(named: Text(L10n.t("waiting.withdraw"))) { onWithdraw(post) }
+        .accessibilityAction { if offered { onChange(post) } }
+        .modifier(WaitingNamedActs(offered: offered, move: { onMove(post) }, withdraw: { onWithdraw(post) }))
+    }
+}
+
+/// Move and Withdraw, as VoiceOver hears them: offered only where the press and the `…` are.
+private struct WaitingNamedActs: ViewModifier {
+    let offered: Bool
+    let move: () -> Void
+    let withdraw: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if offered {
+            content
+                .accessibilityAction(named: Text(L10n.t("waiting.move")), move)
+                .accessibilityAction(named: Text(L10n.t("waiting.withdraw")), withdraw)
+        } else {
+            content
+        }
     }
 }
 
