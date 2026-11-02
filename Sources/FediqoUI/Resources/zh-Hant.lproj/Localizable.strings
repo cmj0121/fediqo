@@ -2785,11 +2785,15 @@
 
 /* #324 — the person is told of a new notice while Fediqo runs. */
 "source.told" = "Fediqo 開著時，告訴我 %@ 的新通知";
-"source.told.help" = "預設關閉，由你開啟。開啟時，只要 Fediqo 開著，就與 %1$@ 保持一條連線：每則新通知立刻列在通知裡，並在打開通知的地方計數，直到你打開為止。%1$@ 擋下的通知不會告訴你。除了那個來源，不會送往任何地方。通知只在 Fediqo 開著時才會來：沒有 Fediqo 服務端，所以它關著的時候沒有人能告訴它任何事。";
+"source.told.help" = "預設關閉，由你開啟。開啟時，只要 Fediqo 開著，就與 %1$@ 保持一條連線：每則新通知立刻列在通知裡，而打開通知處的數字就是 %1$@ 給的數字。%1$@ 擋下的通知不會告訴你。除了那個來源，不會送往任何地方。通知只在 Fediqo 開著時才會來：沒有 Fediqo 服務端，所以它關著的時候沒有人能告訴它任何事。";
 "source.told.system" = "也用系統的通知告訴我";
 "source.told.system.help" = "預設關閉，由你開啟。開啟的那一刻，系統才會詢問 Fediqo 能否顯示通知；啟動時從不詢問。只會顯示下方開著的種類。通知只在 Fediqo 開著時才會來：沒有 Fediqo 服務端，所以它關著的時候沒有人能告訴它任何事。";
 "source.told.system.refused" = "系統設定裡關掉了 Fediqo 的通知。計數照常運作，也不會再詢問。";
 "source.told.open" = "通知只在 Fediqo 開著時才會來：沒有 Fediqo 服務端，所以它關著的時候沒有人能告訴它任何事。";
+"source.told.count.failed" = "%@ 沒有回答有多少則未讀通知。數字維持它上次說的。";
+"source.told.count.none" = "%@ 不提供未讀通知的數字，所以不顯示它的數字。";
+"source.told.count.readOnly" = "這次登入只能讀，打開通知不會告訴 %@ 已讀。它的數字要等其他客戶端告訴它才會下降。";
+"source.told.mark.failed" = "沒能告訴 %@ 這些通知已讀。它的數字不變。";
 "source.told.kinds" = "會告訴你的種類";
 "source.told.signIn" = "登入 %@ 並允許讀取通知，Fediqo 開著時就會告訴你新通知。";
 "source.told.cannot" = "%@ 沒有通知可說，照舊讀取。";

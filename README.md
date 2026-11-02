@@ -993,6 +993,10 @@ of a request you let through come in once the source has moved them. With the sy
 arriving while Fediqo is behind other windows is shown by the system once, and pressing it opens that
 notice; while Fediqo is in front, the system shows nothing.
 
+The count where notices are reached is the source's own, read with each read that reaches it, so it
+agrees with its other clients. Opening notices tells the source they are read where the sign-in may
+write; one that only reads says so on the source's page, and its count falls when another client tells it.
+
 Notices come only while Fediqo is open: there is no Fediqo server to tell it anything while it is
 closed. A closed Fediqo is not a fault, and what came meanwhile is read when it is next open.
 

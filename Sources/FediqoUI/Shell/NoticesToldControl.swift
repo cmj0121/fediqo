@@ -51,6 +51,7 @@ struct NoticesToldControl: View {
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .fixedSize(horizontal: false, vertical: true)
         if choice.on {
+            countSaid
             let system = L10n.t("source.told.system")
             Toggle(system, isOn: Binding(
                 get: { choice.system },
@@ -76,6 +77,18 @@ struct NoticesToldControl: View {
                 ))
                 .shellFont(.reading)
             }
+        }
+    }
+
+    /// Why the count beside notices may not move as the person expects, where it may not (#429): the
+    /// source did not answer, has no count, or this sign-in cannot tell it what was read.
+    @ViewBuilder
+    private var countSaid: some View {
+        if let words = session.noticesTold.countWords(host: host, in: session) {
+            Text(words)
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

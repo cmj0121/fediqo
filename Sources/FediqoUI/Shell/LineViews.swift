@@ -106,7 +106,7 @@ struct ShowsLineFront: ViewModifier {
 
 /// While Fediqo runs and its window is not in the background, the lines wanted are held: Home's
 /// for the timeline in front (#325) and the notices told of (#324). A change of what is wanted, or
-/// the background, lets them go. And the notices page in front has nothing waiting to be seen.
+/// the background, lets them go. And the notices page in front tells the source they are read.
 /// On the root, inside `AsksOnAWait`'s group, so the chain gains no line.
 struct HearsLines: ViewModifier {
     let session: ShellSession
@@ -124,7 +124,7 @@ struct HearsLines: ViewModifier {
                     await session.lines.hearDirect(host, in: session)
                 }
             }
-            .task(id: noticesInFront) { session.noticesTold.pageInFront = noticesInFront }
+            .task(id: noticesInFront) { await session.noticesTold.pageCame(noticesInFront, in: session) }
             .task { SystemNoticePresses.shared.told = session.noticesTold }
             .onChange(of: session.noticesTold.pressedID) { _, id in
                 if id != nil { onToldPressed(session.noticesTold.takePressed()) }

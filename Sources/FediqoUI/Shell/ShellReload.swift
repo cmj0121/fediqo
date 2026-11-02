@@ -1565,6 +1565,7 @@ struct AnnouncementsAsk: ViewModifier {
             session.reload.sourceAnswered = { [weak session, weak announcements] host in
                 guard let session, let announcements else { return }
                 announcements.checked(host, in: session)
+                Task { await session.noticesTold.roundAnswered(host: host, in: session) }
             }
             session.lines.announced = { [weak session, weak announcements] host in
                 guard let session, let announcements else { return }

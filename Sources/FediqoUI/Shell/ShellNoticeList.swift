@@ -475,6 +475,7 @@ final class ShellNoticeList {
         }
         locked = []
         await run(asks, fromTop: Set(asks.map(\.host)), in: session)
+        await session.noticesTold.afterRead(in: session)
     }
 
     /// The next, older stretch: the foot of the list reached or pressed.

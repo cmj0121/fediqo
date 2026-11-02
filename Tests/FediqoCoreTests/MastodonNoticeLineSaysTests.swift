@@ -68,4 +68,19 @@ struct MastodonNoticeLineSaysTests {
         #expect(!heard.all.contains { $0.data.contains(held) }, "a mention held back is not told")
         _ = try await act(seeded.other, "DELETE", "/api/v1/statuses/\(named)")
     }
+
+    @Test("The count is the source's own, falls when it is told, and is never moved back (#429)")
+    func unreadCount() async throws {
+        try await LocalServers.requireHealthy()
+        let seeded = try LocalServers.seeded()
+        let token = MastodonToken(host: Self.host, accessToken: seeded.writer, clientID: "", clientSecret: "")
+        let door = MastodonAuthorized(token: token, sender: try LocalHTTP.client(), store: MemoryMastodonTokens())
+        let notices = MastodonNotices(door: door)
+        let source = Source(host: Self.host, kind: .mastodon)
+        let newest = try #require(try await notices.page(source: source, gathered: false).notices.first?.newestID)
+        try await notices.tellRead(upTo: newest)
+        #expect(try await notices.unreadCount() == 0)
+        try await notices.tellRead(upTo: "1")
+        #expect(try await notices.unreadCount() == 0, "a lower place is not told")
+    }
 }

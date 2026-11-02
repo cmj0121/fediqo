@@ -119,8 +119,12 @@ struct NoSystemNotices: SystemNotices {
 /// while Fediqo runs (`ShellLines.wants`), whatever page is in front, and each notice it tells:
 /// - **is listed** — the notices page reads again, in place, as its reload would (`read`), so what
 ///   is drawn there is what a read draws, gathered as a read gathers it;
-/// - **raises the count** where notices are reached, unless that page is in front — and only for
-///   a kind the person keeps told: one switched off tells nothing, and is still listed;
+/// - **moves the count** where notices are reached — **the source's own** (#429), read after each
+///   read of the notices and each round that reaches the source, never tallied here, so it agrees
+///   with the source's other clients. A kind the person switched off is left out by asking the source
+///   to. Opening the page tells the source they are read, where the sign-in may
+///   (`NoticesToldControl` says where it may not), and what it decides then is the count. A refusal
+///   or a failure is said, and the count stands as it last said;
 /// - **and is shown as the system's own notice** only where the person turned that on, which is
 ///   when the system is asked, and never at launch. Refused there, the switch stays off, says so,
 ///   and nothing asks again; the count works all the same.
@@ -150,17 +154,27 @@ final class ShellNoticesTold {
         case cannot(String)
     }
 
+    /// Why a source's count is not being drawn as its word.
+    enum CountSaid: Equatable {
+        /// It refused or failed: the last word stands.
+        case failed
+        /// It answered that it has no such count.
+        case none
+    }
+
     nonisolated static let key = "fediqo.notices.told"
 
     private(set) var choices: [String: Choice]
-    /// Notices told since the notices page was last in front.
-    private(set) var count = 0
+    /// How many are unread at each source told of, as it last said.
+    private(set) var counts: [String: Int] = [:]
+    /// Why a source's count is not its word just now, by host.
+    private(set) var countSaid: [String: CountSaid] = [:]
+    /// What is drawn where notices are reached: every source's own word, added.
+    var count: Int { counts.values.reduce(0, +) }
     /// Whether the system said no: the switch then stays off, and nothing asks again.
     private(set) var systemRefused = false
 
-    @ObservationIgnored var pageInFront = false {
-        didSet { if pageInFront { count = 0 } }
-    }
+    @ObservationIgnored var pageInFront = false
     @ObservationIgnored private let defaults: UserDefaults?
     @ObservationIgnored let system: any SystemNotices
     /// Whether a read of the notices is on its way for what was told, and whether another was
@@ -195,6 +209,10 @@ final class ShellNoticesTold {
         var choice = choice(host: host)
         choice.on = on
         keep(choice, host: host)
+        if !on {
+            counts[host.lowercased()] = nil
+            countSaid[host.lowercased()] = nil
+        }
     }
 
     func tell(_ narrowedAs: String, _ on: Bool, host: String) {
@@ -257,7 +275,8 @@ final class ShellNoticesTold {
         }
     }
 
-    /// One notice told on `host`'s line: listed, counted and shown as the choice says.
+    /// One notice told on `host`'s line: listed, shown as the choice says, and the count read again
+    /// with the list (`afterRead`).
     func told(_ notice: Notice, in session: ShellSession) async {
         guard toldThisRun[notice.id] == nil else { return }
         toldThisRun[notice.id] = notice
@@ -265,7 +284,6 @@ final class ShellNoticesTold {
         if toldOrder.count > Self.keptTold { toldThisRun[toldOrder.removeFirst()] = nil }
         let choice = choice(host: notice.source.host)
         if !choice.off.contains(notice.kind.narrowedAs) {
-            if !pageInFront { count += 1 }
             if choice.system, !systemRefused, !system.inFront() {
                 await system.post(
                     id: notice.id, title: notice.source.host, body: NoticeWords.spoken(notice)
@@ -307,8 +325,86 @@ final class ShellNoticesTold {
         } while again
     }
 
-    /// The notices page came in front: nothing is waiting to be seen.
-    func seen() {
-        count = 0
+    // MARK: - The source's count
+
+    /// The notices page came in front, or left: in front, the source is told they are read.
+    func pageCame(_ inFront: Bool, in session: ShellSession) async {
+        pageInFront = inFront
+        if inFront { await afterRead(in: session) }
+    }
+
+    /// A read of the notices landed: with the page in front the source is told how far, and every
+    /// source told of says its count.
+    func afterRead(in session: ShellSession) async {
+        let hosts = hosts(in: session)
+        for known in Set(counts.keys).union(countSaid.keys).subtracting(hosts) {
+            counts[known] = nil
+            countSaid[known] = nil
+        }
+        for host in hosts {
+            if pageInFront { await tellRead(host, in: session) }
+            await readCount(host: host, in: session)
+        }
+    }
+
+    /// Where the source answered a round of reading, its count is read with it.
+    func roundAnswered(host raw: String, in session: ShellSession) async {
+        let host = raw.lowercased()
+        guard hosts(in: session).contains(host) else { return }
+        await readCount(host: host, in: session)
+    }
+
+    private func readCount(host: String, in session: ShellSession) async {
+        guard let sent = session.mastodon.token(host: host) else { return }
+        let left = excluded(host: host, in: session)
+        let door = session.mastodon.authorized(token: sent, within: session.noticeList.deadline, for: .notices)
+        let result = await ShellNoticeActs.run(session.reach.notices(door)) { try await $0.unreadCount(excluding: left) }
+        guard ShellNoticeActs.counts(result, of: host, sentWith: sent, in: session) == .held else { return }
+        switch result {
+        case .success(let told):
+            counts[host] = told
+            countSaid[host] = nil
+        case .failure(MastodonAuthError.http(404)):
+            counts[host] = nil
+            countSaid[host] = CountSaid.none
+        case .failure(let error) where Cancellation.happened(error):
+            break
+        case .failure:
+            if countSaid[host] != .failed { session.showToast(String(format: L10n.t("source.told.count.failed"), host)) }
+            countSaid[host] = .failed
+        }
+    }
+
+    /// The source's own words for the kinds switched off. **Everything else as one** is no word of
+    /// the source's, and cannot be asked for: those stay counted.
+    private func excluded(host: String, in session: ShellSession) -> [String] {
+        choice(host: host).off.subtracting([Notice.Kind.unknownKinds]).sorted()
+    }
+
+    /// What the source's page says of why the count may not move as expected: the source did not
+    /// answer, has no count, or this sign-in cannot tell it what was read. Nothing where all is well.
+    func countWords(host: String, in session: ShellSession) -> String? {
+        switch countSaid[host.lowercased()] {
+        case .failed: String(format: L10n.t("source.told.count.failed"), host)
+        case .none?: String(format: L10n.t("source.told.count.none"), host)
+        case nil: session.mastodon.place(.acting, host: host) == nil ? nil : String(format: L10n.t("source.told.count.readOnly"), host)
+        }
+    }
+
+    /// The source told the person has read what is held of it, where the sign-in may. A conflict
+    /// with another client's telling is left to the next read; any other refusal or failure is said,
+    /// and nothing on this device moves.
+    private func tellRead(_ host: String, in session: ShellSession) async {
+        guard session.mastodon.place(.acting, host: host) == nil, let sent = session.mastodon.token(host: host),
+              let newest = session.noticeList.reaches[host]?.notices.map(\.newestID).max(by: { StatusID.later($1, than: $0) })
+        else { return }
+        let door = session.mastodon.authorized(token: sent, within: session.noticeList.deadline, for: .write)
+        let result = await ShellNoticeActs.run(session.reach.notices(door)) { try await $0.tellRead(upTo: newest) }
+        guard ShellNoticeActs.counts(result, of: host, sentWith: sent, in: session) == .held else { return }
+        switch result {
+        case .success, .failure(MastodonAuthError.http(409)): break
+        case .failure(let error) where Cancellation.happened(error): break
+        case .failure: session.showToast(String(format: L10n.t("source.told.mark.failed"), host))
+        }
     }
 }

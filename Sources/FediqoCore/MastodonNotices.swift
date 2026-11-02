@@ -99,6 +99,42 @@ public struct MastodonNotices: Sendable {
         event.name == "notifications_merged"
     }
 
+    // MARK: - What is unread
+
+    static let unreadCountPath = "/api/v1/notifications/unread_count"
+    static let markersPath = "/api/v1/markers"
+    /// The most a source counts when asked (`MastodonLiveCaptures`): past it, it says this many.
+    static let countedAtMost = 1_000
+    /// The form field a place among the notices is told by.
+    static let readField = "notifications[last_read_id]"
+
+    /// How many notices the source itself says are unread (#429), leaving out `excluding`, each a
+    /// word of the source's own: above the place it holds, whoever told it that. Asks nothing of
+    /// this device, and a 404 — a source with no such count — is thrown as any other answer is.
+    public func unreadCount(excluding kinds: [String] = []) async throws -> Int {
+        var query = [URLQueryItem(name: "limit", value: String(Self.countedAtMost))]
+        query += kinds.map { URLQueryItem(name: "exclude_types%5B%5D", value: $0) }
+        let data = try await door.get(path: Self.unreadCountPath, query: query)
+        guard let read = try? MastodonJSON.decoder.decode(UnreadDTO.self, from: data), read.count >= 0 else {
+            throw MastodonNoticeError.unreadable
+        }
+        return read.count
+    }
+
+    /// Tells the source the person has read up to `newest`, **and never lower than it holds**: the
+    /// source takes a lower id and moves back (`MastodonLiveCaptures`), which would make notices read
+    /// on another client unread again. So its place is read first, and nothing is told where it is
+    /// there or past. Needs the sign-in to write statuses, which the source's own rule asks for here.
+    public func tellRead(upTo newest: String) async throws {
+        guard !newest.isEmpty, !newest.contains(where: \.isWhitespace) else { throw MastodonRequestError.invalidURL }
+        let asked = [URLQueryItem(name: "timeline%5B%5D", value: "notifications")]
+        guard let held = try? MastodonJSON.decoder.decode(MarkersDTO.self, from: try await door.get(path: Self.markersPath, query: asked)) else {
+            throw MastodonNoticeError.unreadable
+        }
+        if let place = held.notifications?.lastReadId, !StatusID.later(newest, than: place) { return }
+        _ = try await door.post(path: Self.markersPath, form: [(Self.readField, newest)])
+    }
+
     // MARK: - Dismissing
 
     static let clearPath = "/api/v1/notifications/clear"
@@ -231,6 +267,21 @@ public struct MastodonNotices: Sendable {
         guard ListSubscription.isPathSegment(request.requestID) else { throw MastodonRequestError.invalidURL }
         _ = try await door.post(path: "\(Self.requestsPath)/\(request.requestID)/\(act)", form: [])
     }
+}
+
+/// `/api/v1/notifications/unread_count`.
+private struct UnreadDTO: Decodable, Sendable {
+    let count: Int
+}
+
+/// `/api/v1/markers`, in the one place read. `last_read_id` under `MastodonJSON.decoder`'s
+/// snake-case strategy, which writes `id` as `Id`.
+private struct MarkersDTO: Decodable, Sendable {
+    struct Place: Decodable, Sendable {
+        let lastReadId: String
+    }
+
+    let notifications: Place?
 }
 
 /// `/api/v2/notifications/policy`, in the one part of it read: how much is waiting. The counts
