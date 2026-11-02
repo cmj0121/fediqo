@@ -2873,6 +2873,7 @@
 "filters.change" = "變更";
 "filters.remove" = "移除…";
 "filters.more" = "過濾器 %@ 的更多動作";
+"filters.posts.unread" = "現在讀不到的貼文";
 "item.act.filter" = "放進過濾器…";
 "filters.post.put" = "放進去";
 "filters.post.put.spoken" = "把這則貼文放進 %@";

@@ -13,6 +13,11 @@ private actor FilterServer: HTTPSender {
     private(set) var asked: [String] = []
 
     func goneNow() { gone = true }
+    var failsPosts = false
+    var postsGate: Gate?
+    let postsReached = Gate()
+    func failingPosts() { failsPosts = true }
+    func holdingPosts(_ gate: Gate) { postsGate = gate }
 
     static func status(filtered: String) -> String {
         #"{"id":"77","created_at":"2026-10-01T00:00:00.000Z","content":"<p>the words</p>","visibility":"public","url":"https://social.example/@a/77","uri":"https://social.example/s/77","account":{"id":"3","username":"a","acct":"a","display_name":"A","url":"https://social.example/@a"},"media_attachments":[],"mentions":[],"tags":[],"emojis":[],"reblogs_count":0,"favourites_count":0,"replies_count":0,"filtered":\#(filtered)}"#
@@ -48,6 +53,11 @@ private actor FilterServer: HTTPSender {
             let hit = #"{"filter":{"id":"5","title":"Hush","context":["home"],"expires_at":null,"filter_action":"hide"},"keyword_matches":null,"status_matches":["77"]}"#
             return answer(200, Self.status(filtered: under ? "[\(hit)]" : "[]"))
         case ("GET", "/api/v1/statuses"):
+            if failsPosts { return answer(500, "down") }
+            if let postsGate {
+                await postsReached.open()
+                await postsGate.wait()
+            }
             return answer(200, gone ? "[]" : "[" + Self.status(filtered: "[]") + "]")
         case ("DELETE", _):
             filters.removeAll { $0.hasPrefix(#"{"id":"\#(path.split(separator: "/").last ?? "")","#) }
@@ -322,9 +332,60 @@ struct ServerFiltersTests {
         #expect(none.postFilterOffer(on: try await held(none)) == nil)
     }
 
+    private static let hushed = ServerFilter(id: "5", title: "Hush", context: ["home"], action: .hide, expiresAt: nil, keywords: [], statuses: 1, posts: [FilteredPost(id: "1", statusID: "77")])
+
+    @Test("A read of the posts that fails says so, and says of none that it has gone")
+    func aFailedReadOfPosts() async throws {
+        let server = FilterServer([Self.hush(under: true)])
+        let session = try await make(server: server)
+        await server.failingPosts()
+        await session.serverFilters.openPosts(of: Self.hushed, at: Self.host, in: session)
+        let sheet = try #require(session.serverFilters.readingPosts)
+        #expect(sheet.unread && !sheet.reading && sheet.lines.count == 1)
+        #expect(session.serverFilters.refused[Self.host] == String(format: L10n.t("filters.failed"), Self.host))
+    }
+
+    @Test("A line taken out while the posts are read stays out")
+    func outWhileRead() async throws {
+        let server = FilterServer([Self.hush(under: true)])
+        let gate = Gate()
+        await server.holdingPosts(gate)
+        let session = try await make(server: server)
+        let reading = Task { await session.serverFilters.openPosts(of: Self.hushed, at: Self.host, in: session) }
+        await server.postsReached.wait()
+        let line = try #require(session.serverFilters.readingPosts?.lines.first)
+        await session.serverFilters.takeOut(line, in: session)
+        await gate.open()
+        await reading.value
+        #expect(session.serverFilters.readingPosts?.lines.isEmpty == true)
+    }
+
+    @Test("A sign-out lets go of the filters and their sheets, and a read on its way lands nowhere")
+    func signOutForgets() async throws {
+        let server = FilterServer([Self.hush(under: true)])
+        let session = try await make(server: server)
+        await session.serverFilters.read(host: Self.host, in: session)
+        let item = try await held(session)
+        session.serverFilters.open(on: item, in: session)
+        await session.serverFilters.openPosts(of: Self.hushed, at: Self.host, in: session)
+        #expect(session.serverFilters.filters(at: Self.host) != nil)
+        await session.mastodon.signOut(host: Self.host)
+        await session.forgetReaderMarksDue()
+        #expect(session.serverFilters.filters(at: Self.host) == nil)
+        #expect(session.serverFilters.filtering == nil && session.serverFilters.readingPosts == nil)
+    }
+
+    @Test("Removing the source lets go of them too")
+    func removalForgets() async throws {
+        let session = try await make(server: FilterServer([Self.hush()]))
+        await session.serverFilters.read(host: Self.host, in: session)
+        await session.remove(host: Self.host)
+        #expect(session.serverFilters.filters(at: Self.host) == nil)
+    }
+
     @Test("Every language says each of its words")
     func theWords() {
-        for key in ["item.act.filter", "filters.post.put", "filters.post.put.spoken", "filters.post.out", "filters.post.out.spoken", "filters.post.unread", "filters.posts.open", "filters.posts.title", "filters.posts.none", "filters.posts.gone"] {
+        for key in ["item.act.filter", "filters.post.put", "filters.post.put.spoken", "filters.post.out", "filters.post.out.spoken", "filters.post.unread", "filters.posts.open", "filters.posts.title", "filters.posts.none", "filters.posts.gone", "filters.posts.unread"] {
             for language in [DummyLanguage.english, .taiwanese] { #expect(L10n.t(key, language: language) != key) }
         }
     }

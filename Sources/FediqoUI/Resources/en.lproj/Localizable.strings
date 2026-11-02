@@ -2931,6 +2931,7 @@
 "filters.change" = "Change";
 "filters.remove" = "Remove…";
 "filters.more" = "More for the filter %@";
+"filters.posts.unread" = "A post that could not be read now";
 "item.act.filter" = "Put under a filter…";
 "filters.post.put" = "Put under";
 "filters.post.put.spoken" = "Put this post under %@";

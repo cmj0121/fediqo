@@ -4151,6 +4151,7 @@ final class ShellSession {
         // What waited to be sent to it goes with it, as its question said — off the disk
         // before the rest is said to have gone (#292). A sign-out and a Clear leave them.
         await outbox.forget(host: host, in: self)
+        serverFilters.forget(host: host)
         await adopt()
         // A post the person keeps stays though the rest went (#284), and a row that stays is
         // `keepingPosts`' case for the pictures: let go without the bump, so it asks nothing of

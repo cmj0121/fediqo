@@ -303,7 +303,8 @@ struct FilterPostsSheet: View {
     }
 
     private func row(_ line: ShellServerFilters.FilterPosts.Line, host: String) -> some View {
-        let words = line.opening ?? String(format: L10n.t("filters.posts.gone"), host)
+        let unread = filters.readingPosts?.unread == true
+        let words = line.opening ?? (unread ? L10n.t("filters.posts.unread") : String(format: L10n.t("filters.posts.gone"), host))
         return HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
             VStack(alignment: .leading, spacing: ShellSpace.hair) {
                 if let who = line.who { Text(LineText.oneLine(who)).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme)) }

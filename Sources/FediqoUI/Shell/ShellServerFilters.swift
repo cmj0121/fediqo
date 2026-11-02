@@ -36,6 +36,8 @@ final class ShellServerFilters {
     private(set) var refused: [String: String] = [:]
     /// The acts on their way, by host.
     private(set) var busy: Set<String> = []
+    /// How many times each host's state was let go (`forget`): a read begun before lands nowhere.
+    @ObservationIgnored private var epochs: [String: Int] = [:]
     /// The post whose sheet of filters is up (#439), or nothing.
     private(set) var filtering: PostUnderFilters?
     /// The filter whose sheet of posts is up (#439), or nothing.
@@ -71,6 +73,8 @@ final class ShellServerFilters {
         let host: String
         var lines: [Line] = []
         var reading = true
+        /// The posts could not be read: a line with no words then says nothing of its post.
+        var unread = false
 
         var id: String { host + "\n" + filterID }
     }
@@ -111,10 +115,14 @@ final class ShellServerFilters {
         let host = raw.lowercased()
         guard case .list = offer(host: host, in: session), let filters = filters(host, in: session) else { return }
         let had = reading[host]
+        let asked = epochs[host, default: 0]
         if had == nil { reading[host] = .reading }
         do {
-            reading[host] = .read(try await filters.list())
+            let read = try await filters.list()
+            guard epochs[host, default: 0] == asked else { return }
+            reading[host] = .read(read)
         } catch {
+            guard epochs[host, default: 0] == asked else { return }
             if Cancellation.happened(error) {
                 reading[host] = had
                 return
@@ -138,12 +146,14 @@ final class ShellServerFilters {
         busy.insert(host)
         defer { busy.remove(host) }
         refused[host] = nil
+        let asked = epochs[host, default: 0]
         do {
             try await body(filters)
         } catch {
-            if !Cancellation.happened(error) { refused[host] = Self.said(error, host: host) }
+            if !Cancellation.happened(error), epochs[host, default: 0] == asked { refused[host] = Self.said(error, host: host) }
             return false
         }
+        guard epochs[host, default: 0] == asked else { return false }
         await read(host: host, in: session)
         return true
     }
@@ -164,7 +174,10 @@ final class ShellServerFilters {
         await act(host, in: session) { try await $0.remove(filter) }
     }
 
+    /// What was read as whoever was signed in at `host` let go: they left, somebody new came, or
+    /// the source went. Its sheets close, and an answer on its way lands nowhere (`epochs`).
     func forget(host: String) {
+        epochs[host.lowercased(), default: 0] += 1
         reading[host.lowercased()] = nil
         refused[host.lowercased()] = nil
         if filtering?.host == host.lowercased() { filtering = nil }
@@ -235,15 +248,27 @@ final class ShellServerFilters {
             readingPosts?.reading = false
             return
         }
-        let read = try? await filters.posts(filter.posts.map(\.statusID), source: source)
-        guard readingPosts?.id == sheet.id else { return }
-        for index in sheet.lines.indices {
-            guard let note = read?[sheet.lines[index].post.statusID] else { continue }
-            sheet.lines[index].who = note.handle
-            sheet.lines[index].opening = LineText.oneLine(note.body, limit: 80)
+        let asked = epochs[host, default: 0]
+        var read: [String: Note] = [:]
+        var failure: (any Error)?
+        do {
+            read = try await filters.posts(filter.posts.map(\.statusID), source: source)
+        } catch {
+            failure = error
         }
-        sheet.reading = false
-        readingPosts = sheet
+        // Written onto the sheet as it stands now: a line taken out meanwhile stays out.
+        guard readingPosts?.id == sheet.id, epochs[host, default: 0] == asked else { return }
+        readingPosts?.reading = false
+        if let failure {
+            readingPosts?.unread = true
+            if !Cancellation.happened(failure) { refused[host] = Self.said(failure, host: host) }
+            return
+        }
+        for index in readingPosts?.lines.indices ?? 0..<0 {
+            guard let id = readingPosts?.lines[index].post.statusID, let note = read[id] else { continue }
+            readingPosts?.lines[index].who = note.handle
+            readingPosts?.lines[index].opening = LineText.oneLine(note.body, limit: 80)
+        }
     }
 
     func closePosts() { readingPosts = nil }
