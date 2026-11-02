@@ -1756,7 +1756,7 @@ struct DummyItemRow: View {
         if drawsQuoteCard, let quote = item.quote {
             QuoteBand(
                 quote: quote, host: host, lifted: quoteLifted,
-                onOpen: openQuote, onToggleCover: onToggleQuoteCover
+                onOpen: openQuote, onToggleCover: onToggleQuoteCover, onOpenPerson: onOpenPerson
             )
             .padding(.top, ShellSpace.tight - ShellSpace.snug)
         }

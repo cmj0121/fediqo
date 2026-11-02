@@ -595,6 +595,7 @@ public struct FediqoRootView: View {
             .environment(\.shellSourcesHere, Set(session.sources.map(\.host)))
             // Whether there is nothing here but a finger (#303), asked once and handed down.
             .environment(\.shellTouch, ShellHands.shared.touch)
+            .environment(\.shellOpens, shellOpens)
             .environment(\.shellCovered, Self.covered(viewing: viewedItem != nil, shortcuts: showingShortcuts, landing: playsLanding))
             .modifier(StagedOverlays(staged: staged, session: session))
             .environment(\.locale, prefs.language.locale)
@@ -2144,6 +2145,21 @@ public struct FediqoRootView: View {
     /// comes back to the row pressed (`PlaceErrand`).
     private var personSetOut: (DummyPerson) -> Void { { setOut(to: .person($0)) } }
 
+    /// What a row away from the timeline's lists opens by (#443).
+    private var shellOpens: ShellOpens { ShellOpens(person: personSetOut, post: heldThenOpened) }
+
+    /// A post nothing here holds, held and opened; one the store would not take is said, and not
+    /// a press that did nothing.
+    private func heldThenOpened(_ note: Note) {
+        Task {
+            guard let row = await session.landed(noticePost: note) else {
+                session.toast = ShellToast(tick: Int.random(in: 1 ... .max), text: L10n.t("notices.tooOld"))
+                return
+            }
+            setOut(to: .thread(row))
+        }
+    }
+
     /// `q`, Escape and the page's Back: from a host's page to the list, letting go of what the
     /// page held. Whether the page was in front.
     private func leaveAdminPage() -> Bool {
@@ -2739,9 +2755,13 @@ public struct FediqoRootView: View {
     /// row that names nobody (`DummyPerson(_:)` is nil) is refused the same way its face is:
     /// there is no page to open, so there is no press.
     private func openAuthor() -> Bool {
-        guard Self.canOpenAuthor(place: place, open: openLayers) else { return false }
+        // On somebody's page only a post of somebody else's, boosted there, has an author to open
+        // (#443): `DummyPerson.opensAuthor`, as the face reads it.
+        guard Self.canOpenAuthor(place: place, open: openLayers.subtracting([.person])) else { return false }
+        let page = keyedWalk.openedPerson
         return onFocusedItem { item in
             guard let person = DummyPerson(item) else { return false }
+            if let page, !page.opensAuthor(of: item) { return false }
             return openPerson(person)
         }
     }
