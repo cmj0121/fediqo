@@ -434,6 +434,19 @@ public struct MastodonWrite: Sendable {
         return answered
     }
 
+    /// `note` read again and laid over its row, moving none of the reader's marks (#439): what its
+    /// source now says of it, as a filter it was just put under or taken out of.
+    @discardableResult
+    public func readAgain(_ note: Note) async throws -> Note {
+        guard await store.sources().contains(where: { $0.host == host }) else { throw MastodonWriteError.noSource }
+        guard let id = note.sendableID, ListSubscription.isPathSegment(id) else { throw MastodonWriteError.unfindable }
+        let sent = ReadMoment.now()
+        let data = try await door.get(path: "/api/v1/statuses/\(id)")
+        let answered = try landed(data, on: note, sent: sent)
+        await store.refresh([answered], ifSourceHere: host, filtersActed: true)
+        return await store.note(answered.key) ?? answered.refreshed(over: note)
+    }
+
     /// `answered` laid over the row as an act's answer is (`act`), and the store's copy back.
     /// `mark` is the one the act moved, or nothing where it moved none (a change, #332).
     func settle(_ answered: Note, on note: Note, acted mark: ReaderMark?) async -> Note {

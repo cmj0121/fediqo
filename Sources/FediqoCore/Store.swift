@@ -802,7 +802,8 @@ public actor ItemStore {
                 }
                 // Which of the person's filters there caught it, as the last read that says
                 // says it (#338): a filter made, changed or removed since shows at the next read.
-                merged.serverFiltered = note.serverFiltered ?? existing.serverFiltered
+                // Not a copy sent before the person put the post under one or took it out (#439).
+                merged.serverFiltered = older ? existing.serverFiltered : note.serverFiltered ?? existing.serverFiltered
                 // The same source handing the post over again is the source having it (#179):
                 // a mark it once earned comes off.
                 let kept = categories != existing.categories
@@ -938,7 +939,7 @@ public actor ItemStore {
     /// an act the source turned away never reaches here. `acted` names the mark the act moved:
     /// that one is taken whatever the answer's age, and the other two as any copy's are.
     @discardableResult
-    public func refresh(_ incoming: [Note], ifSourceHere host: String, acted: ReaderMark? = nil) -> Bool {
+    public func refresh(_ incoming: [Note], ifSourceHere host: String, acted: ReaderMark? = nil, filtersActed: Bool = false) -> Bool {
         let host = host.lowercased()
         guard sourceList.contains(where: { $0.host == host }) else { return false }
         // What the file could not be read for is not held as far as this knows: not laid over.
@@ -966,12 +967,16 @@ public actor ItemStore {
             // or not the answer changes the row, since a read that already said as much changes
             // nothing about which of the two is the later. After `older` is read: the answer is
             // not older than itself.
-            if acted != nil { self.acted[note.key] = ReadMoment.now().place }
+            // So too for what the person just had a filter do to it (#439): a read already on its
+            // way must not undo that.
+            if acted != nil || filtersActed { self.acted[note.key] = ReadMoment.now().place }
             // The same words read again are not a change (#175): a thread re-read with nothing
             // edited in it neither writes the store down again nor renews a screen.
-            let refreshed = stale
+            var refreshed = stale
                 ? existing.restated(by: note, taking: acted == nil || older ? own : Set(ReaderMark.allCases))
                 : note.refreshed(over: existing, taking: older ? own : Set(ReaderMark.allCases))
+            // Which of the person's filters caught it, as the last read that says says it (#338).
+            refreshed.serverFiltered = older ? existing.serverFiltered : note.serverFiltered ?? existing.serverFiltered
             guard refreshed != existing else { continue }
             notes[note.key] = refreshed
             moved = true

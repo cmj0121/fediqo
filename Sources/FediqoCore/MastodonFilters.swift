@@ -34,6 +34,12 @@ struct FilterDTO: Decodable, Sendable {
 
     struct PostDTO: Decodable, Sendable {
         let id: String
+        let statusId: String?
+
+        var post: FilteredPost? {
+            guard let statusId, ListSubscription.isPathSegment(id), ListSubscription.isPathSegment(statusId) else { return nil }
+            return FilteredPost(id: id, statusID: statusId)
+        }
     }
 
     let id: String
@@ -49,7 +55,7 @@ struct FilterDTO: Decodable, Sendable {
             id: id, title: title, context: Set(context ?? []), action: ServerFilterAction(word: filterAction ?? "warn"),
             expiresAt: expiresAt?.value,
             keywords: (keywords ?? []).map { .init(id: $0.id, keyword: $0.keyword, wholeWord: $0.wholeWord ?? true) },
-            statuses: statuses?.count ?? 0
+            statuses: statuses?.count ?? 0, posts: (statuses ?? []).compactMap(\.post)
         )
     }
 }
@@ -95,6 +101,58 @@ public struct MastodonFilters: Sendable {
         } catch MastodonAuthError.http(404) {
             return
         }
+    }
+
+    /// Names one post by itself under `filter` (#439). What the source then says of the post is
+    /// the source's to say: whoever asked reads the post again. A post it will not have under it —
+    /// gone, one the person may not read, or under it already — is a refusal
+    /// (`MastodonFilterCaptures`), and a filter that is gone is one too.
+    public func put(_ statusID: String, under filter: ServerFilter) async throws -> FilteredPost {
+        guard ListSubscription.isPathSegment(filter.id), ListSubscription.isPathSegment(statusID) else { throw URLError(.badURL) }
+        let data: Data
+        do {
+            data = try await door.post(path: "\(Self.path)/\(filter.id)/statuses", form: [("status_id", statusID)])
+        } catch MastodonAuthError.http(422), MastodonAuthError.http(404) {
+            throw MastodonFilterRefused(said: nil)
+        } catch is MastodonUnprocessable {
+            throw MastodonFilterRefused(said: nil)
+        }
+        guard let post = try MastodonJSON.decoder.decode(FilterDTO.PostDTO.self, from: data).post else {
+            throw MastodonFilterRefused(said: nil)
+        }
+        return post
+    }
+
+    /// Takes a post named by itself out of its filter. **A 404 is a post already out**, which is
+    /// what was asked.
+    public func takeOut(_ post: FilteredPost) async throws {
+        guard ListSubscription.isPathSegment(post.id) else { throw URLError(.badURL) }
+        do {
+            _ = try await door.delete(path: "\(Self.path)/statuses/\(post.id)")
+        } catch MastodonAuthError.http(404) {
+            return
+        }
+    }
+
+    /// As many posts as one read of them is asked for: what a source gives at once.
+    static let postsAtOnce = 20
+
+    /// The posts `ids` name, as this sign-in may read them, by the id each was asked by. **One
+    /// not among them is gone, or may not be read**: a filter goes on naming a post after it is
+    /// deleted (`MastodonFilterCaptures`).
+    public func posts(_ ids: [String], source: Source) async throws -> [String: Note] {
+        var read: [String: Note] = [:]
+        for start in stride(from: 0, to: ids.count, by: Self.postsAtOnce) {
+            let asked = ids[start..<min(start + Self.postsAtOnce, ids.count)]
+            let sent = ReadMoment.now()
+            // `id[]`, spelled as the wire carries it: a query's name goes out as it is written here.
+            let data = try await door.get(path: "/api/v1/statuses", query: asked.map { URLQueryItem(name: "id%5B%5D", value: $0) })
+            let statuses = try MastodonJSON.decoder.decode([StatusDTO.Lenient<StatusDTO>].self, from: data)
+            for note in statuses.compactMap({ $0.value?.asNote(source: source, categories: [], sent: sent) }) {
+                if let id = note.statusID { read[id] = note }
+            }
+        }
+        return read
     }
 
     private func answer(_ send: () async throws -> Data) async throws -> ServerFilter {
