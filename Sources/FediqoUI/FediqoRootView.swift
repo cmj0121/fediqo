@@ -55,6 +55,7 @@ public struct FediqoRootView: View {
     /// What `/` opened (#32). Its results stand in for the stream while it is open.
     @State private var search = ShellSearch()
     @State private var jumpToTop = 0
+    @State private var pageTop = 0
     @State private var composing = false
     @State private var showingShortcuts = false
     @State private var shortcutTab: DummyShortcutGroup = .move
@@ -679,6 +680,10 @@ public struct FediqoRootView: View {
             if place == .admin {
                 let rows = adminRows
                 return adminKeyed { $0.top(among: rows) }
+            }
+            if Self.goesToPageTop(place, held: noticesHeld) {
+                pageTop += 1
+                return true
             }
             return place == .notices ? jumpNoticesToTop() : jumpListOrThreadToTop()
         case .expandPost:
@@ -1399,6 +1404,26 @@ public struct FediqoRootView: View {
     private var currentListEntry: String? {
         walk.openedPerson.flatMap { people.entry(of: $0, in: session) }
             ?? (foundRowIDs.isEmpty ? nil : streamItems.first?.id)
+    }
+
+    /// Whether `g` on `place` takes a page with no list the keys walk to its top (#442), and not a
+    /// list. **No `default:`**: a place added has to say.
+    static func goesToPageTop(_ place: ShellPlace, held: Bool) -> Bool {
+        switch place {
+        case .account, .usage, .preferences: true
+        case .notices: held
+        case .timeline, .trends, .admin: false
+        }
+    }
+
+    /// A place or a tab already in front, pressed again (#442): what `g` does, but under a finger
+    /// nothing is left lit, since a finger has no lamp to walk on from.
+    private func pressedAgain() {
+        let lit = selectedItemID, notice = noticeSelectedID
+        _ = apply(.goTop)
+        guard ShellHands.shared.touch else { return }
+        selectedItemID = lit
+        noticeSelectedID = notice
     }
 
     private func jumpListOrThreadToTop() -> Bool {
@@ -3049,6 +3074,8 @@ public struct FediqoRootView: View {
             case .wide: columns
             }
         }
+        .environment(\.shellPressedAgain, PressedAgain(go: pressedAgain))
+        .environment(\.shellPageTop, pageTop)
     }
 
     private var columns: some View {
@@ -3058,7 +3085,7 @@ public struct FediqoRootView: View {
                 expanded: $railExpanded,
                 availability: availability,
                 counts: [.notices: session.noticesTold.count],
-                onAgain: { _ = apply(.goTop) },
+                onAgain: pressedAgain,
                 onCompose: {
                     guard availability.canCompose else { return }
                     composing = true
@@ -3119,7 +3146,7 @@ public struct FediqoRootView: View {
         ShellNarrow(titles: availability.tabbedPlaces.map(\.title)) {
             tabbed
         } folded: {
-            FoldedPlaces(place: placeBinding, places: availability.enabledPlaces) {
+            FoldedPlaces(place: placeBinding, places: availability.enabledPlaces, onAgain: pressedAgain) {
                 placedPage(place)
             }
         }
@@ -3164,7 +3191,10 @@ public struct FediqoRootView: View {
     private var tabSelection: Binding<ShellPlace> {
         Binding(
             get: { place.tab },
-            set: { place = Self.selecting($0, standingOn: place) }
+            set: { tab in
+                if tab == place.tab { pressedAgain() }
+                place = Self.selecting(tab, standingOn: place)
+            }
         )
     }
 

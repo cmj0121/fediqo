@@ -133,12 +133,13 @@ struct PreferencesPane: View {
             // **On a narrow page the tabs are one head, over the list and not in it** (#305):
             // the whole of what is under the head then follows a swipe as one. A wide page
             // keeps its row of tabs where it was, in the list.
-            if !headed { Section { tabs } }
+            if headed { FormTop() } else { Section { tabs.id(ShellPageTop.id) } }
             // On a wide page the tabs are a row in the list, and what is under them follows a
             // swipe row by row.
             Group { page }.modifier(Slid(slide: slide, applies: headed ? false : nil))
         }
         // On a narrow one the tabs are one head over the list, and the whole list follows.
+        .modifier(GoesToPageTop())
         .modifier(TabsOverForm(headed: headed, slide: slide) { tabs })
         // Over the tabs, Usage's way in where the tabs have folded it in here (decision 19).
         .modifier(UsageStep(on: .preferences))

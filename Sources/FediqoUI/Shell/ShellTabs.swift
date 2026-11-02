@@ -42,6 +42,7 @@ struct ShellTabs<Tab: ShellTab>: View {
 
     @Environment(\.shellLayout) private var shellLayout
     @Environment(\.shellTabsSlide) private var handed
+    @Environment(\.shellPressedAgain) private var again
     @State private var own = PageSlide()
 
     /// Whether the tabs are one head that names the one in front, with a dot for each (#305):
@@ -127,7 +128,10 @@ struct ShellTabs<Tab: ShellTab>: View {
     private var row: some View {
         HStack(spacing: ShellSpace.tight) {
             ForEach(tabs) { tab in
-                ShellTabPill(L10n.t(tab.titleKey), symbol: tab.symbol, selected: tab == selected) { onSelect(tab) }
+                ShellTabPill(L10n.t(tab.titleKey), symbol: tab.symbol, selected: tab == selected) {
+                    // The one in front pressed again goes to the top of what it shows (#442).
+                    if tab == selected { again?.go() } else { onSelect(tab) }
+                }
             }
         }
         .fixedSize(horizontal: true, vertical: false)

@@ -154,6 +154,20 @@ struct ShellPlaceTests {
         #expect(FediqoRootView.selecting(.trends, standingOn: .notices) == .trends)
     }
 
+    /// #442. The pages with no list the keys walk go to their own top; the lists stay `g`'s.
+    @Test("A page with no list goes to its own top, and Notices only while what they hold is up")
+    @MainActor
+    func pagesGoToTheirOwnTop() {
+        for place in [ShellPlace.account, .usage, .preferences] {
+            #expect(FediqoRootView.goesToPageTop(place, held: false))
+        }
+        #expect(FediqoRootView.goesToPageTop(.notices, held: true))
+        #expect(!FediqoRootView.goesToPageTop(.notices, held: false))
+        for place in [ShellPlace.timeline, .trends, .admin] {
+            #expect(!FediqoRootView.goesToPageTop(place, held: true))
+        }
+    }
+
     /// Decision 19. The row into Usage and the row back are named, in every table and not only
     /// through `zh-TW`'s fallback to `zh-Hant`.
     @Test("Usage's way in and way back are written in every table")
