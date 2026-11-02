@@ -137,6 +137,9 @@ struct FoldedPlaces<Page: View>: View {
     /// The shell's language where nothing is given, which is the app's only caller. A test names
     /// one, so it need not set the global every other suite reads.
     var language: DummyLanguage? = nil
+    /// The place in front chosen again (#442). A `Menu` and not a `Picker` for this: a picker
+    /// says nothing of a choice that changes nothing.
+    var onAgain: () -> Void = {}
     @ViewBuilder var page: () -> Page
 
     var body: some View {
@@ -156,12 +159,17 @@ struct FoldedPlaces<Page: View>: View {
         // **One sentence, asked for once and handed to both**, so a pointer's help and a
         // listener cannot come to be told different things.
         let said = ShellFold.spoken(places, language: language)
-        return Picker(L10n.t("shell.places.fold", language: language), selection: $place) {
+        return Menu {
             ForEach(places) { item in
-                Label(item.title(language: language), systemImage: item.symbolName).tag(item)
+                Button {
+                    if item == place { onAgain() } else { place = item }
+                } label: {
+                    Label(item.title(language: language), systemImage: item == place ? "checkmark" : item.symbolName)
+                }
             }
+        } label: {
+            Label(place.title(language: language), systemImage: place.symbolName)
         }
-        .pickerStyle(.menu)
         .fixedSize()
         .help(said)
         .accessibilityLabel(said)

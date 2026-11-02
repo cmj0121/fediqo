@@ -114,6 +114,7 @@ struct FoundTagsList<Lead: View>: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    Color.clear.frame(height: 0).id(ShellPageTop.id).accessibilityHidden(true)
                     lead
                     ForEach(said.rows) { row in
                         SearchFoundRowView(row: row, selected: row.id == selectedID, onPress: { press(row) }, onOpen: { onOpen(row) })
@@ -138,8 +139,7 @@ struct FoundTagsList<Lead: View>: View {
                 withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) }
             }
             .onChange(of: jumpToTop) { _, _ in
-                guard let first = said.rows.first else { return }
-                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(first.id, anchor: .top) }
+                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(ShellPageTop.id, anchor: .top) }
             }
         }
     }

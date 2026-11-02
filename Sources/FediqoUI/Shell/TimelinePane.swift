@@ -126,6 +126,9 @@ struct TimelinePane: View {
     /// Nothing here but a finger (#303): the list marks the post being read as it scrolls, one
     /// press opens a row, and the selection is neither drawn nor followed. See `ShellReadingMark`.
     @Environment(\.shellTouch) private var touch
+    @Environment(\.shellPressedAgain) private var again
+    /// The head of the list, over what the sources found as well as the posts.
+    private static let top = "timeline.list.top"
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.shellLayout) private var shellLayout
     /// Counted up each time a timeline returned to has a post to put back at the top (#303).
@@ -1223,6 +1226,7 @@ struct TimelinePane: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    Color.clear.frame(height: 0).id(Self.top).accessibilityHidden(true)
                     // What the sources found beside posts (#319): short bands over the posts,
                     // which begin under them exactly as they always did.
                     if !bands.isEmpty {
@@ -1422,7 +1426,8 @@ struct TimelinePane: View {
                 if !now { mark.handed = next }
                 selectedID = next
             }
-            .onChange(of: jumpToTop) { _, _ in jumpedToTop(first: items.first?.id, proxy: proxy) }
+            // Over found rows the top is theirs, which is where `g` lights (#442).
+            .onChange(of: jumpToTop) { _, _ in jumpedToTop(first: bands.isEmpty ? items.first?.id : Self.top, proxy: proxy) }
             // The press that goes up to what arrived on a line (#325) goes where `g` goes.
             .onChange(of: session.lines.wentUp) { _, _ in jumpedToTop(first: items.first?.id, proxy: proxy) }
         }
@@ -1638,7 +1643,9 @@ struct TimelinePane: View {
             accessory: missing ? "circle.dashed" : nil,
             hint: missing ? L10n.t("timeline.pill.missing.hint") : nil
         ) {
-            session.goToTimeline(query)
+            // The one in front pressed again goes to its top (#442). A second press or a hold
+            // still edits it: these do not wait to see which it was.
+            if query == session.timelineID { again?.go() } else { session.goToTimeline(query) }
         }
         .simultaneousGesture(
             TapGesture(count: 2).onEnded { session.editTimeline(query) }

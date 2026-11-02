@@ -99,7 +99,7 @@ struct AccountPane: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: ShellSpace.room) {
                     // What the page stands under stays where it is: a swipe begins under it.
-                    masthead.headOfPage()
+                    masthead.headOfPage().id(ShellPageTop.id)
                     if let held = session.signUp.heldStep {
                         SignUpHeldLine(
                             said: held,
@@ -114,6 +114,7 @@ struct AccountPane: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .scrollIndicators(.never)
+            .modifier(GoesToPageTop())
             .clearsFloatingCorner()
             // A sideways swipe goes to the tab beside, where the page has tabs (#305).
             .modifier(SwipesTabs(
