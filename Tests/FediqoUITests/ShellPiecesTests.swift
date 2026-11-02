@@ -235,6 +235,10 @@ struct ShellPiecesTests {
         #expect(ShellListEntry.pressed(3, selected: 3) == .open)
         #expect(DummyCommand.tapped("a", selected: "a") == ShellListEntry.pressed("a", selected: "a"))
         #expect(DummyCommand.tapped("a", selected: "b") == ShellListEntry.Tap.select)
+        // A finger opens on the first press, whatever the id; a pointer still lights a row first.
+        #expect(DummyCommand.tapped("a", selected: nil, touch: true) == .open)
+        #expect(DummyCommand.tapped(true, selected: nil as Bool?, touch: true) == .open)
+        #expect(DummyCommand.tapped(true, selected: false, touch: false) == .select)
         #expect(L10n.t("list.open.hint") != "list.open.hint")
     }
 
