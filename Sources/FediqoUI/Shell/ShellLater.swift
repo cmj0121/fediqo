@@ -186,8 +186,8 @@ final class ShellLater {
                         // The new one is not made until each is ready (#438), and the line says so.
                         if !file.ready {
                             self.told = String(format: L10n.t("waiting.preparing"), host)
+                            defer { self.told = nil }
                             try await write.awaitFile(file.id, pace: session.outbox.filePace)
-                            self.told = nil
                         }
                         ids.append(file.id)
                     }

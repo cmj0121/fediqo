@@ -63,6 +63,16 @@ struct MastodonFileTests {
         #expect(await stoppedServer.count(at) == 1)
     }
 
+    @Test("A wait asks again past a blip, and stops at the source's own word against the ask")
+    func waitsPastABlip() async throws {
+        let at = "GET /api/v1/media/5"
+        let (blip, _) = try await write([at: [.init(body: "bad", status: 502), .init(body: Captures.ready)]])
+        try await blip.awaitFile("5", pace: Self.instant)
+        let (refused, server) = try await write([at: [.init(body: "{}", status: 403)]])
+        await #expect(throws: (any Error).self) { try await refused.awaitFile("5", pace: Self.instant) }
+        #expect(await server.count(at) == 1)
+    }
+
     @Test("A description is corrected at the source, and its refusal is thrown")
     func correcting() async throws {
         let at = "PUT /api/v1/media/5"

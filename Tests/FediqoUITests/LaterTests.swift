@@ -244,6 +244,27 @@ struct LaterTests {
         #expect(session.changes.mediaNote?.contains("25 scheduled posts") == true)
     }
 
+    @Test("A file that could not be prepared does not leave the line saying it is being prepared")
+    func preparingIsNotLeftSaid() async throws {
+        let at = Date().addingTimeInterval(7200)
+        let server = LaterSource([
+            "GET /api/v1/scheduled_statuses": [("[\(Self.waiting("1", "before", at: at))]", 200)],
+            "POST /api/v2/media": [(#"{"id":"m1"}"#, 202)],
+            "GET /api/v1/media/m1": [(#"{"error":"Error processing thumbnail for uploaded media"}"#, 422)],
+        ])
+        let session = try await run(server)
+        session.later.show(host: Self.host, in: session)
+        await session.later.settled()
+        let old = try #require(session.later.posts.first)
+        session.changes.startWaiting(old, host: Self.host, in: session)
+        session.changes.draft.media = [UnsentMedia(bytes: Data("v".utf8), mime: "video/mp4", name: "v.mp4")]
+        session.later.change(old, to: session.changes.draft, at: Self.host, in: session)
+        await session.later.settled()
+        let said = try #require(session.later.said(in: session))
+        #expect(said.told == nil)
+        #expect(said.missed == String(format: L10n.t("waiting.unprepared"), Self.host))
+    }
+
     @Test("A waiting post is changed through the change sheet, its time and who may read it among what changes: the new one first, the old let go after; where the old cannot go both are flagged, the one before said to wait without its files")
     func changedAndPaired() async throws {
         let at = Date().addingTimeInterval(7200)

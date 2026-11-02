@@ -264,18 +264,35 @@ public struct MastodonWrite: Sendable {
 
     /// Waits until `id` is ready, asking at `pace`: **bounded by its rounds, and ended by a
     /// cancelling**. Throws `MastodonFileError` where it could not be prepared, is gone, or was
-    /// still being prepared at the last round; a failure to ask is thrown as it came.
+    /// still being prepared at the last round. **A failure to ask is asked again within the bound**,
+    /// but the source's own word against the ask (a 4xx but those something in front of it says),
+    /// which is thrown as it came.
     public func awaitFile(_ id: String, pace: FilePace = .standing) async throws {
         for round in 0..<pace.rounds {
             try Task.checkCancellation()
-            switch try await standing(ofFile: id) {
-            case .ready: return
-            case .unprepared: throw MastodonFileError.unprepared
-            case .gone: throw MastodonFileError.gone
-            case .preparing: try await pace.wait(round)
-            }
+            do {
+                switch try await standing(ofFile: id) {
+                case .ready: return
+                case .unprepared: throw MastodonFileError.unprepared
+                case .gone: throw MastodonFileError.gone
+                case .preparing: break
+                }
+            } catch let error where Self.endsFileWait(error) {
+                throw error
+            } catch {}
+            try await pace.wait(round)
         }
         throw MastodonFileError.stillPreparing
+    }
+
+    /// Whether a failure ends a wait for a file: what became of the file, a cancelling, or the
+    /// source's own word against the ask. No answer, a fault past its door or what something in
+    /// front of it says do not.
+    private static func endsFileWait(_ error: any Error) -> Bool {
+        if error is MastodonFileError || Cancellation.happened(error) { return true }
+        guard let auth = error as? MastodonAuthError else { return false }
+        if case .http(let status) = auth { return (400..<500).contains(status) && ![408, 409, 425, 429, 499].contains(status) }
+        return true
     }
 
     /// Corrects what a file not yet on a post says of itself. A source takes this while it is being
