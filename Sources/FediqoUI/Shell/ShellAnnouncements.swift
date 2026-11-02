@@ -162,7 +162,7 @@ final class ShellAnnouncements {
     @ObservationIgnored private var heardMeanwhile: Set<String> = []
     @ObservationIgnored private let errands: PageErrands
     @ObservationIgnored private let readers: PageReaders
-    @ObservationIgnored private let hosts: ShellHostsKnown
+    @ObservationIgnored let hosts: ShellHostsKnown
     /// How long one ask may take. A test shortens it.
     @ObservationIgnored var deadline: Duration = .seconds(30)
     /// The clock the fifteen minutes are read on. A test turns it by hand.

@@ -35,7 +35,7 @@ enum NoticeShape: Equatable {
     /// to another or split here.
     static func of(_ notice: Notice) -> NoticeShape {
         switch notice.kind {
-        case .mention, .quote, .poll, .update:
+        case .mention, .quote, .poll, .update, .quotedUpdate:
             return notice.post.map { .post($0) } ?? .line
         case .unknown("status"):
             return notice.post.map { .post($0) } ?? .line
@@ -46,7 +46,7 @@ enum NoticeShape: Equatable {
             return notice.people.count == 1 && notice.count <= 1 ? .follower(first) : .faces(nil)
         case .followRequest:
             return notice.people.first.map { .request($0) } ?? .line
-        case .server, .unknown:
+        case .addedToCollection, .collectionUpdate, .server, .unknown:
             return .line
         }
     }

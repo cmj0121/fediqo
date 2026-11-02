@@ -443,6 +443,7 @@ private struct GatheredDTO: Decodable, Sendable {
         let sampleAccountIds: StatusDTO.Lenient<[StatusDTO.Lenient<WireNumber>]>?
         let statusId: StatusDTO.Lenient<WireNumber>?
         let report: StatusDTO.Lenient<ReportIDDTO>?
+        let collection: StatusDTO.Lenient<NamedCollectionDTO>?
     }
 
     /// What makes a notice of one of this answer's lines, with the side lists joined once.
@@ -465,7 +466,7 @@ private struct GatheredDTO: Decodable, Sendable {
                 people: (line.sampleAccountIds?.value ?? []).compactMap { ($0.value?.text).flatMap { people[$0] } },
                 count: max(1, line.notificationsCount?.value?.count ?? 1),
                 post: post, at: at, newestID: newest, oldestID: line.pageMinId?.value?.text ?? newest,
-                report: line.report?.value?.named
+                report: line.report?.value?.named, collection: line.collection?.value?.named
             )
         }
     }
@@ -480,6 +481,7 @@ private struct SingleDTO: Decodable, Sendable {
     let account: StatusDTO.Lenient<PersonDTO>?
     let status: StatusDTO.Lenient<StatusDTO>?
     let report: StatusDTO.Lenient<ReportIDDTO>?
+    let collection: StatusDTO.Lenient<NamedCollectionDTO>?
 
     /// A line of one: one person, a count of one, named by its own id. Placed as a gathered
     /// line is: at its own moment, at its post's where it has none, and nothing where it has
@@ -490,8 +492,19 @@ private struct SingleDTO: Decodable, Sendable {
         return Notice(
             source: source, handle: .one(id: id.text), kind: Notice.Kind(type: type),
             people: (account?.value).map { [$0.asPerson(host: source.host)] } ?? [],
-            post: post, at: at, newestID: id.text, oldestID: id.text, report: report?.value?.named
+            post: post, at: at, newestID: id.text, oldestID: id.text, report: report?.value?.named,
+            collection: collection?.value?.named
         )
+    }
+}
+
+/// The collection a notice of one carries (#430), as far as what it is called.
+private struct NamedCollectionDTO: Decodable, Sendable {
+    let name: String
+
+    var named: String? {
+        let line = LineText.oneLine(name)
+        return line.isEmpty ? nil : line
     }
 }
 

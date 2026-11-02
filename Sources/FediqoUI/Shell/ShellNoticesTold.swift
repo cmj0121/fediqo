@@ -375,10 +375,16 @@ final class ShellNoticesTold {
         }
     }
 
-    /// The source's own words for the kinds switched off. **Everything else as one** is no word of
-    /// the source's, and cannot be asked for: those stay counted.
+    /// The kinds the source's page lists switches for: those it has not said it lacks (#430).
+    func kinds(host: String, in session: ShellSession) -> [String] {
+        let known = session.quoting.hosts
+        return NoticeWords.kinds { known?.has($0, at: host.lowercased()) ?? .unsaid }
+    }
+
+    /// The source's own words for the kinds switched off, **only those it has** (#430). **Everything
+    /// else as one** is no word of the source's, and cannot be asked for: those stay counted.
     private func excluded(host: String, in session: ShellSession) -> [String] {
-        choice(host: host).off.subtracting([Notice.Kind.unknownKinds]).sorted()
+        choice(host: host).off.intersection(kinds(host: host, in: session)).subtracting([Notice.Kind.unknownKinds]).sorted()
     }
 
     /// What the source's page says of why the count may not move as expected: the source did not

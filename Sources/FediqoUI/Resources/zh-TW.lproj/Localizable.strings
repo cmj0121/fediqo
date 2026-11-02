@@ -1686,6 +1686,14 @@
 "notices.what.favourite" = "收藏了你的貼文";
 "notices.what.follow" = "跟隨了你";
 "notices.what.followRequest" = "請求跟隨你";
+"notices.what.quoted_update" = "修改了一則你引用的貼文";
+"notices.what.added_to_collection" = "把你加進了一個收藏集";
+"notices.what.added_to_collection.named" = "把你加進了收藏集 %@";
+"notices.what.collection_update" = "修改了一個你在其中的收藏集";
+"notices.what.collection_update.named" = "修改了你在其中的收藏集 %@";
+"notices.kind.quoted_update" = "引用的貼文被修改";
+"notices.kind.added_to_collection" = "被加進收藏集";
+"notices.kind.collection_update" = "收藏集被修改";
 "notices.what.quote" = "引用了你的貼文";
 "notices.what.poll" = "發起的投票結束了";
 "notices.what.update" = "編輯了一則你轉發過的貼文";

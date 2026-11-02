@@ -568,4 +568,34 @@ struct NoticeWordsTests {
             #expect(missing.isEmpty, "\(lproj) is missing \(missing)")
         }
     }
+
+    @Test("A quoted post changed, and a collection's news, each read as what happened, in each language, with a glyph of their own")
+    func newerKinds() {
+        let ada = NoticePerson(handle: "@ada@a.example", name: "Ada")
+        let source = Source(host: "a.example", kind: .mastodon)
+        func notice(_ kind: Notice.Kind, collection: String? = nil, post: Note? = nil) -> Notice {
+            Notice(
+                source: source, handle: .one(id: "1"), kind: kind, people: [ada], post: post, at: Date(timeIntervalSince1970: 0),
+                newestID: "1", oldestID: "1", collection: collection
+            )
+        }
+        #expect(NoticeWords.what(notice(.quotedUpdate), language: .english) == "changed a post you quoted")
+        #expect(NoticeWords.what(notice(.addedToCollection, collection: "Friends"), language: .english) == "added you to the collection Friends")
+        #expect(NoticeWords.what(notice(.addedToCollection), language: .english) == "added you to a collection")
+        #expect(NoticeWords.what(notice(.collectionUpdate, collection: "Friends"), language: .taiwanese).contains("Friends"))
+        for kind in [Notice.Kind.quotedUpdate, .addedToCollection, .collectionUpdate] {
+            let line = notice(kind)
+            #expect(NoticeWords.readsOnFromWho(line) && NoticeWords.symbolSays(line))
+            for language in [DummyLanguage.english, .taiwanese] {
+                #expect(!NoticeWords.what(line, language: language).contains("notices.what"), "\(kind)")
+                #expect(NoticeWords.kindName(kind.narrowedAs, language: language) != kind.narrowedAs, "\(kind)")
+            }
+        }
+        #expect(Set([Notice.Kind.quotedUpdate, .addedToCollection, .collectionUpdate].map { NoticeWords.symbol(notice($0)) }).count == 3)
+        // A collection's news opens its owner's page, where their collections are listed.
+        guard case .person = NoticeWords.opens(notice(.addedToCollection)) else {
+            Issue.record("a collection's news opens nothing")
+            return
+        }
+    }
 }

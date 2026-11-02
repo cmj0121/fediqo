@@ -1567,6 +1567,8 @@ struct AnnouncementsAsk: ViewModifier {
                 announcements.checked(host, in: session)
                 Task { await session.noticesTold.roundAnswered(host: host, in: session) }
             }
+            // What each source says it has, for what a source's notices page lists (#430).
+            session.quoting.hosts = announcements.hosts
             session.lines.announced = { [weak session, weak announcements] host in
                 guard let session, let announcements else { return }
                 await announcements.heard(host, in: session)

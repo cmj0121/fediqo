@@ -34,6 +34,8 @@ struct NoticesToldControl: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, ShellSpace.pad)
             .padding(.bottom, ShellSpace.step)
+            // What the source says of itself decides which kinds are listed: asked as the page opens.
+            .task(id: host) { await session.quoting.hosts?.hear(host, in: session) }
         }
     }
 
@@ -70,7 +72,7 @@ struct NoticesToldControl: View {
                 .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .padding(.top, ShellSpace.tight)
-            ForEach(Self.kinds, id: \.self) { kind in
+            ForEach(session.noticesTold.kinds(host: host, in: session), id: \.self) { kind in
                 Toggle(NoticeWords.kindName(kind), isOn: Binding(
                     get: { !choice.off.contains(kind) },
                     set: { told.tell(kind, $0, host: host) }
@@ -91,7 +93,4 @@ struct NoticesToldControl: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
-
-    /// The kinds the choice lists: every kind a source may send, then everything else as one.
-    static let kinds: [String] = NoticeWords.named.map(\.narrowedAs) + [Notice.Kind.unknownKinds]
 }

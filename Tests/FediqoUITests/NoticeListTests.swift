@@ -811,7 +811,7 @@ struct NoticeListTests {
         let (session, server, _) = try await shell([
             "\(Self.a)\(Self.v1)": Self.page(
                 Self.one(5, at: 50, type: "mention"), Self.one(4, at: 40), Self.one(3, at: 30, type: "status"),
-                Self.one(2, at: 20, type: "quoted_update"), Self.one(1, at: 10, type: "admin.report")
+                Self.one(2, at: 20, type: "annual_report"), Self.one(1, at: 10, type: "admin.report")
             ),
             "\(Self.a)\(Self.v1)?1": Self.page(),
         ], signedIn: [Self.a: Self.reads])

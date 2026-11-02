@@ -993,6 +993,9 @@ of a request you let through come in once the source has moved them. With the sy
 arriving while Fediqo is behind other windows is shown by the system once, and pressing it opens that
 notice; while Fediqo is in front, the system shows nothing.
 
+A post you quoted being changed, being put in a collection, and a collection you are in changing are each a notice
+of their own, where the source has them. One about a collection opens its owner's page.
+
 The count where notices are reached is the source's own, read with each read that reaches it, so it
 agrees with its other clients. Opening notices tells the source they are read where the sign-in may
 write; one that only reads says so on the source's page, and its count falls when another client tells it.

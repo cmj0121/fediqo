@@ -25,6 +25,9 @@ enum NoticeWords {
         case .quote: L10n.t("notices.what.quote", language: language)
         case .poll: L10n.t("notices.what.poll", language: language)
         case .update: L10n.t("notices.what.update", language: language)
+        case .quotedUpdate: L10n.t("notices.what.quoted_update", language: language)
+        case .addedToCollection: collectionWords("added_to_collection", notice, language: language)
+        case .collectionUpdate: collectionWords("collection_update", notice, language: language)
         case .server(let word):
             (notice.people.isEmpty ? nil : serverWord(word + ".by", language: language))
                 ?? serverWord(word, language: language)
@@ -38,7 +41,8 @@ enum NoticeWords {
     /// server's own word and an unknown kind are whole sentences, and stand beside the name.
     static func readsOnFromWho(_ notice: Notice, language: DummyLanguage? = nil) -> Bool {
         switch notice.kind {
-        case .mention, .reblog, .favourite, .follow, .followRequest, .quote, .poll, .update: true
+        case .mention, .reblog, .favourite, .follow, .followRequest, .quote, .poll, .update,
+             .quotedUpdate, .addedToCollection, .collectionUpdate: true
         case .server(let word): !notice.people.isEmpty && serverWord(word + ".by", language: language) != nil
         case .unknown: false
         }
@@ -55,6 +59,9 @@ enum NoticeWords {
         case .quote: "quote.opening"
         case .poll: "chart.bar"
         case .update: "pencil"
+        case .quotedUpdate: "quote.closing"
+        case .addedToCollection: "rectangle.stack.badge.plus"
+        case .collectionUpdate: "rectangle.stack"
         case .server: "server.rack"
         case .unknown: "questionmark.circle"
         }
@@ -65,7 +72,8 @@ enum NoticeWords {
     /// those keeps its words where they can be read.
     static func symbolSays(_ notice: Notice) -> Bool {
         switch notice.kind {
-        case .mention, .reblog, .favourite, .follow, .followRequest, .quote, .poll, .update: true
+        case .mention, .reblog, .favourite, .follow, .followRequest, .quote, .poll, .update,
+             .quotedUpdate, .addedToCollection, .collectionUpdate: true
         case .server, .unknown: false
         }
     }
@@ -184,6 +192,13 @@ enum NoticeWords {
         )
     }
 
+    /// What happened to a collection, by its name where this run was told it, and without one where
+    /// the notice was read back from this device.
+    private static func collectionWords(_ word: String, _ notice: Notice, language: DummyLanguage?) -> String {
+        guard let name = notice.collection else { return L10n.t("notices.what.\(word)", language: language) }
+        return String(format: L10n.t("notices.what.\(word).named", language: language), name)
+    }
+
     /// What one of the server's own words means, where this build has a sentence for it.
     private static func serverWord(_ word: String, language: DummyLanguage?) -> String? {
         let key = "notices.server." + word
@@ -196,13 +211,28 @@ enum NoticeWords {
     /// The kinds every Mastodon may send, in the order the choice lists them.
     static let named: [Notice.Kind] = [.mention, .reblog, .favourite, .follow, .followRequest, .quote, .poll, .update]
 
+    /// The kinds only some sources have, and what says one has them. **Asked of the source's own
+    /// account of itself** (`MastodonHostThing`): a source that says it has none is neither asked to
+    /// leave them out of anything, nor offered a switch for them. One that has said nothing is
+    /// offered them, as anything unsaid is.
+    static let newer: [(kind: Notice.Kind, thing: MastodonHostThing)] = [
+        (.quotedUpdate, .quotes), (.addedToCollection, .collections), (.collectionUpdate, .collections),
+    ]
+
+    /// The kinds a source's switches list, by their words: every kind, less those `has` says it lacks.
+    static func kinds(has: (MastodonHostThing) -> MastodonHostHas) -> [String] {
+        named.map(\.narrowedAs) + newer.filter { has($0.thing) != .absent }.map(\.kind.narrowedAs) + [Notice.Kind.unknownKinds]
+    }
+
     /// The kinds the choice offers, each under the word it is narrowed by: the named ones, then
     /// each of the server's own words that is held or left out now, then every unknown kind as
     /// one. A word the server has never sent is not offered — nobody can say what it would hide.
     static func narrowable(held: [Notice], hidden: Set<String>) -> [String] {
         let fixed = named.map(\.narrowedAs)
+        let newerWords = Set(newer.map(\.kind.narrowedAs))
         let servers = held.compactMap { notice -> String? in
-            if case .server = notice.kind { notice.kind.narrowedAs } else { nil }
+            if case .server = notice.kind { return notice.kind.narrowedAs }
+            return newerWords.contains(notice.kind.narrowedAs) ? notice.kind.narrowedAs : nil
         }
         let extra = Set(servers).union(hidden).subtracting(fixed).subtracting([Notice.Kind.unknownKinds])
         return fixed + extra.sorted() + [Notice.Kind.unknownKinds]

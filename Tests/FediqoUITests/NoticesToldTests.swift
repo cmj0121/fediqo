@@ -390,6 +390,25 @@ struct NoticesToldTests {
         #expect(session.noticesTold.countWords(host: Self.host, in: session)?.contains("only reads") == true)
     }
 
+    @Test("A source that says it lacks a kind is offered no switch for it, and is never asked to leave it out")
+    func lackedKinds() async throws {
+        let (session, server) = try await make()
+        let hosts = ShellHostsKnown(errands: PageErrands())
+        session.quoting.hosts = hosts
+        session.noticesTold.choose(true, host: Self.host)
+        #expect(session.noticesTold.kinds(host: Self.host, in: session).contains("added_to_collection"), "unsaid: offered")
+        session.noticesTold.tell("added_to_collection", false, host: Self.host)
+        session.noticesTold.tell("follow", false, host: Self.host)
+        await session.noticesTold.afterRead(in: session)
+        #expect(await server.queries.last?.contains("exclude_types%5B%5D=added_to_collection") == true)
+
+        hosts.notFound(.collections, at: Self.host, round: hosts.round(at: Self.host))
+        #expect(!session.noticesTold.kinds(host: Self.host, in: session).contains("added_to_collection"))
+        await session.noticesTold.afterRead(in: session)
+        let last = try #require(await server.queries.last)
+        #expect(!last.contains("added_to_collection") && last.contains("exclude_types%5B%5D=follow"))
+    }
+
     @Test("It says plainly, in each language, that notices come only while Fediqo is open, and why", arguments: [
         "source.told.open", "source.told.help", "source.told.system.help",
     ])

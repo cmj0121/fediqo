@@ -1730,6 +1730,14 @@
 "notices.what.favourite" = "favourited your post";
 "notices.what.follow" = "followed you";
 "notices.what.followRequest" = "asked to follow you";
+"notices.what.quoted_update" = "changed a post you quoted";
+"notices.what.added_to_collection" = "added you to a collection";
+"notices.what.added_to_collection.named" = "added you to the collection %@";
+"notices.what.collection_update" = "changed a collection you are in";
+"notices.what.collection_update.named" = "changed the collection %@, which you are in";
+"notices.kind.quoted_update" = "Quoted posts changed";
+"notices.kind.added_to_collection" = "Added to a collection";
+"notices.kind.collection_update" = "Collections changed";
 "notices.what.quote" = "quoted your post";
 "notices.what.poll" = "ran a poll that has ended";
 "notices.what.update" = "edited a post you boosted";
