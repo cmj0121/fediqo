@@ -335,6 +335,26 @@ struct NoticeListTests {
         #expect(drawn(list.lines) == ["a4", "b8", "a3", "a2", "a1"])
     }
 
+    @Test("A line opening reads only its own source, and leaves a reading on out to land")
+    func caughtUpIsOneSource() async throws {
+        let gate = Gate()
+        let (session, server, _) = try await shell(Self.two)
+        let list = session.noticeList
+        await list.read(in: session)
+        await server.set("\(Self.a)\(Self.v1)?3", .held(gate, Self.body([Self.one(2, at: 30), Self.one(1, at: 20)])))
+        let onward = Task { await list.readOn(in: session) }
+        await met("the next stretch is asked for", by: onward) { await server.reads.last == "\(Self.a)\(Self.v1)?3" }
+        let before = await server.reads.count
+        let caught = Task { await session.noticesTold.caughtUp(host: Self.b, in: session) }
+        await Task.yield()
+        await gate.open()
+        await onward.value
+        await caught.value
+        let since = await server.reads.dropFirst(before)
+        #expect(Array(since) == ["\(Self.b)\(Self.v1)"], "only the source whose line opened, once")
+        #expect(drawn(list.lines) == ["a4", "b8", "a3", "a2", "a1"], "the reading on landed")
+    }
+
     @Test("A gathered line the source cut at a page edge comes back folded into the line held")
     func aGatheredLineIsFoldedOnReadingOn() async throws {
         let (session, _, _) = try await shell([

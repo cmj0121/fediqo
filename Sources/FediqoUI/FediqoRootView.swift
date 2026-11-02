@@ -3118,7 +3118,7 @@ public struct FediqoRootView: View {
                 place: placeBinding,
                 expanded: $railExpanded,
                 availability: availability,
-                counts: [.notices: session.noticesTold.count],
+                counts: [.notices: session.noticesTold.count(in: session)],
                 onAgain: pressedAgain,
                 onCompose: {
                     guard availability.canCompose else { return }
@@ -3213,7 +3213,7 @@ public struct FediqoRootView: View {
                             .environment(\.symbolVariants, .none)
                     }
                     // What was told since the notices page was last in front (#324).
-                    .badge(item == .notices ? session.noticesTold.count : 0)
+                    .badge(item == .notices ? session.noticesTold.count(in: session) : 0)
                     .tag(item)
             }
         }

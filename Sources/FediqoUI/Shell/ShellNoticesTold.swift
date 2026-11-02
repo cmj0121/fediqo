@@ -59,6 +59,17 @@ struct UserSystemNotices: SystemNotices {
     }
 }
 
+extension Notification.Name {
+    /// Fediqo became the app in front.
+    static var fediqoCameForward: Notification.Name {
+        #if os(macOS)
+        NSApplication.didBecomeActiveNotification
+        #else
+        UIApplication.didBecomeActiveNotification
+        #endif
+    }
+}
+
 /// What the system says of the notices it showed for Fediqo (#428): a press on one goes to the
 /// session's `ShellNoticesTold`, and none is shown while Fediqo is in front. Installed by the app
 /// alone (`listen`), before its launch ends: a test process has no bundle the centre will serve.
@@ -169,7 +180,7 @@ final class ShellNoticesTold {
     private(set) var counts: [String: Int] = [:]
     /// Why a source's count is not its word just now, by host.
     private(set) var countSaid: [String: CountSaid] = [:]
-    /// What is drawn where notices are reached: every source's own word, added.
+    /// Every source's last word, added. What is drawn is `count(in:)`.
     var count: Int { counts.values.reduce(0, +) }
     /// Whether the system said no: the switch then stays off, and nothing asks again.
     private(set) var systemRefused = false
@@ -177,10 +188,10 @@ final class ShellNoticesTold {
     @ObservationIgnored var pageInFront = false
     @ObservationIgnored private let defaults: UserDefaults?
     @ObservationIgnored let system: any SystemNotices
-    /// Whether a read of the notices is on its way for what was told, and whether another was
-    /// told meanwhile: what was told is listed by one read after the one out.
+    /// Whether a read of the notices is on its way for what was told, and which sources told more
+    /// meanwhile: what was told is listed by one read of each after the one out.
     @ObservationIgnored private var reading = false
-    @ObservationIgnored private var again = false
+    @ObservationIgnored private var again: Set<String> = []
     /// The notices told this run, by id, oldest first: one told again is not told twice, and a press
     /// on the system's notice opens the one it showed. Only the last `keptTold` are kept.
     @ObservationIgnored private var toldThisRun: [String: Notice] = [:]
@@ -290,13 +301,15 @@ final class ShellNoticesTold {
                 )
             }
         }
-        await list(in: session)
+        await list(host: notice.source.host, in: session)
     }
 
     /// The list read again with nothing counted or shown: the line just opened, so what was told
     /// while none was is brought in (#426), or the source said requests let through have landed.
-    func caughtUp(in session: ShellSession) async {
-        await list(in: session)
+    ///
+    /// **Only that source**, and a reading on out is left to land (`ShellNoticeList.readTop`).
+    func caughtUp(host: String, in session: ShellSession) async {
+        await list(host: host, in: session)
     }
 
     /// The system's notice with this id was pressed (#428).
@@ -311,18 +324,15 @@ final class ShellNoticesTold {
         return pressedID.flatMap { toldThisRun[$0] }
     }
 
-    /// The notices page's own read, once for every notice told while one is out.
-    private func list(in session: ShellSession) async {
-        guard !reading else {
-            again = true
-            return
-        }
+    /// The notices page's own read of the source that told, once for all it told while one is out.
+    private func list(host raw: String, in session: ShellSession) async {
+        again.insert(raw.lowercased())
+        guard !reading else { return }
         reading = true
         defer { reading = false }
-        repeat {
-            again = false
-            await session.noticeList.read(in: session)
-        } while again
+        while let host = again.popFirst() {
+            await session.noticeList.readTop(host: host, in: session)
+        }
     }
 
     // MARK: - The source's count
@@ -333,16 +343,33 @@ final class ShellNoticesTold {
         if inFront { await afterRead(in: session) }
     }
 
-    /// A read of the notices landed: with the page in front the source is told how far, and every
-    /// source told of says its count.
-    func afterRead(in session: ShellSession) async {
+    /// Fediqo came back in front of other windows: with the page up, what it shows is now seen.
+    func cameForward(in session: ShellSession) async {
+        if pageInFront { await afterRead(in: session) }
+    }
+
+    /// What is drawn where notices are reached: the count of sources told of now, so one signed out
+    /// of or removed draws nothing from the moment it went, with or without a read.
+    func count(in session: ShellSession) -> Int {
         let hosts = hosts(in: session)
+        return counts.filter { hosts.contains($0.key) }.values.reduce(0, +)
+    }
+
+    private func prune(keeping hosts: [String]) {
         for known in Set(counts.keys).union(countSaid.keys).subtracting(hosts) {
             counts[known] = nil
             countSaid[known] = nil
         }
-        for host in hosts {
-            if pageInFront { await tellRead(host, in: session) }
+    }
+
+    /// A read of the notices landed, of every source or of `only`: **with the page up and Fediqo
+    /// really in front** the source is told how far — behind other windows nobody has seen them —
+    /// and each says its count.
+    func afterRead(only: String? = nil, in session: ShellSession) async {
+        let hosts = hosts(in: session)
+        prune(keeping: hosts)
+        for host in hosts where only == nil || only?.lowercased() == host {
+            if pageInFront, system.inFront() { await tellRead(host, in: session) }
             await readCount(host: host, in: session)
         }
     }
@@ -350,7 +377,9 @@ final class ShellNoticesTold {
     /// Where the source answered a round of reading, its count is read with it.
     func roundAnswered(host raw: String, in session: ShellSession) async {
         let host = raw.lowercased()
-        guard hosts(in: session).contains(host) else { return }
+        let hosts = hosts(in: session)
+        prune(keeping: hosts)
+        guard hosts.contains(host) else { return }
         await readCount(host: host, in: session)
     }
 
@@ -359,7 +388,9 @@ final class ShellNoticesTold {
         let left = excluded(host: host, in: session)
         let door = session.mastodon.authorized(token: sent, within: session.noticeList.deadline, for: .notices)
         let result = await ShellNoticeActs.run(session.reach.notices(door)) { try await $0.unreadCount(excluding: left) }
-        guard ShellNoticeActs.counts(result, of: host, sentWith: sent, in: session) == .held else { return }
+        guard ShellNoticeActs.counts(result, of: host, sentWith: sent, in: session) == .held,
+              hosts(in: session).contains(host) // Told off, or the source removed, while this was out.
+        else { return }
         switch result {
         case .success(let told):
             counts[host] = told

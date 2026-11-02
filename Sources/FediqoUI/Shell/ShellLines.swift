@@ -358,7 +358,7 @@ final class ShellLines {
         // What was told while no line was open, read now the line is hearing what comes after (#426).
         if want.notices {
             guard !Task.isCancelled else { return .dropped }
-            await session.noticesTold.caughtUp(in: session)
+            await session.noticesTold.caughtUp(host: host, in: session)
         }
         standing[host] = .open(since: now())
         do {
@@ -368,7 +368,7 @@ final class ShellLines {
                     continue
                 }
                 if want.notices, MastodonNotices.saysMerged(event) {
-                    await session.noticesTold.caughtUp(in: session)
+                    await session.noticesTold.caughtUp(host: host, in: session)
                     continue
                 }
                 if MastodonLine.announcementEvents.contains(event.name) {

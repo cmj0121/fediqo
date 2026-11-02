@@ -478,6 +478,27 @@ final class ShellNoticeList {
         await session.noticesTold.afterRead(in: session)
     }
 
+    /// One source's newest stretch, for a line that opened or told something (#426). **Not `read`**:
+    /// no other source is asked, and a reading on or a read out is waited for and never ended. A
+    /// reader's stop stands as it was.
+    func readTop(host raw: String, in session: ShellSession) async {
+        if !followed { await session.adoptHeldNotices() }
+        while let work {
+            await work.task.value
+            guard !Task.isCancelled else { return }
+        }
+        let host = raw.lowercased()
+        let stood = halted
+        settle(in: session)
+        let asks = Self.asked(in: session).filter { $0.host.lowercased() == host }.map {
+            Ask(source: $0, before: nil, gathered: reaches[host]?.gathered)
+        }
+        locked.remove(host)
+        await run(asks, fromTop: Set(asks.map(\.host)), in: session)
+        halted = stood
+        await session.noticesTold.afterRead(only: host, in: session)
+    }
+
     /// The next, older stretch: the foot of the list reached or pressed.
     ///
     /// **Asked only of the sources standing at the floor** — those the list stops at. One read

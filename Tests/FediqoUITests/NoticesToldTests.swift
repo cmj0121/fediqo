@@ -354,7 +354,7 @@ struct NoticesToldTests {
 
     @Test("The page in front tells the source the newest read, by the numbers' order, and then reads its count")
     func pageTells() async throws {
-        let (session, server) = try await make(writing: true)
+        let (session, server) = try await make(writing: true, system: HeldSystem(.allowed, front: true))
         session.noticesTold.choose(true, host: Self.host)
         await server.setList(Self.list)
         await server.setUnread(0)
@@ -366,9 +366,40 @@ struct NoticesToldTests {
         #expect(session.noticesTold.count == 0)
     }
 
+    @Test("Behind other windows nothing is told read, page up or not; Fediqo coming back to front with the page up tells it")
+    func behindTellsNothing() async throws {
+        let system = HeldSystem(.allowed, front: false)
+        let (session, server) = try await make(writing: true, system: system)
+        session.noticesTold.choose(true, host: Self.host)
+        await server.setList(Self.list)
+        await session.noticeList.read(in: session)
+        await session.noticesTold.pageCame(true, in: session)
+        #expect(await server.told.isEmpty, "the person is not looking at it")
+        system.setFront(true)
+        await session.noticesTold.cameForward(in: session)
+        #expect(await server.told.count == 1)
+        await session.noticesTold.pageCame(false, in: session)
+        await session.noticesTold.cameForward(in: session)
+        #expect(await server.told.count == 1, "the page not up: nothing more")
+    }
+
+    @Test("Signed out, the count stands for nothing, drawn or held, with no read needed; a round answering lets it go too")
+    func countGoesWithSignIn() async throws {
+        let (session, server) = try await make()
+        session.noticesTold.choose(true, host: Self.host)
+        await server.setUnread(4)
+        await session.noticesTold.afterRead(in: session)
+        #expect(session.noticesTold.count(in: session) == 4)
+        if let held = try session.mastodon.tokens.token(host: Self.host) { _ = try session.mastodon.tokens.forget(held) }
+        session.mastodon.refresh()
+        #expect(session.noticesTold.count(in: session) == 0, "no badge for a source gone")
+        await session.noticesTold.roundAnswered(host: Self.host, in: session)
+        #expect(session.noticesTold.counts.isEmpty)
+    }
+
     @Test("A place the source already holds past what was read is never moved back")
     func neverBack() async throws {
-        let (session, server) = try await make(writing: true)
+        let (session, server) = try await make(writing: true, system: HeldSystem(.allowed, front: true))
         session.noticesTold.choose(true, host: Self.host)
         await server.setList(Self.list)
         await server.setMarker(#"{"notifications":{"last_read_id":"500","version":1,"updated_at":"2026-11-02T09:51:09.835Z"}}"#)

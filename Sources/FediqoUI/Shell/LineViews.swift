@@ -1,4 +1,5 @@
 import FediqoCore
+import Combine
 import SwiftUI
 
 /// On a joined source's page: whether what is new in its Home arrives as it happens (#325). Draws
@@ -126,6 +127,9 @@ struct HearsLines: ViewModifier {
             }
             .task(id: noticesInFront) { await session.noticesTold.pageCame(noticesInFront, in: session) }
             .task { SystemNoticePresses.shared.told = session.noticesTold }
+            .onReceive(NotificationCenter.default.publisher(for: .fediqoCameForward)) { _ in
+                Task { await session.noticesTold.cameForward(in: session) }
+            }
             .onChange(of: session.noticesTold.pressedID) { _, id in
                 if id != nil { onToldPressed(session.noticesTold.takePressed()) }
             }
