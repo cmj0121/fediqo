@@ -993,6 +993,9 @@ of a request you let through come in once the source has moved them. With the sy
 arriving while Fediqo is behind other windows is shown by the system once, and pressing it opens that
 notice; while Fediqo is in front, the system shows nothing.
 
+Notices come only while Fediqo is open: there is no Fediqo server to tell it anything while it is
+closed. A closed Fediqo is not a fault, and what came meanwhile is read when it is next open.
+
 Notices are read when the page is opened, at its reload mark, at `r` and at a pull, and never
 by a clock: nothing is asked while the page is closed. A read can be stopped. Reading on is
 yours too — a press on the foot of the list, `j` on the last line, or a scroll by hand that

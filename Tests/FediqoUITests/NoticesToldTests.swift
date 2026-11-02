@@ -304,9 +304,19 @@ struct NoticesToldTests {
         #expect(allowing.asked == 1 && allowing.posted.count == 1)
     }
 
+    @Test("It says plainly, in each language, that notices come only while Fediqo is open, and why", arguments: [
+        "source.told.open", "source.told.help", "source.told.system.help",
+    ])
+    func saysOnlyWhileOpen(key: String) {
+        #expect(L10n.t(key, language: .english).contains("only while Fediqo is open"))
+        #expect(L10n.t(key, language: .english).contains("there is no Fediqo server"))
+        #expect(L10n.t(key, language: .taiwanese).contains("只在 Fediqo 開著時"))
+        #expect(L10n.t(key, language: .taiwanese).contains("沒有 Fediqo 服務端"))
+    }
+
     @Test("Every word it says is in each language", arguments: [
         "source.told", "source.told.help", "source.told.system", "source.told.system.help", "source.told.system.refused",
-        "source.told.kinds", "source.told.signIn", "source.told.cannot", "rail.count",
+        "source.told.kinds", "source.told.signIn", "source.told.cannot", "source.told.open", "rail.count",
     ])
     func words(key: String) {
         for language in DummyLanguage.allCases {

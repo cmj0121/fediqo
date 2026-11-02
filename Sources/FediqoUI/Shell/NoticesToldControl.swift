@@ -44,6 +44,12 @@ struct NoticesToldControl: View {
         Toggle(title, isOn: Binding(get: { choice.on }, set: { told.choose($0, host: host) }))
             .shellFont(.reading)
             .shellHelp(verbatim: String(format: L10n.t("source.told.help"), host), about: title)
+        // **Said where it is chosen, on or off** (#432), and not only in the help a phone keeps a
+        // press away: someone who expects a notice while Fediqo is closed would take this for a fault.
+        Text(L10n.t("source.told.open"))
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
         if choice.on {
             let system = L10n.t("source.told.system")
             Toggle(system, isOn: Binding(
