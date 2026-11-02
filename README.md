@@ -987,6 +987,12 @@ the cover as you would anywhere.
 | `p`      | open whoever the notice you are on names first   |
 | `d`      | dismiss the notice you are on, asked first       |
 
+Notices you asked to be told of, on that source's settings, arrive by themselves while Fediqo runs:
+each is listed as it happens, what came while the line was down is read when it is back, and notices
+of a request you let through come in once the source has moved them. With the system's notices on, one
+arriving while Fediqo is behind other windows is shown by the system once, and pressing it opens that
+notice; while Fediqo is in front, the system shows nothing.
+
 Notices are read when the page is opened, at its reload mark, at `r` and at a pull, and never
 by a clock: nothing is asked while the page is closed. A read can be stopped. Reading on is
 yours too — a press on the foot of the list, `j` on the last line, or a scroll by hand that

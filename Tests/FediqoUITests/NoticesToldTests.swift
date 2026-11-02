@@ -6,11 +6,14 @@ import Testing
 
 /// The system's notices, held: what it says it allows, how often it was asked, what it showed.
 private final class HeldSystem: SystemNotices, Sendable {
-    private let state: Mutex<(standing: SystemNoticeStanding, answer: Bool, asked: Int, posted: [String])>
+    private let state: Mutex<(standing: SystemNoticeStanding, answer: Bool, asked: Int, posted: [String], front: Bool)>
 
-    init(_ standing: SystemNoticeStanding, answer: Bool = true) {
-        state = Mutex((standing, answer, 0, []))
+    init(_ standing: SystemNoticeStanding, answer: Bool = true, front: Bool = false) {
+        state = Mutex((standing, answer, 0, [], front))
     }
+
+    func setFront(_ front: Bool) { state.withLock { $0.front = front } }
+    func inFront() -> Bool { state.withLock { $0.front } }
 
     var asked: Int { state.withLock { $0.asked } }
     var posted: [String] { state.withLock { $0.posted } }
@@ -167,6 +170,92 @@ struct NoticesToldTests {
         }
         #expect(read)
         #expect(session.noticesTold.count == 0)
+    }
+
+    @Test("The line opening reads the list, so what came while none was open is not missed, and counts nothing")
+    func caughtUpOnOpen() async throws {
+        let line = OneLine()
+        let (session, server) = try await make(line: line)
+        session.noticesTold.choose(true, host: Self.host)
+        let wants = session.lines.wants(running: true, in: session)
+        let hearing = Task { await session.lines.hear(wants, in: session) }
+        defer { hearing.cancel() }
+        let read = await met("the list read as the line opens", by: hearing) {
+            await server.asked.contains("/api/v1/notifications")
+        }
+        #expect(read)
+        #expect(session.noticesTold.count == 0)
+    }
+
+    @Test("The source saying requests let through have landed reads the list, with nothing counted")
+    func mergedReads() async throws {
+        let line = OneLine()
+        let (session, server) = try await make(line: line)
+        session.noticesTold.choose(true, host: Self.host)
+        let wants = session.lines.wants(running: true, in: session)
+        let hearing = Task { await session.lines.hear(wants, in: session) }
+        defer { hearing.cancel() }
+        let open = await met("the line open", by: hearing) { if case .open? = session.lines.standing[Self.host] { true } else { false } }
+        try #require(open)
+        let before = await server.asked.filter { $0 == "/api/v1/notifications" }.count
+        line.told?.yield(LineEvent(name: "notifications_merged", data: "1"))
+        let read = await met("listed again", by: hearing) {
+            await server.asked.filter { $0 == "/api/v1/notifications" }.count > before
+        }
+        #expect(read)
+        #expect(session.noticesTold.count == 0)
+    }
+
+    @Test("One notice told twice is counted and shown by the system once")
+    func toldOnce() async throws {
+        let system = HeldSystem(.allowed)
+        let (session, _) = try await make(system: system)
+        session.noticesTold.choose(true, host: Self.host)
+        await session.noticesTold.chooseSystem(true, host: Self.host)
+        let notice = try #require(MastodonNotices.told(Self.mention("5"), source: Source(host: Self.host, kind: .mastodon)))
+        await session.noticesTold.told(notice, in: session)
+        await session.noticesTold.told(notice, in: session)
+        #expect(session.noticesTold.count == 1)
+        #expect(system.posted.count == 1)
+    }
+
+    @Test("In front the system shows nothing and the count still rises; behind other windows it shows")
+    func inFront() async throws {
+        let system = HeldSystem(.allowed, front: true)
+        let (session, _) = try await make(system: system)
+        session.noticesTold.choose(true, host: Self.host)
+        await session.noticesTold.chooseSystem(true, host: Self.host)
+        let source = Source(host: Self.host, kind: .mastodon)
+        await session.noticesTold.told(try #require(MastodonNotices.told(Self.mention("6"), source: source)), in: session)
+        #expect(system.posted.isEmpty)
+        #expect(session.noticesTold.count == 1)
+        system.setFront(false)
+        await session.noticesTold.told(try #require(MastodonNotices.told(Self.mention("7"), source: source)), in: session)
+        #expect(system.posted.count == 1)
+    }
+
+    @Test("A press on the system's notice hands over that notice once; one this run did not tell hands over none")
+    func pressed() async throws {
+        let (session, _) = try await make(system: HeldSystem(.allowed))
+        let notice = try #require(MastodonNotices.told(Self.mention("8"), source: Source(host: Self.host, kind: .mastodon)))
+        await session.noticesTold.told(notice, in: session)
+        let presses = SystemNoticePresses()
+        presses.told = session.noticesTold
+        presses.pressed(id: notice.id)
+        #expect(session.noticesTold.pressedID == notice.id)
+        #expect(session.noticesTold.takePressed()?.id == notice.id)
+        #expect(session.noticesTold.pressedID == nil)
+        presses.pressed(id: "not told")
+        #expect(session.noticesTold.takePressed() == nil)
+    }
+
+    @Test("A press from before anybody was there to hear it waits for them")
+    func pressWaits() async throws {
+        let (session, _) = try await make()
+        let presses = SystemNoticePresses()
+        presses.pressed(id: "early")
+        presses.told = session.noticesTold
+        #expect(session.noticesTold.pressedID == "early")
     }
 
     @Test("A kind switched off tells nothing — no count, no system notice — and is still listed")

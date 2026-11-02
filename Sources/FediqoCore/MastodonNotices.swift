@@ -93,6 +93,12 @@ public struct MastodonNotices: Sendable {
         return entry.asNotice(source: source, sent: ReadMoment.now())
     }
 
+    /// Whether `event` is the source saying the notices of requests let through have now joined
+    /// the ordinary list (#426). It carries none of them: a read brings them.
+    public static func saysMerged(_ event: LineEvent) -> Bool {
+        event.name == "notifications_merged"
+    }
+
     // MARK: - Dismissing
 
     static let clearPath = "/api/v1/notifications/clear"

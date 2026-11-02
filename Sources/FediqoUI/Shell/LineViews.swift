@@ -1,3 +1,4 @@
+import FediqoCore
 import SwiftUI
 
 /// On a joined source's page: whether what is new in its Home arrives as it happens (#325). Draws
@@ -110,6 +111,8 @@ struct ShowsLineFront: ViewModifier {
 struct HearsLines: ViewModifier {
     let session: ShellSession
     let noticesInFront: Bool
+    /// A press on the system's notice: the notice to open, or nothing known of it (#428).
+    let onToldPressed: (Notice?) -> Void
     @Environment(\.scenePhase) private var phase
 
     func body(content: Content) -> some View {
@@ -117,5 +120,9 @@ struct HearsLines: ViewModifier {
         content
             .task(id: wants) { await session.lines.hear(wants, in: session) }
             .task(id: noticesInFront) { session.noticesTold.pageInFront = noticesInFront }
+            .task { SystemNoticePresses.shared.told = session.noticesTold }
+            .onChange(of: session.noticesTold.pressedID) { _, id in
+                if id != nil { onToldPressed(session.noticesTold.takePressed()) }
+            }
     }
 }

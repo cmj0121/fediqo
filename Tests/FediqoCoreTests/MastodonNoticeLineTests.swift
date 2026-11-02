@@ -24,6 +24,14 @@ struct MastodonNoticeLineTests {
         #expect(notices[3].people.first?.handle.contains("fediqo_hidden") == true)
     }
 
+    @Test("The source saying requests let through have landed is heard by its own name, and is no notice")
+    func merged() {
+        let said = LineEvent(name: "notifications_merged", data: "1")
+        #expect(MastodonNotices.saysMerged(said))
+        #expect(MastodonNotices.told(said, source: Self.source) == nil)
+        #expect(!MastodonNotices.saysMerged(LineEvent(name: "update", data: "{}")))
+    }
+
     @Test("Any other event, or words that will not read, is no notice")
     func notNotices() throws {
         let told = try Self.told()

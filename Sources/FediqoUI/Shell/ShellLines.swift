@@ -282,11 +282,20 @@ final class ShellLines {
             guard !Task.isCancelled else { return .dropped }
             await session.reloadFromStore()
         }
+        // What was told while no line was open, read now the line is hearing what comes after (#426).
+        if want.notices {
+            guard !Task.isCancelled else { return .dropped }
+            await session.noticesTold.caughtUp(in: session)
+        }
         standing[host] = .open(since: now())
         do {
             for try await event in events {
                 if want.notices, let notice = MastodonNotices.told(event, source: source) {
                     await session.noticesTold.told(notice, in: session)
+                    continue
+                }
+                if want.notices, MastodonNotices.saysMerged(event) {
+                    await session.noticesTold.caughtUp(in: session)
                     continue
                 }
                 guard want.home, MastodonLine.homeEvents.contains(event.name) else { continue }

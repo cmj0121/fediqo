@@ -2,6 +2,11 @@ import FediqoCore
 import Foundation
 import Observation
 import UserNotifications
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// Whether the system may show this app's own notices, as the system says.
 enum SystemNoticeStanding: Equatable, Sendable {
@@ -19,6 +24,8 @@ protocol SystemNotices: Sendable {
     /// Asks the person, once — the system answers again with no question after that.
     func ask() async -> Bool
     func post(id: String, title: String, body: String) async
+    /// Whether Fediqo is the app in front: then the person is told in Fediqo, not by the system.
+    @MainActor func inFront() -> Bool
 }
 
 /// The system's own, over `UNUserNotificationCenter`. Built by the app alone: a test process has
@@ -42,6 +49,59 @@ struct UserSystemNotices: SystemNotices {
         content.body = body
         try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
     }
+
+    @MainActor func inFront() -> Bool {
+        #if os(macOS)
+        NSApplication.shared.isActive
+        #else
+        UIApplication.shared.applicationState == .active
+        #endif
+    }
+}
+
+/// What the system says of the notices it showed for Fediqo (#428): a press on one goes to the
+/// session's `ShellNoticesTold`, and none is shown while Fediqo is in front. Installed by the app
+/// alone (`listen`), before its launch ends: a test process has no bundle the centre will serve.
+@MainActor
+public final class SystemNoticePresses: NSObject, UNUserNotificationCenterDelegate {
+    public static let shared = SystemNoticePresses()
+
+    override init() { super.init() }
+
+    /// Who a press goes to.
+    weak var told: ShellNoticesTold? {
+        didSet {
+            guard let told, let waiting else { return }
+            self.waiting = nil
+            told.systemPressed(id: waiting)
+        }
+    }
+    /// A press from before there was anybody to tell: one that launched Fediqo.
+    private var waiting: String?
+
+    public func listen() {
+        UNUserNotificationCenter.current().delegate = self
+    }
+
+    func pressed(id: String) {
+        if let told { told.systemPressed(id: id) } else { waiting = id }
+    }
+
+    public nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+        withCompletionHandler done: @escaping () -> Void
+    ) {
+        let id = response.notification.request.identifier
+        Task { @MainActor in SystemNoticePresses.shared.pressed(id: id) }
+        done()
+    }
+
+    public nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+        withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        done([])
+    }
 }
 
 /// No system at all: what every session has until the app hands in the system's own.
@@ -49,6 +109,7 @@ struct NoSystemNotices: SystemNotices {
     func standing() async -> SystemNoticeStanding { .refused }
     func ask() async -> Bool { false }
     func post(id: String, title: String, body: String) async {}
+    @MainActor func inFront() -> Bool { false }
 }
 
 /// The person is told of a new notice while Fediqo runs (#324).
@@ -106,6 +167,13 @@ final class ShellNoticesTold {
     /// told meanwhile: what was told is listed by one read after the one out.
     @ObservationIgnored private var reading = false
     @ObservationIgnored private var again = false
+    /// The notices told this run, by id, oldest first: one told again is not told twice, and a press
+    /// on the system's notice opens the one it showed. Only the last `keptTold` are kept.
+    @ObservationIgnored private var toldThisRun: [String: Notice] = [:]
+    @ObservationIgnored private var toldOrder: [String] = []
+    nonisolated static let keptTold = 200
+    /// The system's notice just pressed, by its id, until the root takes it.
+    private(set) var pressedID: String?
 
     init(defaults: UserDefaults? = nil, system: any SystemNotices = NoSystemNotices()) {
         self.defaults = defaults
@@ -191,16 +259,38 @@ final class ShellNoticesTold {
 
     /// One notice told on `host`'s line: listed, counted and shown as the choice says.
     func told(_ notice: Notice, in session: ShellSession) async {
+        guard toldThisRun[notice.id] == nil else { return }
+        toldThisRun[notice.id] = notice
+        toldOrder.append(notice.id)
+        if toldOrder.count > Self.keptTold { toldThisRun[toldOrder.removeFirst()] = nil }
         let choice = choice(host: notice.source.host)
         if !choice.off.contains(notice.kind.narrowedAs) {
             if !pageInFront { count += 1 }
-            if choice.system, !systemRefused {
+            if choice.system, !systemRefused, !system.inFront() {
                 await system.post(
                     id: notice.id, title: notice.source.host, body: NoticeWords.spoken(notice)
                 )
             }
         }
         await list(in: session)
+    }
+
+    /// The list read again with nothing counted or shown: the line just opened, so what was told
+    /// while none was is brought in (#426), or the source said requests let through have landed.
+    func caughtUp(in session: ShellSession) async {
+        await list(in: session)
+    }
+
+    /// The system's notice with this id was pressed (#428).
+    func systemPressed(id: String) {
+        pressedID = id
+    }
+
+    /// What was pressed, once: the notice to open, or nothing where this run did not tell it, which
+    /// still brings the person to the notices page.
+    func takePressed() -> Notice? {
+        defer { pressedID = nil }
+        return pressedID.flatMap { toldThisRun[$0] }
     }
 
     /// The notices page's own read, once for every notice told while one is out.

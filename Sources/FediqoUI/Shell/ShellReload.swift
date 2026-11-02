@@ -1539,13 +1539,15 @@ struct AsksOnAWait: ViewModifier {
     let minutes: Int
     /// Whether the notices page is in front, for the lines (`HearsLines.noticesInFront`).
     var noticesInFront = false
+    /// A press on the system's notice (`HearsLines.onToldPressed`).
+    var onToldPressed: (Notice?) -> Void = { _ in }
 
     func body(content: Content) -> some View {
         content
             .task(id: minutes) {
                 await session.reload.keepAsking(every: Self.wait(minutes), in: session)
             }
-            .modifier(HearsLines(session: session, noticesInFront: noticesInFront))
+            .modifier(HearsLines(session: session, noticesInFront: noticesInFront, onToldPressed: onToldPressed))
     }
 
     static func wait(_ minutes: Int) -> Duration { .seconds(minutes * 60) }

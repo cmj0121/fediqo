@@ -277,6 +277,10 @@ final class Launch {
 /// `StoreSaver.deadline`, and then quits anyway.
 @MainActor
 final class FediqoAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        SystemNoticePresses.shared.listen()
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         #if DEBUG
         // A launch made for a picture opened nothing, so it has nothing to save or sweep.
@@ -319,6 +323,7 @@ final class FediqoAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        SystemNoticePresses.shared.listen()
         NotificationCenter.default.addObserver(
             forName: UIScene.didDisconnectNotification, object: nil, queue: .main
         ) { note in

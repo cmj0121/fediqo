@@ -364,7 +364,8 @@ public struct FediqoRootView: View {
             // The wait, and the lines wanted held while Fediqo runs (#325, #324) in the same group.
             .modifier(AsksOnAWait(
                 session: session, minutes: prefs.askMinutes,
-                noticesInFront: Self.noticesInFront(place: place, open: openLayers, held: noticesHeld)
+                noticesInFront: Self.noticesInFront(place: place, open: openLayers, held: noticesHeld),
+                onToldPressed: openToldNotice
             ))
             .modifier(AnnouncementsAsk(session: session, announcements: people.announcements))
             // The pages open over the timeline, whose rows the store keeps while they are (#359).
@@ -2052,6 +2053,19 @@ public struct FediqoRootView: View {
 
     /// A line opened: its post in its conversation, or the person — a step of the timeline
     /// place's walk, come back from by leaving it. A line that is only words opens nothing.
+    /// A press on the system's notice (#428): the notices page in front, then what that notice is
+    /// about. What is drawn over the page stays, so nothing being written is lost under a press.
+    private func openToldNotice(_ notice: Notice?) {
+        guard availability.allows(.notices) else { return }
+        session.noticeList.acts.hideHeld()
+        place = .notices
+        guard let notice else { return }
+        Task { @MainActor in
+            await Task.yield()
+            _ = openNotice(notice)
+        }
+    }
+
     private func openNotice(_ notice: Notice) -> Bool {
         guard Self.noticesInFront(place: place, open: openLayers, held: noticesHeld) else { return false }
         // A new report or sign-up opens the Admin place at its host and tab, where the reader
