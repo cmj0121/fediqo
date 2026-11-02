@@ -42,7 +42,6 @@ struct FormTop: View {
                 .id(ShellPageTop.id)
                 .accessibilityHidden(true)
                 .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets())
         }
     }
 }

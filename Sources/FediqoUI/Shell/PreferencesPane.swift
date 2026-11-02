@@ -133,7 +133,8 @@ struct PreferencesPane: View {
             // **On a narrow page the tabs are one head, over the list and not in it** (#305):
             // the whole of what is under the head then follows a swipe as one. A wide page
             // keeps its row of tabs where it was, in the list.
-            if headed { FormTop() } else { Section { tabs.id(ShellPageTop.id) } }
+            if headed { FormTop() }
+            if !headed { Section { tabs } }
             // On a wide page the tabs are a row in the list, and what is under them follows a
             // swipe row by row.
             Group { page }.modifier(Slid(slide: slide, applies: headed ? false : nil))
@@ -292,6 +293,7 @@ struct PreferencesPane: View {
     /// rotates them (`ShellSession.rotatePreferencesTab`).
     private var tabs: some View {
         ShellTabs(Purpose.shown(touch: touch), selected: purpose, slide: slide) { session?.preferencesPurpose = $0 }
+            .id(ShellPageTop.id)
     }
 
     /// Off is no latest date. Turning it on starts at today, the date that hides nothing yet.
