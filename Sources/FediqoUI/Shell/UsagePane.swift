@@ -153,7 +153,8 @@ struct UsagePane: View {
             // **On a narrow page the tabs are one head, over the list and not in it** (#305):
             // the whole of what is under the head then follows a swipe as one. A wide page
             // keeps its row of tabs where it was, in the list.
-            if headed { FormTop() } else { Section { tabs.id(ShellPageTop.id) } }
+            if headed { FormTop() }
+            if !headed { Section { tabs } }
             // On a wide page the tabs are a row in the list, and what is under them follows a
             // swipe row by row.
             Group { page }.modifier(Slid(slide: slide, applies: headed ? false : nil))
@@ -191,6 +192,7 @@ struct UsagePane: View {
     /// in the Form so the grouped chrome is the page's own, not a second colour.
     private var tabs: some View {
         ShellTabs(Purpose.allCases, selected: session?.usagePurpose ?? .source, slide: slide) { select($0) }
+            .id(ShellPageTop.id)
     }
 
     @Environment(\.shellLayout) private var shellLayout
