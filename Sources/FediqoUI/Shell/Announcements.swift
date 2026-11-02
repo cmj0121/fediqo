@@ -536,7 +536,11 @@ struct AnnouncementsBlock: View {
             }
         }
         .task(id: ShellAnnouncements.opening(host, in: session)) { await announcements.opened(host, in: session) }
-        .onDisappear { announcements.left(host) }
+        .task(id: host) { session.lines.sourcePage = host }
+        .onDisappear {
+            announcements.left(host)
+            if session.lines.sourcePage == host { session.lines.sourcePage = nil }
+        }
     }
 
     private var acts: AnnouncementActs {

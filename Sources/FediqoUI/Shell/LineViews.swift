@@ -119,6 +119,11 @@ struct HearsLines: ViewModifier {
         let wants = session.lines.wants(running: phase != .background, in: session)
         content
             .task(id: wants) { await session.lines.hear(wants, in: session) }
+            .task(id: session.lines.directWanted(running: phase != .background, in: session)) {
+                if let host = session.lines.directWanted(running: phase != .background, in: session) {
+                    await session.lines.hearDirect(host, in: session)
+                }
+            }
             .task(id: noticesInFront) { session.noticesTold.pageInFront = noticesInFront }
             .task { SystemNoticePresses.shared.told = session.noticesTold }
             .onChange(of: session.noticesTold.pressedID) { _, id in

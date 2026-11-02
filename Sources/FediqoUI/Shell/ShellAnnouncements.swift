@@ -158,6 +158,8 @@ final class ShellAnnouncements {
     private var pages: [String: Page] = [:]
     private var presses = PressGuard<PressName, AnnouncementAct>()
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
+    /// The sources that said something on their line while an ask was out.
+    @ObservationIgnored private var heardMeanwhile: Set<String> = []
     @ObservationIgnored private let errands: PageErrands
     @ObservationIgnored private let readers: PageReaders
     @ObservationIgnored private let hosts: ShellHostsKnown
@@ -343,6 +345,30 @@ final class ShellAnnouncements {
               let page = standing(at: source.host, as: askedAs), !page.asking, page.reading == .failed
         else { return }
         await begin(source, as: askedAs, with: held, in: session).value
+    }
+
+    /// The source said on its line that an announcement came, changed, was reacted to or went
+    /// (#427): asked at once, whatever the fifteen minutes say, and its answer is what is drawn.
+    /// One told while an ask is out is asked once after it. Nothing of a source that will not show
+    /// this sign-in its announcements.
+    func heard(_ host: String, in session: ShellSession) async {
+        guard let source = ShellPersonPages.source(at: host, in: session),
+              let (_, askedAs) = asker(at: source.host, in: session)
+        else { return }
+        if let page = standing(at: source.host, as: askedAs) {
+            if page.reading == .forbidden { return }
+            if page.asking {
+                heardMeanwhile.insert(source.host)
+                return
+            }
+        }
+        repeat {
+            heardMeanwhile.remove(source.host)
+            guard let held = readers.look(at: source.host, in: session).held,
+                  let (_, now) = asker(at: source.host, in: session)
+            else { return }
+            await begin(source, as: now, with: held, in: session).value
+        } while heardMeanwhile.contains(source.host) && !Task.isCancelled
     }
 
     private func door(_ held: MastodonToken, for purpose: SourceWork.Purpose, in session: ShellSession) -> MastodonAnnouncements {

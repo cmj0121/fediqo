@@ -1566,6 +1566,10 @@ struct AnnouncementsAsk: ViewModifier {
                 guard let session, let announcements else { return }
                 announcements.checked(host, in: session)
             }
+            session.lines.announced = { [weak session, weak announcements] host in
+                guard let session, let announcements else { return }
+                await announcements.heard(host, in: session)
+            }
         }
     }
 }
