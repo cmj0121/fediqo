@@ -265,7 +265,8 @@ final class ShellCollections {
             guard let owner = people.said(of: person, in: session)?.person,
                   let item = people.featured(of: person, in: session)?.takeOuts[list.accountID]
             else { return true }
-            Task { await takeOut(item: item, of: list.accountID, owner: owner.accountID, at: person.host, in: session) }
+            // On the reader's own page the collection is somebody else's, and its owner is its own (#434).
+            Task { await takeOut(item: item, of: list.accountID, owner: list.owner ?? owner.accountID, at: person.host, in: session) }
             return true
         case .tag, .people, .takeOff:
             return false

@@ -2963,6 +2963,7 @@
 "year.post.favourited" = "Favourited most";
 "year.done" = "Done";
 "person.collections" = "Collections";
+"person.collections.appearsIn" = "Collections you appear in";
 "person.collection.count" = "%d people";
 "person.collection.count.one" = "%d person";
 "people.title.collection" = "“%1$@”, put together by %2$@";

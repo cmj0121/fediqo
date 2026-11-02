@@ -512,6 +512,10 @@ join, suspending an account, and suspending a server or refusing an address with
 all or a wide range of addresses; taking anything off the server's lists asks as well. Signing
 out is the key itself, and asks first too. One is not asked: removing a rule from a timeline
 being edited is behind the dots as well, but it is only a draft, and nothing is kept until Done.
+Your own page also lists the collections you appear in, as your source's own page of them shows
+them, each with who put it together. A source tells this of you alone, so nobody else's page has
+it; you in none, or a server without it, leaves no trace. Behind a row's dots is leaving it.
+
 Taking somebody or a hashtag off your profile is behind the dots too, and is not asked either:
 Feature puts it back. Discarding a text that was not sent asks first as well, from its line at
 the foot of the page.

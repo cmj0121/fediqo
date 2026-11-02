@@ -53,6 +53,8 @@ final class ShellFeatures {
         var collections: [PersonCollection] = []
         /// Which read of their collections may land: a change since makes the one out no word.
         var collectionsAwait = 0
+        /// The collections the reader appears in (#434), on their own page alone.
+        var appearances: [CollectionAppearance] = []
         var awaits = 0
     }
 
@@ -208,6 +210,18 @@ final class ShellFeatures {
                 }
             }
         }
+        // Nothing of it where the host says it has no such address, or on anyone else's page: a
+        // source tells this of the one asking alone.
+        if isOwn, hosts.has(.inCollections, at: source.host) != .absent, !page.appearances.isEmpty {
+            handed.appearsIn = page.appearances.map { PeopleList(appearance: $0, at: source.host) }
+            let me = session.mastodon.reader(host: source.host)?.id
+            for shown in page.appearances where shown.collection.ownerID != me {
+                if let place = shown.collection.items.first(where: { $0.accountID == me }) { handed.takeOuts[shown.id] = place.id }
+            }
+            if handed.collectionsLock == nil, source.kind.offers.tendsCollections {
+                handed.collectionsLock = session.mastodon.collectionsLock(host: source.host)
+            }
+        }
         return handed
     }
 
@@ -282,6 +296,7 @@ final class ShellFeatures {
             page.tags = before.tags
             page.anyFeatured = before.anyFeatured
             page.collections = before.collections
+            page.appearances = before.appearances
         }
         theirs[id] = page
         let through = held.map { session.reach.featured(session.mastodon.authorized(token: $0, within: deadline, for: .person)) }
@@ -297,7 +312,8 @@ final class ShellFeatures {
                 ? self.readPeople(id, of: accountID, through: through, at: source, round: round, errand: errand, in: session) : ()
             async let collections: Void = collectionsWanted
                 ? self.readCollections(id, of: accountID, at: source, as: askedAs, round: round, errand: errand, awaits: collectionsErrand, in: session) : ()
-            _ = await (tags, people, collections)
+            async let appearances: Void = self.readAppearances(id, of: accountID, at: source, round: round, errand: errand, awaits: collectionsErrand, in: session)
+            _ = await (tags, people, collections, appearances)
         }
         asks[id] = task
         return task
@@ -364,15 +380,40 @@ final class ShellFeatures {
         }
     }
 
+    /// The collections the reader appears in (#434), asked only on their own page where the
+    /// sign-in holds the word: of anybody else a source refuses it, so it is not asked. Absent
+    /// where the host says it has no such address. **Any other failure draws nothing and changes
+    /// nothing**: what is here stands, and a page with none of it shows no trace.
+    private func readAppearances(
+        _ id: String, of accountID: String, at source: Source, round: Int, errand: Int, awaits: Int, in session: ShellSession
+    ) async {
+        guard hosts.has(.inCollections, at: source.host) != .absent, session.mastodon.reader(host: source.host)?.id == accountID,
+              let held = readers.look(at: source.host, in: session).held, MastodonParts.holds(.seeing, of: .collections, in: held.scopes)
+        else { return }
+        do {
+            let writes = session.reach.collections(session.mastodon.authorized(token: held, within: deadline, for: .person))
+            let appearances = try await writes.appearances(of: accountID, source: source)
+            guard stillTheirs(id, of: accountID, errand: errand, at: source, in: session), theirs[id]?.collectionsAwait == awaits else { return }
+            theirs[id]?.appearances = appearances
+        } catch {
+            guard stillTheirs(id, of: accountID, errand: errand, at: source, in: session), theirs[id]?.collectionsAwait == awaits else { return }
+            if (error as? MastodonHostMoreError) == .noSuchAddress { hosts.notFound(.inCollections, at: source.host, round: round) }
+        }
+    }
+
     /// What `accountID` put together has changed at `host` (#433): each page of theirs reads it
     /// again, and a read already out lands nowhere. Pages of nobody else are not asked.
     func collectionsChanged(of accountID: String, at host: String, in session: ShellSession) async {
         guard let source = ShellPersonPages.source(at: host, in: session) else { return }
         let round = hosts.round(at: host)
-        for (id, page) in theirs where page.host == host && page.accountID == accountID {
+        // The reader's own page too, wherever they appear: a change to anybody's may be a place
+        // of theirs in it (#434).
+        let me = session.mastodon.reader(host: host)?.id
+        for (id, page) in theirs where page.host == host && (page.accountID == accountID || page.accountID == me) {
             let awaits = errands.next()
             theirs[id]?.collectionsAwait = awaits
-            await readCollections(id, of: accountID, at: source, as: page.askedAs, round: round, errand: page.awaits, awaits: awaits, in: session)
+            await readCollections(id, of: page.accountID, at: source, as: page.askedAs, round: round, errand: page.awaits, awaits: awaits, in: session)
+            await readAppearances(id, of: page.accountID, at: source, round: round, errand: page.awaits, awaits: awaits, in: session)
         }
     }
 

@@ -18,6 +18,9 @@ struct FeaturedSaid: Equatable {
     /// The collections of people they put together and let be found (#340), each the list of its
     /// people: a row each, which opens it.
     var collections: [PeopleList] = []
+    /// The collections the reader appears in (#434), on their own page alone, as the source's own
+    /// page of them shows: nothing where they are in none, or the source does not say.
+    var appearsIn: [PeopleList] = []
     /// Whether About has the way to the reader's own collections: on their own page alone (#433).
     var tendsCollections = false
     /// How the sign-in stands where it lacks the collections part. Nothing where it holds it.
@@ -41,8 +44,14 @@ struct FeaturedSaid: Equatable {
     /// What the lamp calls the row of a collection.
     static func lamp(ofCollection list: PeopleList) -> String { "about.collection:" + list.accountID }
 
+    /// What the lamp calls the row of a collection the reader appears in: one of their own may be
+    /// among those they keep as well.
+    static func lamp(ofAppearance list: PeopleList) -> String { "about.appearsIn:" + list.accountID }
+
     /// The rows `j` and `k` walk among the collections.
-    var collectionRows: [String] { (tendsCollections ? [Self.tendID] : []) + collections.map(Self.lamp(ofCollection:)) }
+    var collectionRows: [String] {
+        (tendsCollections ? [Self.tendID] : []) + collections.map(Self.lamp(ofCollection:)) + appearsIn.map(Self.lamp(ofAppearance:))
+    }
 
     static let tendID = "about.collections.tend"
 
@@ -50,7 +59,7 @@ struct FeaturedSaid: Equatable {
     static func tendLamp(_ lit: String?) -> AboutBlockLit { AboutBlockLit(lit: tendID == lit) }
 
     /// Whether the collections' block has anything to draw.
-    var collectionsDrawn: Bool { tendsCollections || !collections.isEmpty }
+    var collectionsDrawn: Bool { tendsCollections || !collections.isEmpty || !appearsIn.isEmpty }
 
     /// The `…` of a collection's row, only where the reader is in it: taking themselves out —
     /// which asks first — or dim with the part's lock, its press `ask`.
@@ -73,6 +82,14 @@ struct FeaturedSaid: Equatable {
         let counted = list.counted.map { L10n.count("person.collection.count", $0, language: language) }
         return [list.lineWords, counted].compactMap { $0 }.joined(separator: L10n.t("people.row.between", language: language))
     }
+    /// A collection the reader appears in as its row is drawn and heard: its name, who put it
+    /// together where their source said, and how many are in it.
+    static func appearanceWords(_ list: PeopleList, language: DummyLanguage? = nil) -> String {
+        let between = L10n.t("people.row.between", language: language)
+        let counted = list.counted.map { L10n.count("person.collection.count", $0, language: language) }
+        return [list.lineWords, list.handle.isEmpty ? nil : list.lineHandle, counted].compactMap { $0 }.joined(separator: between)
+    }
+
     static let tagsID = "about.featured.tags"
 
     /// What the lamp calls the row of `tag`.
@@ -140,6 +157,7 @@ struct FeaturedSaid: Equatable {
         // As the pointer: a lock that cannot be asked is words, with nothing to press.
         if id == Self.tendID, tendsCollections { return collectionsLock?.asks == false ? nil : .tendCollections }
         if let list = collections.first(where: { Self.lamp(ofCollection: $0) == id }) { return .people(list) }
+        if let list = appearsIn.first(where: { Self.lamp(ofAppearance: $0) == id }) { return .people(list) }
         return tags.first { Self.lamp(of: $0.tag) == id }.map { .tag($0.tag) }
     }
 }
