@@ -77,8 +77,12 @@ final class ShellLines {
     /// What the line saying something of announcements does: handed in with the one keeper of them,
     /// which is not the session's. Nothing in a session that has none.
     @ObservationIgnored var announced: (String) async -> Void = { _ in }
-    /// The sources whose direct line was refused this run: not asked again.
-    private var directRefused: Set<String> = []
+    /// The sources whose direct line was refused for good, by the sign-in refused: not asked again
+    /// under that sign-in. Another is asked afresh.
+    private var directRefused: [String: String] = [:]
+    /// The answers that say a direct line will not be had by asking again. A sign-in doubted (401, which
+    /// reads settle) and a source busy (429) are drops, and waited out.
+    nonisolated static let directRefusals: Set<Int> = [400, 403, 404, 410]
 
     struct Front: Equatable {
         let timeline: TimelineQuery
@@ -172,8 +176,9 @@ final class ShellLines {
     /// the person chose its line. Nothing else holds one: a list not up is read as it opens.
     func directWanted(running: Bool, in session: ShellSession) -> String? {
         guard running, let host = session.directs.shown?.lowercased(), session.directsReads(host: host),
-              !directRefused.contains(host), mayHold(host, in: session)
+              mayHold(host, in: session)
         else { return nil }
+        if let refused = directRefused[host], refused == session.mastodon.token(host: host)?.accessToken { return nil }
         return host
     }
 
@@ -278,11 +283,10 @@ final class ShellLines {
     }
 
     /// `host`'s direct line, held until cancelled or refused, and its list read for what was missed
-    /// each time it opens again. **It has no standing of its own**: reading goes on beside it, and
+    /// each time it opens, the first of a holding too. **It has no standing of its own**: reading goes on beside it, and
     /// the place on the source's page speaks of the reader's own line.
     func hearDirect(_ host: String, in session: ShellSession) async {
         var wait = Self.firstWait
-        var first = true
         while !Task.isCancelled {
             guard let token = session.mastodon.token(host: host) else { return }
             let work = session.mastodon.work
@@ -294,13 +298,12 @@ final class ShellLines {
                 let events = try await Outward.$admitted.withValue(true) {
                     try await MastodonLine(token: token, opener: opener).openDirect()
                 }
-                if !first { await session.directs.heard(host, in: session) }
-                first = false
+                await session.directs.heard(host, in: session)
                 for try await event in events where event.name == MastodonLine.conversationEvent {
                     await session.directs.heard(host, in: session)
                 }
-            } catch let refused as MastodonLineRefused where (400..<500).contains(refused.status) {
-                directRefused.insert(host)
+            } catch let refused as MastodonLineRefused where Self.directRefusals.contains(refused.status) {
+                directRefused[host] = token.accessToken
                 return
             } catch {}
             guard !Task.isCancelled else { return }

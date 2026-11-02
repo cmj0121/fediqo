@@ -159,4 +159,79 @@ struct LineEventsTests {
         await session.serverFilters.heard(host: Self.host, in: session)
         #expect(await count(server, Self.filters) == 2)
     }
+
+    /// A line that opens with `status`, and ends at once.
+    private struct Opening: LineOpener {
+        let status: Int
+        func open(_ request: URLRequest) async throws -> OpenLine {
+            let (events, told) = AsyncThrowingStream<LineEvent, any Error>.makeStream()
+            told.finish()
+            return OpenLine(
+                response: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!, events: events
+            )
+        }
+    }
+
+    /// One pass of a direct line: the wait after it ends the holding.
+    private func oneOpen(_ session: ShellSession, status: Int) async {
+        let chosen = session.lines.chosen
+        session.lines = ShellLines(opener: Opening(status: status), sleep: { _ in throw CancellationError() })
+        for host in chosen { session.lines.choose(true, host: host) }
+        await session.lines.hearDirect(Self.host, in: session)
+    }
+
+    @Test("Every open of the direct line reads the list, the first of a new holding too: what came with none open is not missed")
+    func directCatchesUp() async throws {
+        let (session, server) = try await make([Self.conversations: PageServer.Answer(body: "[\(Self.conversation("1"))]")])
+        session.lines.choose(true, host: Self.host)
+        await session.directs.show(Self.host, in: session)
+        #expect(await count(server, Self.conversations) == 1)
+        await oneOpen(session, status: 200)
+        #expect(await count(server, Self.conversations) == 2)
+    }
+
+    @Test("A direct line's busy answer or a doubted sign-in stops nothing for good; a real refusal does, until the sign-in changes", arguments: [429, 401])
+    func directRefusalNarrow(status: Int) async throws {
+        let (session, _) = try await make([Self.conversations: PageServer.Answer(body: "[]")])
+        session.lines.choose(true, host: Self.host)
+        await session.directs.show(Self.host, in: session)
+        await oneOpen(session, status: status)
+        #expect(session.lines.directWanted(running: true, in: session) == Self.host)
+
+        await oneOpen(session, status: 403)
+        #expect(session.lines.directWanted(running: true, in: session) == nil)
+        let scopes = "read:statuses read:lists read:accounts"
+        try session.mastodon.tokens.save(MastodonToken(
+            host: Self.host, accessToken: "new", clientID: "c", clientSecret: "s", scopes: scopes, asked: scopes,
+            accountID: "7", handle: "@me@m.example"
+        ))
+        session.mastodon.refresh()
+        #expect(session.lines.directWanted(running: true, in: session) == Self.host, "a new sign-in is asked afresh")
+    }
+
+    @Test("A direct post told while somebody else's read of the list is out is read after it, by whoever owns that read")
+    func directToldDuringAnotherRead() async throws {
+        let (session, server) = try await make([Self.conversations: PageServer.Answer(body: "[]")])
+        await session.directs.show(Self.host, in: session)
+        await server.hold(Self.conversations)
+        let other = Task { await session.directs.again(Self.host, in: session) }
+        await met("the other read out", by: other) { await server.arrivals(of: Self.conversations) == 2 }
+        await session.directs.heard(Self.host, in: session)
+        await server.release(Self.conversations)
+        await other.value
+        #expect(await count(server, Self.conversations) == 3)
+    }
+
+    @Test("An announcement told while somebody else's read is out is read after it, by whoever owns that read")
+    func announcedDuringAnotherRead() async throws {
+        let people = ShellPersonPages()
+        let (session, server) = try await make([Self.announcements: PageServer.Answer(body: "[]")])
+        await server.hold(Self.announcements)
+        let opening = Task { await people.announcements.opened(Self.host, in: session) }
+        await met("the opening read out", by: opening) { await server.arrivals(of: Self.announcements) == 1 }
+        await people.announcements.heard(Self.host, in: session)
+        await server.release(Self.announcements)
+        await opening.value
+        #expect(await count(server, Self.announcements) == 2)
+    }
 }

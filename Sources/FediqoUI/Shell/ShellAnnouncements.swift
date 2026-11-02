@@ -349,8 +349,8 @@ final class ShellAnnouncements {
 
     /// The source said on its line that an announcement came, changed, was reacted to or went
     /// (#427): asked at once, whatever the fifteen minutes say, and its answer is what is drawn.
-    /// One told while an ask is out is asked once after it. Nothing of a source that will not show
-    /// this sign-in its announcements.
+    /// **Told while an ask is out, whoever's**, that ask is followed by one more (`ask`). Nothing of a
+    /// source that will not show this sign-in its announcements.
     func heard(_ host: String, in session: ShellSession) async {
         guard let source = ShellPersonPages.source(at: host, in: session),
               let (_, askedAs) = asker(at: source.host, in: session)
@@ -362,13 +362,8 @@ final class ShellAnnouncements {
                 return
             }
         }
-        repeat {
-            heardMeanwhile.remove(source.host)
-            guard let held = readers.look(at: source.host, in: session).held,
-                  let (_, now) = asker(at: source.host, in: session)
-            else { return }
-            await begin(source, as: now, with: held, in: session).value
-        } while heardMeanwhile.contains(source.host) && !Task.isCancelled
+        guard let held = readers.look(at: source.host, in: session).held else { return }
+        await begin(source, as: askedAs, with: held, in: session).value
     }
 
     private func door(_ held: MastodonToken, for purpose: SourceWork.Purpose, in session: ShellSession) -> MastodonAnnouncements {
@@ -421,6 +416,12 @@ final class ShellAnnouncements {
             }
         }
         pages[host]?.asking = false
+        // What the source said while this was out: asked once more, by the ask that was out.
+        if heardMeanwhile.remove(host) != nil, !Task.isCancelled,
+           let held = readers.look(at: host, in: session).held, let (_, now) = asker(at: host, in: session),
+           pages[host]?.reading != .forbidden {
+            await begin(source, as: now, with: held, in: session).value
+        }
     }
 
     private func stillTheirs(_ host: String, errand: Int, askedAs: AskedAs, in session: ShellSession) -> Bool {
