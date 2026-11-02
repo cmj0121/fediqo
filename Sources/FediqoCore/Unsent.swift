@@ -18,12 +18,14 @@ public struct UnsentMedia: Identifiable, Hashable, Sendable, CustomDebugStringCo
     public var description: String
     /// The id the source gave this file, once it accepted the upload. Nothing until then.
     public var remoteID: String?
+    /// Whether its source said it could not prepare it (#438). Sent again, it goes up anew.
+    public var unprepared: Bool
 
     public var debugDescription: String { "\(bytes.count) bytes" }
 
     public init(
         id: UUID = UUID(), bytes: Data, mime: String, name: String, description: String = "",
-        remoteID: String? = nil
+        remoteID: String? = nil, unprepared: Bool = false
     ) {
         self.id = id
         self.bytes = bytes
@@ -31,6 +33,7 @@ public struct UnsentMedia: Identifiable, Hashable, Sendable, CustomDebugStringCo
         self.name = name
         self.description = description
         self.remoteID = remoteID
+        self.unprepared = unprepared
     }
 }
 

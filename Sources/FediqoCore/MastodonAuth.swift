@@ -897,6 +897,13 @@ public struct MastodonAuthorized: Sendable {
         try await finish(try await send(path: path, query: query), path: path)
     }
 
+    /// `get(path:query:)`, and beside the body the status it was answered with: where a 200 and a
+    /// 206 are two different words (#438).
+    public func getAnswering(path: String) async throws -> (status: Int, body: Data) {
+        let answer = try await send(path: path, query: [])
+        return (answer.status, try await finish(answer, path: path))
+    }
+
     /// `get(path:query:)`, and beside the body what the answer's `Link` header says: where a
     /// list that pages by its own word names its next stretch. Nothing where it sent none.
     public func getLinked(path: String, query: [URLQueryItem] = []) async throws -> (body: Data, link: String?) {
@@ -1035,10 +1042,18 @@ public struct MastodonAuthorized: Sendable {
     public func post(
         path: String, parts: [MultipartPart], limit: Int, headers: [String: String] = [:]
     ) async throws -> Data {
+        try await postAnswering(path: path, parts: parts, limit: limit, headers: headers).body
+    }
+
+    /// The same, and beside the body the status it was answered with: a file accepted and being
+    /// prepared is a 202, and one ready a 200 (#438).
+    public func postAnswering(
+        path: String, parts: [MultipartPart], limit: Int, headers: [String: String] = [:]
+    ) async throws -> (status: Int, body: Data) {
         let body = try MultipartBody(parts, limit: limit)
         let result = try await send(path: path, method: "POST", parts: body, headers: headers)
         if result.status == 422 { throw MastodonUnprocessable(body: result.body) }
-        return try await finish(result, path: path)
+        return (result.status, try await finish(result, path: path))
     }
 
     /// A PATCH carrying a body of several parts through the same door (#312): a file's bytes
