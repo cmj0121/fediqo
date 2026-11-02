@@ -160,7 +160,7 @@ struct PersonPane<Lead: View>: View {
                     if let foot = said.foot {
                         ShellRule()
                         PersonFootRow(symbol: foot.symbol, words: foot.words, presses: foot.presses, onPress: onReadOn)
-                            .onAppear { if Self.readsOn(foot: foot, failed: said.footFailed) { (onReachFoot ?? onReadOn)() } }
+                            .onAppear { if foot.presses, !said.footFailed { (onReachFoot ?? onReadOn)() } }
                     }
                 }
             }
@@ -188,11 +188,6 @@ struct PersonPane<Lead: View>: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(ShellSpace.pad)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// Whether reaching a foot reads on: the next stretch alone, and no automatic retry.
-    static func readsOn(foot: PostRowsSaid.Foot, failed: Bool) -> Bool {
-        foot.presses && !failed
     }
 
     /// One of theirs.
@@ -224,7 +219,7 @@ struct PersonPane<Lead: View>: View {
             },
             // Lit and opened in one, for the reader who activates a row once.
             onOpen: { onOpenThread(item.id) },
-            onOpenPerson: page.map { $0.opensAuthor(of: item) } == false ? nil : onOpenPerson,
+            onOpenPerson: page?.opensAuthor(of: item) ?? true ? onOpenPerson : nil,
             quoteLifted: decks.isQuoteLifted(of: item),
             onToggleQuoteCover: { decks.toggleQuoteCover(of: item) },
             onToggleCover: { _ = decks.toggleCover(item.id) },

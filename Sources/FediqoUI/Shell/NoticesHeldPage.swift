@@ -102,7 +102,7 @@ struct NoticesHeldPage: View {
         let hosts = Self.hosts(in: acts)
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                Color.clear.frame(height: 0).id(ShellPageTop.id).accessibilityHidden(true)
+                PageTopMark()
                 if hosts.isEmpty {
                     NoticesSentence(words: L10n.t("notices.held.empty"), part: .heldEmpty, ink: ShellChrome.inkFaint(colorScheme))
                 }

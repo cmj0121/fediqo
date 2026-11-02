@@ -4,10 +4,14 @@ import SwiftUI
 /// What a row away from the timeline's lists opens by (#443): a report's posts, a quote of one's
 /// own post, a member of a collection, a held-back request. Each is a step of the timeline's walk,
 /// and leaving it comes back to where it was pressed (`PlaceErrand`).
-struct ShellOpens {
+///
+/// Always equal, for `PressedAgain`'s reason.
+struct ShellOpens: Equatable {
     let person: (DummyPerson) -> Void
     /// The post is held first, as a notice's post is, since nothing here holds it.
     let post: (Note) -> Void
+
+    static func == (_: ShellOpens, _: ShellOpens) -> Bool { true }
 }
 
 extension EnvironmentValues {

@@ -122,7 +122,7 @@ struct FollowedTagsList<Lead: View>: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    Color.clear.frame(height: 0).id(ShellPageTop.id).accessibilityHidden(true)
+                    PageTopMark()
                     lead
                     ForEach(Array(said.rows.enumerated()), id: \.element.id) { index, row in
                         self.row(row)

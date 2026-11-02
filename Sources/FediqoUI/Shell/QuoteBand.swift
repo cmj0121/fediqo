@@ -272,7 +272,7 @@ struct QuoteCard: View {
         if post.covered {
             Button(L10n.t(covered ? "quote.lift" : "quote.cover"), action: onToggleCover)
         }
-        if let author, let onOpenPerson {
+        if let onOpenPerson, let author {
             Button(String(format: L10n.t("item.person.open"), author.name)) { onOpenPerson(author) }
         }
     }
@@ -295,7 +295,7 @@ struct QuoteCard: View {
     /// press does not take.
     @ViewBuilder
     private var authorPress: some View {
-        if let author, let onOpenPerson {
+        if let onOpenPerson, let author {
             Button { onOpenPerson(author) } label: { authorFace }
                 .buttonStyle(.plain)
         } else {
