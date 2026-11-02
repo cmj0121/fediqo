@@ -749,6 +749,69 @@ struct CollectionsTests {
         #expect(people.collections.said() == nil)
     }
 
+    @Test("A changed draft asks before Close, a swipe or Cancel let it go; nothing changed goes; a write cannot be closed")
+    func aChangedDraftAsks() async throws {
+        let (session, server, people) = try await prepared([
+            Self.ownList: [Self.list(Self.collection())], Self.make: [Self.one(Self.collection())],
+        ])
+        let collections = people.collections
+        await collections.opening(at: Self.host, in: session)
+
+        collections.startMaking()
+        collections.setDraft(CollectionDraft(name: "   "))
+        collections.cancelForm()
+        #expect(collections.said()?.form == nil && collections.said()?.askingLeave == nil, "blank edges are not a change")
+        collections.close()
+        #expect(collections.said() == nil)
+
+        await collections.opening(at: Self.host, in: session)
+        collections.startMaking()
+        collections.close()
+        #expect(collections.said() == nil, "an untouched draft closes")
+
+        await collections.opening(at: Self.host, in: session)
+        collections.startMaking()
+        collections.setDraft(CollectionDraft(name: "Neighbours"))
+        collections.close()
+        #expect(collections.said()?.askingLeave == .sheet && collections.said()?.form?.draft.name == "Neighbours")
+        collections.setAskingLeave(nil)
+        #expect(collections.said()?.askingLeave == nil && collections.said()?.form != nil, "Keep editing")
+        collections.close()
+        collections.giveUp(.sheet)
+        #expect(collections.said() == nil)
+
+        await collections.opening(at: Self.host, in: session)
+        collections.startChanging("9")
+        collections.cancelForm()
+        #expect(collections.said()?.form == nil && collections.said() != nil, "nothing typed drops the form")
+        collections.startChanging("9")
+        collections.setDraft(CollectionDraft(name: "Friends", discoverable: false))
+        collections.cancelForm()
+        #expect(collections.said()?.askingLeave == .form && collections.said()?.form != nil)
+        collections.giveUp(.form)
+        #expect(collections.said()?.form == nil && collections.said()?.rows.map(\.id) == ["9"])
+
+        let en = CollectionsDiscardAsks.question(Self.host, language: .english)
+        let profile = ProfileDiscardAsks.question(Self.host, language: .english)
+        #expect(en.title == profile.title && en.line == profile.line && en.cancel == profile.cancel)
+        #expect(en.choices.map(\.id) == ["discard"] && en.choices.map(\.role) == [.destructive])
+        let zh = CollectionsDiscardAsks.question(Self.host, language: .taiwanese)
+        #expect(zh.title == "捨棄你的修改？" && zh.line == "什麼都沒有送到 \(Self.host)。" && zh.cancel == "繼續編輯")
+        #expect(!CollectionDraft(name: "  Friends  ").differs(from: CollectionDraft(name: "Friends")))
+        #expect(CollectionDraft(name: "Neighbours").differs(from: CollectionDraft()))
+
+        collections.startMaking()
+        collections.setDraft(CollectionDraft(name: "Neighbours"))
+        await server.hold(Self.make)
+        let work = Task { await collections.save(in: session) }
+        await met("the post has arrived", by: work) { await server.arrivals(of: Self.make) >= 1 }
+        collections.close()
+        collections.cancelForm()
+        #expect(collections.said()?.writing == true && collections.said()?.form != nil && collections.said()?.askingLeave == nil)
+        await server.release(Self.make)
+        await work.value
+    }
+
     @Test("A stranger's words on the sheet are one line, and bounded")
     func wordsAreCleaned() async throws {
         let long = String(repeating: "x", count: 3_000)

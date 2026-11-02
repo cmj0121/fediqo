@@ -2,9 +2,10 @@ import SwiftUI
 
 /// How a list answers the reader (#232) — **rule 3 of #231, as a rule and not a copy.**
 ///
-/// The timeline's rule, made to take any id: a press on a row that is not lit lights it, and a
-/// press on the lit row opens it. `DummyCommand.tapped` asks this, so the stream and every other
-/// list cannot come to answer a press differently. Return is `ShellListRow.enter()`'s.
+/// The timeline's rule, made to take any id. With a pointer or the keyboard, a press on a row
+/// that is not lit lights it, and a press on the lit row opens it. Under a finger one press opens
+/// (`DummyCommand.tapped`, #303, #446). The stream and every other list ask that one function, so
+/// they cannot come to answer a press differently. Return is `ShellListRow.enter()`'s.
 enum ShellListEntry {
     typealias Tap = DummyRowTap
 
@@ -23,12 +24,13 @@ enum ShellListEntry {
 /// The brief and the figure are the list's to give: Usage's sources give neither, and say them
 /// in the detail and to VoiceOver (`spoken`), so that row is its mark, its host and the chevron.
 ///
-/// **Entering, three ways, one outcome.** A press lights the row and a second press opens it
-/// (`ShellListEntry.pressed`). Return opens the lit row, and ↑ and ↓ hand the list a step where
-/// it takes one (`onStep`); the keyboard's focus follows the lamp. VoiceOver, whose reader activates once,
-/// opens in one — the row's default action. Focus does not light a row, because a click focuses
-/// before it presses and would turn every first press into an open; a focused row wears the hover
-/// plate instead.
+/// **Entering, three ways, one outcome.** With a pointer, a press lights the row and a second
+/// press opens it (`ShellListEntry.pressed`). Under a finger (`shellTouch`) the first press opens
+/// (`DummyCommand.tapped`). Return opens the lit row, and ↑ and ↓ hand the list a step where it
+/// takes one (`onStep`); the keyboard's focus follows the lamp. VoiceOver, whose reader activates
+/// once, opens in one — the row's default action. Focus does not light a row, because a click
+/// focuses before it presses and would turn every first press into an open; a focused row wears
+/// the hover plate instead.
 ///
 /// **The chevron is what says there is more.** A row that opens nothing is not this row. A control
 /// of the row's own — a switch, a clear — sits after it, outside what a press on the row enters,
@@ -59,6 +61,7 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
     @FocusState private var focused: Bool
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.shellTouch) private var touch
 
     init(
         id: ID, title: String, brief: String? = nil, figure: String? = nil, spoken: String? = nil,
@@ -129,9 +132,9 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
         selected ? [.isButton, .isSelected] : .isButton
     }
 
-    /// A press: light the row, or open the row already lit.
+    /// A press: under a finger, open; with a pointer, light the row, or open the row already lit.
     func press() {
-        switch ShellListEntry.pressed(id, selected: selection) {
+        switch DummyCommand.tapped(id, selected: selection, touch: touch) {
         case .select: selection = id
         case .open: onOpen()
         }
