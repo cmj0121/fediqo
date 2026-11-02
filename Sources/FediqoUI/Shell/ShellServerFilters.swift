@@ -36,6 +36,44 @@ final class ShellServerFilters {
     private(set) var refused: [String: String] = [:]
     /// The acts on their way, by host.
     private(set) var busy: Set<String> = []
+    /// The post whose sheet of filters is up (#439), or nothing.
+    private(set) var filtering: PostUnderFilters?
+    /// The filter whose sheet of posts is up (#439), or nothing.
+    private(set) var readingPosts: FilterPosts?
+
+    /// A post a sheet of the person's filters is open on.
+    struct PostUnderFilters: Identifiable, Equatable {
+        /// The row the press was on.
+        let row: String
+        /// The row of the copy at the source that is asked, and that copy's id there.
+        let copy: String
+        let statusID: String
+        let host: String
+        /// Its opening words, as a line of ours says them.
+        let opening: String
+
+        var id: String { row }
+    }
+
+    /// The posts a filter names by themselves, as its sheet shows them.
+    struct FilterPosts: Identifiable, Equatable {
+        struct Line: Identifiable, Equatable {
+            let post: FilteredPost
+            /// Who wrote it and how it opens; nothing where its source no longer gives it.
+            var who: String?
+            var opening: String?
+
+            var id: String { post.id }
+        }
+
+        let filterID: String
+        let title: String
+        let host: String
+        var lines: [Line] = []
+        var reading = true
+
+        var id: String { host + "\n" + filterID }
+    }
 
     /// Nothing for a source with no filters of the person's — any but a Mastodon.
     func offer(host raw: String, in session: ShellSession) -> Offer? {
@@ -129,6 +167,95 @@ final class ShellServerFilters {
     func forget(host: String) {
         reading[host.lowercased()] = nil
         refused[host.lowercased()] = nil
+        if filtering?.host == host.lowercased() { filtering = nil }
+        if readingPosts?.host == host.lowercased() { readingPosts = nil }
+    }
+
+    // MARK: - One post (#439)
+
+    /// The filters as the post's sheet draws them, once read.
+    func filters(at host: String) -> [ServerFilter]? {
+        if case .read(let filters)? = reading[host.lowercased()] { return filters }
+        return nil
+    }
+
+    /// The sheet put up on `item`'s post, and the filters read for it: whose they are says which
+    /// hold the post already.
+    func open(on item: DummyItem, in session: ShellSession) {
+        let post = item.isReblog ? item.reblogged.first ?? item : item
+        guard let id = post.statusID else { return }
+        let host = post.source.host.lowercased()
+        refused[host] = nil
+        filtering = PostUnderFilters(row: item.id, copy: post.id, statusID: id, host: host, opening: LineText.oneLine(post.body, limit: 80))
+        Task { await read(host: host, in: session) }
+    }
+
+    func closePost() { filtering = nil }
+
+    /// Puts the post under `filter`, or takes it out where it is under it already: **the source
+    /// first**. What it refuses or fails is said, and nothing here moves. After its yes the post is
+    /// read again, so what it now says of it is what the post's row is drawn by, here as on its
+    /// pages; and a warning opened this run is closed, where it is one of its own making.
+    func turn(_ filter: ServerFilter, for asked: PostUnderFilters, in session: ShellSession) async {
+        let place = filter.place(of: asked.statusID)
+        let done = await act(asked.host, in: session) { filters in
+            if let place {
+                try await filters.takeOut(place)
+            } else {
+                _ = try await filters.put(asked.statusID, under: filter)
+            }
+        }
+        guard done else { return }
+        if place == nil { session.shownAnyway.remove(asked.row) }
+        await readAgain(row: asked.copy, host: asked.host, in: session)
+    }
+
+    /// What the source now says of the post held in `row`. It took the act, so a read lost now
+    /// says that alone: the post is drawn as it was until it is next read.
+    private func readAgain(row: String, host: String, in session: ShellSession) async {
+        guard let held = session.note(ofRow: row), let door = session.mastodon.authorized(host: host, for: .filters) else { return }
+        do {
+            try await session.reach.write(door, landingIn: session.store).readAgain(held)
+            await session.reloadFromStore()
+        } catch {
+            if !Cancellation.happened(error) { refused[host] = String(format: L10n.t("filters.post.unread"), host) }
+        }
+    }
+
+    /// The sheet of the posts `filter` names by themselves, each read for who wrote it and how it
+    /// opens. **A post the source no longer gives stays a line of its own**, which can be taken out.
+    func openPosts(of filter: ServerFilter, at raw: String, in session: ShellSession) async {
+        let host = raw.lowercased()
+        var sheet = FilterPosts(filterID: filter.id, title: filter.title, host: host)
+        sheet.lines = filter.posts.map { .init(post: $0) }
+        readingPosts = sheet
+        guard let filters = filters(host, in: session),
+              let source = session.sources.first(where: { $0.host.lowercased() == host })
+        else {
+            readingPosts?.reading = false
+            return
+        }
+        let read = try? await filters.posts(filter.posts.map(\.statusID), source: source)
+        guard readingPosts?.id == sheet.id else { return }
+        for index in sheet.lines.indices {
+            guard let note = read?[sheet.lines[index].post.statusID] else { continue }
+            sheet.lines[index].who = note.handle
+            sheet.lines[index].opening = LineText.oneLine(note.body, limit: 80)
+        }
+        sheet.reading = false
+        readingPosts = sheet
+    }
+
+    func closePosts() { readingPosts = nil }
+
+    /// Takes a line's post out of the filter its sheet is on, the source first; and, where this
+    /// device holds the post, reads it again so it is treated as it was before.
+    func takeOut(_ line: FilterPosts.Line, in session: ShellSession) async {
+        guard let host = readingPosts?.host else { return }
+        guard await act(host, in: session, { try await $0.takeOut(line.post) }) else { return }
+        readingPosts?.lines.removeAll { $0.id == line.id }
+        guard let held = session.notes.first(where: { $0.source.host == host && $0.statusID == line.post.statusID }) else { return }
+        await readAgain(row: held.key.rowID, host: host, in: session)
     }
 
     private static func said(_ error: any Error, host: String) -> String {
@@ -186,6 +313,26 @@ final class ShellServerFilters {
 }
 
 extension ShellSession {
+    /// What `item`'s `…` offers of its filters (#439): nothing but on a post at a source that has
+    /// them, with somebody signed in there; dim with the part's lock where the sign-in lacks it,
+    /// its press asking.
+    func postFilterOffer(on item: DummyItem) -> ItemActing.PostFilter? {
+        let post = item.isReblog ? item.reblogged.first ?? item : item
+        let host = post.source.host
+        guard post.statusID != nil, post.goneSince == nil, sources.first(where: { $0.host == host })?.kind == .mastodon,
+              mastodon.isSignedIn(host: host)
+        else { return nil }
+        guard let place = mastodon.place(.filters, host: host) else {
+            return ItemActing.PostFilter(lock: nil) { [weak self] in
+                guard let self else { return }
+                self.serverFilters.open(on: item, in: self)
+            }
+        }
+        return ItemActing.PostFilter(lock: ItemActing.Lock(place: place, host: host)) { [weak self] in
+            _ = self?.askFor([.filters], host: host)
+        }
+    }
+
     /// The filter of the person's at `item`'s source that stands over it where a timeline shows
     /// it (#338), as its source said: a hiding one always, a warning not opened this run.
     /// Nothing where this device is not applying a source's filters (#406). The hit stays on

@@ -516,6 +516,10 @@ Your own page also lists the collections you appear in, as your source's own pag
 them, each with who put it together. A source tells this of you alone, so nobody else's page has
 it; you in none, or a server without it, leaves no trace. Behind a row's dots is leaving it.
 
+A post's dots hold Put under a filter, where its Mastodon has your filters part: pick one of your
+filters there, and the post is treated by it here and on your server's own pages. A filter's dots
+on the source's page list the posts under it, each with Take out.
+
 Taking somebody or a hashtag off your profile is behind the dots too, and is not asked either:
 Feature puts it back. Discarding a text that was not sent asks first as well, from its line at
 the foot of the page.

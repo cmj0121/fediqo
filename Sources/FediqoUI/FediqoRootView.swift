@@ -3463,6 +3463,7 @@ private struct PersonPresenters: ViewModifier {
             .modifier(ReportSheetPresenter(people: people, session: session))
             .modifier(ServerListsPresenter(lists: people.serverLists, session: session))
             .modifier(CollectionsPresenter(collections: people.collections, session: session))
+            .modifier(PostFilterPresenter(filters: session.serverFilters, session: session))
             .modifier(AccountActSheetPresenter(people: people.tending.people, session: session))
             .modifier(FederationAskSheetPresenter(servers: people.tending.servers, session: session))
             .modifier(DirectsPresenter(directs: session.directs, session: session, onOpen: onOpenThread))

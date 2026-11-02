@@ -2848,6 +2848,16 @@
 "filters.change" = "變更";
 "filters.remove" = "移除…";
 "filters.more" = "過濾器 %@ 的更多動作";
+"item.act.filter" = "放進過濾器…";
+"filters.post.put" = "放進去";
+"filters.post.put.spoken" = "把這則貼文放進 %@";
+"filters.post.out" = "拿出來";
+"filters.post.out.spoken" = "從 %@ 拿出來";
+"filters.post.unread" = "%@ 做了這件事，但沒辦法重新讀取這則貼文：在下次讀到之前，它維持原樣。";
+"filters.posts.open" = "裡面的貼文";
+"filters.posts.title" = "%@ 裡的貼文";
+"filters.posts.none" = "這個過濾器沒有單獨放進來的貼文。";
+"filters.posts.gone" = "%@ 已不再提供的貼文";
 "filters.remove.title" = "要移除過濾器「%@」嗎？";
 "filters.remove.line" = "%@ 不再隱藏或警告它抓到的內容，在你用來讀它的每個 app 裡都是。";
 "filters.remove.yes" = "移除";

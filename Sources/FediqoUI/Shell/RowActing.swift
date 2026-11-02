@@ -57,6 +57,9 @@ struct RowActing {
                 Task { await people.reports.start(offer.who, post: offer.post, people: people, in: session) }
             }
         }
+        // Under one of the person's filters (#439): the sheet goes up at the press, or the sign-in
+        // is asked for more.
+        acting.postFilter = session.postFilterOffer(on: item)
         // The preview of the page it links to (#335), where the person lets previews be drawn:
         // its picture only where the gate lets it through as one its own source pointed to.
         acting.preview = LinkPreview.of(item, shown: linkPreviews) { reached, source in

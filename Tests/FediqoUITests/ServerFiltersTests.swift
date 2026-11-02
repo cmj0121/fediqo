@@ -7,7 +7,16 @@ import Testing
 private actor FilterServer: HTTPSender {
     var filters: [String] = []
     var refuse = false
+    /// Whether the one post is under a filter here, and whether it has gone.
+    var under = false
+    var gone = false
     private(set) var asked: [String] = []
+
+    func goneNow() { gone = true }
+
+    static func status(filtered: String) -> String {
+        #"{"id":"77","created_at":"2026-10-01T00:00:00.000Z","content":"<p>the words</p>","visibility":"public","url":"https://social.example/@a/77","uri":"https://social.example/s/77","account":{"id":"3","username":"a","acct":"a","display_name":"A","url":"https://social.example/@a"},"media_attachments":[],"mentions":[],"tags":[],"emojis":[],"reblogs_count":0,"favourites_count":0,"replies_count":0,"filtered":\#(filtered)}"#
+    }
 
     init(_ filters: [String]) { self.filters = filters }
 
@@ -27,6 +36,19 @@ private actor FilterServer: HTTPSender {
             let made = Self.filter(id: "\(filters.count + 1)", title: "Made")
             filters.append(made)
             return answer(200, made)
+        case ("POST", let at) where at.hasSuffix("/statuses") && at.hasPrefix("/api/v2/filters/"):
+            if refuse { return answer(422, #"{"error":"Validation failed: Status must exist"}"#) }
+            under = true
+            return answer(200, #"{"id":"1","status_id":"77"}"#)
+        case ("DELETE", "/api/v2/filters/statuses/1"):
+            if refuse { return answer(500, "down") }
+            under = false
+            return answer(200, "{}")
+        case ("GET", "/api/v1/statuses/77"):
+            let hit = #"{"filter":{"id":"5","title":"Hush","context":["home"],"expires_at":null,"filter_action":"hide"},"keyword_matches":null,"status_matches":["77"]}"#
+            return answer(200, Self.status(filtered: under ? "[\(hit)]" : "[]"))
+        case ("GET", "/api/v1/statuses"):
+            return answer(200, gone ? "[]" : "[" + Self.status(filtered: "[]") + "]")
         case ("DELETE", _):
             filters.removeAll { $0.hasPrefix(#"{"id":"\#(path.split(separator: "/").last ?? "")","#) }
             return answer(200, "{}")
@@ -213,6 +235,97 @@ struct ServerFiltersTests {
     func words(key: String) {
         for language in DummyLanguage.allCases {
             #expect(L10n.t(key, language: language) != key, "\(key) in \(language)")
+        }
+    }
+
+    // MARK: - One post (#439)
+
+    private func held(_ session: ShellSession) async throws -> DummyItem {
+        let source = try #require(session.sources.first { $0.host == Self.host })
+        let read = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(FilterServer.status(filtered: "[]").utf8))
+        let note = try #require(read.asNote(source: source, category: .home, sent: .now()))
+        await session.store.ingest([note], ifSourceHere: Self.host)
+        await session.reloadFromStore()
+        return try #require(session.notes.first.map { DummyItem($0) })
+    }
+
+    private static func hush(under: Bool = false) -> String {
+        #"{"id":"5","title":"Hush","context":["home"],"expires_at":null,"filter_action":"hide","keywords":[],"statuses":[\#(under ? #"{"id":"1","status_id":"77"}"# : "")]}"#
+    }
+
+    @Test("Put under a filter from its `…`, a post is treated by that filter here; taken out, it is as it was")
+    func underAndOut() async throws {
+        let server = FilterServer([Self.hush()])
+        let session = try await make(server: server)
+        let item = try await held(session)
+        #expect(session.serverFilter(over: item) == nil)
+        let more = ItemActs.more(on: item, acting: { var a = session.acting(on: item); a.postFilter = session.postFilterOffer(on: item); return a }())
+        #expect(more.items.contains { $0.name == L10n.t("item.act.filter") })
+
+        session.serverFilters.open(on: item, in: session)
+        await session.serverFilters.read(host: Self.host, in: session)
+        let asked = try #require(session.serverFilters.filtering)
+        #expect(asked.statusID == "77")
+        let filter = try #require(session.serverFilters.filters(at: Self.host)?.first)
+        await session.serverFilters.turn(filter, for: asked, in: session)
+        #expect(await server.asked.contains("POST /api/v2/filters/5/statuses"))
+        let under = DummyItem(try #require(session.notes.first))
+        #expect(session.serverFilter(over: under)?.filterID == "5")
+
+        let now = ServerFilter(id: "5", title: "Hush", context: ["home"], action: .hide, expiresAt: nil, keywords: [], statuses: 1, posts: [FilteredPost(id: "1", statusID: "77")])
+        await session.serverFilters.turn(now, for: asked, in: session)
+        #expect(await server.asked.contains("DELETE /api/v2/filters/statuses/1"))
+        #expect(session.serverFilter(over: DummyItem(try #require(session.notes.first))) == nil)
+    }
+
+    @Test("The source refusing says so, and nothing here moves")
+    func aRefusalMovesNothing() async throws {
+        let server = FilterServer([Self.hush()])
+        let session = try await make(server: server)
+        let item = try await held(session)
+        session.serverFilters.open(on: item, in: session)
+        let asked = try #require(session.serverFilters.filtering)
+        await server.refusing()
+        let filter = ServerFilter(id: "5", title: "Hush", context: ["home"], action: .hide, expiresAt: nil, keywords: [])
+        await session.serverFilters.turn(filter, for: asked, in: session)
+        #expect(session.serverFilters.refused[Self.host] != nil)
+        #expect(await !server.asked.contains("GET /api/v1/statuses/77"), "nothing read over a refusal")
+        #expect(session.serverFilter(over: DummyItem(try #require(session.notes.first))) == nil)
+    }
+
+    @Test("The posts under a filter are read and taken out; one its source no longer gives stays a line that can be")
+    func itsPosts() async throws {
+        let server = FilterServer([Self.hush(under: true)])
+        let session = try await make(server: server)
+        _ = try await held(session)
+        let filter = ServerFilter(id: "5", title: "Hush", context: ["home"], action: .hide, expiresAt: nil, keywords: [], statuses: 1, posts: [FilteredPost(id: "1", statusID: "77")])
+        await session.serverFilters.openPosts(of: filter, at: Self.host, in: session)
+        var line = try #require(session.serverFilters.readingPosts?.lines.first)
+        #expect(line.opening == "the words" && line.who != nil)
+
+        await server.goneNow()
+        await session.serverFilters.openPosts(of: filter, at: Self.host, in: session)
+        line = try #require(session.serverFilters.readingPosts?.lines.first)
+        #expect(line.opening == nil && session.serverFilters.readingPosts?.reading == false)
+
+        await session.serverFilters.takeOut(line, in: session)
+        #expect(session.serverFilters.readingPosts?.lines.isEmpty == true)
+        #expect(await server.asked.contains("DELETE /api/v2/filters/statuses/1"))
+    }
+
+    @Test("Offered only on a post of a source with filters where somebody is signed in; dim without the part")
+    func whoIsOffered() async throws {
+        let session = try await make(filters: false)
+        let item = try await held(session)
+        #expect(session.postFilterOffer(on: item)?.lock != nil)
+        let none = try await make(signedIn: false)
+        #expect(none.postFilterOffer(on: try await held(none)) == nil)
+    }
+
+    @Test("Every language says each of its words")
+    func theWords() {
+        for key in ["item.act.filter", "filters.post.put", "filters.post.put.spoken", "filters.post.out", "filters.post.out.spoken", "filters.post.unread", "filters.posts.open", "filters.posts.title", "filters.posts.none", "filters.posts.gone"] {
+            for language in [DummyLanguage.english, .taiwanese] { #expect(L10n.t(key, language: language) != key) }
         }
     }
 }

@@ -2906,6 +2906,16 @@
 "filters.change" = "Change";
 "filters.remove" = "Remove…";
 "filters.more" = "More for the filter %@";
+"item.act.filter" = "Put under a filter…";
+"filters.post.put" = "Put under";
+"filters.post.put.spoken" = "Put this post under %@";
+"filters.post.out" = "Take out";
+"filters.post.out.spoken" = "Take out of %@";
+"filters.post.unread" = "%@ did that, and the post could not be read again: it is drawn as it was until it next is.";
+"filters.posts.open" = "Posts under it";
+"filters.posts.title" = "Posts under %@";
+"filters.posts.none" = "No post is under this filter by itself.";
+"filters.posts.gone" = "A post %@ no longer gives";
 "filters.remove.title" = "Remove the filter “%@”?";
 "filters.remove.line" = "%@ stops hiding and warning of what it caught, in every app you read it with.";
 "filters.remove.yes" = "Remove";
