@@ -147,6 +147,13 @@ struct ForumReplyItemHostedTests {
             return
         }
         #expect(replies.map(\.pid) == [2, 3, 4])
+        var selected: String? = Self.rowID(4)
+        let returning = DummyCommand.returning(selected: &selected, touch: true, opening: root.id)
+        #expect(selected == nil)
+        #expect(DummyThreadPane.replyInView(selected: selected, returning: returning, touch: true, of: thread, among: []) == nil)
+        #expect(DummyThreadPane.replyInView(selected: selected, returning: returning, touch: true, of: thread, among: replies) == Self.rowID(4))
+        #expect(DummyThreadPane.replyInView(selected: selected, returning: returning, touch: false, of: thread, among: replies) == nil,
+                "attaching a keyboard never revives a touch return's lamp")
         #expect(DummyThreadPane.replyInView(selected: Self.rowID(4), of: thread, among: replies) == Self.rowID(4))
         #expect(DummyThreadPane.replyInView(selected: root.id, of: thread, among: replies) == nil, "the topic's own row is not a reply to bring into view")
         #expect(DummyThreadPane.replyInView(selected: Self.rowID(9), of: thread, among: replies) == nil)

@@ -382,6 +382,16 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         guard let selected, selected != root else { return nil }
         return selected
     }
+
+    /// A list brought back under a finger centres what was opened, then leaves nothing lit
+    /// (#444). The destination is read before the selection goes; with a keyboard or pointer
+    /// both the destination and the lamp stay as they were. A newly opened thread still starts
+    /// at its head, as `centredOnAppear` says.
+    static func returning(selected: inout String?, touch: Bool, opening root: String? = nil) -> String? {
+        let row = centredOnAppear(selected: selected, opening: root)
+        if touch { selected = nil }
+        return row
+    }
 }
 
 /// What a dismissing press can close, outermost first.

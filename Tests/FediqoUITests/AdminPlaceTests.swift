@@ -228,6 +228,45 @@ struct AdminPlaceTests {
         #expect(front.page == nil && front.lamp == Self.row && did18 == nil)
     }
 
+    @Test("A server's tabs keep their own lamps, and a row gone is not lit on return (#444)")
+    func tabsGiveBackTheirOwnRows() async throws {
+        let (session, server, pages) = try await session()
+        let tending = pages.tending
+        var front = AdminFront()
+        let changed1 = front.open(Self.host, in: session)
+        #expect(changed1)
+        let reports = try #require(front.page)
+        await tending.opened(reports, in: session)
+        let row = try #require(front.rows(in: session, tending: tending).first)
+        front.lamp = row
+        let changed2 = front.turn(to: .people, tending: tending, in: session)
+        #expect(changed2)
+        #expect(front.lamp == nil, "a tab never visited has no lamp")
+        let changed3 = front.rotate(by: -1, covered: false, tending: tending, in: session)
+        #expect(changed3)
+        #expect(front.page == reports && front.lamp == row, "keys and a pressed tab share the same memory")
+        let changed4 = !front.turn(to: .reports, tending: tending, in: session)
+        #expect(changed4)
+        #expect(front.lamp == row, "a reselect does not overwrite its lamp")
+        let changed5 = front.turn(to: .people, tending: tending, in: session)
+        #expect(changed5)
+        await server.answer(Self.open, PageServer.Answer(body: "[]"))
+        await tending.again(reports, in: session)
+        let changed6 = front.turn(to: .reports, tending: tending, in: session)
+        #expect(changed6)
+        #expect(front.lamp == nil, "the remembered report was removed")
+        await server.answer(Self.open, PageServer.Answer(body: "[" + Self.report("2") + "]"))
+        await tending.again(reports, in: session)
+        front.lamp = row
+        let changed7 = front.turn(to: .people, tending: tending, in: session)
+        #expect(changed7)
+        tending.letGo(at: Self.host)
+        await tending.opened(reports, in: session)
+        let changed8 = front.turn(to: .reports, tending: tending, in: session)
+        #expect(changed8)
+        #expect(front.lamp == nil, "letting the host go also forgets its tabs' lamps")
+    }
+
     @Test("On the People tab the lamp walks the accounts, and the one it is on names a person, as any person's row opens them")
     func peopleRowsOpenThePerson() async throws {
         let account = #"""
@@ -258,6 +297,10 @@ struct AdminPlaceTests {
         let lit = front.move(by: 1, among: reportRows)
         let onReport = front.enter(in: session, tending: pages.tending)
         #expect(turned && lit && onReport == nil)
+        let backToPeople = front.turn(to: .people, tending: pages.tending, in: session)
+        #expect(backToPeople && front.lamp == lamp, "the account's lamp is separate from the report's")
+        let backToReports = front.turn(to: .reports, tending: pages.tending, in: session)
+        #expect(backToReports && front.lamp == reportRows.first, "both populated tabs keep their own row")
     }
 
     @Test("Return on the list opens the host the lamp is on, and with no lamp does nothing; Escape stops the tab's ask, then puts the lamp out, then goes back to the list, then is not Admin's")

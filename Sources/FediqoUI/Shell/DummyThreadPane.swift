@@ -73,6 +73,9 @@ struct DummyThreadPane: View {
     /// The post at the top of the view, kept there as the thread renews under it (#198): an answer
     /// laid in above it moves what is below the reader, never the post they are reading.
     @State private var topID: String?
+    /// A forum reply may arrive after the lamp was put out under a finger (#444). Its return
+    /// destination stays until it is drawn, without making it the selected row again.
+    @State private var returningID: String?
 
     private let step: CGFloat = 16
     /// How many steps a reply is indented by at most — **the conversation's depth, not a
@@ -162,7 +165,8 @@ struct DummyThreadPane: View {
                 .scrollIndicators(.never)
                 .clearsFloatingCorner()
                 .onAppear {
-                    guard let id = DummyCommand.centredOnAppear(selected: selectedID, opening: root.id)
+                    returningID = touch ? DummyCommand.centredOnAppear(selected: selectedID, opening: root.id) : nil
+                    guard let id = DummyCommand.returning(selected: &selectedID, touch: touch, opening: root.id)
                     else { return }
                     // A tick later: a lazy stack just built has not laid out the row to scroll to.
                     Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
@@ -176,6 +180,7 @@ struct DummyThreadPane: View {
                 }
                 .onChange(of: selectedID) { _, id in
                     guard let id else { return }
+                    returningID = nil
                     withAnimation(.easeInOut(duration: 0.18)) {
                         proxy.scrollTo(id, anchor: .center)
                     }
@@ -312,16 +317,19 @@ struct DummyThreadPane: View {
     }
 
     /// The reply the lamp is on, where it is one of `replies` drawn under `thread` — what the
-    /// pane brings into view. Nothing while the reply is not drawn yet, and nothing for a lamp
-    /// on anything else.
-    static func replyInView(selected: String?, of thread: ForumThreadRef?, among replies: [DiscuzPost]) -> String? {
-        guard let selected, let thread else { return nil }
+    /// pane brings into view. Under a finger a reply kept for the return also counts after the
+    /// lamp is out (#444); it never counts for a keyboard. Nothing until that reply is drawn.
+    static func replyInView(
+        selected: String?, returning: String? = nil, touch: Bool = false,
+        of thread: ForumThreadRef?, among replies: [DiscuzPost]
+    ) -> String? {
+        guard let selected = selected ?? (touch ? returning : nil), let thread else { return nil }
         return replies.contains { rowID(of: $0, in: thread) == selected } ? selected : nil
     }
 
     private var replyInView: String? {
         guard let thread, case .loaded(let replies) = posts.standing(of: thread) else { return nil }
-        return Self.replyInView(selected: selectedID, of: thread, among: replies)
+        return Self.replyInView(selected: selectedID, returning: returningID, touch: touch, of: thread, among: replies)
     }
 
     // MARK: - The rest of the topic — D31

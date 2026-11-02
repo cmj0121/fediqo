@@ -68,7 +68,7 @@ struct PeopleRows<Lead: View>: View {
             .modifier(ShellMoreAsks(asked: $asked))
             // Come back to from somebody's page, the row they were opened from is in view.
             .onAppear {
-                if let id = DummyCommand.centredOnAppear(selected: selectedID) { proxy.scrollTo(id, anchor: .center) }
+                if let id = DummyCommand.returning(selected: &selectedID, touch: touch) { proxy.scrollTo(id, anchor: .center) }
             }
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }

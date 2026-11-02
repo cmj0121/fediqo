@@ -90,7 +90,7 @@ struct TendingServerList<Lead: View>: View {
             .scrollIndicators(.never)
             .clearsFloatingCorner()
             .onAppear {
-                if let id = DummyCommand.centredOnAppear(selected: selectedID) { proxy.scrollTo(id, anchor: .center) }
+                if let id = DummyCommand.returning(selected: &selectedID, touch: touch) { proxy.scrollTo(id, anchor: .center) }
             }
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }
