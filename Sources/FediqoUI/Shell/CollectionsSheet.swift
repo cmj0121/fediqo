@@ -149,11 +149,11 @@ struct CollectionsSheetBody: View {
         }
     }
 
-    /// A person's `…` in a collection: taking them out, asked first.
     private func open(_ member: CollectionsSaid.Member) {
         if let person = member.person { onOpenPerson?(person) }
     }
 
+    /// A person's `…` in a collection: taking them out, asked first.
     func more(_ member: CollectionsSaid.Member, of name: String) -> ShellMore {
         ShellMore(items: [
             .danger("person.crop.circle.badge.minus", L10n.t("collections.drop"), asks: ShellQuestion.dropFromCollection(person: member.name, named: name)) {

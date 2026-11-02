@@ -3,8 +3,13 @@ import SwiftUI
 /// A place, a tab or a timeline's name already in front, pressed again (#442): the page in front
 /// goes to its top, as `g` takes it there. Handed down rather than asked of each bar, so the rail,
 /// the tab bar, the fold and the tabs on a page cannot come to mean different things by it.
-struct PressedAgain {
+///
+/// **Always equal**: what `go` reads is the root's state, whichever pass built it, and a new closure
+/// on each of the root's passes would otherwise redraw every page that reads this.
+struct PressedAgain: Equatable {
     let go: () -> Void
+
+    static func == (_: PressedAgain, _: PressedAgain) -> Bool { true }
 }
 
 extension EnvironmentValues {
@@ -32,15 +37,21 @@ struct GoesToPageTop: ViewModifier {
     }
 }
 
+/// What a page's top is scrolled to: a mark that draws nothing and says nothing.
+struct PageTopMark: View {
+    var id = ShellPageTop.id
+
+    var body: some View {
+        Color.clear.frame(height: 0).id(id).accessibilityHidden(true)
+    }
+}
+
 /// What the top of a `Form` is where its tabs stand over it and no row of its own is known to come
 /// first: a row that draws nothing.
 struct FormTop: View {
     var body: some View {
         Section {
-            Color.clear
-                .frame(height: 0)
-                .id(ShellPageTop.id)
-                .accessibilityHidden(true)
+            PageTopMark()
                 .listRowBackground(Color.clear)
         }
     }

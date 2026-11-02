@@ -316,8 +316,7 @@ final class ShellCollections {
     func startMaking() {
         guard open?.live == true else { return }
         open?.sentence = nil
-        let blank = CollectionDraft()
-        open?.form = CollectionsSaid.Form(changing: nil, draft: blank, basis: blank)
+        open?.form = CollectionsSaid.Form(changing: nil, draft: CollectionDraft())
     }
 
     func startChanging(_ id: String) {
@@ -325,8 +324,7 @@ final class ShellCollections {
               let collection = open?.collections.first(where: { $0.id == id })
         else { return }
         open?.sentence = nil
-        let basis = CollectionDraft(collection)
-        open?.form = CollectionsSaid.Form(changing: id, draft: basis, basis: basis)
+        open?.form = CollectionsSaid.Form(changing: id, draft: CollectionDraft(collection))
     }
 
     func setDraft(_ draft: CollectionDraft) { open?.form?.draft = draft }

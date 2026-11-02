@@ -1208,17 +1208,22 @@ struct TimelinePane: View {
         ScrollView { empty }
             .scrollIndicators(.never)
             .clearsFloatingCorner()
-            .modifier(PullsToReload(
-                offered: { ReloadMark.pulls(canReload: ways.canReload, searching: searching, reading: !session.reload.asking.isEmpty) },
-                reload: {
-                    session.readingMark.pulled()
-                    ways.onReload()
-                },
-                settled: {
-                    await session.reload.settled(.timeline)
-                    session.readingMark.pullSettled()
-                }
-            ))
+            .modifier(timelinePull(reading: !session.reload.asking.isEmpty))
+    }
+
+    /// The one pull of a timeline, with rows or with none: the same press as the reload mark.
+    private func timelinePull(reading: Bool = false) -> PullsToReload {
+        PullsToReload(
+            offered: { ReloadMark.pulls(canReload: ways.canReload, searching: searching, reading: reading) },
+            reload: {
+                session.readingMark.pulled()
+                ways.onReload()
+            },
+            settled: {
+                await session.reload.settled(.timeline)
+                session.readingMark.pullSettled()
+            }
+        )
     }
 
     private func list(_ items: [DummyItem], under bands: [SearchBands] = []) -> some View {
@@ -1245,7 +1250,7 @@ struct TimelinePane: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    Color.clear.frame(height: 0).id(Self.top).accessibilityHidden(true)
+                    PageTopMark(id: Self.top)
                     // What the sources found beside posts (#319): short bands over the posts,
                     // which begin under them exactly as they always did.
                     if !bands.isEmpty {
@@ -1336,17 +1341,7 @@ struct TimelinePane: View {
             .scrollIndicators(.never)
             // Pulled down from its top, the list is read again as the reload mark reads it
             // (#307) — the same press, by the same function — wherever that mark is offered.
-            .modifier(PullsToReload(
-                offered: { ReloadMark.pulls(canReload: ways.canReload, searching: searching) },
-                reload: {
-                    session.readingMark.pulled()
-                    ways.onReload()
-                },
-                settled: {
-                    await session.reload.settled(.timeline)
-                    session.readingMark.pullSettled()
-                }
-            ))
+            .modifier(timelinePull())
             // The end of the list stops short of whatever floats over the page (#112).
             .clearsFloatingCorner()
             .modifier(KeepsTopRow(session: session, placing: searching ? nil : timeline, latest: prefs.latestDate))
