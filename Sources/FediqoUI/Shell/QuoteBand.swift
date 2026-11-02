@@ -24,10 +24,11 @@ struct QuoteBand: View {
     /// Opening the quoted post as a post of its own. Nothing where there is nothing to open.
     var onOpen: (() -> Void)?
     var onToggleCover: () -> Void = {}
+    var onOpenPerson: ((DummyPerson) -> Void)?
 
     var body: some View {
         if let post = quote.post {
-            QuoteCard(post: post, host: host, lifted: lifted, onOpen: onOpen, onToggleCover: onToggleCover)
+            QuoteCard(post: post, host: host, lifted: lifted, onOpen: onOpen, onToggleCover: onToggleCover, onOpenPerson: onOpenPerson)
         }
     }
 
@@ -212,6 +213,8 @@ struct QuoteCard: View {
     let lifted: Bool
     var onOpen: (() -> Void)?
     var onToggleCover: () -> Void
+    /// The author pressed, apart from the card's own press (#443).
+    var onOpenPerson: ((DummyPerson) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var contrast
@@ -269,9 +272,38 @@ struct QuoteCard: View {
         if post.covered {
             Button(L10n.t(covered ? "quote.lift" : "quote.cover"), action: onToggleCover)
         }
+        if let author, let onOpenPerson {
+            Button(String(format: L10n.t("item.person.open"), author.name)) { onOpenPerson(author) }
+        }
     }
 
+    private var author: DummyPerson? { DummyPerson(handle: post.handle, host: host) }
+
     private var header: some View {
+        HStack(alignment: .center, spacing: ShellSpace.tight) {
+            authorPress
+            EmojiText(post.handle, emojis: post.emojis, host: host, role: .meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: ShellSpace.tight)
+            headerEnd
+        }
+    }
+
+    /// The face and the name: a press of their own where one is handed in, which the card's own
+    /// press does not take.
+    @ViewBuilder
+    private var authorPress: some View {
+        if let author, let onOpenPerson {
+            Button { onOpenPerson(author) } label: { authorFace }
+                .buttonStyle(.plain)
+        } else {
+            authorFace
+        }
+    }
+
+    private var authorFace: some View {
         HStack(alignment: .center, spacing: ShellSpace.tight) {
             Group {
                 if let url = post.avatarURL {
@@ -288,11 +320,11 @@ struct QuoteCard: View {
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .lineLimit(1)
                 .layoutPriority(1)
-            EmojiText(post.handle, emojis: post.emojis, host: host, role: .meta)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: ShellSpace.tight)
+        }
+    }
+
+    private var headerEnd: some View {
+        HStack(alignment: .center, spacing: ShellSpace.tight) {
             Text(post.postedAt, format: .relative(presentation: .numeric, unitsStyle: .abbreviated))
                 .shellFont(.reading)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))

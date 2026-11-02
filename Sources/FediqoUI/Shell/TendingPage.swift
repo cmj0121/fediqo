@@ -420,8 +420,8 @@ struct ReportRowView: View {
                 .buttonStyle(.plain)
                 .padding(.horizontal, ShellSpace.pad)
             }
-            ForEach(postItems, id: \.id) { item in
-                DummyItemRow(item: item, catalogues: catalogues, posts: posts, onOpenPerson: onOpenPerson)
+            ForEach(postItems, id: \.item.id) { post in
+                TendedPostRow(note: post.note, item: post.item, catalogues: catalogues, posts: posts, onOpenPerson: onOpenPerson)
             }
         }
         .padding(.vertical, ShellSpace.step)
@@ -434,8 +434,8 @@ struct ReportRowView: View {
     }
 
     /// The posts it names, each as a post's row of its own — drawn from the report, never held.
-    private var postItems: [DummyItem] {
+    private var postItems: [(note: Note, item: DummyItem)] {
         let targets = ReblogTargets(report.posts + report.carried)
-        return report.posts.map { DummyItem($0, among: targets) }
+        return report.posts.map { (note: $0, item: DummyItem($0, among: targets)) }
     }
 }

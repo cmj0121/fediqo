@@ -15,7 +15,7 @@ struct QuoteHead: View {
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
                 if let note = session.note(ofRow: quoting.item.rowID) {
-                    QuoteCard(post: QuotedPost(note), host: quoting.item.host, lifted: false, onOpen: nil, onToggleCover: {})
+                    OwnCoverQuoteCard(post: QuotedPost(note), host: quoting.item.host)
                 }
                 ShellLinkButton(L10n.t("compose.quote.remove")) { session.composeDraft.quoting = nil }
                     .fixedSize()
@@ -68,6 +68,8 @@ struct QuotesSheet: View {
     let revoking: Set<String>
     let missed: String?
     var onRevoke: (Note) -> Void
+    /// A quote pressed: the post that quotes, with the sheet out of its way (#443).
+    var onOpen: ((Note) -> Void)?
     var onReadOn: () -> Void
     var onClose: () -> Void
 
@@ -163,9 +165,12 @@ struct QuotesSheet: View {
                 .lineLimit(1)
         }
         .padding(ShellSpace.pad)
+        .contentShape(Rectangle())
+        .onTapGesture { onOpen?(quoting) }
         .shellMoreHeld()
         .accessibilityElement(children: .combine)
         .accessibilityLabel(QuoteWords.spoken(quoting))
+        .accessibilityAction { onOpen?(quoting) }
     }
 }
 
@@ -174,6 +179,7 @@ struct QuotesSheet: View {
 /// drops what the draft carries; and the composer opened on a quote. Hands the session what its
 /// people pages know of each host, which says whether it has quotes.
 struct QuotePresenter: ViewModifier {
+    @Environment(\.shellOpens) private var opens
     let session: ShellSession
     let hosts: ShellHostsKnown
     @Binding var composing: Bool
@@ -188,6 +194,12 @@ struct QuotePresenter: ViewModifier {
                     host: open.host, rows: quoting.rows, reading: quoting.reading, more: quoting.next != nil,
                     revoking: quoting.revoking, missed: quoting.missed,
                     onRevoke: { quoting.withdrawQuote($0, of: open.post, in: session) },
+                    onOpen: opens.map { opens in
+                        { note in
+                            quoting.close()
+                            opens.post(note)
+                        }
+                    },
                     onReadOn: { quoting.readOn(in: session) },
                     onClose: { quoting.close() }
                 )

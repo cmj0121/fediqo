@@ -127,6 +127,8 @@ struct PersonPane<Lead: View>: View {
     var onReachFoot: (() -> Void)?
     /// A face on a row pressed, where the list is not one person's: nothing on their own page.
     var onOpenPerson: ((DummyPerson) -> Void)?
+    /// Whose page this is, where it is somebody's: their own face is no press there (#443).
+    var page: DummyPerson?
     /// What stands over the rows and scrolls away with them: the page's head, at a text size
     /// where it would fill the page.
     @ViewBuilder var lead: Lead
@@ -188,7 +190,8 @@ struct PersonPane<Lead: View>: View {
     /// **One closure is deliberately nothing on their page.** `onOpenPerson` is nothing there
     /// because this *is* their page — a face that opened the page it is already on is a control
     /// that promises a journey and stands still, so it is absent rather than drawn and refused.
-    /// A list of anybody's posts (#379) hands one in.
+    /// A list of anybody's posts (#379) hands one in, and so does their page for a post of somebody
+    /// else's that they boosted, whose face is not theirs (#443): `opensAuthor`.
     private func row(_ item: DummyItem) -> some View {
         DummyItemRow(
             item: item,
@@ -211,7 +214,7 @@ struct PersonPane<Lead: View>: View {
             },
             // Lit and opened in one, for the reader who activates a row once.
             onOpen: { onOpenThread(item.id) },
-            onOpenPerson: onOpenPerson,
+            onOpenPerson: page.map { $0.opensAuthor(of: item) } == false ? nil : onOpenPerson,
             quoteLifted: decks.isQuoteLifted(of: item),
             onToggleQuoteCover: { decks.toggleQuoteCover(of: item) },
             onToggleCover: { _ = decks.toggleCover(item.id) },

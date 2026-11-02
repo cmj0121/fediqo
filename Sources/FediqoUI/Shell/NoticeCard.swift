@@ -247,7 +247,7 @@ struct NoticeCard: View {
 
     /// The person's own post, short and quieter: the news is who, not the post.
     private func ownPost(_ post: Note) -> some View {
-        QuoteCard(post: QuotedPost(post), host: notice.source.host, lifted: false, onOpen: onOpen, onToggleCover: {})
+        OwnCoverQuoteCard(post: QuotedPost(post), host: notice.source.host, onOpen: onOpen)
             .padding(.horizontal, ShellSpace.pad)
             .padding(.bottom, ShellSpace.step)
     }

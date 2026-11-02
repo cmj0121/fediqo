@@ -19,6 +19,8 @@ struct CollectionsSheetBody: View {
     var onCancel: () -> Void = {}
     var onClose: () -> Void = {}
     var onAgain: () -> Void = {}
+    /// A member pressed: that person, with the sheet out of their way (#443).
+    var onOpenPerson: ((DummyPerson) -> Void)?
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -138,13 +140,20 @@ struct CollectionsSheetBody: View {
                 Text(spoken).shellFont(.meta).foregroundStyle(member.waits ? ShellChrome.inkDim(colorScheme) : ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { open(member) }
                     .accessibilityLabel(spoken)
+                    .accessibilityAction { open(member) }
                 ShellMoreButton(more(member, of: opened.name)).fixedSize()
             }
         }
     }
 
     /// A person's `…` in a collection: taking them out, asked first.
+    private func open(_ member: CollectionsSaid.Member) {
+        if let person = member.person { onOpenPerson?(person) }
+    }
+
     func more(_ member: CollectionsSaid.Member, of name: String) -> ShellMore {
         ShellMore(items: [
             .danger("person.crop.circle.badge.minus", L10n.t("collections.drop"), asks: ShellQuestion.dropFromCollection(person: member.name, named: name)) {
@@ -196,6 +205,7 @@ struct CollectionsSheetBody: View {
 /// The sheet up, over its keeper.
 struct CollectionsSheet: View {
     let collections: ShellCollections
+    @Environment(\.shellOpens) private var opens
     let session: ShellSession
 
     var body: some View {
@@ -214,7 +224,13 @@ struct CollectionsSheet: View {
                     onSave: { Task { await collections.save(in: session) } },
                     onCancel: { collections.cancelForm() },
                     onClose: { collections.close() },
-                    onAgain: { Task { await collections.again(in: session) } }
+                    onAgain: { Task { await collections.again(in: session) } },
+                    onOpenPerson: opens.map { opens in
+                        { person in
+                            collections.close()
+                            opens.person(person)
+                        }
+                    }
                 )
             }
             .interactiveDismissDisabled(said.writing)
