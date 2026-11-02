@@ -79,6 +79,8 @@ extension ShellSession {
             // And so is what that reader pressed, and what was said of what they asked of it.
             acts.forget(host: host)
             said.forget(host: host)
+            // And so are their filters, and any sheet open on them (#439).
+            serverFilters.forget(host: host)
             // The reader of this source changed (#293). Gone — signed out, or ended by the
             // server — its line of loads is dropped, as the reader's own sign-out drops it.
             // Signed in — again, or as somebody new — the source is asked again from the start.

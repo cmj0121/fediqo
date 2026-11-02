@@ -327,7 +327,7 @@ extension ShellSession {
     /// it adds them.
     var raisesOverPages: Bool {
         answering != nil || signingIn != nil || editing != nil || withdrawing != nil || rowAsk != nil
-            || editingUnsent != nil || discardingUnsent != nil || resendingUnsent != nil
+            || editingUnsent != nil || filesOfUnsent != nil || discardingUnsent != nil || resendingUnsent != nil
             || partAsks.open != nil || signOutAsk != nil || !mastodon.ended.isEmpty
             || !mastodon.leftTold.isEmpty
     }

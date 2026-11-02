@@ -119,6 +119,36 @@ enum MastodonCollectionCaptures {
 {"collection":{"id":"117532239155670303","uri":"https://mastodon.localhost/ap/users/117532228446847631/collections/117532239155670303","name":"With two","description":null,"language":null,"account_id":"117532228446847631","local":true,"sensitive":true,"discoverable":false,"url":"https://mastodon.localhost/collections/117532239155670303","item_count":1,"created_at":"2026-10-30T22:34:05.320Z","updated_at":"2026-10-30T22:34:05.320Z","tag":null,"items":[{"id":"117532239155632250","state":"accepted","created_at":"2026-10-30T22:34:05.329Z","account_id":"117532228456870897"}]},"accounts":[{"id":"117532228446847631","username":"p2","acct":"p2","display_name":"","locked":false,"bot":false,"discoverable":true,"indexable":false,"group":false,"created_at":"2026-10-30T00:00:00.000Z","note":"","url":"https://mastodon.localhost/@p2","uri":"https://mastodon.localhost/ap/users/117532228446847631","avatar":"https://mastodon.localhost/avatars/original/missing.png","avatar_static":"https://mastodon.localhost/avatars/original/missing.png","avatar_description":"","header":"https://mastodon.localhost/headers/original/missing.png","header_static":"https://mastodon.localhost/headers/original/missing.png","header_description":"","followers_count":0,"following_count":0,"statuses_count":0,"last_status_at":null,"hide_collections":null,"show_media":true,"show_media_replies":true,"show_featured":true,"noindex":false,"feature_approval":{"automatic":["public"],"manual":[],"current_user":"automatic"},"emojis":[],"roles":[],"fields":[]},{"id":"117532228456870897","username":"p3","acct":"p3","display_name":"","locked":false,"bot":false,"discoverable":true,"indexable":false,"group":false,"created_at":"2026-10-30T00:00:00.000Z","note":"","url":"https://mastodon.localhost/@p3","uri":"https://mastodon.localhost/ap/users/117532228456870897","avatar":"https://mastodon.localhost/avatars/original/missing.png","avatar_static":"https://mastodon.localhost/avatars/original/missing.png","avatar_description":"","header":"https://mastodon.localhost/headers/original/missing.png","header_static":"https://mastodon.localhost/headers/original/missing.png","header_description":"","followers_count":0,"following_count":0,"statuses_count":0,"last_status_at":null,"hide_collections":null,"show_media":true,"show_media_replies":true,"show_featured":true,"noindex":false,"feature_approval":{"automatic":["public"],"manual":[],"current_user":"automatic"},"emojis":[],"roles":[],"fields":[]}]}
 """#
 
+    // MARK: - The collections a person appears in (#434), asked on 2026-11-02 the same way
+
+    /// | Asked | Answered |
+    /// | ----- | -------- |
+    /// | `GET …/accounts/:id/in_collections` by that person, with `read:collections` | 200, those not to be found too |
+    /// | the same, in none | 200 `{"collections":[]}` |
+    /// | the same of anybody else, signed in | 403 `This action is not allowed` |
+    /// | the same with no sign-in | 422 `This method requires an authenticated user` |
+    /// | the same without the word | 403 outside the authorized scopes |
+    /// | after they took themselves out of one | that one still listed, with no item of theirs in it |
+    /// | the same on a host with no such address | 404, a page of the host's own |
+    /// | the same in the nightly of 2026-10-30 (source read, not run) | the same policy: the person asked of alone |
+    static let appearsInOwner = "117546213547442566"
+    static let appearsInReader = "117546213553834776"
+
+    /// `GET …/accounts/:id/in_collections` by that person
+    static let appearsIn = #"""
+{"collections":[{"id":"117546217371525934","uri":"https://mastodon.localhost/ap/users/117546213547442566/collections/117546217371525934","name":"Friends","description":"worth","language":null,"account_id":"117546213547442566","local":true,"sensitive":false,"discoverable":true,"url":"https://mastodon.localhost/collections/117546217371525934","item_count":1,"created_at":"2026-11-02T09:48:55.968Z","updated_at":"2026-11-02T09:48:55.968Z","tag":null,"items":[{"id":"117546217388057501","state":"accepted","created_at":"2026-11-02T09:48:56.221Z","account_id":"117546213553834776"}]},{"id":"117546217380643916","uri":"https://mastodon.localhost/ap/users/117546213547442566/collections/117546217380643916","name":"Hidden","description":null,"language":null,"account_id":"117546213547442566","local":true,"sensitive":false,"discoverable":false,"url":"https://mastodon.localhost/collections/117546217380643916","item_count":0,"created_at":"2026-11-02T09:48:56.106Z","updated_at":"2026-11-02T09:48:56.106Z","tag":null,"items":[]}]}
+"""#
+
+    /// the same, in none
+    static let appearsInNone = #"""
+{"collections":[]}
+"""#
+
+    /// the same of anybody else
+    static let appearsInOfAnother = #"""
+{"error":"This action is not allowed"}
+"""#
+
     /// What says a sign-in lacks the word.
     static let outOfScopeHeader = #"Bearer realm="Doorkeeper", error="insufficient_scope", error_description="Access to this resource requires scope _write write:collections_.""#
 }

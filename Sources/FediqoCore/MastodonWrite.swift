@@ -218,11 +218,12 @@ public struct MastodonWrite: Sendable {
     /// device invented. The multipart wrapper is allowed `uploadMargin` past the file, which is
     /// not that ceiling: a file at the source's exact limit still goes.
     ///
-    /// A 202 that carries an id is the file accepted. A 422 is the source's refusal, thrown
-    /// before this is taken for a post that may have landed.
-    public func upload(
+    /// A 202 that carries an id is the file accepted, **not yet ready** (`UploadedFile.ready`): a
+    /// post carrying it is refused until it is (`MastodonFileCaptures`). A 422 is the source's
+    /// refusal, thrown before this is taken for a post that may have landed.
+    public func uploadFile(
         bytes: Data, name: String, type: String, description: String, byteLimit: Int? = nil
-    ) async throws -> String {
+    ) async throws -> UploadedFile {
         if let byteLimit, bytes.count > byteLimit {
             throw MastodonWriteError.refusedHere(.tooLarge(limit: byteLimit))
         }
@@ -231,13 +232,86 @@ public struct MastodonWrite: Sendable {
             MultipartPart.file("file", named: fileName, type: type, bytes),
             MultipartPart.field("description", description),
         ]
-        let data = try await door.post(
+        let answer = try await door.postAnswering(
             path: "/api/v2/media", parts: parts, limit: bytes.count + Self.uploadMargin
         )
-        guard let id = try? MastodonJSON.decoder.decode(UploadedMedia.self, from: data).id, !id.isEmpty else {
+        guard let id = try? MastodonJSON.decoder.decode(UploadedMedia.self, from: answer.body).id, !id.isEmpty else {
             throw MastodonWriteError.unreadable
         }
-        return id
+        return UploadedFile(id: id, ready: answer.status != 202)
+    }
+
+    /// `uploadFile`, for whoever only wants the id.
+    public func upload(
+        bytes: Data, name: String, type: String, description: String, byteLimit: Int? = nil
+    ) async throws -> String {
+        try await uploadFile(bytes: bytes, name: name, type: type, description: description, byteLimit: byteLimit).id
+    }
+
+    /// How a file sent to this source stands (#438), as `MastodonFileCaptures` records: a 200 is
+    /// ready, a 206 still being prepared, a 422 could not be prepared, and a 404 is not there — let
+    /// go by its source, or on a post already. Anything else is thrown: it says nothing of the file.
+    public func standing(ofFile id: String) async throws -> FileStanding {
+        guard ListSubscription.isPathSegment(id) else { throw MastodonWriteError.unfindable }
+        do {
+            return try await door.getAnswering(path: "/api/v1/media/\(id)").status == 206 ? .preparing : .ready
+        } catch MastodonAuthError.http(422) {
+            return .unprepared
+        } catch MastodonAuthError.http(404) {
+            return .gone
+        }
+    }
+
+    /// Waits until `id` is ready, asking at `pace`: **bounded by its rounds, and ended by a
+    /// cancelling**. Throws `MastodonFileError` where it could not be prepared, is gone, or was
+    /// still being prepared at the last round. **A failure to ask is asked again within the bound**,
+    /// but the source's own word against the ask (a 4xx but those something in front of it says),
+    /// which is thrown as it came.
+    public func awaitFile(_ id: String, pace: FilePace = .standing) async throws {
+        for round in 0..<pace.rounds {
+            try Task.checkCancellation()
+            do {
+                switch try await standing(ofFile: id) {
+                case .ready: return
+                case .unprepared: throw MastodonFileError.unprepared
+                case .gone: throw MastodonFileError.gone
+                case .preparing: break
+                }
+            } catch let error where Self.endsFileWait(error) {
+                throw error
+            } catch {}
+            try await pace.wait(round)
+        }
+        throw MastodonFileError.stillPreparing
+    }
+
+    /// Whether a failure ends a wait for a file: what became of the file, a cancelling, or the
+    /// source's own word against the ask. No answer, a fault past its door or what something in
+    /// front of it says do not.
+    private static func endsFileWait(_ error: any Error) -> Bool {
+        if error is MastodonFileError || Cancellation.happened(error) { return true }
+        guard let auth = error as? MastodonAuthError else { return false }
+        if case .http(let status) = auth { return (400..<500).contains(status) && ![408, 409, 425, 429, 499].contains(status) }
+        return true
+    }
+
+    /// Corrects what a file not yet on a post says of itself. A source takes this while it is being
+    /// prepared too. Thrown as it came where it does not: nothing here is changed by that.
+    public func describeFile(_ id: String, as description: String) async throws {
+        guard ListSubscription.isPathSegment(id) else { throw MastodonWriteError.unfindable }
+        _ = try await door.put(path: "/api/v1/media/\(id)", form: [("description", description)])
+    }
+
+    /// Takes a file not yet on a post back from its source: at any stage of being prepared, and one
+    /// that could not be. **A 404 is a file already gone**, which is what was asked; a 422 is a file
+    /// on a post already, which is thrown.
+    public func takeBackFile(_ id: String) async throws {
+        guard ListSubscription.isPathSegment(id) else { throw MastodonWriteError.unfindable }
+        do {
+            _ = try await door.delete(path: "/api/v1/media/\(id)")
+        } catch MastodonAuthError.http(404) {
+            return
+        }
     }
 
     /// A non-empty line, or nothing.
@@ -434,6 +508,19 @@ public struct MastodonWrite: Sendable {
         return answered
     }
 
+    /// `note` read again and laid over its row, moving none of the reader's marks (#439): what its
+    /// source now says of it, as a filter it was just put under or taken out of.
+    @discardableResult
+    public func readAgain(_ note: Note) async throws -> Note {
+        guard await store.sources().contains(where: { $0.host == host }) else { throw MastodonWriteError.noSource }
+        guard let id = note.sendableID, ListSubscription.isPathSegment(id) else { throw MastodonWriteError.unfindable }
+        let sent = ReadMoment.now()
+        let data = try await door.get(path: "/api/v1/statuses/\(id)")
+        let answered = try landed(data, on: note, sent: sent)
+        await store.refresh([answered], ifSourceHere: host, filtersActed: true)
+        return await store.note(answered.key) ?? answered.refreshed(over: note)
+    }
+
     /// `answered` laid over the row as an act's answer is (`act`), and the store's copy back.
     /// `mark` is the one the act moved, or nothing where it moved none (a change, #332).
     func settle(_ answered: Note, on note: Note, acted mark: ReaderMark?) async -> Note {
@@ -464,6 +551,49 @@ public struct MastodonWrite: Sendable {
 
 /// The id a media upload was answered with. Anything else about the file is the source's to
 /// keep; a post sends the id.
+/// A file its source accepted (#438): its id, and whether it said it is ready already.
+public struct UploadedFile: Equatable, Sendable {
+    public let id: String
+    public let ready: Bool
+
+    public init(id: String, ready: Bool) {
+        self.id = id
+        self.ready = ready
+    }
+}
+
+/// How a file sent to a source stands there (#438).
+public enum FileStanding: Equatable, Sendable {
+    case ready, preparing, unprepared, gone
+}
+
+/// Why a wait for a file ended without it (#438).
+public enum MastodonFileError: Error, Equatable, Sendable {
+    /// The source could not prepare it.
+    case unprepared
+    /// The source no longer has it.
+    case gone
+    /// Still being prepared at the wait's last round.
+    case stillPreparing
+}
+
+/// How often and for how long a file being prepared is asked after (#438). A seam, so a check
+/// turns no clock.
+public struct FilePace: Sendable {
+    public let rounds: Int
+    public let wait: @Sendable (Int) async throws -> Void
+
+    public init(rounds: Int, wait: @escaping @Sendable (Int) async throws -> Void) {
+        self.rounds = rounds
+        self.wait = wait
+    }
+
+    /// Soon at first, as most are ready in moments, then every five seconds for some 15 minutes.
+    public static let standing = FilePace(rounds: 180) { round in
+        try await Task.sleep(for: .seconds(min(round + 1, 5)))
+    }
+}
+
 private struct UploadedMedia: Decodable {
     let id: String
 }

@@ -466,8 +466,8 @@ struct ComposeTests {
            {"type":"image","url":"https://social.example/m2.jpg","description":"a bird"}]
         """#)
         let server = MediaServer(media: [
-            .init(status: 202, body: #"{"id":"m1"}"#),
-            .init(status: 202, body: #"{"id":"m2"}"#),
+            .init(status: 200, body: #"{"id":"m1"}"#),
+            .init(status: 200, body: #"{"id":"m2"}"#),
         ], status: posted)
         let session = try await mediaShell(server)
         session.prepareCompose()
@@ -508,9 +508,9 @@ struct ComposeTests {
     @Test("A file refused part-way leaves the post unsent and whole, and trying again does not upload the one already taken")
     func aFailurePartWayLeavesThePostWhole() async throws {
         let server = MediaServer(media: [
-            .init(status: 202, body: #"{"id":"m1"}"#),
+            .init(status: 200, body: #"{"id":"m1"}"#),
             .init(status: 422, body: "{}"),
-            .init(status: 202, body: #"{"id":"m2"}"#),
+            .init(status: 200, body: #"{"id":"m2"}"#),
         ], status: Self.status(body: "kept"))
         let session = try await mediaShell(server)
         session.prepareCompose()
@@ -635,6 +635,285 @@ struct ComposeTests {
         #expect(ComposeWords.runsLine(1800, language: .english) == "30 minutes")
     }
 
+    // MARK: - A file its source is preparing (#438)
+
+    private static let preparing = MediaServer.Answer(status: 206, body: #"{"id":"m1","url":null}"#)
+    private static let readyFile = MediaServer.Answer(body: #"{"id":"m1","url":"https://m/x"}"#)
+
+    private func slowPost(_ server: MediaServer, pace: FilePace = FilePace(rounds: 5) { _ in }) async throws -> ShellSession {
+        let session = try await mediaShell(server)
+        session.outbox.filePace = pace
+        session.prepareCompose()
+        session.composeDraft.text = "kept"
+        #expect(session.composeAttach(bytes: Data("v".utf8), name: "v.mp4", type: "video/mp4", description: "a hill") == nil)
+        #expect(session.send())
+        return session
+    }
+
+    @Test("A post with a slow file is sent once the file is ready, with no other act, carrying it")
+    func aSlowFileWaits() async throws {
+        let server = MediaServer(media: [.init(status: 202, body: #"{"id":"m1"}"#)], status: Self.status(body: "kept"))
+        await server.files([Self.preparing, Self.preparing, Self.readyFile])
+        let session = try await slowPost(server)
+        await session.outbox.settled()
+        #expect(session.outbox.sendings.isEmpty)
+        let requests = await server.requests
+        #expect(requests.map { $0.url?.path } == ["/api/v2/media", "/api/v1/media/m1", "/api/v1/media/m1", "/api/v1/media/m1", "/api/v1/statuses"])
+        #expect(Self.pairs(requests[4]).filter { $0.0 == "media_ids[]" }.map(\.1) == ["m1"])
+    }
+
+    @Test("A file its source could not prepare says so and nothing is posted, every word kept; Send again sends it anew, what was left let go")
+    func aFileNotPrepared() async throws {
+        let server = MediaServer(media: [.init(status: 202, body: #"{"id":"m1"}"#), .init(body: #"{"id":"m2"}"#)], status: Self.status(body: "kept"))
+        await server.files([.init(status: 422, body: #"{"error":"Error processing thumbnail for uploaded media"}"#)])
+        let session = try await slowPost(server)
+        await session.outbox.settled()
+        let held = try #require(session.outbox.sendings.first)
+        #expect(held.standing == .unprepared && held.unsent.text == "kept" && held.unsent.media.first?.unprepared == true)
+        #expect(held.unsent.standing == .unprepared)
+        #expect(OutboxWords.line(held, hold: nil, whom: nil).contains("v.mp4"))
+        #expect(OutboxWords.presses(held, hold: nil).contains(.files))
+        #expect(await !server.paths.contains("/api/v1/statuses"))
+
+        #expect(session.outbox.again(held.id, in: session))
+        await session.outbox.settled()
+        #expect(session.outbox.sendings.isEmpty)
+        let requests = await server.requests
+        #expect(requests.contains { $0.httpMethod == "DELETE" && $0.url?.path == "/api/v1/media/m1" })
+        #expect(Self.pairs(try #require(requests.last)).filter { $0.0 == "media_ids[]" }.map(\.1) == ["m2"])
+    }
+
+    /// A pace that says it stands at a wait, and stands there until a check lets it on.
+    private struct Held {
+        let reached = Gate()
+        let gate = Gate()
+        var pace: FilePace {
+            FilePace(rounds: 5) { [reached, gate] _ in
+                await reached.open()
+                await gate.wait()
+            }
+        }
+    }
+
+    @Test("While it is prepared the line says so, the description goes to the source and is what stands, and a file taken back is gone there and not on the post")
+    func whilePrepared() async throws {
+        let server = MediaServer(media: [.init(status: 202, body: #"{"id":"m1"}"#)], status: Self.status(body: "kept"))
+        await server.files([Self.preparing, Self.readyFile])
+        let held = Held()
+        let session = try await slowPost(server, pace: held.pace)
+        await held.reached.wait()
+        let line = try #require(session.outbox.sendings.first)
+        #expect(OutboxWords.presses(line, hold: nil) == [.files, .stop])
+        #expect(OutboxWords.line(line, hold: nil, whom: nil) == String(format: L10n.t("outbox.preparing.post"), host))
+        let piece = try #require(line.unsent.media.first)
+        session.outbox.correct(piece.id, of: line.id, to: "a valley", in: session)
+        session.outbox.takeBack(piece.id, of: line.id, in: session)
+        #expect(session.outbox.sending(line.id)?.unsent.media.first?.description == "a hill", "the source first, and one act at a time")
+        await session.outbox.fileActEnded(line.id)
+        #expect(session.outbox.sending(line.id)?.unsent.media.first?.description == "a valley")
+        session.outbox.takeBack(piece.id, of: line.id, in: session)
+        await session.outbox.fileActEnded(line.id)
+        #expect(session.outbox.sending(line.id)?.unsent.media.isEmpty == true)
+        await held.gate.open()
+        await session.outbox.settled()
+        let requests = await server.requests
+        #expect(requests.contains { $0.httpMethod == "PUT" && $0.url?.path == "/api/v1/media/m1" })
+        #expect(requests.contains { $0.httpMethod == "DELETE" && $0.url?.path == "/api/v1/media/m1" })
+        let post = try #require(requests.last { $0.url?.path == "/api/v1/statuses" })
+        #expect(Self.pairs(post).filter { $0.0 == "media_ids[]" }.isEmpty)
+        #expect(session.outbox.sendings.isEmpty)
+    }
+
+    @Test("What the source refuses of a correction or a taking back is said, and nothing here moves; the wait can be ended and taken up")
+    func refusalsAndStopping() async throws {
+        let server = MediaServer(media: [.init(status: 202, body: #"{"id":"m1"}"#)], status: Self.status(body: "kept"))
+        await server.files([Self.preparing, Self.preparing, Self.readyFile])
+        await server.refusesFileActs()
+        let held = Held()
+        let session = try await slowPost(server, pace: held.pace)
+        await held.reached.wait()
+        let line = try #require(session.outbox.sendings.first)
+        let piece = try #require(line.unsent.media.first)
+        session.outbox.takeBack(piece.id, of: line.id, in: session)
+        await session.outbox.fileActEnded(line.id)
+        #expect(session.outbox.fileRefusals[line.id] == String(format: L10n.t("outbox.files.refused"), host))
+        #expect(session.outbox.sending(line.id)?.unsent.media.count == 1)
+
+        session.outbox.stopPreparing(line.id)
+        await held.gate.open()
+        await session.outbox.settled()
+        let stopped = try #require(session.outbox.sendings.first)
+        #expect(stopped.standing == .failed(.unreachable) && stopped.unsent.media.first?.remoteID == "m1")
+        #expect(await !server.paths.contains("/api/v1/statuses"))
+
+        session.outbox.filePace = FilePace(rounds: 5) { _ in }
+        #expect(session.outbox.again(stopped.id, in: session))
+        await session.outbox.settled()
+        #expect(session.outbox.sendings.isEmpty, "the id kept, and no file sent twice")
+        #expect(await server.paths.filter { $0 == "/api/v2/media" }.count == 1)
+    }
+
+    /// Two files of one post, the first ready after one round, the second's upload standing still.
+    private func secondGoingUp(_ server: MediaServer) async throws -> (ShellSession, ShellOutbox.Sending) {
+        await server.files([Self.preparing, Self.readyFile])
+        await server.holdingSecondUpload()
+        let session = try await mediaShell(server)
+        session.outbox.filePace = FilePace(rounds: 5) { _ in }
+        session.prepareCompose()
+        session.composeDraft.text = "kept"
+        #expect(session.composeAttach(bytes: Data("v".utf8), name: "v.mp4", type: "video/mp4", description: "a hill") == nil)
+        #expect(session.composeAttach(bytes: Data("w".utf8), name: "w.mp4", type: "video/mp4", description: "a bird") == nil)
+        #expect(session.send())
+        await server.uploadReached.wait()
+        return (session, try #require(session.outbox.sendings.first))
+    }
+
+    private static var twoSlowFiles: [MediaServer.Answer] {
+        [.init(status: 202, body: #"{"id":"m1"}"#), .init(body: #"{"id":"m2"}"#)]
+    }
+
+    @Test("A file taken back while another goes up stays gone, and the post does not carry it")
+    func takenBackDuringAnotherUpload() async throws {
+        let server = MediaServer(media: Self.twoSlowFiles, status: Self.status(body: "kept"))
+        let (session, line) = try await secondGoingUp(server)
+        #expect(line.standing == .preparing)
+        session.outbox.takeBack(line.unsent.media[0].id, of: line.id, in: session)
+        await session.outbox.fileActEnded(line.id)
+        await server.uploadGate.open()
+        await session.outbox.settled()
+        #expect(session.outbox.sendings.isEmpty)
+        let post = try #require(await server.requests.last)
+        #expect(Self.pairs(post).filter { $0.0 == "media_ids[]" }.map(\.1) == ["m2"])
+    }
+
+    @Test("A description corrected while its own file goes up reaches the source; a file taken back while it goes up is gone there")
+    func actsOnAFileGoingUp() async throws {
+        let server = MediaServer(media: Self.twoSlowFiles, status: Self.status(body: "kept"))
+        let (session, line) = try await secondGoingUp(server)
+        session.outbox.correct(line.unsent.media[1].id, of: line.id, to: "a valley", in: session)
+        await session.outbox.fileActEnded(line.id)
+        await server.uploadGate.open()
+        await session.outbox.settled()
+        let requests = await server.requests
+        let put = try #require(requests.first { $0.httpMethod == "PUT" })
+        #expect(put.url?.path == "/api/v1/media/m2" && String(decoding: put.httpBody ?? Data(), as: UTF8.self).contains("valley"))
+
+        let other = MediaServer(media: Self.twoSlowFiles, status: Self.status(body: "kept"))
+        let (second, going) = try await secondGoingUp(other)
+        second.outbox.takeBack(going.unsent.media[1].id, of: going.id, in: second)
+        await second.outbox.fileActEnded(going.id)
+        await other.uploadGate.open()
+        await second.outbox.settled()
+        let asked = await other.requests
+        #expect(asked.contains { $0.httpMethod == "DELETE" && $0.url?.path == "/api/v1/media/m2" })
+        let post = try #require(asked.last { $0.url?.path == "/api/v1/statuses" })
+        #expect(Self.pairs(post).filter { $0.0 == "media_ids[]" }.map(\.1) == ["m1"])
+    }
+
+    @Test("Stop during another file's upload stops: nothing is posted, every id kept")
+    func stopDuringAnUpload() async throws {
+        let server = MediaServer(media: Self.twoSlowFiles, status: Self.status(body: "kept"))
+        let (session, line) = try await secondGoingUp(server)
+        session.outbox.stopPreparing(line.id)
+        await server.uploadGate.open()
+        await session.outbox.settled()
+        #expect(await !server.paths.contains("/api/v1/statuses"))
+        let held = try #require(session.outbox.sendings.first)
+        #expect(held.standing == .failed(.unreachable) && held.unsent.media.map(\.remoteID) == ["m1", "m2"])
+    }
+
+    @Test("Stop followed by a ready answer stops")
+    func stopThenReady() async throws {
+        let server = MediaServer(media: [.init(status: 202, body: #"{"id":"m1"}"#)], status: Self.status(body: "kept"))
+        await server.files([Self.preparing, Self.readyFile])
+        await server.holdingGet(2)
+        let session = try await slowPost(server)
+        await server.getReached.wait()
+        let line = try #require(session.outbox.sendings.first)
+        session.outbox.stopPreparing(line.id)
+        await server.getGate.open()
+        await session.outbox.settled()
+        #expect(await !server.paths.contains("/api/v1/statuses"))
+        #expect(session.outbox.sendings.first?.standing == .failed(.unreachable))
+    }
+
+    @Test("A not-found racing a file taken back does not send it up again")
+    func goneRacingATakingBack() async throws {
+        let server = MediaServer(media: [.init(status: 202, body: #"{"id":"m1"}"#), .init(body: #"{"id":"m2"}"#)], status: Self.status(body: "kept"))
+        await server.files([Self.preparing, .init(status: 404, body: #"{"error":"Record not found"}"#)])
+        await server.holdingGet(2)
+        let session = try await slowPost(server)
+        await server.getReached.wait()
+        let line = try #require(session.outbox.sendings.first)
+        await server.holdingDelete()
+        session.outbox.takeBack(line.unsent.media[0].id, of: line.id, in: session)
+        await server.deleteReached.wait()
+        // The not-found lands with the taking back still out. Given the turns to go wrong in.
+        await server.getGate.open()
+        await server.getAnswered.wait()
+        for _ in 0..<200 { await Task.yield() }
+        await server.deleteGate.open()
+        await session.outbox.settled()
+        #expect(await server.paths.filter { $0 == "/api/v2/media" }.count == 1)
+        #expect(session.outbox.sendings.isEmpty)
+    }
+
+    @Test("A blip while asking after a file does not end the wait: the post still goes with no other act")
+    func aBlipIsAskedAgain() async throws {
+        let server = MediaServer(media: [.init(status: 202, body: #"{"id":"m1"}"#)], status: Self.status(body: "kept"))
+        await server.files([.init(status: 502, body: "bad"), Self.preparing, .init(status: 500, body: "down"), Self.readyFile])
+        let session = try await slowPost(server)
+        await session.outbox.settled()
+        #expect(session.outbox.sendings.isEmpty)
+        #expect(await server.paths.contains("/api/v1/statuses"))
+    }
+
+    @Test("A post waiting on a file holds nobody: the one behind it goes first, and it goes once ready")
+    func aWaitHoldsNobody() async throws {
+        let server = MediaServer(media: [.init(status: 202, body: #"{"id":"m1"}"#)], status: Self.status(body: "kept"))
+        await server.files([Self.preparing, Self.readyFile])
+        let held = Held()
+        let session = try await slowPost(server, pace: held.pace)
+        await held.reached.wait()
+        session.composeDraft.text = "behind it"
+        #expect(session.send())
+        // The one behind it reaches its source while the first still waits: held behind it, this
+        // would stand here until the run went still, and fail.
+        let watched = watching(server.postReached, "the post behind the one waiting on a file")
+        defer { watched.cancel() }
+        await server.postReached.wait()
+        #expect(session.outbox.sendings.first?.standing == .preparing)
+        #expect(await server.paths.filter { $0 == "/api/v1/statuses" }.count == 1)
+        await held.gate.open()
+        await session.outbox.settled()
+        #expect(session.outbox.sendings.isEmpty)
+        #expect(await server.paths.filter { $0 == "/api/v1/statuses" }.count == 2)
+    }
+
+    @Test("A file left with an id by a run before is asked after; one its source let go goes up again from what is kept")
+    func leftFromBefore() async throws {
+        let server = MediaServer(media: [.init(body: #"{"id":"m2"}"#)], status: Self.status(body: "kept"))
+        await server.files([.init(status: 404, body: #"{"error":"Record not found"}"#)])
+        let session = try await mediaShell(server)
+        let unsent = Unsent(
+            host: host, text: "kept", audience: .everyone,
+            media: [UnsentMedia(bytes: Data("v".utf8), mime: "video/mp4", name: "v.mp4", remoteID: "m1")]
+        )
+        session.outbox.take(unsent, in: session)
+        await session.outbox.settled()
+        #expect(session.outbox.sendings.isEmpty)
+        let requests = await server.requests
+        #expect(requests.map { $0.url?.path } == ["/api/v1/media/m1", "/api/v2/media", "/api/v1/statuses"])
+        #expect(Self.pairs(requests[2]).filter { $0.0 == "media_ids[]" }.map(\.1) == ["m2"])
+    }
+
+    @Test("Every language says each word of it")
+    func filesWords() {
+        for key in ["outbox.files", "outbox.files.spoken", "outbox.stop", "outbox.stop.spoken", "outbox.preparing.post", "outbox.preparing.answer", "outbox.preparing.change", "outbox.unprepared.post", "outbox.unprepared.answer", "outbox.unprepared.change", "outbox.files.refused", "outbox.files.failed", "outbox.files.takeBack", "outbox.files.takeBack.title", "outbox.files.takeBack.line", "outbox.files.takeBack.spoken", "outbox.files.description", "outbox.files.description.spoken", "outbox.files.save", "outbox.files.save.spoken", "outbox.files.unprepared", "outbox.files.preparing", "waiting.preparing", "waiting.unprepared", "waiting.stillPreparing"] {
+            for language in [DummyLanguage.english, .taiwanese] { #expect(L10n.t(key, language: language) != key) }
+        }
+    }
+
     private func mediaShell(_ server: MediaServer) async throws -> ShellSession {
         let tokens = MemoryMastodonTokens()
         try tokens.save(token(host, scopes: writing + " write:media"))
@@ -660,6 +939,22 @@ private actor MediaServer: HTTPSender {
     private var media: [Answer]
     private let statusBody: String
     private(set) var requests: [URLRequest] = []
+    /// What each `GET` of a file answers, in turn (#438).
+    private var fileAnswers: [Answer] = []
+    private var fileActsRefused = false
+
+    /// An upload past the first stands here until a check opens it; so does the `GET` numbered.
+    let postReached = Gate(), uploadReached = Gate(), uploadGate = Gate(), getReached = Gate(), getGate = Gate()
+    private var holdsUpload = false, uploads = 0, gets = 0, heldGet: Int?
+    func holdingSecondUpload() { holdsUpload = true }
+    func holdingGet(_ number: Int) { heldGet = number }
+    /// A `DELETE` of a file stands here until a check opens it, once it is held.
+    let deleteReached = Gate(), deleteGate = Gate(), getAnswered = Gate()
+    private var holdsDelete = false
+    func holdingDelete() { holdsDelete = true }
+
+    func files(_ answers: [Answer]) { fileAnswers = answers }
+    func refusesFileActs() { fileActsRefused = true }
 
     init(media: [Answer], status: String) {
         self.media = media
@@ -675,8 +970,31 @@ private actor MediaServer: HTTPSender {
         if path == "/api/v2/media" {
             guard !media.isEmpty else { throw FixtureHTTPError.unmapped }
             answer = media.removeFirst()
+            uploads += 1
+            if holdsUpload, uploads == 2 {
+                await uploadReached.open()
+                await uploadGate.wait()
+            }
         } else if path == "/api/v1/statuses" {
             answer = Answer(body: statusBody)
+            await postReached.open()
+        } else if path.hasPrefix("/api/v1/media/") {
+            if request.httpMethod == "GET" {
+                guard !fileAnswers.isEmpty else { throw FixtureHTTPError.unmapped }
+                answer = fileAnswers.removeFirst()
+                gets += 1
+                if gets == heldGet {
+                    await getReached.open()
+                    await getGate.wait()
+                    await getAnswered.open()
+                }
+            } else {
+                if holdsDelete, request.httpMethod == "DELETE" {
+                    await deleteReached.open()
+                    await deleteGate.wait()
+                }
+                answer = fileActsRefused ? Answer(status: 422, body: #"{"error":"Media attachment is currently used by a status"}"#) : Answer(body: "{}")
+            }
         } else {
             throw FixtureHTTPError.unmapped
         }

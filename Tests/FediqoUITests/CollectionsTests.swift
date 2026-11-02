@@ -663,6 +663,88 @@ struct CollectionsTests {
         #expect(!other.mastodon.ended.contains(Self.host))
     }
 
+    // MARK: - Those the reader appears in (#434)
+
+    private static let appearing = "GET /api/v1/accounts/7/in_collections"
+    private static let keepers = "GET /api/v1/accounts"
+    private static let me = DummyPerson(handle: "@me@m.example", host: host)!
+    private static func appears(_ items: String) -> String {
+        #"{"collections":[{"id":"9","name":"Friends","account_id":"42","discoverable":true,"sensitive":false,"item_count":1,"items":[\#(items)]}]}"#
+    }
+
+    @Test("On the reader's own page those they appear in are rows of their own, named by who put them together, with a `…` to leave")
+    func appearsOnOwnPage() async throws {
+        let (session, server, people) = try await prepared([
+            Self.ownList: [Self.list()],
+            Self.appearing: [.init(body: Self.appears(Self.item("3", of: "7")))],
+            Self.keepers: [.init(body: #"[{"id":"42","username":"ada","acct":"ada","display_name":"Ada"}]"#)],
+        ])
+        let page = try Self.page(id: "7")
+        await people.features.opened(Self.me, said: page, in: session)
+        let said = try #require(people.features.said(of: Self.me, said: page, own: true, in: session))
+        #expect(said.appearsIn.map(\.accountID) == ["9"] && said.appearsIn[0].owner == "42")
+        #expect(said.takeOuts["9"] == "3" && said.collectionsDrawn)
+        #expect(FeaturedSaid.appearanceWords(said.appearsIn[0]).contains("ada"))
+        #expect(said.collectionRows.contains(FeaturedSaid.lamp(ofAppearance: said.appearsIn[0])))
+        #expect(said.press(on: FeaturedSaid.lamp(ofAppearance: said.appearsIn[0])) == .people(said.appearsIn[0]))
+        #expect(said.more(ofCollection: said.appearsIn[0], act: {}, ask: {}) != nil)
+        #expect(await server.bearer(of: Self.appearing) == "Bearer tok")
+    }
+
+    @Test("Leaving one reads again, and what the source goes on showing stays, with no `…` to leave it twice")
+    func appearsAfterLeaving() async throws {
+        let revoke = "POST /api/v1/collections/9/items/3/revoke"
+        let (session, server, people) = try await prepared([
+            Self.ownList: [Self.list()],
+            Self.appearing: [.init(body: Self.appears(Self.item("3", of: "7"))), .init(body: Self.appears(""))],
+            Self.keepers: [.init(body: #"[{"id":"42","username":"ada","acct":"ada","display_name":"Ada"}]"#)],
+            revoke: [.init(body: "")],
+        ])
+        let page = try Self.page(id: "7")
+        await people.features.opened(Self.me, said: page, in: session)
+        await people.collections.takeOut(item: "3", of: "9", owner: "42", at: Self.host, in: session)
+        #expect(await server.arrivals(of: revoke) == 1)
+        #expect(await server.arrivals(of: Self.appearing) == 2)
+        let said = try #require(people.features.said(of: Self.me, said: page, own: true, in: session))
+        #expect(said.appearsIn.map(\.accountID) == ["9"] && said.takeOuts["9"] == nil)
+    }
+
+    @Test("In none, refused, or lacking the word, or on anybody else's page, there is no trace; a host with no such address is not asked again")
+    func appearsNowhere() async throws {
+        let page = try Self.page(id: "7")
+        for answer in [CollectionsServer.Answer(body: #"{"collections":[]}"#), .init(body: #"{"error":"This action is not allowed"}"#, status: 403)] {
+            let (session, _, people) = try await prepared([Self.ownList: [Self.list()], Self.appearing: [answer]])
+            await people.features.opened(Self.me, said: page, in: session)
+            let said = try #require(people.features.said(of: Self.me, said: page, own: true, in: session))
+            #expect(said.appearsIn.isEmpty && said.collectionRows == [FeaturedSaid.tendID])
+        }
+
+        let (narrow, narrowServer, narrowPeople) = try await prepared([:], scopes: Self.reading)
+        await narrowPeople.features.opened(Self.me, said: page, in: narrow)
+        #expect(await narrowServer.arrivals(of: Self.appearing) == 0)
+
+        let (other, otherServer, otherPeople) = try await prepared([:])
+        await otherPeople.features.opened(Self.ada, said: try Self.page(), in: other)
+        #expect(await otherServer.arrivals(of: "GET /api/v1/accounts/42/in_collections") == 0)
+
+        let (old, oldServer, oldPeople) = try await prepared([
+            Self.ownList: [Self.list(), Self.list()], Self.appearing: [.init(body: "<!DOCTYPE html><html></html>", status: 404)],
+        ])
+        await oldPeople.features.opened(Self.me, said: page, in: old)
+        #expect(oldPeople.postActs.hosts.has(.inCollections, at: Self.host) == .absent)
+        #expect(oldPeople.postActs.hosts.has(.collections, at: Self.host) != .absent, "the ones they keep are another address")
+        await oldPeople.features.collectionsChanged(of: "7", at: Self.host, in: old)
+        #expect(await oldServer.arrivals(of: Self.appearing) == 1)
+    }
+
+    @Test("Every language says the title")
+    func appearsInEveryLanguage() {
+        for language in [DummyLanguage.english, .taiwanese] {
+            let words = L10n.t("person.collections.appearsIn", language: language)
+            #expect(words != "person.collections.appearsIn" && !words.isEmpty)
+        }
+    }
+
     @Test("Pressing a row of the reader's own collection reads its people as its owner, those not to be found among them; anyone else's, or without the word, is read unsigned")
     func theOwnCollectionsPeople() async throws {
         let members = "GET /api/v1/collections/9"

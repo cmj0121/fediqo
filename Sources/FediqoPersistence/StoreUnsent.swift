@@ -118,6 +118,8 @@ private enum UnsentMediaRow {
         var name: String
         var description: String
         var remoteID: String?
+        /// `UnsentMedia.unprepared`. Absent from what a build before #438 wrote: not so.
+        var unprepared: Bool?
     }
 
     static func text(_ media: [UnsentMedia]) -> String? {
@@ -125,7 +127,7 @@ private enum UnsentMediaRow {
         let rows = media.map {
             Row(
                 id: $0.id.uuidString, bytes: $0.bytes.base64EncodedString(), mime: $0.mime,
-                name: $0.name, description: $0.description, remoteID: $0.remoteID
+                name: $0.name, description: $0.description, remoteID: $0.remoteID, unprepared: $0.unprepared ? true : nil
             )
         }
         guard let data = try? JSONEncoder().encode(rows) else { return nil }
@@ -140,7 +142,7 @@ private enum UnsentMediaRow {
             guard let id = UUID(uuidString: row.id), let bytes = Data(base64Encoded: row.bytes) else { return nil }
             return UnsentMedia(
                 id: id, bytes: bytes, mime: row.mime, name: row.name, description: row.description,
-                remoteID: row.remoteID
+                remoteID: row.remoteID, unprepared: row.unprepared ?? false
             )
         }
     }

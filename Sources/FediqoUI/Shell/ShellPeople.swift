@@ -169,6 +169,19 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         owner = person.accountID
     }
 
+    /// The people of `collection`, which the reader appears in (#434): counted as its source
+    /// counts it, and named as the one who put it together was, where their source could say.
+    init(appearance: CollectionAppearance, at host: String) {
+        which = .collection
+        self.host = host
+        accountID = appearance.collection.id
+        handle = appearance.owner?.handle ?? ""
+        counted = appearance.collection.count
+        hidden = false
+        words = appearance.collection.name
+        owner = appearance.collection.ownerID
+    }
+
     /// Who boosted or favourited the post `id` at `host` (#334), written by `author`: the post's
     /// list and nobody's account, counted as the source last counted the post, hidden by nobody.
     init(_ which: Which, ofPost id: String, at host: String, by author: String, counted: Int?) {

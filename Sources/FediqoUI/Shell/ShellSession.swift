@@ -2051,6 +2051,8 @@ final class ShellSession {
     /// The text of the outbox's that the sheet is open on, where one is (`ShellOutbox.edit`).
     /// Observed, and the sheet is presented from it.
     var editingUnsent: UnsentAsk?
+    /// The text whose files' sheet is up (#438), or nothing.
+    var filesOfUnsent: UnsentAsk?
     /// The text of the outbox's whose discarding is being asked about. Nothing goes while it
     /// is only asked.
     var discardingUnsent: UnsentAsk?
@@ -4149,6 +4151,7 @@ final class ShellSession {
         // What waited to be sent to it goes with it, as its question said — off the disk
         // before the rest is said to have gone (#292). A sign-out and a Clear leave them.
         await outbox.forget(host: host, in: self)
+        serverFilters.forget(host: host)
         await adopt()
         // A post the person keeps stays though the rest went (#284), and a row that stays is
         // `keepingPosts`' case for the pictures: let go without the bump, so it asks nothing of

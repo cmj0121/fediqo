@@ -97,6 +97,9 @@ struct ServerFiltersBlock: View {
             Spacer(minLength: 0)
             Menu {
                 Button(L10n.t("filters.change")) { editing = Editing(filter: filter) }
+                if !filter.posts.isEmpty {
+                    Button(L10n.t("filters.posts.open")) { Task { await session.serverFilters.openPosts(of: filter, at: host, in: session) } }
+                }
                 Button(L10n.t("filters.remove"), role: .destructive) { removing = filter }
             } label: {
                 Image(systemName: "ellipsis")
@@ -191,6 +194,128 @@ struct ServerFilterEditor: View {
             keywords = filter.keywords
             // Left as the source has it, unless the person chooses anew.
             lasts = ServerFilterDraft.unchanged
+        }
+    }
+}
+
+/// The sheets of what a filter names by itself (#439): the person's filters, opened on one post
+/// from its `…`, and the posts one filter names, opened from its row. **What the source refuses
+/// or fails is said on the sheet**, and nothing here moves for it.
+struct PostFilterPresenter: ViewModifier {
+    let filters: ShellServerFilters
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: Binding(get: { filters.filtering }, set: { if $0 == nil { filters.closePost() } })) { asked in
+                PostFilterSheet(asked: asked, filters: filters, session: session)
+            }
+            .sheet(item: Binding(get: { filters.readingPosts }, set: { if $0 == nil { filters.closePosts() } })) { sheet in
+                FilterPostsSheet(sheetID: sheet.id, filters: filters, session: session)
+            }
+    }
+}
+
+/// One post, and each of the person's filters: under it already, to take it out, or not, to put it.
+struct PostFilterSheet: View {
+    let asked: ShellServerFilters.PostUnderFilters
+    let filters: ShellServerFilters
+    let session: ShellSession
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(asked.opening).shellFont(.reading).fixedSize(horizontal: false, vertical: true)
+                }
+                Section(String(format: L10n.t("filters.title"), asked.host)) { list }
+                if let refused = filters.refused[asked.host] {
+                    Text(refused).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme)).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .navigationTitle(L10n.t("item.act.filter"))
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(L10n.t("servers.close")) { filters.closePost() } }
+            }
+        }
+        .frame(minWidth: 360, minHeight: 320)
+    }
+
+    @ViewBuilder
+    private var list: some View {
+        switch filters.reading[asked.host] {
+        case nil, .reading?:
+            ShellStatusLine(String(format: L10n.t("filters.reading"), asked.host))
+        case .failed(let why)?:
+            Text(why).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme))
+        case .read(let held)?:
+            if held.isEmpty { Text(String(format: L10n.t("filters.none"), asked.host)).shellFont(.meta) }
+            ForEach(held) { filter in row(filter) }
+        }
+    }
+
+    private func row(_ filter: ServerFilter) -> some View {
+        let under = filter.place(of: asked.statusID) != nil
+        return HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+            VStack(alignment: .leading, spacing: ShellSpace.hair) {
+                Text(filter.title).shellFont(.reading)
+                Text(ShellServerFilters.line(filter)).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme)).fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 0)
+            Button(L10n.t(under ? "filters.post.out" : "filters.post.put")) {
+                Task { await filters.turn(filter, for: asked, in: session) }
+            }
+            .accessibilityLabel(String(format: L10n.t(under ? "filters.post.out.spoken" : "filters.post.put.spoken"), filter.title))
+            .disabled(filters.busy.contains(asked.host))
+            .fixedSize()
+        }
+    }
+}
+
+/// The posts one filter names by itself: each who wrote it and how it opens, or that its source
+/// no longer gives it, and Take out.
+struct FilterPostsSheet: View {
+    let sheetID: String
+    let filters: ShellServerFilters
+    let session: ShellSession
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let sheet = filters.readingPosts, sheet.id == sheetID {
+                    if sheet.reading { ShellStatusLine(String(format: L10n.t("filters.reading"), sheet.host)) }
+                    if !sheet.reading, sheet.lines.isEmpty { Text(L10n.t("filters.posts.none")).shellFont(.meta) }
+                    ForEach(sheet.lines) { line in row(line, host: sheet.host) }
+                    if let refused = filters.refused[sheet.host] {
+                        Text(refused).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme)).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .navigationTitle(String(format: L10n.t("filters.posts.title"), filters.readingPosts?.title ?? ""))
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(L10n.t("servers.close")) { filters.closePosts() } }
+            }
+        }
+        .frame(minWidth: 360, minHeight: 320)
+    }
+
+    private func row(_ line: ShellServerFilters.FilterPosts.Line, host: String) -> some View {
+        let unread = filters.readingPosts?.unread == true
+        let words = line.opening ?? (unread ? L10n.t("filters.posts.unread") : String(format: L10n.t("filters.posts.gone"), host))
+        return HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+            VStack(alignment: .leading, spacing: ShellSpace.hair) {
+                if let who = line.who { Text(LineText.oneLine(who)).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme)) }
+                Text(words).shellFont(.reading).fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 0)
+            Button(L10n.t("filters.post.out")) { Task { await filters.takeOut(line, in: session) } }
+                .accessibilityLabel(String(format: L10n.t("filters.post.out.spoken"), words))
+                .disabled(filters.busy.contains(host))
+                .fixedSize()
         }
     }
 }

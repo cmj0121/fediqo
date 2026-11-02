@@ -16,6 +16,37 @@ struct MastodonFiltersTests {
             .asNote(source: Source(host: host, kind: .mastodon), category: .home, sent: .now())
     }
 
+    @Test("What a filter just did to a post lands on its row, a read already on its way does not undo it, and a later read has the last word")
+    func aFilterActLands() async throws {
+        let store = ItemStore()
+        let source = Source(host: host, kind: .mastodon)
+        await store.add(source)
+        let plain = try note(Self.status("1", filtered: nil))
+        await store.ingest([plain], ifSourceHere: host)
+        let onItsWay = ReadMoment.now()
+        let under = try note(Self.status("1", filtered: MastodonFilterCaptures.postFiltered))
+        await store.refresh([under], ifSourceHere: host, filtersActed: true)
+        #expect(await store.note(plain.key)?.serverFiltered?.first?.filterID == "1")
+
+        let older = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(Self.status("1", filtered: "[]").utf8))
+            .asNote(source: source, category: .home, sent: onItsWay)
+        await store.ingest([older], ifSourceHere: host)
+        #expect(await store.note(plain.key)?.serverFiltered?.first?.filterID == "1")
+        await store.refresh([older], ifSourceHere: host)
+        #expect(await store.note(plain.key)?.serverFiltered?.first?.filterID == "1")
+
+        let later = try note(Self.status("1", filtered: "[]"))
+        await store.ingest([later], ifSourceHere: host)
+        #expect(await store.note(plain.key)?.serverFiltered?.isEmpty == true)
+    }
+
+    @Test("A filter names the posts under it by themselves, each with the id taking it out goes by")
+    func itsPosts() throws {
+        let read = try MastodonJSON.decoder.decode(FilterDTO.self, from: Data(MastodonFilterCaptures.withPost.utf8)).filter
+        #expect(read.statuses == 1 && read.posts == [FilteredPost(id: "1", statusID: "117546247423360017")])
+        #expect(read.place(of: "117546247423360017")?.id == "1" && read.place(of: "2") == nil)
+    }
+
     @Test("A post says which filters caught it, each as the source named it; none said is nothing, an empty list is none")
     func filtered() throws {
         let warned = try note(Self.status("1", filtered: MastodonFilterCaptures.warned))

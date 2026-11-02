@@ -83,6 +83,11 @@ extension [ServerFilterHit] {
 
 /// One filter of the person's, as the source keeps it.
 public struct ServerFilter: Hashable, Sendable, Identifiable {
+    /// The place of `post`, if any, among those this filter names by themselves.
+    public func place(of post: String) -> FilteredPost? {
+        posts.first { $0.statusID == post }
+    }
+
     public struct Keyword: Hashable, Sendable {
         public let id: String?
         public var keyword: String
@@ -103,10 +108,13 @@ public struct ServerFilter: Hashable, Sendable, Identifiable {
     public var keywords: [Keyword]
     /// How many posts it names by themselves.
     public var statuses: Int
+    /// The posts it names by themselves, each by its place in the filter and its id at the source
+    /// (#439). A source's whole list names them, so whose they are needs no second read.
+    public var posts: [FilteredPost]
 
     public init(
         id: String, title: String, context: Set<String>, action: ServerFilterAction, expiresAt: Date?,
-        keywords: [Keyword], statuses: Int = 0
+        keywords: [Keyword], statuses: Int = 0, posts: [FilteredPost] = []
     ) {
         self.id = id
         self.title = title
@@ -115,6 +123,7 @@ public struct ServerFilter: Hashable, Sendable, Identifiable {
         self.expiresAt = expiresAt
         self.keywords = keywords
         self.statuses = statuses
+        self.posts = posts
     }
 
     /// Every place a filter may apply, in the order a choice lists them.
@@ -141,5 +150,16 @@ public struct ServerFilterDraft: Hashable, Sendable {
         self.action = action
         self.lasts = lasts
         self.keywords = keywords
+    }
+}
+
+/// A post a filter names by itself (#439): the id taking it out goes by, and the post's own.
+public struct FilteredPost: Hashable, Sendable, Identifiable {
+    public let id: String
+    public let statusID: String
+
+    public init(id: String, statusID: String) {
+        self.id = id
+        self.statusID = statusID
     }
 }

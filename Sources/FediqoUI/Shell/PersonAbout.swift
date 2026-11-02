@@ -694,24 +694,36 @@ struct PersonAbout<Lead: View>: View {
                 Text(L10n.t("person.collections")).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme))
                 if featured.tendsCollections { tendCollections(featured) }
                 ForEach(featured.collections, id: \.id) { list in
-                    let words = FeaturedSaid.collectionWords(list)
-                    HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
-                        Button { onFeatured(.people(list)) } label: {
-                            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
-                                Text(words).fixedSize(horizontal: false, vertical: true)
-                                Image(systemName: "chevron.right").shellFont(.mark).accessibilityHidden(true)
-                            }
-                            .shellFont(.reading)
-                            .foregroundStyle(ShellChrome.ink(colorScheme))
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(words)
-                        if let more = featured.more(ofCollection: list, act: { onFeatured(.takeOut(list)) }, ask: { onFeatured(.tendCollections) }) {
-                            ShellMoreButton(more).fixedSize()
-                        }
+                    collectionRow(list, words: FeaturedSaid.collectionWords(list), in: featured)
+                }
+                // Those they appear in (#434): a title of their own, and only where there is one.
+                if !featured.appearsIn.isEmpty {
+                    Text(L10n.t("person.collections.appearsIn")).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    ForEach(featured.appearsIn, id: \.id) { list in
+                        collectionRow(list, words: FeaturedSaid.appearanceWords(list), in: featured)
                     }
                 }
+            }
+        }
+    }
+
+    /// One collection's row: its words and the mark that says it leads on, and a `…` where the
+    /// reader has a place in it to give up.
+    private func collectionRow(_ list: PeopleList, words: String, in featured: FeaturedSaid) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+            Button { onFeatured(.people(list)) } label: {
+                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                    Text(words).fixedSize(horizontal: false, vertical: true)
+                    Image(systemName: "chevron.right").shellFont(.mark).accessibilityHidden(true)
+                }
+                .shellFont(.reading)
+                .foregroundStyle(ShellChrome.ink(colorScheme))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(words)
+            if let more = featured.more(ofCollection: list, act: { onFeatured(.takeOut(list)) }, ask: { onFeatured(.tendCollections) }) {
+                ShellMoreButton(more).fixedSize()
             }
         }
     }

@@ -18,7 +18,41 @@ import Foundation
 /// | the same, each keyword at its place (`keywords_attributes[0][id]`, `[1][_destroy]`, `[2][keyword]`) | 200: the kept one changed, the removed one gone, the new one made with an id of its own |
 /// | `PUT` `expires_in` empty | 200, `expires_at` `null`: for good |
 /// | `DELETE /api/v2/filters/:id` | 200 `{}`; again 404 `Record not found` |
+///
+/// ## One post under a filter (#439), asked on 2026-11-02 the same way
+///
+/// | Asked | Mastodon 4.6.6 |
+/// | ----- | -------------- |
+/// | `POST …/filters/:id/statuses` of a post | 200 `{"id","status_id"}`; the filter lists it, and the post reads `filtered` naming it, alone and in the public timeline |
+/// | the same again | 422 `Validation failed: Status has already been taken` |
+/// | of a post that does not exist | 422 `Validation failed: Status must exist` |
+/// | of a post the person may not read | 422 `Validation failed: Status is invalid` |
+/// | of a filter not theirs, or that does not exist | 404 `Record not found` |
+/// | by a sign-in without `write:filters` | 403 outside the authorized scopes |
+/// | `DELETE …/filters/statuses/:id` | 200 `{}`, and the post reads `filtered` `[]`; again, 404 |
+/// | under a `hide` filter | the post **is sent**, naming the filter: hiding it is the reader's |
+/// | the post deleted while under a filter | the filter goes on listing it |
 enum MastodonFilterCaptures {
+    /// `POST /api/v2/filters/:id/statuses`
+    static let postPut = #"""
+    {"id":"1","status_id":"117546247423360017"}
+    """#
+
+    /// `GET /api/v2/filters/:id` with that post under it
+    static let withPost = #"""
+    {"id":"1","title":"Hush","context":["home","public","thread"],"expires_at":null,"filter_action":"warn","keywords":[],"statuses":[{"id":"1","status_id":"117546247423360017"}]}
+    """#
+
+    /// the same post put under it twice
+    static let postTwice = #"""
+    {"error":"Validation failed: Status has already been taken"}
+    """#
+
+    /// `Status.filtered` of that post
+    static let postFiltered = #"""
+    [{"filter":{"id":"1","title":"Hush","context":["home","public","thread"],"expires_at":null,"filter_action":"warn"},"keyword_matches":null,"status_matches":["117546247423360017"]}]
+    """#
+
     /// `POST /api/v2/filters`, a warning for a day: the answer, verbatim.
     static let made = #"""
     {"id":"1","title":"Fruit warned","context":["home","public","thread"],"expires_at":"2026-10-28T02:31:36.021Z","filter_action":"warn","keywords":[{"id":"1","keyword":"apple","whole_word":true},{"id":"2","keyword":"pear","whole_word":false}],"statuses":[]}

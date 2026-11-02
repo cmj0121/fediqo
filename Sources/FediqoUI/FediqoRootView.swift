@@ -3463,6 +3463,7 @@ private struct PersonPresenters: ViewModifier {
             .modifier(ReportSheetPresenter(people: people, session: session))
             .modifier(ServerListsPresenter(lists: people.serverLists, session: session))
             .modifier(CollectionsPresenter(collections: people.collections, session: session))
+            .modifier(PostFilterPresenter(filters: session.serverFilters, session: session))
             .modifier(AccountActSheetPresenter(people: people.tending.people, session: session))
             .modifier(FederationAskSheetPresenter(servers: people.tending.servers, session: session))
             .modifier(DirectsPresenter(directs: session.directs, session: session, onOpen: onOpenThread))
@@ -3486,12 +3487,17 @@ private struct UnsentPresenters: ViewModifier {
                     .presentationDetents([.medium, .large])
                     #endif
             }
+            .sheet(item: files) { asked in UnsentFilesSheet(id: asked.id, session: session) }
             .shellConfirm(discarding, question: { ShellQuestion.discard($0) }) { sending, _ in
                 session.outbox.discardSoon(sending.id, in: session)
             }
             .shellConfirm(resending, question: { ShellQuestion.resend($0, changed: session.outbox.changed($0.id) != nil) }) { sending, _ in
                 session.outbox.sendAnyway(sending.id, in: session)
             }
+    }
+
+    private var files: Binding<UnsentAsk?> {
+        Binding(get: { session.filesOfUnsent }, set: { session.filesOfUnsent = $0 })
     }
 
     private var editing: Binding<UnsentAsk?> {

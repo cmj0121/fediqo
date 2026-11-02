@@ -101,6 +101,10 @@ struct ItemActing {
     /// Nothing where the post is not one to report: no sign-in at its source, a kind of source
     /// with no reports, the reader's own, or one gone.
     var report: Report?
+    /// Putting the post under one of the person's filters (#439): the item of the row's `…` that
+    /// puts the filters' sheet up, or dim with the part's lock, its press asking. Nothing where the
+    /// post's source has none or nobody is signed in there.
+    var postFilter: PostFilter?
     /// Pinning, quieting, translating, and who boosted and favourited it (#334): items of the
     /// row's `…` (`ItemActs.postItems`), and the translation drawn beside its words. Nothing
     /// where its source has none of them, or the list cannot act.
@@ -118,6 +122,11 @@ struct ItemActing {
     var preview: LinkPreview?
 
     struct Report {
+        var lock: Lock?
+        let press: () -> Void
+    }
+
+    struct PostFilter {
         var lock: Lock?
         let press: () -> Void
     }
@@ -491,6 +500,15 @@ extension ItemActs {
         // Lane A's own-post items (Change it…, Who may quote it, Quotes of it) go here, before Pin and Quiet.
         items += ownItems(on: item, acting: acting, language: language)
         items += postItems(acting.post, group: .own, language: language)
+        // Under one of the person's filters (#439), on its own sheet.
+        if let filter = acting.postFilter {
+            let name = L10n.t("item.act.filter", language: language)
+            if let lock = filter.lock {
+                items.append(.locked(name: name, lock: lock, language: language, press: filter.press))
+            } else {
+                items.append(.plain("line.3.horizontal.decrease.circle", name, act: filter.press))
+            }
+        }
         // Reporting it (#339): to those who answer for its source, asked on its sheet first.
         if let report = acting.report {
             let name = L10n.t("item.act.report", language: language)

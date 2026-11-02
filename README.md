@@ -186,6 +186,8 @@ What did not arrive is said on that line for what it was, with every character k
 | it may have been posted   | anything else — see below                                      | Send again, Edit, Discard   |
 | it waits, or cannot go    | nobody may send it as things stand — see below                 | Copy, Discard               |
 | it could not be kept here | it could not be written to this device, so it did not leave    | Send anyway, Copy, Discard  |
+| being prepared            | its source is still preparing a file; it goes by itself once ready    | Files, Stop waiting   |
+| a file not prepared       | its source could not prepare a file; everything else is kept          | Send again, Files     |
 | it could not be removed   | discarded, or its source removed, and its words are still in the file | Discard               |
 
 Anything else is no answer in time, a connection lost, an error from the source or from
@@ -194,6 +196,11 @@ nobody is signed in to its source with writing, somebody else is, or the post it
 no longer here. One that "could not be removed from this device" is not sent, changed or
 opened; Discard tries again without asking a second time, and its line goes by itself once a
 later save has taken its words out of the file.
+
+Files shows a text's files until it is sent: correct what each says of itself, or take one back,
+and your source is asked first. A file taken back is gone from your source; what it refuses changes
+nothing here. Stop waiting leaves the post not sent with its files kept, and Send again takes the
+wait up.
 
 Every window shows the same texts. One sent, changed or discarded in one window is so in the
 others at once, a text being sent from one window is the same "Sending your post to" line in
@@ -512,6 +519,14 @@ join, suspending an account, and suspending a server or refusing an address with
 all or a wide range of addresses; taking anything off the server's lists asks as well. Signing
 out is the key itself, and asks first too. One is not asked: removing a rule from a timeline
 being edited is behind the dots as well, but it is only a draft, and nothing is kept until Done.
+Your own page also lists the collections you appear in, as your source's own page of them shows
+them, each with who put it together. A source tells this of you alone, so nobody else's page has
+it; you in none, or a server without it, leaves no trace. Behind a row's dots is leaving it.
+
+A post's dots hold Put under a filter, where its Mastodon has your filters part: pick one of your
+filters there, and the post is treated by it here and on your server's own pages. A filter's dots
+on the source's page list the posts under it, each with Take out.
+
 Taking somebody or a hashtag off your profile is behind the dots too, and is not asked either:
 Feature puts it back. Discarding a text that was not sent asks first as well, from its line at
 the foot of the page.

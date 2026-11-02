@@ -109,7 +109,7 @@ struct SaidStrip: ViewModifier {
 
     /// Whether the root answers a press with a sheet or a question of its own.
     static func raises(_ press: OutboxWords.Press) -> Bool {
-        press == .edit || press == .discard
+        press == .edit || press == .discard || press == .files
     }
 
     /// A press on one of the outbox's lines, done.
@@ -119,6 +119,8 @@ struct SaidStrip: ViewModifier {
         case .again: session.outbox.again(pressed.id, in: session)
         case .anyway: session.outbox.sendUnkept(pressed.id, in: session)
         case .edit: session.outbox.edit(pressed.id, in: session)
+        case .files: session.outbox.openFiles(pressed.id, in: session)
+        case .stop: session.outbox.stopPreparing(pressed.id)
         case .copy: session.outbox.copy(sending.unsent.text)
         // One that could not be taken off this device was asked about already, and the
         // answer was yes: the press tries the write again.

@@ -179,10 +179,17 @@ final class ShellLater {
                     if let id = piece.remoteID, !id.isEmpty {
                         ids.append(id)
                     } else {
-                        ids.append(try await write.upload(
+                        let file = try await write.uploadFile(
                             bytes: piece.bytes, name: piece.name, type: piece.mime, description: piece.description,
                             byteLimit: session.mediaLimits(of: host).byteLimit(for: piece.mime)
-                        ))
+                        )
+                        // The new one is not made until each is ready (#438), and the line says so.
+                        if !file.ready {
+                            self.told = String(format: L10n.t("waiting.preparing"), host)
+                            defer { self.told = nil }
+                            try await write.awaitFile(file.id, pace: session.outbox.filePace)
+                        }
+                        ids.append(file.id)
                     }
                 }
                 let clock = try await write.sourceNow()

@@ -68,6 +68,8 @@ public struct MastodonCollectionWrites: Sendable {
     static let path = "/api/v1/collections"
     /// As many as a read is told to send: the most the source takes.
     static let longest = "100"
+    /// As many people as one read of accounts is asked for.
+    static let peopleAtOnce = 40
 
     /// `accountID`'s collections as this sign-in may see them: its own, the ones not to be found
     /// among them. Throws `MastodonHostMoreError.noSuchAddress` where the host has no such address.
@@ -76,6 +78,39 @@ public struct MastodonCollectionWrites: Sendable {
         let body = try await read("/api/v1/accounts/\(accountID)/collections", query: [URLQueryItem(name: "limit", value: Self.longest)])
         guard let list = CollectionWire.list(body) else { throw MastodonCollectionError.unreadable }
         return list
+    }
+
+    /// The collections `accountID` appears in (#434), as the source's own page of them shows.
+    ///
+    /// **A source tells this of the one asking and of nobody else**: asked of another it answers
+    /// 403, and with no sign-in 422, so this is for a reader's own page alone (`MastodonCollectionCaptures`).
+    /// **It leaves nothing out**: one not to be found is among them, and so is one the reader took
+    /// themselves out of, with no place of theirs left in it, as its page goes on showing.
+    /// Throws `MastodonHostMoreError.noSuchAddress` where the host has no such address.
+    public func appearances(of accountID: String, source: Source) async throws -> [CollectionAppearance] {
+        try Self.segment(accountID)
+        guard source.host == door.token.host else { throw MastodonRequestError.invalidURL }
+        let body = try await read("/api/v1/accounts/\(accountID)/in_collections", query: [URLQueryItem(name: "limit", value: Self.longest)])
+        guard let list = CollectionWire.list(body) else { throw MastodonCollectionError.unreadable }
+        let owners = await owners(of: list, source: source)
+        return list.map { CollectionAppearance(collection: $0, owner: $0.ownerID.flatMap { owners[$0] }) }
+    }
+
+    /// Who put each together, read at once: the answer names them only by id. **A row is not lost
+    /// to this**: an answer that fails or does not name one leaves that one unnamed.
+    private func owners(of list: [PersonCollection], source: Source) async -> [String: Person] {
+        var wanted: [String] = []
+        for id in list.compactMap(\.ownerID) where !wanted.contains(id) { wanted.append(id) }
+        var named: [String: Person] = [:]
+        for start in stride(from: 0, to: wanted.count, by: Self.peopleAtOnce) {
+            let ids = wanted[start..<min(start + Self.peopleAtOnce, wanted.count)]
+            // `id[]`, spelled as the wire carries it: a query's name goes out as it is written here.
+            guard let body = try? await door.get(path: "/api/v1/accounts", query: ids.map { URLQueryItem(name: "id%5B%5D", value: $0) }) else {
+                continue
+            }
+            named.merge(CollectionWire.people(body, source: source)) { first, _ in first }
+        }
+        return named
     }
 
     /// One whole, as this sign-in may see it: to its owner, those who are pending too.
