@@ -722,11 +722,11 @@ final class ShellNoticeActs {
         policies[host] = nil
         choosing[host] = nil
         policyMoved[host] = nil
+        chosen.subtract((requests[host] ?? []).map(\.id))
         requests[host] = nil
         onWay[host] = nil
         merging[host]?.cancel()
         merging[host] = nil
-        chosen.subtract((requests[host] ?? []).map(\.id))
         opened.remove(host)
     }
 

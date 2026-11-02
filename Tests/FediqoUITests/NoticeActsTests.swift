@@ -1210,4 +1210,14 @@ struct NoticeActsTests {
         acts.toggleAllChosen(host: Self.a)
         #expect(acts.chosenRequests(host: Self.a).isEmpty)
     }
+
+    @Test("A source let go of leaves none of its requests chosen")
+    func chosenGoWithSource() async throws {
+        let (session, _, _) = try await holding([:])
+        let acts = session.noticeList.acts
+        acts.toggleAllChosen(host: Self.a)
+        #expect(!acts.chosen.isEmpty)
+        acts.forget(host: Self.a)
+        #expect(acts.chosen.isEmpty)
+    }
 }
