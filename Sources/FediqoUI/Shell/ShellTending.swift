@@ -175,6 +175,9 @@ final class ShellTending {
     }
 
     private var pages: [String: Reports] = [:]
+    /// Each host's tabs keep their own lamp (#444), as a person's tabs do. Only a row still
+    /// walked by the tab is handed back; a report removed or an account gone is not lit.
+    private var lamps: [Tending: String] = [:]
     private var halted: Set<String> = []
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private let errands: PageErrands
@@ -578,18 +581,21 @@ final class ShellTending {
         return turn(&page, to: tabs[(at + step + tabs.count) % tabs.count], lamp: &lamp, in: session)
     }
 
-    /// A tab of the page pressed or swiped to: the page turned in place, its lamp put out.
+    /// A tab of the page pressed or swiped to: the page turned in place, keeping the lamp of
+    /// the tab left and giving back the arriving tab's own (#444). A row gone is not lit.
     @discardableResult
     func turn(_ page: inout Tending, to tab: AdminTab, lamp: inout String?, in session: ShellSession) -> Bool {
         guard page.tab != tab, Self.tabs(at: page.host, in: session).contains(tab) else { return false }
+        lamps[page] = lamp
         page.tab = tab
-        lamp = nil
+        lamp = PageFrame.lamp(lamps[page], among: walked(page, in: session))
         return true
     }
 
     /// What was asked of `host` let go, and its ask called off: who reads it changed.
     func letGo(at host: String) {
         let host = host.lowercased()
+        lamps = lamps.filter { $0.key.host != host }
         asks[host]?.cancel()
         asks[host] = nil
         pages[host] = nil

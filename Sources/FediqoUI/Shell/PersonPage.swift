@@ -130,6 +130,7 @@ struct PersonPage: View {
     var acts = PersonPageActs()
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.shellTouch) private var touch
 
     /// What the bar's mark is called: whom it asks again.
     static func reloadName(_ source: String, language: DummyLanguage? = nil) -> String {
@@ -210,6 +211,7 @@ struct PersonPage: View {
                     onOpenPerson: acts.onOpenListed, onLanguages: acts.onLanguages,
                     lead: lead
                 )
+                .onAppear { if touch { selectedID = nil } }
             }
         case .following, .followers:
             if let people {

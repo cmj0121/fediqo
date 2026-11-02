@@ -324,6 +324,23 @@ struct BackFromThreadTests {
         #expect(walk.isEmpty)
     }
 
+    @Test("Back under a finger centres the opened row without leaving it lit; a keyboard keeps its lamp (#444)")
+    func returningWithoutATouchLamp() {
+        var walk = ShellWalk()
+        _ = walk.walk(to: .thread("outer"), from: "outer")
+        _ = walk.walk(to: .thread("reply"), from: "reply")
+        var selected = walk.back()?.lamp
+        #expect(DummyCommand.returning(selected: &selected, touch: true, opening: "outer") == "reply")
+        #expect(selected == nil)
+        selected = "reply"
+        #expect(DummyCommand.returning(selected: &selected, touch: false, opening: "outer") == "reply")
+        #expect(selected == "reply")
+        selected = "outer"
+        #expect(DummyCommand.returning(selected: &selected, touch: true, opening: "outer") == nil)
+        #expect(selected == nil, "the opening thread keeps its head, but not a touch lamp")
+        #expect(DummyCommand.returning(selected: &selected, touch: true) == nil)
+    }
+
     @Test("Nothing to pop with no thread open")
     func noThreadNoPop() {
         var walk = ShellWalk()
