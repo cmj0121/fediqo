@@ -45,6 +45,10 @@ enum LaterWords {
         if case MastodonLaterError.tooSoon(let earliest) = error {
             return String(format: L10n.t("waiting.tooSoon", language: language), host, when(earliest, language: language))
         }
+        if error is MastodonFileError {
+            let key = (error as? MastodonFileError) == .stillPreparing ? "waiting.stillPreparing" : "waiting.unprepared"
+            return String(format: L10n.t(key, language: language), host)
+        }
         if let words = words(of: error) {
             return String(format: L10n.t("outbox.later.refused", language: language), host, words)
         }

@@ -58,6 +58,14 @@ import UIKit
 /// way. And **wherever the store will not hold a text, nothing is sent and its line goes**
 /// (`ItemStore.hold`): it was let go of — through another window, or by its landing.
 ///
+/// **A file its source is still preparing holds its post, and nothing else of the person's**
+/// (#438). The post waits (`preparing`) and goes by itself once every file is ready; meanwhile,
+/// and whenever it stands not sent, a file's description can be corrected and the file taken back
+/// (`correct`, `takeBack`), the source first. One its source could not prepare says so
+/// (`unprepared`), every other word and file kept. **What was left behind by a run that ended is
+/// not trusted to be ready**: a file with an id is asked after before its post goes, and one its
+/// source let go goes up again from what is kept here.
+///
 /// **One on the wire a source**, the rest waiting in the order pressed, so two posts reach
 /// their source in the order written; one that fails does not hold the next back.
 ///
@@ -71,6 +79,10 @@ final class ShellOutbox {
         /// Pressed, and behind another to the same source.
         case waiting
         case onItsWay
+        /// Its source is still preparing a file of it: it goes by itself once ready (#438).
+        case preparing
+        /// Its source said it could not prepare a file of it, and the post was not asked (#438).
+        case unprepared
         /// Being looked for among its writer's own posts, before it is sent again.
         case looking
         /// It was not sent, and what is known of why.
@@ -90,7 +102,9 @@ final class ShellOutbox {
 
         var id: UUID { unsent.id }
         /// Waiting, looked for or on the wire: nothing the person can do to it until that ends.
-        var isOut: Bool { standing == .waiting || standing == .onItsWay || standing == .looking }
+        var isOut: Bool { standing == .waiting || standing == .onItsWay || standing == .looking || standing == .preparing }
+        /// The files of it that are its source's to prepare: not one already on a post it changes.
+        var files: [UnsentMedia] { unsent.media.filter { !PostDraft.kept($0) } }
     }
 
     /// Why a text that waits cannot be sent as things stand, read off the session as it is now.
@@ -180,6 +194,18 @@ final class ShellOutbox {
     /// one there while its source is removed.
     @ObservationIgnored var holding: (@MainActor () async -> Void)?
 
+    /// How a file being prepared is asked after. A seam, so a check turns no clock.
+    @ObservationIgnored var filePace = FilePace.standing
+    /// The files this run was told are ready, by the name each has here. **For the run**: one left
+    /// by a run before is asked after again (`uploadMedia`).
+    @ObservationIgnored private var readyFiles: Set<UUID> = []
+    /// The act on a text's files that is out, one at a time: its post waits for it (`uploadMedia`).
+    @ObservationIgnored private var fileActs: [UUID: Task<Void, Never>] = [:]
+    /// The texts whose wait for a file the person ended.
+    @ObservationIgnored private var waitsStopped: Set<UUID> = []
+    /// What the last act on a text's files could not do, said on its sheet. Nothing moved for it.
+    private(set) var fileRefusals: [UUID: String] = [:]
+
     /// Puts a text where the person can take it elsewhere. A seam, so a test reads what went.
     @ObservationIgnored var copy: (String) -> Void = { text in
         #if os(macOS)
@@ -257,6 +283,7 @@ final class ShellOutbox {
         case .asked: return .unconfirmed
         case .refused: return .failed(.refused)
         case .declined: return .failed(.declined)
+        case .unprepared: return .unprepared
         case .fresh, .unreachable: return .failed(.unreachable)
         }
     }
@@ -266,6 +293,7 @@ final class ShellOutbox {
         if let asked = session.editingUnsent, going.contains(asked.id) { session.editingUnsent = nil }
         if let asked = session.discardingUnsent, going.contains(asked.id) { session.discardingUnsent = nil }
         if let asked = session.resendingUnsent, going.contains(asked.id) { session.resendingUnsent = nil }
+        if let asked = session.filesOfUnsent, going.contains(asked.id) { session.filesOfUnsent = nil }
     }
 
     /// The end of what this outbox had out of one text: the store is told nobody here is
@@ -468,7 +496,7 @@ final class ShellOutbox {
     /// (`ItemStore.claim`), so a window that has it on the wire is not discarded under — the
     /// line is drawn as on its way, as the store has it, and nothing goes.
     func discard(_ id: UUID, in session: ShellSession) async {
-        guard let held = sending(id), !held.isOut, discarding.insert(id).inserted else { return }
+        guard let held = sending(id), !held.isOut, fileActs[id] == nil, discarding.insert(id).inserted else { return }
         await keeps[id]?.value
         guard await session.store.claim(unsent: id, for: sender) else {
             discarding.remove(id)
@@ -523,7 +551,7 @@ final class ShellOutbox {
     /// Whether the person said `id` goes: its words are on their way out of the file, or
     /// could not be taken out of it. Nothing sends, changes or opens one.
     private func leaving(_ id: UUID) -> Bool {
-        discarding.contains(id) || sending(id)?.standing == .unremoved
+        discarding.contains(id) || sending(id)?.standing == .unremoved || fileActs[id] != nil
     }
 
     private func drop(_ id: UUID) {
@@ -540,6 +568,8 @@ final class ShellOutbox {
         lastAsked[id] = nil
         out.remove(id)
         dropped.insert(id)
+        waitsStopped.remove(id)
+        fileRefusals[id] = nil
     }
 
     /// Whether a text's entry went while something waited — its source removed, or its post
@@ -948,6 +978,9 @@ final class ShellOutbox {
         case .missed(let why):
             await missed(id, why, in: session)
             return
+        case .unprepared:
+            await unprepared(id, in: session)
+            return
         case .ready(let uploaded):
             unsent = uploaded
         }
@@ -1129,16 +1162,20 @@ final class ShellOutbox {
 
     /// Where an upload of `unsent`'s files got to, before the post itself is asked.
     private enum Uploaded {
-        /// Every file the post needs has an id. Nothing was uploaded where there was no file.
+        /// Every file the post needs has an id, and is ready. Nothing was uploaded where there was
+        /// no file.
         case ready(Unsent)
         /// The text was let go of while a file was going up. Nothing further is sent.
         case stopped
         /// A file was refused or did not land. The post was not asked. Ids already stored stay.
         case missed(WriteWhy)
+        /// Its source could not prepare a file. The post was not asked, and the file is marked.
+        case unprepared
     }
 
     /// Uploads each file that has no id yet, and writes each id down before the next, so a
     /// failure part-way leaves the post unsent and the files already accepted ready to try again.
+    /// **And waits for each to be ready** (`prepared`), the line saying so where it is not.
     ///
     /// **Nothing is asked where the post cannot carry these files**: the sign-in does not hold
     /// media, there are more than the source takes, a description or a kind or a stated size is
@@ -1146,6 +1183,9 @@ final class ShellOutbox {
     ///
     /// A failure here is a post that was not sent, whatever a lost answer might mean for a file:
     /// the status is the request the key covers, and it has not left.
+    ///
+    /// **The files are read again after each wait**: while it waits the person may correct one or
+    /// take one back, and what is sent is what stands when the last act on them has ended.
     private func uploadMedia(_ unsent: Unsent, id: UUID, in session: ShellSession) async -> Uploaded {
         guard !unsent.media.isEmpty else { return .ready(unsent) }
         let limits = session.mediaLimits(of: unsent.host)
@@ -1164,31 +1204,244 @@ final class ShellOutbox {
         {
             return .missed(.unreachable)
         }
-        guard let (door, _, _) = ready(unsent, in: session) else { return .missed(.unreachable) }
+        waitsStopped.remove(id)
         var current = unsent
-        for index in current.media.indices {
-            if let remote = current.media[index].remoteID, !remote.isEmpty { continue }
-            let piece = current.media[index]
-            do {
-                let remote = try await session.reach.write(door, landingIn: session.store).upload(
-                    bytes: piece.bytes, name: piece.name, type: piece.mime,
-                    description: piece.description, byteLimit: limits.byteLimit(for: piece.mime)
-                )
-                current.media[index].remoteID = remote
-                if let at = sendings.firstIndex(where: { $0.id == id }) { sendings[at].unsent = current }
-                guard await session.store.hold(current) else {
-                    letGoHere(id, in: session)
-                    return .stopped
+        if let at = sendings.firstIndex(where: { $0.id == id }) { sendings[at].unsent = current }
+        for name in unsent.media.map(\.id) {
+            // One going up again where its source let it go, and no more: a source that goes on
+            // saying so of what it just took has said what this can learn of it.
+            var tries = 0
+            var again = true
+            while again {
+                again = false
+                tries += 1
+                // Read again: it may have been taken back, or corrected, meanwhile.
+                current.media = sending(id)?.unsent.media ?? current.media
+                guard let index = current.media.firstIndex(where: { $0.id == name }), !PostDraft.kept(current.media[index]) else { break }
+                guard let (door, _, _) = ready(current, in: session) else { return .missed(.unreachable) }
+                let write = session.reach.write(door, landingIn: session.store)
+                // What its source could not prepare goes up anew, and what is left of it is let go.
+                if current.media[index].unprepared {
+                    if let remote = current.media[index].remoteID, !remote.isEmpty { try? await write.takeBackFile(remote) }
+                    current.media[index].remoteID = nil
+                    current.media[index].unprepared = false
                 }
-                _ = await session.persistUnsent?()
-                if await gone(id, in: session) { return .stopped }
-            } catch {
-                session.writeFailed(error, host: current.host)
-                if let at = sendings.firstIndex(where: { $0.id == id }) { sendings[at].unsent = current }
-                return .missed(Self.notSent(error) ?? .unreachable)
+                if (current.media[index].remoteID ?? "").isEmpty {
+                    let piece = current.media[index]
+                    do {
+                        let file = try await write.uploadFile(
+                            bytes: piece.bytes, name: piece.name, type: piece.mime,
+                            description: piece.description, byteLimit: limits.byteLimit(for: piece.mime)
+                        )
+                        current.media[index].remoteID = file.id
+                        if file.ready { readyFiles.insert(name) } else { readyFiles.remove(name) }
+                        if let at = sendings.firstIndex(where: { $0.id == id }) { sendings[at].unsent = current }
+                        guard await session.store.hold(current) else {
+                            letGoHere(id, in: session)
+                            return .stopped
+                        }
+                        _ = await session.persistUnsent?()
+                        if await gone(id, in: session) { return .stopped }
+                    } catch {
+                        session.writeFailed(error, host: current.host)
+                        if let at = sendings.firstIndex(where: { $0.id == id }) { sendings[at].unsent = current }
+                        return .missed(Self.notSent(error) ?? .unreachable)
+                    }
+                }
+                // A try before may have put it on the post: that one is not asked after.
+                if readyFiles.contains(name) || mayHaveLanded.contains(id) { continue }
+                switch await prepared(name, of: id, current, in: session) {
+                case .ready: readyFiles.insert(name)
+                case .upAgain:
+                    guard tries < 2 else { return .missed(.unreachable) }
+                    again = true
+                case .ended(let ending): return ending
+                }
+                current.media = sending(id)?.unsent.media ?? current.media
             }
         }
+        // The last act on the files ends before the post goes, and then the line says it is on its
+        // way: from here no press reaches them.
+        await fileActEnded(id)
+        guard let at = sendings.firstIndex(where: { $0.id == id }) else {
+            _ = await gone(id, in: session)
+            return .stopped
+        }
+        if sendings[at].standing == .preparing { sendings[at].standing = .onItsWay }
+        current.media = sendings[at].unsent.media
+        // Every file taken back from a post of nothing else: nothing is left to send.
+        if current.media.isEmpty, current.text.isEmpty, current.poll == nil { return .missed(.unreachable) }
         return .ready(current)
+    }
+
+    private enum Prepared {
+        case ready
+        /// Its source no longer has it: it goes up again from what is kept here.
+        case upAgain
+        case ended(Uploaded)
+    }
+
+    /// Asks after one file until its source says what became of it: each round as who may send it
+    /// now, and only while the text is still here, the file still on it, and the person has not
+    /// ended the wait. A failure to ask ends this as a file that did not land does.
+    private func prepared(_ name: UUID, of id: UUID, _ asked: Unsent, in session: ShellSession) async -> Prepared {
+        for round in 0..<filePace.rounds {
+            guard sending(id) != nil else {
+                _ = await gone(id, in: session)
+                return .ended(.stopped)
+            }
+            guard let piece = sending(id)?.unsent.media.first(where: { $0.id == name }), let remote = piece.remoteID else { return .ready }
+            if waitsStopped.remove(id) != nil { return .ended(.missed(.unreachable)) }
+            guard let (door, _, _) = ready(asked, in: session) else { return .ended(.missed(.unreachable)) }
+            do {
+                switch try await session.reach.write(door, landingIn: session.store).standing(ofFile: remote) {
+                case .ready:
+                    return .ready
+                case .gone:
+                    // Taken back meanwhile is not gone at its source by its own doing.
+                    guard let at = sendings.firstIndex(where: { $0.id == id }),
+                          let index = sendings[at].unsent.media.firstIndex(where: { $0.id == name })
+                    else { return .ready }
+                    sendings[at].unsent.media[index].remoteID = nil
+                    return .upAgain
+                case .unprepared:
+                    guard sending(id)?.unsent.media.contains(where: { $0.id == name }) == true else { return .ready }
+                    if let at = sendings.firstIndex(where: { $0.id == id }),
+                       let index = sendings[at].unsent.media.firstIndex(where: { $0.id == name }) {
+                        sendings[at].unsent.media[index].unprepared = true
+                    }
+                    return .ended(.unprepared)
+                case .preparing:
+                    if let at = sendings.firstIndex(where: { $0.id == id }), sendings[at].standing != .preparing {
+                        sendings[at].standing = .preparing
+                        session.said.announce(OutboxWords.line(sendings[at], hold: nil, whom: nil))
+                    }
+                    try await filePace.wait(round)
+                }
+            } catch {
+                if !Cancellation.happened(error) { session.writeFailed(error, host: asked.host) }
+                return .ended(.missed(Self.notSent(error) ?? .unreachable))
+            }
+        }
+        // Past the bound: not sent, and its id kept, so Send again takes up the wait.
+        return .ended(.missed(.unreachable))
+    }
+
+    /// A text with a file its source could not prepare: written down and said so, every other
+    /// word and file kept. The post was never asked.
+    private func unprepared(_ id: UUID, in session: ShellSession) async {
+        guard mayHaveLanded.contains(id) == false else { return stand(id, .unconfirmed, in: session) }
+        if let at = sendings.firstIndex(where: { $0.id == id }) { sendings[at].unsent.standing = .unprepared }
+        stand(id, .unprepared, in: session)
+        guard let held = sending(id)?.unsent else { return }
+        guard await session.store.hold(held) else { return letGoHere(id, in: session) }
+        if await gone(id, in: session) { return }
+        _ = await session.persistUnsent?()
+    }
+
+    // MARK: - A file of one, until it is sent (#438)
+
+    /// Whatever act on a text's files is out has ended, and whatever began after it.
+    func fileActEnded(_ id: UUID) async {
+        while let act = fileActs[id] { await act.value }
+    }
+
+    /// Ends the wait for a file: the text stands as not sent, every file and id kept, and Send
+    /// again takes the wait up. What lets a text that waits long be discarded.
+    func stopPreparing(_ id: UUID) {
+        guard sending(id)?.standing == .preparing else { return }
+        waitsStopped.insert(id)
+    }
+
+    /// Opens the sheet on a text's files, where they can still be acted on.
+    @discardableResult
+    func openFiles(_ id: UUID, in session: ShellSession) -> Bool {
+        guard let held = sending(id), Self.filesOpen(held), !held.files.isEmpty else { return false }
+        fileRefusals[id] = nil
+        session.filesOfUnsent = UnsentAsk(id: id)
+        return true
+    }
+
+    /// Whether a text's files may be acted on as it stands: waiting on one, or known not to have
+    /// gone. **Not once it may have landed**: they may be on a post then.
+    static func filesOpen(_ sending: Sending) -> Bool {
+        switch sending.standing {
+        case .preparing, .unprepared, .failed: true
+        case .waiting, .onItsWay, .looking, .unconfirmed, .unkept, .unremoved: false
+        }
+    }
+
+    /// A file's description corrected: **at its source first, where it has one there**, and only
+    /// on its yes here. What it refuses or fails is said on the sheet, and nothing moves.
+    func correct(_ name: UUID, of id: UUID, to words: String, in session: ShellSession) {
+        fileAct(id, in: session) { write in
+            guard let piece = self.sending(id)?.unsent.media.first(where: { $0.id == name }) else { return }
+            if let remote = piece.remoteID, !remote.isEmpty, !piece.unprepared {
+                guard let write else { throw MastodonWriteError.noSource }
+                try await write.describeFile(remote, as: words)
+            }
+            self.changeFiles(of: id) { media in
+                if let index = media.firstIndex(where: { $0.id == name }) { media[index].description = words }
+            }
+        }
+    }
+
+    /// A file taken back: **gone at its source first, where it has one there**, and only on its yes
+    /// from this text. What it refuses or fails is said on the sheet, and the file stays.
+    func takeBack(_ name: UUID, of id: UUID, in session: ShellSession) {
+        fileAct(id, in: session) { write in
+            guard let piece = self.sending(id)?.unsent.media.first(where: { $0.id == name }) else { return }
+            if let remote = piece.remoteID, !remote.isEmpty {
+                guard let write else { throw MastodonWriteError.noSource }
+                try await write.takeBackFile(remote)
+            }
+            self.changeFiles(of: id) { media in media.removeAll { $0.id == name } }
+            self.readyFiles.remove(name)
+            // The file it said could not be prepared is gone, and with it the sentence.
+            if self.sending(id)?.standing == .unprepared, self.sending(id)?.unsent.media.contains(where: \.unprepared) == false,
+               let at = self.sendings.firstIndex(where: { $0.id == id }) {
+                self.sendings[at].unsent.standing = .unreachable
+                self.sendings[at].standing = .failed(.unreachable)
+            }
+        }
+    }
+
+    private func changeFiles(of id: UUID, _ change: (inout [UnsentMedia]) -> Void) {
+        guard let at = sendings.firstIndex(where: { $0.id == id }) else { return }
+        change(&sendings[at].unsent.media)
+    }
+
+    /// One act on a text's files, one at a time. **A text not out from here is taken first**
+    /// (`ItemStore.claim`), so no other window sends it under the act, and given back after; one
+    /// waiting on a file is this outbox's already, and its post waits for the act.
+    private func fileAct(_ id: UUID, in session: ShellSession, _ body: @escaping @MainActor (MastodonWrite?) async throws -> Void) {
+        guard let held = sending(id), Self.filesOpen(held), fileActs[id] == nil else { return }
+        let waiting = held.standing == .preparing
+        fileRefusals[id] = nil
+        let host = held.unsent.host
+        if !waiting { out.insert(id) }
+        fileActs[id] = Task {
+            defer { self.fileActs[id] = nil }
+            if !waiting {
+                guard await session.store.claim(unsent: id, for: self.sender) else {
+                    self.out.remove(id)
+                    return self.follow(await session.store.unsentView(), in: session)
+                }
+            }
+            let door = self.sending(id).flatMap { self.ready($0.unsent, in: session) }?.door
+            do {
+                try await body(door.map { session.reach.write($0, landingIn: session.store) })
+                if let now = self.sending(id)?.unsent {
+                    if await session.store.hold(now) { _ = await session.persistUnsent?() }
+                }
+            } catch {
+                if !Cancellation.happened(error) {
+                    let refused = Self.notSent(error) == .declined
+                    self.fileRefusals[id] = String(format: L10n.t(refused ? "outbox.files.refused" : "outbox.files.failed"), host)
+                }
+            }
+            if !waiting { await self.settle(id, in: session) }
+        }
     }
 
     /// What a text needs to leave, as things stand at this moment: a sign-in at its source that
@@ -1256,9 +1509,10 @@ final class ShellOutbox {
     /// Every send, look, write and discard begun before this call has ended, and whatever
     /// those began. What a test awaits before it looks.
     func settled() async {
-        while let task = pumps.values.first ?? works.values.first ?? keeps.values.first {
+        while let task = pumps.values.first ?? works.values.first ?? keeps.values.first ?? fileActs.values.first {
             await task.value
             for (id, kept) in keeps where kept == task { keeps[id] = nil }
+            for (id, act) in fileActs where act == task { fileActs[id] = nil }
         }
     }
 }
@@ -1282,7 +1536,7 @@ struct UnsentAsk: Identifiable, Equatable {
 enum OutboxWords {
     /// What may be done to a text that waits.
     enum Press: String, CaseIterable, Sendable {
-        case again, anyway, edit, copy, discard
+        case again, anyway, edit, copy, discard, files, stop
     }
 
     /// The presses a line offers: none while it is out; its words to take elsewhere, or to let
@@ -1290,13 +1544,17 @@ enum OutboxWords {
     /// same, where it could not be kept on this device; and otherwise to send it again, change
     /// it or discard it.
     static func presses(_ sending: ShellOutbox.Sending, hold: ShellOutbox.Hold?) -> [Press] {
+        // A file being prepared: it may be corrected or taken back, and the wait may be ended.
+        if sending.standing == .preparing { return sending.files.isEmpty ? [.stop] : [.files, .stop] }
         if sending.isOut { return [] }
         // Asked to go already: the one thing left is to try taking it off the disk again.
         if sending.standing == .unremoved { return [.discard] }
         // A change whose post is gone has nothing to go to, and nothing to keep (X0 §1).
         if hold == .changeGone { return [.discard] }
         if hold != nil { return [.copy, .discard] }
-        return sending.standing == .unkept ? [.anyway, .copy, .discard] : [.again, .edit, .discard]
+        if sending.standing == .unkept { return [.anyway, .copy, .discard] }
+        // Known not to have gone, with files of its own: those may be seen to.
+        return ShellOutbox.filesOpen(sending) && !sending.files.isEmpty ? [.again, .edit, .files, .discard] : [.again, .edit, .discard]
     }
 
     static func word(_ press: Press, language: DummyLanguage? = nil) -> String {
@@ -1314,9 +1572,10 @@ enum OutboxWords {
     static func symbol(_ sending: ShellOutbox.Sending) -> String {
         switch sending.standing {
         case .waiting, .onItsWay: "paperplane"
+        case .preparing: "hourglass"
         case .looking: "magnifyingglass"
         case .unconfirmed: "questionmark.circle"
-        case .failed, .unkept, .unremoved: SaidStrip.symbol
+        case .failed, .unkept, .unremoved, .unprepared: SaidStrip.symbol
         }
     }
 
@@ -1334,12 +1593,14 @@ enum OutboxWords {
             if sending.unsent.at != nil { return String(format: L10n.t("outbox.sending.later", language: language), host) }
             guard kind == "answer", let whom else { return said("sending") }
             return String(format: L10n.t("outbox.sending.answer.to", language: language), host, LineText.oneLine(whom))
+        case .preparing:
+            return said("preparing")
         case .looking:
             return said("looking")
         // Said before anything of its source: it is here whatever became of that.
         case .unremoved:
             return said("unremoved")
-        case .failed, .unconfirmed, .unkept:
+        case .failed, .unconfirmed, .unkept, .unprepared:
             break
         }
         switch hold {
@@ -1360,6 +1621,10 @@ enum OutboxWords {
         }
         switch sending.standing {
         case .waiting, .onItsWay: return said("sending")
+        case .preparing: return said("preparing")
+        case .unprepared:
+            let names = sending.unsent.media.filter(\.unprepared).map { LineText.oneLine($0.name) }.joined(separator: ", ")
+            return String(format: L10n.t("outbox.unprepared.\(kind)", language: language), host, names)
         case .looking: return said("looking")
         case .unconfirmed, .failed(.unconfirmed): return said("unconfirmed")
         case .unkept: return said("unkept")

@@ -65,6 +65,8 @@ public struct Unsent: Hashable, Sendable, Identifiable {
         case unreachable
         /// The source answered, and did not take it.
         case declined
+        /// The source could not prepare a file of it (#438), and the post was not asked.
+        case unprepared
     }
 
     /// Its name here, and the `Idempotency-Key` every request for it carries: sent again, a
