@@ -7,11 +7,12 @@ import os
 // and wrong for this one: the answer never ends while the line is open. So a line is a seam of its
 // own, injected as `HTTPSender` is, so a test holds it and hands the events in by hand.
 //
-// **Server-sent events, not a WebSocket** (Mastodon 4.6.6 answers both, `MastodonLineCaptures`).
-// The request is an ordinary GET: its header carries the token as every other ask's does, the
-// address is built from the token's own host by the same door, and a redirect is refused as it is
-// for every request that carries a token — here every redirect, since a line has nowhere to move
-// to. A WebSocket would be a second transport with rules of its own for each of those.
+// **Server-sent events** (Mastodon 4.6.6 answers both, `MastodonLineCaptures`). The request is an
+// ordinary GET: its header carries the token as every other ask's does, the address is built from
+// the token's own host by the same door, and a redirect is refused as it is for every request that
+// carries a token — here every redirect, since a line has nowhere to move to. **A line carries one
+// stream**, so where a source carries everything heard of it on one socket (#459, `Socket.swift`)
+// that is what is held, under the same rules; a line is what a source that will not is heard on.
 
 /// One event a source told on a line: its name and what it carried, as server-sent events frame
 /// them. A name the line did not give is `message`, as the format says.

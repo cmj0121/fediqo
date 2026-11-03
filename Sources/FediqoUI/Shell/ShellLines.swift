@@ -114,6 +114,9 @@ final class ShellLines {
     /// How long a burst is gathered from its first event before it lands (#458): `gathering` but
     /// for a test, which ends it by hand.
     @ObservationIgnored let gather: @Sendable () async throws -> Void
+    /// The one line to each source that carries everything heard of it (#459); a line of its own for
+    /// each stream where there is none.
+    @ObservationIgnored let sockets: ShellSockets
     /// The moment a burst is gathered for: short enough that one post alone still shows at once.
     nonisolated static let gathering: Duration = .milliseconds(250)
 
@@ -121,13 +124,15 @@ final class ShellLines {
         defaults: UserDefaults? = nil, opener: any LineOpener = URLSessionLines.signedIn(),
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         now: @escaping @Sendable () -> Date = { Date() },
-        gather: @escaping @Sendable () async throws -> Void = { try await Task.sleep(for: ShellLines.gathering) }
+        gather: @escaping @Sendable () async throws -> Void = { try await Task.sleep(for: ShellLines.gathering) },
+        sockets: ShellSockets = ShellSockets()
     ) {
         self.defaults = defaults
         self.opener = opener
         self.sleep = sleep
         self.now = now
         self.gather = gather
+        self.sockets = sockets
         chosen = Set(defaults?.stringArray(forKey: Self.key) ?? [])
     }
 
@@ -306,15 +311,10 @@ final class ShellLines {
         var wait = Self.firstWait
         while !Task.isCancelled {
             guard let token = session.mastodon.token(host: host) else { return }
-            let work = session.mastodon.work
-            guard let admission = work.admission(reached: host, source: nil, for: .line), work.spend(admission, at: host) else { return }
-            let record = work.begin(host: host, for: .line, name: nil, allowedBy: admission.allowedBy)
-            defer { work.endLine(record) }
             let opened = now()
             do {
-                let events = try await Outward.$admitted.withValue(true) {
-                    try await MastodonLine(token: token, opener: opener).openDirect()
-                }
+                guard let (events, end) = try await heard(.direct, host: host, token: token, name: nil, in: session) else { return }
+                defer { end() }
                 await session.directs.heard(host, in: session)
                 for try await event in events where event.name == MastodonLine.conversationEvent {
                     await session.directs.heard(host, in: session)
@@ -327,6 +327,34 @@ final class ShellLines {
             if now().timeIntervalSince(opened) >= Double(Self.held.components.seconds) { wait = Self.firstWait }
             do { try await sleep(wait) } catch { return }
             wait = min(wait * 2, Self.longestWait)
+        }
+    }
+
+    /// `stream` of `host` as it happens: on the source's one socket where it carries it (#459), on a
+    /// line of its own where not — through **the gate** (#220) as every request is, and on the record
+    /// for as long as it is heard: a socket's act is the socket's, and a line's ends with `end`.
+    /// Nothing where the gate does not let it out.
+    private func heard(
+        _ stream: MastodonStream, host: String, token: MastodonToken, name: SourceWork.Name?, in session: ShellSession
+    ) async throws -> (events: AsyncThrowingStream<LineEvent, any Error>, end: () -> Void)? {
+        let work = session.mastodon.work
+        do {
+            if let events = try await sockets.hear(stream, host: host, token: token, work: work) { return (events, {}) }
+        } catch is ShellSockets.Shut {
+            return nil
+        }
+        guard let admission = work.admission(reached: host, source: nil, for: .line), work.spend(admission, at: host) else {
+            return nil
+        }
+        let record = work.begin(host: host, for: .line, name: name, allowedBy: admission.allowedBy)
+        do {
+            let events = try await Outward.$admitted.withValue(true) {
+                try await MastodonLine(token: token, opener: opener).open(stream)
+            }
+            return (events, { work.endLine(record) })
+        } catch {
+            work.endLine(record)
+            throw error
         }
     }
 
@@ -348,22 +376,19 @@ final class ShellLines {
         // However this line ends, its Home is the wait's to ask again from then on.
         let opening = UUID()
         defer { if homeHeardBy[host] == opening { homeHeardBy[host] = nil } }
-        let work = session.mastodon.work
-        // **The gate** (#220), as every request's: a line belongs to the source it is of.
-        guard let admission = work.admission(reached: host, source: nil, for: .line), work.spend(admission, at: host) else {
-            return .over
-        }
-        let record = work.begin(host: host, for: .line, name: want.home ? .home : nil, allowedBy: admission.allowedBy)
-        defer { work.endLine(record) }
-        let line = MastodonLine(token: token, opener: opener)
         let events: AsyncThrowingStream<LineEvent, any Error>
+        let end: () -> Void
         do {
-            events = try await Outward.$admitted.withValue(true) { try await line.open() }
+            guard let heard = try await heard(.user, host: host, token: token, name: want.home ? .home : nil, in: session) else {
+                return .over
+            }
+            (events, end) = heard
         } catch let refused as MastodonLineRefused where (400..<500).contains(refused.status) {
             return .refused(refused.status)
         } catch {
             return .dropped
         }
+        defer { end() }
         // Home up to now, before anything the line tells lands over it.
         if want.home {
             let door = session.mastodon.authorized(token: token, for: .timeline, name: .home)
