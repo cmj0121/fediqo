@@ -45,7 +45,9 @@ public struct MastodonAccount: Sendable {
     /// names the server gives them now — a renamed list stays one category, only its label moves.
     ///
     /// Returns whether every read came back. Throws only `.signedOut` and cancellation.
-    public func read() async throws -> Bool {
+    ///
+    /// Home is left out where `home` is false (#457): a line tells it as it happens.
+    public func read(home: Bool = true) async throws -> Bool {
         guard let source = await source() else { return true }
         var complete = true
         let lists = source.lists
@@ -61,7 +63,7 @@ public struct MastodonAccount: Sendable {
                 complete = false
             }
         }
-        if try await attempt(.home, {
+        if home, try await attempt(.home, {
             try await readOn("/api/v1/timelines/home", source: source, category: .home)
         }) == nil {
             complete = false
