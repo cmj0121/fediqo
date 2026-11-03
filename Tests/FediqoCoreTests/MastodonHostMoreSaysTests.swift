@@ -37,14 +37,16 @@ struct MastodonHostMoreSaysTests {
         #expect(nobody.status == 200 && nobody.body == Data(MastodonHostMoreCaptures.unwritten.utf8) && writer.body == nobody.body)
     }
 
-    @Test("The servers it knows are bare names in a list and nothing else, given to anyone: the one the seed made it know, read as a name and counted")
+    @Test("The servers it knows are bare names in a list and nothing else, given to anyone: those the seed made it know among them, read as names and counted")
     func theServersItKnows() async throws {
         try await LocalServers.requireHealthy()
         let said = try await MastodonHostMore(http: try LocalHTTP.client(), host: Self.host).knownServers()
-        #expect(said == HostServers(counted: 1, names: ["elsewhere.example"]))
+        #expect(said.names.contains("elsewhere.example") && said.counted == said.names.count, "what else it knows, the seed and the admin checks decide")
         let nobody = try await plain(MastodonHostMore.serversPath)
         let writer = try await plain(MastodonHostMore.serversPath, as: try LocalServers.writerToken())
-        #expect(nobody.status == 200 && nobody.body == Data(MastodonHostMoreCaptures.servers.utf8) && writer.body == nobody.body)
+        #expect(nobody.status == 200 && writer.body == nobody.body)
+        let bare = try #require(try JSONSerialization.jsonObject(with: nobody.body) as? [String], "bare names and nothing else")
+        #expect(Set(bare) == Set(said.names))
     }
 
     @Test("How busy it has been is twelve weeks, newest first, every figure a string and the week a moment in seconds: read as twelve weeks of counts, the newest holding what the seed made happen")

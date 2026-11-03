@@ -80,25 +80,25 @@ struct MastodonSearchSaysTests {
         #expect(found.isSuperset(of: expected))
         #expect(finds.people.count <= MastodonSearch.longest && Set(finds.people.map(\.id)).count == finds.people.count)
         #expect(finds.people.allSatisfy { $0.source == Self.source && $0.livesHere })
-        #expect(finds.tags.map(\.tag.text) == ["#FediqoRising"])
+        #expect(finds.tags.map(\.tag.text).contains("#FediqoRising"), "the seed names other hashtags of this word too")
         let whole = try #require(finds.people.first { $0.accountID == seeded.people.person.id })
         #expect(whole.tally.followers == 8 && whole.fields.count == 2 && !whole.words.contains("<"))
 
         let together = try await plain([("q", "fediqo")], as: seeded.reading)
-        #expect(together.status == 200 && !together.accts.isEmpty && together.tags == ["FediqoRising"] && together.posts == 0)
+        #expect(together.status == 200 && !together.accts.isEmpty && together.tags.contains("FediqoRising") && together.posts == 0)
         #expect(together.response.value(forHTTPHeaderField: "Link") == nil, "it names no next")
         #expect(together.response.value(forHTTPHeaderField: "x-ratelimit-limit") == "300")
         let people = try await plain([("q", "fediqo"), ("type", "accounts")], as: seeded.reading)
         #expect(!people.accts.isEmpty && people.tags.isEmpty)
         let tags = try await plain([("q", "fediqo"), ("type", "hashtags")], as: seeded.reading)
-        #expect(tags.accts.isEmpty && tags.tags == ["FediqoRising"])
+        #expect(tags.accts.isEmpty && tags.tags.contains("FediqoRising"))
         for word in ["fediqorising", "#FediqoRising"] {
             #expect(try await plain([("q", word), ("type", "hashtags")], as: seeded.reading).tags == ["FediqoRising"], "\(word)")
         }
         let bogus = try await plain([("q", "fediqo"), ("type", "bogus")], as: seeded.reading)
         #expect(bogus.status == 200 && bogus.body == Data(MastodonSearchCaptures.nothing.utf8))
         let two = try await plain([("q", "fediqo"), ("limit", "2")], as: seeded.reading)
-        #expect(two.accts.count == 2 && two.tags.count == 1)
+        #expect(two.accts.count == 2 && two.tags.count == 2, "the length holds each kind, and the seed names more than two of each")
         for length in ["0", "abc"] {
             let none = try await plain([("q", "fediqo"), ("limit", length)], as: seeded.reading)
             #expect(none.status == 200 && none.body == Data(MastodonSearchCaptures.nothing.utf8), "\(length)")
@@ -142,7 +142,7 @@ struct MastodonSearchSaysTests {
         try await LocalServers.requireHealthy()
         let seeded = try Self.seeded()
         let nobody = try await plain([("q", "fediqo")])
-        #expect(nobody.status == 200 && nobody.accts.contains(seeded.people.person.acct) && nobody.tags == ["FediqoRising"])
+        #expect(nobody.status == 200 && nobody.accts.contains(seeded.people.person.acct) && nobody.tags.contains("FediqoRising"))
         for token in [nil, "not-a-token"] {
             let resolve = try await plain([("q", "fediqo"), ("type", "accounts"), ("resolve", "true")], as: token)
             #expect(resolve.status == 401 && resolve.body == Data(MastodonSearchCaptures.resolveUnsigned.utf8))

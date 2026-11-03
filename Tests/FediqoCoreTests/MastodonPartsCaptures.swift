@@ -15,7 +15,7 @@ import Foundation
 /// | Asked | Answered |
 /// | ----- | -------- |
 /// | `PATCH /api/v1/accounts/update_credentials` with a `note` field of several scripts, a quote, an `&` and a line end, and an `avatar` file part of a one-pixel PNG whose name is not ASCII and holds a space and quotes (sent as `%XX`) | 200, the account whole (`taken`): `source.note` the text exactly as sent, `note` the same as the server's own HTML, `avatar` an address of the server's own making — the file's name is used nowhere |
-/// | the same address, an `avatar` part said to be `image/png` whose bytes are no picture | **422** (`noPicture`): a sentence, and beside it `details` naming the part and a word for why. Nothing of the account changes |
+/// | the same address, an `avatar` part said to be `image/png` whose bytes are no picture | 4.7.4: **500**, a page with nothing of why. 4.6.6: **422** (`noPicture`): a sentence, and beside it `details` naming the part and a word for why. Either way nothing of the account changes |
 /// | the account check after each | the same bytes the change answered with: the two say an account the same way |
 /// | a `note` field with nothing in it, then `DELETE /api/v1/profile/avatar` | 200 each, and the account check then answers byte for byte what it did before anything was sent — an empty field is a field, and sets the note to nothing |
 ///
