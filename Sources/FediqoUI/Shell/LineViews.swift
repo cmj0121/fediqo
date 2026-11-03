@@ -120,8 +120,11 @@ struct HearsLines: ViewModifier {
 
     func body(content: Content) -> some View {
         let wants = session.lines.wants(running: phase != .background, in: session)
+        let fronts = session.lines.frontWants(running: phase != .background, in: session)
         content
             .task(id: wants) { await session.lines.hear(wants, in: session) }
+            // A list, the public timeline or a hashtag in front, as it happens (#460).
+            .task(id: fronts) { await session.lines.hearFront(fronts, in: session) }
             .task(id: session.lines.directWanted(running: phase != .background, in: session)) {
                 if let host = session.lines.directWanted(running: phase != .background, in: session) {
                     await session.lines.hearDirect(host, in: session)

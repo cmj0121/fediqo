@@ -144,10 +144,10 @@ final class ShellSockets {
                 do {
                     for try await message in opened.messages {
                         guard let (streams, event) = MastodonSocket.heard(message) else { continue }
-                        for name in streams {
-                            guard let stream = MastodonStream(rawValue: name) else { continue }
-                            socket?.streams[stream]?.told.yield(event)
-                        }
+                        // A message names the stream it is of as the stream is asked for by: a list
+                        // or a hashtag by its word and its id or name (#460).
+                        guard let stream = MastodonStream(named: streams) else { continue }
+                        socket?.streams[stream]?.told.yield(event)
                     }
                 } catch {
                     dropped = error

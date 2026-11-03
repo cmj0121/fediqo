@@ -96,8 +96,23 @@ public struct MastodonAccount: Sendable {
     /// it: only then may a line's posts land over it, since landing one moves where reading on
     /// starts. Throws what the read threw.
     public func catchUp() async throws -> Bool {
+        try await catchUp(.home)
+    }
+
+    /// `catchUp()` of `category`: Home, one of the reader's lists, or the public timeline (#460).
+    /// Nothing is read of any other, and that is no catching up.
+    public func catchUp(_ category: Category) async throws -> Bool {
         guard let source = await source() else { return false }
-        let read = try await read("/api/v1/timelines/home", source: source, category: .home, catchingUp: true)
+        let path: String
+        switch category {
+        case .home: path = "/api/v1/timelines/home"
+        case .public: path = "/api/v1/timelines/public"
+        case .list(let id):
+            guard ListSubscription.isPathSegment(id) else { return false }
+            path = "/api/v1/timelines/list/\(id)"
+        default: return false
+        }
+        let read = try await read(path, source: source, category: category, catchingUp: true)
         return read.newerRemainAbove == nil
     }
 
