@@ -248,8 +248,10 @@ struct OneLineTests {
         let open = await met("open", by: home) { if case .open? = session.lines.standing[Self.host] { true } else { false } }
         try #require(open)
         sockets.told?.finish(throwing: URLError(.networkConnectionLost))
-        let waiting = await met("waiting after the drop", by: home) { session.lines.standing[Self.host] == .waiting }
+        // Asleep on the wait, not only said to be waiting: a turn before the sleep wakes nothing.
+        let waiting = await met("waiting after the drop", by: home) { clock.sleeping == 1 }
         try #require(waiting)
+        #expect(session.lines.standing[Self.host] == .waiting)
         #expect(!session.lines.sockets.holds(Self.host))
         clock.turn()
         let again = await met("opened again", by: home) { sockets.opened == 2 }
