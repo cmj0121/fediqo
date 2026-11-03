@@ -26,6 +26,7 @@ private actor FilterServer: HTTPSender {
     init(_ filters: [String]) { self.filters = filters }
 
     func refusing() { refuse = true }
+    func setFilters(_ filters: [String]) { self.filters = filters }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let path = request.url?.path ?? ""
@@ -286,6 +287,52 @@ struct ServerFiltersTests {
         await session.serverFilters.turn(now, for: asked, in: session)
         #expect(await server.asked.contains("DELETE /api/v2/filters/statuses/1"))
         #expect(session.serverFilter(over: DummyItem(try #require(session.notes.first))) == nil)
+    }
+
+    // MARK: - Changed elsewhere (#461)
+
+    private static func fruit(_ action: String, posts: String = "") -> String {
+        #"{"id":"1","title":"Fruit, now","context":["home"],"expires_at":null,"filter_action":"\#(action)","keywords":[],"statuses":[\#(posts)]}"#
+    }
+
+    @Test("A filter changed elsewhere stands over what is held as its list now says, once read again; one removed stands no more")
+    func changedElsewhere() async throws {
+        let server = FilterServer([Self.fruit("hide")])
+        let session = try await make(server: server)
+        let item = Self.item([Self.hit(.warn)])
+        #expect(session.serverFilter(over: item)?.action == .warn, "as the post was read, until the list is")
+
+        await session.serverFilters.cameForward(hosts: [Self.host], in: session)
+        #expect(await server.asked.filter { $0 == "GET /api/v2/filters" }.count == 1, "once, coming forward")
+        let now = try #require(session.serverFilter(over: item))
+        #expect(now.action == .hide && now.title == "Fruit, now")
+
+        await server.setFilters([])
+        await session.serverFilters.cameForward(hosts: [Self.host], in: session)
+        #expect(session.serverFilter(over: item) == nil, "removed elsewhere, it stands no more")
+    }
+
+    @Test("A post a filter names by itself elsewhere is under it once the list is read again; no word is matched here")
+    func namedElsewhere() async throws {
+        let server = FilterServer([Self.fruit("hide", posts: #"{"id":"3","status_id":"77"}"#)])
+        let session = try await make(server: server)
+        let item = try await held(session)
+        #expect(session.serverFilter(over: item) == nil)
+        await session.serverFilters.cameForward(hosts: [Self.host], in: session)
+        #expect(session.serverFilter(over: item)?.filterID == "1")
+
+        await server.setFilters([FilterServer.filter(id: "2", title: "Words")])
+        await session.serverFilters.cameForward(hosts: [Self.host], in: session)
+        #expect(session.serverFilter(over: item) == nil, "a keyword is the source's to match, when it next sends the post")
+    }
+
+    @Test("Coming forward asks nothing of a source whose line is not held")
+    func notHeld() async throws {
+        let server = FilterServer([Self.fruit("hide")])
+        let session = try await make(server: server)
+        await session.serverFilters.cameForward(hosts: [], in: session)
+        #expect(await server.asked.isEmpty)
+        #expect(session.lines.heldHosts.isEmpty)
     }
 
     @Test("The source refusing says so, and nothing here moves")

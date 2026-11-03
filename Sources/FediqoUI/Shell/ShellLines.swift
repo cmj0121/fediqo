@@ -253,6 +253,15 @@ final class ShellLines {
         wentUp += 1
     }
 
+    /// The sources a line is held to now: the reader's own open, or the one socket held (#461).
+    var heldHosts: Set<String> {
+        var hosts = sockets.heldHosts
+        for (host, standing) in standing {
+            if case .open = standing { hosts.insert(host) }
+        }
+        return hosts
+    }
+
     /// A post new here arrived on a line, above where the reader is.
     func arrivedAbove(_ key: NoteKey) {
         above += 1

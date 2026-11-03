@@ -98,6 +98,7 @@ struct OneLineTests {
         #expect(sockets.asked.first?.url?.absoluteString == "https://m.example/api/v1/streaming")
         #expect(sockets.asked.first?.value(forHTTPHeaderField: "Authorization") == "Bearer tok")
         #expect(lineActs(work).count == 1, "one act on the record")
+        #expect(session.lines.heldHosts == [Self.host], "held, so its filters are read again as Fediqo comes forward (#461)")
 
         sockets.told?.yield(Self.said("user", "update", payload: Self.status("2")))
         let landed = await met("a post told lands in Home", by: home) { session.lines.above == 1 }
