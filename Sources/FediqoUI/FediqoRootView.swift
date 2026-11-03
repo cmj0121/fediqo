@@ -170,7 +170,7 @@ public struct FediqoRootView: View {
         )
         // A launch made for a picture keeps no choice of the person's either.
         if staged == nil {
-            session.lines = ShellLines(defaults: .standard)
+            session.lines = ShellLines(defaults: .standard, sockets: ShellSockets(opener: URLSessionSockets.signedIn()))
             session.noticesTold = ShellNoticesTold(defaults: .standard, system: UserSystemNotices())
         }
         session.persist = persist

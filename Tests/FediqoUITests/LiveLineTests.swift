@@ -287,7 +287,7 @@ struct LiveLineTests {
 
     @Test("Every word it says is in each language, and the two Chinese tables are one", arguments: [
         "work.purpose.line", "activity.detail.until", "activity.detail.stillOpen", "source.line", "source.line.help",
-        "source.line.open", "source.line.refused", "source.line.signIn", "source.line.cannot", "timeline.line.above",
+        "source.line.open", "source.line.apart", "source.line.refused", "source.line.signIn", "source.line.cannot", "timeline.line.above",
         "timeline.line.above.one", "timeline.line.above.hint",
     ])
     func words(key: String) {

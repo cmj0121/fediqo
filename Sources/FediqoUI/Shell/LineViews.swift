@@ -22,7 +22,7 @@ struct LineControl: View {
                     ))
                     .shellFont(.reading)
                     .shellHelp(verbatim: String(format: L10n.t("source.line.help"), host), about: title)
-                    if on, let line = Self.line(standing, host: host) {
+                    if on, let line = Self.line(standing, host: host, apart: session.lines.sockets.heardApart(host)) {
                         Text(line)
                             .shellFont(.meta)
                             .foregroundStyle(ShellChrome.inkDim(colorScheme))
@@ -49,11 +49,13 @@ struct LineControl: View {
         }
     }
 
-    /// What is said under the switch of how its line stands: open, or refused. Nothing while it
-    /// is opening, waiting after a drop, or not held — reading goes on as it does without it.
-    static func line(_ standing: ShellLines.Standing?, host: String, language: DummyLanguage? = nil) -> String? {
+    /// What is said under the switch of how its line stands: open — on one line, or `apart`, a line
+    /// for each thing heard where the source would not carry them on one (#459) — or refused.
+    /// Nothing while it is opening, waiting after a drop, or not held — reading goes on as it does
+    /// without it.
+    static func line(_ standing: ShellLines.Standing?, host: String, apart: Bool = false, language: DummyLanguage? = nil) -> String? {
         switch standing {
-        case .open?: String(format: L10n.t("source.line.open", language: language), host)
+        case .open?: String(format: L10n.t(apart ? "source.line.apart" : "source.line.open", language: language), host)
         case .refused(let status)?: String(format: L10n.t("source.line.refused", language: language), host, status)
         case .opening?, .waiting?, nil: nil
         }

@@ -2882,6 +2882,7 @@
 "source.line" = "New posts in Home at %@ arrive as they happen";
 "source.line.help" = "Off until you turn it on. While on, and a timeline that reads this Home is in front, Fediqo keeps one line open to %@: new posts land as they are written, and a post changed or deleted there shows so. Home is read up to now as the line opens. Reloading and the wait go on as before, and the line is let go when the timeline is not in front.";
 "source.line.open" = "The line to %@ is open.";
+"source.line.apart" = "The line to %@ is open, one for each thing heard: it would not carry them all on one.";
 "source.line.refused" = "%1$@ refused the line (%2$d). Home is read as before.";
 "source.line.signIn" = "Sign in to %@ to have new posts in Home arrive as they happen.";
 "source.line.cannot" = "%@ does not say what is new as it happens. It is read as before.";
