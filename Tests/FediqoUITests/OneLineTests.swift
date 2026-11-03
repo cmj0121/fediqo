@@ -128,14 +128,14 @@ struct OneLineTests {
         let left = await met("direct posts let go", by: home) { sockets.sent.contains(MastodonSocket.unsubscribe(.direct)) }
         #expect(left)
         #expect(sockets.opened == 1)
-        #expect(session.lines.sockets.holds(Self.host), "Home is still heard on it")
+        #expect(session.lines.sockets.heldHosts.contains(Self.host), "Home is still heard on it")
 
         home.cancel()
         let lingering = await met("held a moment carrying nothing") { linger.sleeping == 1 }
         try #require(lingering)
-        #expect(session.lines.sockets.holds(Self.host))
+        #expect(session.lines.sockets.heldHosts.contains(Self.host))
         linger.turn()
-        let closed = await met("closed") { !session.lines.sockets.holds(Self.host) }
+        let closed = await met("closed") { !session.lines.sockets.heldHosts.contains(Self.host) }
         #expect(closed)
         let ended = await met("its act ends") { self.lineActs(work).allSatisfy { $0.until != nil } }
         #expect(ended)
@@ -159,7 +159,7 @@ struct OneLineTests {
         #expect(twice)
         linger.turn()
         #expect(sockets.opened == 1, "the same socket")
-        #expect(session.lines.sockets.holds(Self.host))
+        #expect(session.lines.sockets.heldHosts.contains(Self.host))
     }
 
     @Test("A source that will not open a socket is heard line by line, as before, and its page says so")
@@ -220,7 +220,7 @@ struct OneLineTests {
         let waiting = await met("waiting after the drop", by: home) { clock.sleeping == 1 }
         try #require(waiting)
         #expect(session.lines.standing[Self.host] == .waiting)
-        #expect(!session.lines.sockets.holds(Self.host))
+        #expect(!session.lines.sockets.heldHosts.contains(Self.host))
         clock.turn()
         let again = await met("opened again", by: home) { sockets.opened == 2 }
         #expect(again)

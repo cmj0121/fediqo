@@ -115,15 +115,13 @@ extension MastodonLine {
     public static func land(
         _ event: LineEvent, of source: Source, as category: Category? = .home, in store: ItemStore
     ) async -> MastodonLineLanded {
-        let host = source.host
-        let stamp = Source(host: host, kind: source.kind)
+        await land([event], of: source, as: category, in: store)[0]
+    }
+
+    /// An event that is no new post, landed: a change, a deletion, or nothing.
+    private static func landOther(_ event: LineEvent, of stamp: Source, in store: ItemStore) async -> MastodonLineLanded {
+        let host = stamp.host
         switch event.name {
-        case "update":
-            guard let status = decode(event.data) else { return .unreadable }
-            let (key, notes) = arrived(status, of: stamp, as: category)
-            let fresh = await store.note(key) == nil
-            await store.ingest(notes, ifSourceHere: host)
-            return .arrived(key, fresh: fresh)
         case "status.update":
             guard let status = decode(event.data) else { return .unreadable }
             let item = status.arrival(source: stamp, categories: [], sent: ReadMoment.now()).item
@@ -153,10 +151,10 @@ extension MastodonLine {
         var gathered: [(at: Int, key: NoteKey, notes: [Note])] = []
         func putIn() async {
             guard !gathered.isEmpty else { return }
+            let held = await store.notes(gathered.map(\.key))
             var seen: Set<NoteKey> = []
             for post in gathered {
-                let fresh = seen.insert(post.key).inserted ? await store.note(post.key) == nil : false
-                landed[post.at] = .arrived(post.key, fresh: fresh)
+                landed[post.at] = .arrived(post.key, fresh: seen.insert(post.key).inserted && held[post.key] == nil)
             }
             await store.ingest(gathered.flatMap(\.notes), ifSourceHere: host)
             gathered = []
@@ -164,7 +162,7 @@ extension MastodonLine {
         for (at, event) in events.enumerated() {
             guard event.name == "update" else {
                 await putIn()
-                landed[at] = await land(event, of: source, as: category, in: store)
+                landed[at] = await landOther(event, of: stamp, in: store)
                 continue
             }
             guard let status = decode(event.data) else {

@@ -565,6 +565,23 @@ final class SourceWork {
         if publish { schedule() }
     }
 
+    /// A line to `host` opened through **the gate** (#220), as every request is, and on the record
+    /// for as long as it is held: `end` lets it go, and a line that did not open is let go at once.
+    /// Nothing where the gate does not let it out.
+    func openLine<Opened>(
+        host: String, name: Name?, _ open: () async throws -> Opened
+    ) async throws -> (opened: Opened, end: () -> Void)? {
+        guard let admission = admission(reached: host, source: nil, for: .line), spend(admission, at: host) else { return nil }
+        let record = begin(host: host, for: .line, name: name, allowedBy: admission.allowedBy)
+        do {
+            let opened = try await Outward.$admitted.withValue(true) { try await open() }
+            return (opened, { self.endLine(record) })
+        } catch {
+            endLine(record)
+            throw error
+        }
+    }
+
     nonisolated func end(_ token: Token) {
         let publish = held.withLock { held -> Bool in
             guard held.running.removeValue(forKey: token.id) != nil else { return false }

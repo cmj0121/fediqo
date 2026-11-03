@@ -113,7 +113,7 @@ extension ItemActing {
 
 extension ShellSession {
     /// The post a row's #334 acts are about: on a reblog's row, the post it carries.
-    private func postOf(_ item: DummyItem) -> DummyItem {
+    func postOf(_ item: DummyItem) -> DummyItem {
         item.isReblog ? item.reblogged.first ?? item : item
     }
 
