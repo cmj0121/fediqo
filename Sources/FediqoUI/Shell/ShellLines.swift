@@ -87,6 +87,8 @@ final class ShellLines {
     /// What the line saying something of announcements does: handed in with the one keeper of them,
     /// which is not the session's. Nothing in a session that has none.
     @ObservationIgnored var announced: (String) async -> Void = { _ in }
+    /// The streams for what is in front refused for good this run (#460): not asked again.
+    @ObservationIgnored var frontRefused: Set<FrontWant> = []
     /// The sources whose direct line was refused for good, by the sign-in refused: not asked again
     /// under that sign-in. Another is asked afresh.
     private var directRefused: [String: String] = [:]
@@ -110,7 +112,7 @@ final class ShellLines {
     @ObservationIgnored private let defaults: UserDefaults?
     @ObservationIgnored let opener: any LineOpener
     @ObservationIgnored let sleep: @Sendable (Duration) async throws -> Void
-    @ObservationIgnored private let now: @Sendable () -> Date
+    @ObservationIgnored let now: @Sendable () -> Date
     /// How long a burst is gathered from its first event before it lands (#458): `gathering` but
     /// for a test, which ends it by hand.
     @ObservationIgnored let gather: @Sendable () async throws -> Void
@@ -251,6 +253,12 @@ final class ShellLines {
         wentUp += 1
     }
 
+    /// A post new here arrived on a line, above where the reader is.
+    func arrivedAbove(_ key: NoteKey) {
+        above += 1
+        newestAbove = key.rowID
+    }
+
     /// The timeline in front changed: what arrived above the last is not said over this one.
     func forgetAbove() {
         above = 0
@@ -334,7 +342,7 @@ final class ShellLines {
     /// line of its own where not — through **the gate** (#220) as every request is, and on the record
     /// for as long as it is heard: a socket's act is the socket's, and a line's ends with `end`.
     /// Nothing where the gate does not let it out.
-    private func heard(
+    func heard(
         _ stream: MastodonStream, host: String, token: MastodonToken, name: SourceWork.Name?, in session: ShellSession
     ) async throws -> (events: AsyncThrowingStream<LineEvent, any Error>, end: () -> Void)? {
         let work = session.mastodon.work
@@ -435,8 +443,7 @@ final class ShellLines {
                 if filters { await session.serverFilters.heard(host: host, in: session) }
                 guard !home.isEmpty else { continue }
                 for case .arrived(let key, true) in await MastodonLine.land(home, of: source, in: session.store) {
-                    above += 1
-                    newestAbove = key.rowID
+                    arrivedAbove(key)
                 }
                 await session.reloadFromStore()
             }

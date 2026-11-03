@@ -10,14 +10,71 @@ import os
 // A message with no event — the source saying an ask on the line was wrong — is no event.
 
 /// What can be heard of a Mastodon on a line.
-public enum MastodonStream: String, Hashable, Sendable, CaseIterable {
+public enum MastodonStream: Hashable, Sendable {
     /// The reader's own: Home, notices, announcements.
     case user
     /// Their direct posts: `conversation`.
     case direct
+    /// One of the reader's lists, by the id the source gives it (#460).
+    case list(id: String)
+    /// The posts under one hashtag, by its name folded as the source folds it (`hashtag(_:)`).
+    case tagged(String)
+    /// The source's public timeline, every server it knows of (#460).
+    case federated
 
-    /// Where it is heard on a server-sent line of its own.
-    var path: String { "/api/v1/streaming/\(rawValue)" }
+    /// The stream of the posts under `tag`.
+    public static func hashtag(_ tag: PostTag) -> MastodonStream { .tagged(tag.name.lowercased()) }
+
+    /// What the source names it by: the first word is the stream, and the second its list or tag.
+    /// A message on a socket names the streams it is of the same way.
+    public var named: [String] {
+        switch self {
+        case .user: ["user"]
+        case .direct: ["direct"]
+        case .list(let id): ["list", id]
+        case .tagged(let name): ["hashtag", name]
+        case .federated: ["public"]
+        }
+    }
+
+    /// The stream `named` names, or nothing for one this does not hear.
+    public init?(named: [String]) {
+        switch (named.first, named.count) {
+        case ("user"?, 1): self = .user
+        case ("direct"?, 1): self = .direct
+        case ("public"?, 1): self = .federated
+        case ("list"?, 2): self = .list(id: named[1])
+        case ("hashtag"?, 2): self = .tagged(named[1].lowercased())
+        default: return nil
+        }
+    }
+
+    /// Where it is heard on a server-sent line of its own, and what the address asks of it.
+    var path: String {
+        switch self {
+        case .user, .direct, .list, .federated: "/api/v1/streaming/\(named[0])"
+        case .tagged: "/api/v1/streaming/hashtag"
+        }
+    }
+
+    var query: [URLQueryItem] {
+        switch self {
+        case .list(let id): [URLQueryItem(name: "list", value: id)]
+        case .tagged(let name): [URLQueryItem(name: "tag", value: name)]
+        case .user, .direct, .federated: []
+        }
+    }
+
+    /// The category its posts land in: Home's, a list's, the public timeline's — or none, for a
+    /// hashtag's, which lands as a tag's page reads them (#124).
+    public var category: Category? {
+        switch self {
+        case .user: .home
+        case .list(let id): .list(id: id)
+        case .federated: .public
+        case .direct, .tagged: nil
+        }
+    }
 }
 
 /// The one line to a signed-in Mastodon (#459).
@@ -44,12 +101,12 @@ public struct MastodonSocket: Sendable {
 
     /// What asks the socket to carry `stream`.
     public static func subscribe(_ stream: MastodonStream) -> String {
-        said(["type": "subscribe", "stream": stream.rawValue])
+        said("subscribe", stream)
     }
 
     /// What asks the socket to stop carrying `stream`.
     public static func unsubscribe(_ stream: MastodonStream) -> String {
-        said(["type": "unsubscribe", "stream": stream.rawValue])
+        said("unsubscribe", stream)
     }
 
     /// One message heard on the socket: the streams it is of, and the event it tells as a line would
@@ -76,7 +133,9 @@ public struct MastodonSocket: Sendable {
         return (streams, LineEvent(name: name, data: data))
     }
 
-    private static func said(_ words: [String: String]) -> String {
+    private static func said(_ type: String, _ stream: MastodonStream) -> String {
+        var words = ["type": type, "stream": stream.named[0]]
+        for item in stream.query { words[item.name] = item.value }
         let data = (try? JSONSerialization.data(withJSONObject: words, options: [.sortedKeys])) ?? Data()
         return String(decoding: data, as: UTF8.self)
     }
@@ -85,9 +144,6 @@ public struct MastodonSocket: Sendable {
 extension MastodonLine {
     /// `stream` on a server-sent line of its own: where a source will not carry it on one socket.
     public func open(_ stream: MastodonStream) async throws -> AsyncThrowingStream<LineEvent, any Error> {
-        switch stream {
-        case .user: try await open()
-        case .direct: try await openDirect()
-        }
+        try await open(path: stream.path, query: stream.query)
     }
 }

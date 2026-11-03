@@ -420,6 +420,12 @@ final class ShellReload {
     /// (#197). A forum's topic carries its tags beside its words and not in them, so the page
     /// finds what a source filed under the tag by this as well as by the words.
     private(set) var sentUnderTag: [String: Set<NoteKey>] = [:]
+    /// Posts told on a line under `tag` as they happened (#460): sent under it, as a read's are.
+    func heard(_ keys: [NoteKey], under tag: PostTag) {
+        guard !keys.isEmpty else { return }
+        sentUnderTag[HeldUnderTag.folded(tag), default: []].formUnion(keys)
+    }
+
     /// The forums that said this run that they keep no tags: not asked again until the next.
     @ObservationIgnored private var tagsTurnedOff: Set<String> = []
 

@@ -4,39 +4,6 @@ import Testing
 @testable import FediqoCore
 @testable import FediqoUI
 
-/// Sockets held by the check: each open is counted and handed a stream the check says things on,
-/// and what is said on it is kept. Refused where `refuse` names a status.
-private final class Sockets: SocketOpener, Sendable {
-    let refuse: Int?
-    private let state = Mutex<(opened: Int, sent: [String], told: AsyncThrowingStream<String, any Error>.Continuation?, asked: [URLRequest])>(
-        (0, [], nil, [])
-    )
-
-    init(refuse: Int? = nil) {
-        self.refuse = refuse
-    }
-
-    var opened: Int { state.withLock { $0.opened } }
-    var sent: [String] { state.withLock { $0.sent } }
-    var asked: [URLRequest] { state.withLock { $0.asked } }
-    var told: AsyncThrowingStream<String, any Error>.Continuation? { state.withLock { $0.told } }
-
-    func open(_ request: URLRequest) async throws -> OpenSocket {
-        state.withLock { $0.asked.append(request) }
-        if let refuse { throw SocketRefused(status: refuse) }
-        let (messages, told) = AsyncThrowingStream<String, any Error>.makeStream()
-        state.withLock {
-            $0.opened += 1
-            $0.told = told
-        }
-        return OpenSocket(messages: messages, send: { [self] text in self.keep(text) })
-    }
-
-    private func keep(_ text: String) {
-        state.withLock { $0.sent.append(text) }
-    }
-}
-
 /// Lines held by the check, by the path each was opened for.
 private final class PathLines: LineOpener, Sendable {
     private let lines = Mutex<[String: AsyncThrowingStream<LineEvent, any Error>.Continuation]>([:])
@@ -82,7 +49,7 @@ struct OneLineTests {
     }
 
     private func make(
-        sockets: Sockets, lines: PathLines = PathLines(), linger: TurnedClock = TurnedClock()
+        sockets: HeldSockets, lines: PathLines = PathLines(), linger: TurnedClock = TurnedClock()
     ) async throws -> (ShellSession, QuietServer, SourceWork) {
         let server = QuietServer()
         let session = ShellSession(
@@ -114,7 +81,7 @@ struct OneLineTests {
 
     @Test("Home and direct posts are heard on one socket, each asked for on it by name, and one act on the record")
     func oneSocket() async throws {
-        let sockets = Sockets()
+        let sockets = HeldSockets()
         let (session, server, work) = try await make(sockets: sockets)
         let home = Task { await session.lines.hear([Self.host], in: session) }
         defer { home.cancel() }
@@ -145,7 +112,7 @@ struct OneLineTests {
 
     @Test("Leaving direct posts lets their stream go on the same socket; letting everything go closes it after a moment")
     func letGo() async throws {
-        let sockets = Sockets()
+        let sockets = HeldSockets()
         let linger = TurnedClock()
         let (session, _, work) = try await make(sockets: sockets, linger: linger)
         let home = Task { await session.lines.hear([Self.host], in: session) }
@@ -176,7 +143,7 @@ struct OneLineTests {
 
     @Test("A stream let go and asked again within the moment opens nothing")
     func askedAgain() async throws {
-        let sockets = Sockets()
+        let sockets = HeldSockets()
         let linger = TurnedClock()
         let (session, _, _) = try await make(sockets: sockets, linger: linger)
         let first = Task { await session.lines.hearDirect(Self.host, in: session) }
@@ -196,7 +163,7 @@ struct OneLineTests {
 
     @Test("A source that will not open a socket is heard line by line, as before, and its page says so")
     func refusedSocket() async throws {
-        let sockets = Sockets(refuse: 404)
+        let sockets = HeldSockets(refuse: 404)
         let lines = PathLines()
         let (session, _, _) = try await make(sockets: sockets, lines: lines)
         let home = Task { await session.lines.hear([Self.host], in: session) }
@@ -222,7 +189,7 @@ struct OneLineTests {
             func open(_ request: URLRequest) async throws -> OpenSocket { throw URLError(.badServerResponse) }
         }
         let lines = PathLines()
-        let (session, _, _) = try await make(sockets: Sockets(), lines: lines)
+        let (session, _, _) = try await make(sockets: HeldSockets(), lines: lines)
         let sockets = ShellSockets(opener: Failing(), linger: {})
         let token = try #require(session.mastodon.token(host: Self.host))
         await #expect(throws: URLError.self) {
@@ -236,7 +203,7 @@ struct OneLineTests {
 
     @Test("A socket that drops ends every stream it carried as a dropped line; the next ask opens it again")
     func dropped() async throws {
-        let sockets = Sockets()
+        let sockets = HeldSockets()
         let clock = TurnedClock()
         let (session, _, _) = try await make(sockets: sockets)
         session.lines = ShellLines(
