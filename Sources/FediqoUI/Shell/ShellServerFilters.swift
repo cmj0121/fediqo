@@ -138,6 +138,62 @@ final class ShellServerFilters {
         await read(host: raw, in: session)
     }
 
+    /// Fediqo came back to the front (#461): each of `hosts` — the sources whose line is held — has
+    /// its list read once, whether or not its page was opened. **A source does not say on its line
+    /// that a filter changed** (#427), so a filter changed in another client meanwhile applies to
+    /// what is held here as soon as the person is back (`current`), not at the next whole read.
+    func cameForward(hosts: Set<String>, in session: ShellSession) async {
+        await withTaskGroup(of: Void.self) { group in
+            for host in hosts.sorted() {
+                group.addTask { await self.read(host: host, in: session) }
+            }
+        }
+    }
+
+    /// `hits` as `host`'s list read last says each filter is now (#461): one the source no longer
+    /// has stands no more, one changed stands as it is now — its title, its action, where it applies
+    /// and until when — and one naming the post `statusID` by itself stands over it. Unchanged where
+    /// the list was not read this run.
+    ///
+    /// **No word is matched here** (`ServerFilter`): a keyword added elsewhere reaches a post when
+    /// the source next sends it, saying itself what caught it.
+    func current(_ hits: [ServerFilterHit], host raw: String, statusID: String?) -> [ServerFilterHit] {
+        guard case .read(let filters)? = reading[raw.lowercased()] else { return hits }
+        let known = lookup(raw.lowercased(), filters)
+        var standing = hits.compactMap { known.byID[$0.filterID] }
+        if let statusID {
+            for hit in known.byPost[statusID] ?? [] where !standing.contains(where: { $0.filterID == hit.filterID }) {
+                standing.append(hit)
+            }
+        }
+        return standing
+    }
+
+    /// One source's list, by filter and by the posts named: made once a list, not once a row drawn.
+    private struct Lookup {
+        let filters: [ServerFilter]
+        let byID: [String: ServerFilterHit]
+        let byPost: [String: [ServerFilterHit]]
+    }
+
+    @ObservationIgnored private var lookups: [String: Lookup] = [:]
+
+    private func lookup(_ host: String, _ filters: [ServerFilter]) -> Lookup {
+        if let known = lookups[host], known.filters == filters { return known }
+        var byID: [String: ServerFilterHit] = [:]
+        var byPost: [String: [ServerFilterHit]] = [:]
+        for filter in filters {
+            let hit = ServerFilterHit(
+                filterID: filter.id, title: filter.title, action: filter.action, context: filter.context, expiresAt: filter.expiresAt
+            )
+            byID[filter.id] = hit
+            for post in filter.posts { byPost[post.statusID, default: []].append(hit) }
+        }
+        let made = Lookup(filters: filters, byID: byID, byPost: byPost)
+        lookups[host] = made
+        return made
+    }
+
     /// One act on a source's filters, then the list read again. What it could not do is said, and
     /// nothing changes here for it.
     private func act(_ host: String, in session: ShellSession, _ body: (MastodonFilters) async throws -> Void) async -> Bool {
@@ -362,9 +418,13 @@ extension ShellSession {
     /// it (#338), as its source said: a hiding one always, a warning not opened this run.
     /// Nothing where this device is not applying a source's filters (#406). The hit stays on
     /// the post, and no source is asked.
+    ///
+    /// **As the list read last says each filter is now** (#461, `ShellServerFilters.current`).
     func serverFilter(over item: DummyItem, at now: Date = Date(), applied: Bool = true) -> ServerFilterHit? {
         guard applied else { return nil }
-        guard let hit = item.serverFiltered.standing(in: ServerFilterHit.timelines, at: now) else { return nil }
+        let post = item.isReblog ? item.reblogged.first ?? item : item
+        let hits = serverFilters.current(item.serverFiltered, host: post.source.host, statusID: post.statusID)
+        guard let hit = hits.standing(in: ServerFilterHit.timelines, at: now) else { return nil }
         if hit.action != .hide, shownAnyway.contains(item.id) { return nil }
         return hit
     }

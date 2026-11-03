@@ -134,6 +134,8 @@ struct HearsLines: ViewModifier {
             .task { SystemNoticePresses.shared.told = session.noticesTold }
             .onReceive(NotificationCenter.default.publisher(for: .fediqoCameForward)) { _ in
                 Task { await session.noticesTold.cameForward(in: session) }
+                // What a filter changed elsewhere meanwhile does, applied here as the person is back (#461).
+                Task { await session.serverFilters.cameForward(hosts: session.lines.heldHosts, in: session) }
             }
             .onChange(of: session.noticesTold.pressedID) { _, id in
                 if id != nil { onToldPressed(session.noticesTold.takePressed()) }

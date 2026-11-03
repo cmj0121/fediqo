@@ -67,6 +67,9 @@ final class ShellSockets {
     /// Whether `host`'s streams are each heard on a line of their own, its socket refused this run.
     func heardApart(_ host: String) -> Bool { apart[host.lowercased()] != nil }
 
+    /// The sources a socket is held to now.
+    var heldHosts: Set<String> { Set(held.keys) }
+
     /// Whether a socket to `host` is held now.
     func holds(_ host: String) -> Bool { held[host.lowercased()] != nil }
 
