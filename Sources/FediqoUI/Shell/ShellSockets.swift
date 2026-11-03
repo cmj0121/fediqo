@@ -70,9 +70,6 @@ final class ShellSockets {
     /// The sources a socket is held to now.
     var heldHosts: Set<String> { Set(held.keys) }
 
-    /// Whether a socket to `host` is held now.
-    func holds(_ host: String) -> Bool { held[host.lowercased()] != nil }
-
     /// `stream` of `host`, on its one socket — opened for it where none is held — until what is
     /// handed back is let go. **Nothing where it is not to be heard so**: no socket is made here, or
     /// the source refused one. Throws `Shut` where the gate did not let the socket out, and what
@@ -88,8 +85,8 @@ final class ShellSockets {
         } catch let refused as SocketRefused {
             apart[host] = refused.status
             return nil
-        } catch is Shut {
-            throw Shut()
+        } catch let shut as Shut {
+            throw shut
         } catch where !Cancellation.happened(error) {
             failed[host, default: 0] += 1
             guard failed[host, default: 0] >= Self.tries else { throw error }
@@ -128,20 +125,10 @@ final class ShellSockets {
         }
         if let open = opening[host] { return try await open.value }
         let open = Task { @MainActor () throws -> Held in
-            guard let admission = work.admission(reached: host, source: nil, for: .line), work.spend(admission, at: host) else {
-                throw Shut()
-            }
-            let record = work.begin(host: host, for: .line, name: nil, allowedBy: admission.allowedBy)
-            let opened: OpenSocket
-            do {
-                opened = try await Outward.$admitted.withValue(true) {
-                    try await MastodonSocket(token: token, opener: opener).open()
-                }
-            } catch {
-                work.endLine(record)
-                throw error
-            }
-            let socket = Held(socket: opened, accessToken: token.accessToken) { work.endLine(record) }
+            guard let (opened, end) = try await work.openLine(host: host, name: nil, {
+                try await MastodonSocket(token: token, opener: opener).open()
+            }) else { throw Shut() }
+            let socket = Held(socket: opened, accessToken: token.accessToken, end: end)
             socket.hearing = Task { [weak self, weak socket] in
                 var dropped: (any Error)?
                 do {

@@ -1204,7 +1204,7 @@ final class ShellReload {
     /// `homeHeard` is whether a line tells this source's Home as it happens, which is then not read.
     private func read(
         _ source: Source, for categories: Set<FediqoCore.Category>?, revisits: Bool,
-        homeHeard: Bool = false, in session: ShellSession
+        homeHeard: Bool, in session: ShellSession
     ) async -> Bool {
         let host = source.host
         // What a note records is which server it came from, not that server's subscriptions.
@@ -1308,7 +1308,7 @@ final class ShellReload {
     /// and then the reader's bookmarks and favourites, where the sign-in may read them (#317).
     /// `thorough` is a reload the person pressed for, and not the wait (`readMarks`).
     private func readAsYou(
-        _ source: Source, for categories: Set<FediqoCore.Category>?, thorough: Bool, homeHeard: Bool = false,
+        _ source: Source, for categories: Set<FediqoCore.Category>?, thorough: Bool, homeHeard: Bool,
         in session: ShellSession
     ) async -> Bool {
         let timelines = await readTimelinesAsYou(source, for: categories, homeHeard: homeHeard, in: session)
@@ -1320,7 +1320,7 @@ final class ShellReload {
     /// Home and the chosen lists, as the reader — only where signed in, and only what was asked.
     /// Home not where a line tells it (`homeHeard`, #457); the lists still.
     private func readTimelinesAsYou(
-        _ source: Source, for categories: Set<FediqoCore.Category>?, homeHeard: Bool = false,
+        _ source: Source, for categories: Set<FediqoCore.Category>?, homeHeard: Bool,
         in session: ShellSession
     ) async -> Bool {
         let home = !homeHeard && (categories?.contains(.home) ?? true)

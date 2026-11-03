@@ -158,23 +158,6 @@ final class ShellNoticesTold {
         /// it on, as a favourite asks for no answer.
         var systemFavourites = false
 
-        init(on: Bool = false, system: Bool = false, off: Set<String> = [], systemFavourites: Bool = false) {
-            self.on = on
-            self.system = system
-            self.off = off
-            self.systemFavourites = systemFavourites
-        }
-
-        /// **A choice kept from before a part of it was asked is read as it was made**: what it does
-        /// not say is the part's default, and nothing it does say is lost.
-        init(from decoder: any Decoder) throws {
-            let kept = try decoder.container(keyedBy: CodingKeys.self)
-            on = try kept.decodeIfPresent(Bool.self, forKey: .on) ?? false
-            system = try kept.decodeIfPresent(Bool.self, forKey: .system) ?? false
-            off = try kept.decodeIfPresent(Set<String>.self, forKey: .off) ?? []
-            systemFavourites = try kept.decodeIfPresent(Bool.self, forKey: .systemFavourites) ?? false
-        }
-
         /// Whether a notice of `kind` is shown as the system's notice, the system allowing.
         func showsSystem(_ kind: Notice.Kind) -> Bool {
             guard system, !off.contains(kind.narrowedAs) else { return false }
@@ -474,5 +457,20 @@ final class ShellNoticesTold {
         case .failure(let error) where Cancellation.happened(error): break
         case .failure: session.showToast(String(format: L10n.t("source.told.mark.failed"), host))
         }
+    }
+}
+
+extension ShellNoticesTold.Choice {
+    /// **A choice kept from before a part of it was asked is read as it was made**: what it does
+    /// not say is the part's default, and nothing it does say is lost. Out here, so the memberwise
+    /// one stands too.
+    init(from decoder: any Decoder) throws {
+        let kept = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            on: try kept.decodeIfPresent(Bool.self, forKey: .on) ?? false,
+            system: try kept.decodeIfPresent(Bool.self, forKey: .system) ?? false,
+            off: try kept.decodeIfPresent(Set<String>.self, forKey: .off) ?? [],
+            systemFavourites: try kept.decodeIfPresent(Bool.self, forKey: .systemFavourites) ?? false
+        )
     }
 }

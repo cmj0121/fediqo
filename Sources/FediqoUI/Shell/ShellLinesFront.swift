@@ -80,12 +80,7 @@ extension ShellLines {
     /// Holds each of `wants` until cancelled — when what is in front changes, or the window goes to
     /// the background — and lets every one go then.
     func hearFront(_ wants: [FrontWant], in session: ShellSession) async {
-        let held = wants.map { want in Task { await self.keepFront(want, in: session) } }
-        await withTaskCancellationHandler {
-            for stream in held { await stream.value }
-        } onCancel: {
-            for stream in held { stream.cancel() }
-        }
+        await holdEach(wants) { await self.keepFront($0, in: session) }
     }
 
     /// One stream for what is in front, heard, and heard again after a drop, until cancelled or
@@ -101,10 +96,7 @@ extension ShellLines {
                 frontRefused.insert(want)
                 return
             case .dropped:
-                guard !Task.isCancelled else { return }
-                if now().timeIntervalSince(opened) >= Double(Self.held.components.seconds) { wait = Self.firstWait }
-                do { try await sleep(wait) } catch { return }
-                wait = min(wait * 2, Self.longestWait)
+                guard !Task.isCancelled, await waitAfterDrop(&wait, opened: opened) else { return }
             }
         }
     }

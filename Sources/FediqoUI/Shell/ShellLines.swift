@@ -284,16 +284,30 @@ final class ShellLines {
 
     /// `hear(_:in:)` of lines held for what each is wanted for.
     func hear(_ wants: [Want], in session: ShellSession) async {
-        let held = wants.map { want in Task { await self.keep(want, in: session) } }
+        await holdEach(wants) { await self.keep($0, in: session) }
+        for want in wants {
+            if case .refused? = standing[want.host] { continue }
+            standing[want.host] = nil
+        }
+    }
+
+    /// `keep` of each of `items` at once, until cancelled, when every one is let go.
+    func holdEach<Item: Sendable>(_ items: [Item], _ keep: @escaping @MainActor (Item) async -> Void) async {
+        let held = items.map { item in Task { await keep(item) } }
         await withTaskCancellationHandler {
             for line in held { await line.value }
         } onCancel: {
             for line in held { line.cancel() }
         }
-        for want in wants {
-            if case .refused? = standing[want.host] { continue }
-            standing[want.host] = nil
-        }
+    }
+
+    /// The wait after a line dropped, then `wait` doubled for the next, up to the longest. **A line
+    /// held a while before it dropped starts over from the first wait.** False where cancelled.
+    func waitAfterDrop(_ wait: inout Duration, opened: Date) async -> Bool {
+        if now().timeIntervalSince(opened) >= Double(Self.held.components.seconds) { wait = Self.firstWait }
+        do { try await sleep(wait) } catch { return false }
+        wait = min(wait * 2, Self.longestWait)
+        return true
     }
 
     /// One source's line, opened, heard, and opened again after a drop, until cancelled or
@@ -314,9 +328,7 @@ final class ShellLines {
                 return
             case .dropped:
                 standing[host] = .waiting
-                if now().timeIntervalSince(opened) >= Double(Self.held.components.seconds) { wait = Self.firstWait }
-                do { try await sleep(wait) } catch { return }
-                wait = min(wait * 2, Self.longestWait)
+                guard await waitAfterDrop(&wait, opened: opened) else { return }
             }
         }
     }
@@ -340,10 +352,7 @@ final class ShellLines {
                 directRefused[host] = token.accessToken
                 return
             } catch {}
-            guard !Task.isCancelled else { return }
-            if now().timeIntervalSince(opened) >= Double(Self.held.components.seconds) { wait = Self.firstWait }
-            do { try await sleep(wait) } catch { return }
-            wait = min(wait * 2, Self.longestWait)
+            guard !Task.isCancelled, await waitAfterDrop(&wait, opened: opened) else { return }
         }
     }
 
@@ -360,19 +369,11 @@ final class ShellLines {
         } catch is ShellSockets.Shut {
             return nil
         }
-        guard let admission = work.admission(reached: host, source: nil, for: .line), work.spend(admission, at: host) else {
-            return nil
+        let opener = opener
+        let line = try await work.openLine(host: host, name: name) {
+            try await MastodonLine(token: token, opener: opener).open(stream)
         }
-        let record = work.begin(host: host, for: .line, name: name, allowedBy: admission.allowedBy)
-        do {
-            let events = try await Outward.$admitted.withValue(true) {
-                try await MastodonLine(token: token, opener: opener).open(stream)
-            }
-            return (events, { work.endLine(record) })
-        } catch {
-            work.endLine(record)
-            throw error
-        }
+        return line.map { ($0.opened, $0.end) }
     }
 
     private enum End {
