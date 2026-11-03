@@ -99,6 +99,10 @@ struct NoticesToldTests {
         LineEvent(name: "notification", data: #"{"id":"\#(id)","type":"follow","created_at":"2026-10-27T00:00:00.000Z","group_key":"follow-1","account":{"id":"8","username":"bo","acct":"bo","display_name":"Bo"}}"#)
     }
 
+    private static func favourite(_ id: String) -> LineEvent {
+        LineEvent(name: "notification", data: #"{"id":"\#(id)","type":"favourite","created_at":"2026-10-27T00:00:00.000Z","group_key":"favourite-\#(id)","account":{"id":"8","username":"bo","acct":"bo","display_name":"Bo"},"status":{"id":"6\#(id)","uri":"https://social.example/users/reader/statuses/6\#(id)","created_at":"2026-10-27T00:00:00.000Z","content":"<p>mine</p>","account":{"id":"9","username":"reader","acct":"reader","display_name":"Reader"}}}"#)
+    }
+
     private func make(
         signedIn: Bool = true, notices: Bool = true, writing: Bool = false, system: HeldSystem = HeldSystem(.unasked), line: OneLine = OneLine(),
         defaults: UserDefaults? = nil
@@ -290,6 +294,41 @@ struct NoticesToldTests {
         #expect(system.posted.count == 1)
     }
 
+    @Test("Unchosen, a favourite is counted and listed and shows no system notice; favourites switched on, it shows as the others do; switched off as a kind, it shows nothing")
+    func favourites() async throws {
+        let system = HeldSystem(.allowed)
+        let (session, server) = try await make(system: system)
+        await server.setUnread(1)
+        let told = session.noticesTold
+        told.choose(true, host: Self.host)
+        await told.chooseSystem(true, host: Self.host)
+        #expect(told.choice(host: Self.host).systemFavourites == false, "off until chosen")
+        let source = Source(host: Self.host, kind: .mastodon)
+        await told.told(try #require(MastodonNotices.told(Self.favourite("1"), source: source)), in: session)
+        #expect(system.posted.isEmpty, "a favourite interrupts nobody unasked")
+        #expect(told.count == 1, "it is counted")
+        #expect(await server.asked.contains("/api/v1/notifications"), "and listed")
+        #expect(await server.queries.allSatisfy { !$0.contains("exclude_types%5B%5D=favourite") }, "never left out of the count")
+
+        told.chooseSystemFavourites(true, host: Self.host)
+        await told.told(try #require(MastodonNotices.told(Self.favourite("2"), source: source)), in: session)
+        #expect(system.posted.count == 1, "switched on, it shows as a mention does")
+
+        told.tell("favourite", false, host: Self.host)
+        await told.told(try #require(MastodonNotices.told(Self.favourite("3"), source: source)), in: session)
+        #expect(system.posted.count == 1, "a kind switched off tells nothing, whatever this says")
+    }
+
+    @Test("A choice kept from before favourites were asked is read as it was made, and the new switch is kept beside it")
+    func keptChoice() throws {
+        let defaults = try #require(UserDefaults(suiteName: "fediqo.tests.told.\(UUID().uuidString)"))
+        defaults.set(Data(#"{"social.example":{"on":true,"system":true,"off":["follow"]}}"#.utf8), forKey: ShellNoticesTold.key)
+        let told = ShellNoticesTold(defaults: defaults)
+        #expect(told.choice(host: Self.host) == .init(on: true, system: true, off: ["follow"], systemFavourites: false))
+        told.chooseSystemFavourites(true, host: Self.host)
+        #expect(ShellNoticesTold(defaults: defaults).choice(host: Self.host) == .init(on: true, system: true, off: ["follow"], systemFavourites: true))
+    }
+
     @Test("The system is asked only when its switch is turned on, never before; refused, the switch stays off, says so, nothing asks again, and the count works")
     func system() async throws {
         let refusing = HeldSystem(.unasked, answer: false)
@@ -454,6 +493,7 @@ struct NoticesToldTests {
         "source.told", "source.told.help", "source.told.system", "source.told.system.help", "source.told.system.refused",
         "source.told.kinds", "source.told.signIn", "source.told.cannot", "source.told.open", "rail.count",
         "source.told.count.failed", "source.told.count.none", "source.told.count.readOnly", "source.told.mark.failed",
+        "source.told.system.favourites", "source.told.system.favourites.help",
     ])
     func words(key: String) {
         for language in DummyLanguage.allCases {
