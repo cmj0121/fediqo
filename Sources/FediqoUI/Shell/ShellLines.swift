@@ -60,6 +60,15 @@ final class ShellLines {
     private(set) var chosen: Set<String>
     /// Each source's line as it stands now; nothing for one not held.
     private(set) var standing: [String: Standing] = [:]
+    /// The hosts whose Home this line tells as it happens now: open, held for Home, and Home read up
+    /// to now as it opened. **The wait does not ask these for Home** (#457) — the line already says
+    /// it — and asks again the moment the line drops, as a line opened again reads Home up to now
+    /// before anything lands. Not observed: nothing is drawn from it.
+    ///
+    /// Kept by which opening holds it, so a line let go as another to the same source opens takes
+    /// only its own mark away.
+    var homeHeard: Set<String> { Set(homeHeardBy.keys) }
+    @ObservationIgnored private var homeHeardBy: [String: UUID] = [:]
     /// Posts arrived on a line above where the reader is, since they were last at the top.
     private(set) var above = 0
     /// The newest row that arrived so, by its row id.
@@ -328,6 +337,9 @@ final class ShellLines {
               let source = session.sources.first(where: { $0.host.lowercased() == host })
         else { return .over }
         standing[host] = .opening
+        // However this line ends, its Home is the wait's to ask again from then on.
+        let opening = UUID()
+        defer { if homeHeardBy[host] == opening { homeHeardBy[host] = nil } }
         let work = session.mastodon.work
         // **The gate** (#220), as every request's: a line belongs to the source it is of.
         guard let admission = work.admission(reached: host, source: nil, for: .line), work.spend(admission, at: host) else {
@@ -364,6 +376,7 @@ final class ShellLines {
             await session.noticesTold.caughtUp(host: host, in: session)
         }
         standing[host] = .open(since: now())
+        if want.home { homeHeardBy[host] = opening }
         do {
             for try await event in events {
                 if want.notices, let notice = MastodonNotices.told(event, source: source) {

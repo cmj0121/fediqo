@@ -180,6 +180,39 @@ struct LiveLineTests {
         #expect(reread)
     }
 
+    @Test("While a line tells Home, the wait does not ask for it; dropped, the wait asks for it again (#457)")
+    func waitLeavesHomeToTheLine() async throws {
+        let lines = Lines()
+        let clock = TurnedClock()
+        let (session, server, _) = try await make(lines: lines, clock: clock)
+        let homeReads = { await server.asked.filter { $0 == "/api/v1/timelines/home" }.count }
+
+        await session.reload.held(in: session)
+        #expect(await homeReads() == 1, "with no line, the wait reads Home")
+
+        let hearing = Task { await session.lines.hear([Self.host], in: session) }
+        defer { hearing.cancel() }
+        let open = await met("the line open", by: hearing) { if case .open? = session.lines.standing[Self.host] { true } else { false } }
+        try #require(open)
+        #expect(session.lines.homeHeard == [Self.host])
+        let caughtUp = await homeReads()
+        #expect(caughtUp == 2, "the line read Home up to now as it opened")
+
+        await session.reload.held(in: session)
+        #expect(await homeReads() == caughtUp, "the line tells Home, so the wait does not ask")
+        #expect(await server.asked.contains("/api/v1/timelines/public"), "what the line does not tell is still asked")
+
+        await session.reload.timeline(.all, in: session)
+        #expect(await homeReads() == caughtUp + 1, "a press still asks")
+
+        lines.last?.finish(throwing: URLError(.networkConnectionLost))
+        let waiting = await met("waiting after the drop", by: hearing) { clock.sleeping == 1 }
+        try #require(waiting)
+        #expect(session.lines.homeHeard.isEmpty)
+        await session.reload.held(in: session)
+        #expect(await homeReads() == caughtUp + 2, "dropped, the wait asks for Home again")
+    }
+
     @Test("Refused, it is said on the source's page, not asked again this run, and nothing held changes")
     func refused() async throws {
         let lines = Lines(status: 401)
