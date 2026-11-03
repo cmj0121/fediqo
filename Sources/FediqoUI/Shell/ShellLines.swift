@@ -1,6 +1,7 @@
 import FediqoCore
 import Foundation
 import Observation
+import Synchronization
 
 /// What is new in Home arrives as it happens, while a timeline that reads it is in front (#325).
 ///
@@ -110,16 +111,23 @@ final class ShellLines {
     @ObservationIgnored let opener: any LineOpener
     @ObservationIgnored let sleep: @Sendable (Duration) async throws -> Void
     @ObservationIgnored private let now: @Sendable () -> Date
+    /// How long a burst is gathered from its first event before it lands (#458): `gathering` but
+    /// for a test, which ends it by hand.
+    @ObservationIgnored let gather: @Sendable () async throws -> Void
+    /// The moment a burst is gathered for: short enough that one post alone still shows at once.
+    nonisolated static let gathering: Duration = .milliseconds(250)
 
     init(
         defaults: UserDefaults? = nil, opener: any LineOpener = URLSessionLines.signedIn(),
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        gather: @escaping @Sendable () async throws -> Void = { try await Task.sleep(for: ShellLines.gathering) }
     ) {
         self.defaults = defaults
         self.opener = opener
         self.sleep = sleep
         self.now = now
+        self.gather = gather
         chosen = Set(defaults?.stringArray(forKey: Self.key) ?? [])
     }
 
@@ -378,26 +386,30 @@ final class ShellLines {
         standing[host] = .open(since: now())
         if want.home { homeHeardBy[host] = opening }
         do {
-            for try await event in events {
-                if want.notices, let notice = MastodonNotices.told(event, source: source) {
-                    await session.noticesTold.told(notice, in: session)
-                    continue
+            for try await burst in Self.bursts(of: events, gathered: gather) {
+                // Home's events of the burst, landed together once the rest is said (#458). What
+                // the source is asked again for — notices merged, announcements, filters — is asked
+                // once a burst, however often the burst says it.
+                var home: [LineEvent] = []
+                var merged = false, announcements = false, filters = false
+                for event in burst {
+                    if want.notices, let notice = MastodonNotices.told(event, source: source) {
+                        await session.noticesTold.told(notice, in: session)
+                    } else if want.notices, MastodonNotices.saysMerged(event) {
+                        merged = true
+                    } else if MastodonLine.announcementEvents.contains(event.name) {
+                        announcements = true
+                    } else if event.name == MastodonLine.filtersEvent {
+                        filters = true
+                    } else if want.home, MastodonLine.homeEvents.contains(event.name) {
+                        home.append(event)
+                    }
                 }
-                if want.notices, MastodonNotices.saysMerged(event) {
-                    await session.noticesTold.caughtUp(host: host, in: session)
-                    continue
-                }
-                if MastodonLine.announcementEvents.contains(event.name) {
-                    await announced(host)
-                    continue
-                }
-                if event.name == MastodonLine.filtersEvent {
-                    await session.serverFilters.heard(host: host, in: session)
-                    continue
-                }
-                guard want.home, MastodonLine.homeEvents.contains(event.name) else { continue }
-                let landed = await MastodonLine.land(event, of: source, in: session.store)
-                if case .arrived(let key, true) = landed {
+                if merged { await session.noticesTold.caughtUp(host: host, in: session) }
+                if announcements { await announced(host) }
+                if filters { await session.serverFilters.heard(host: host, in: session) }
+                guard !home.isEmpty else { continue }
+                for case .arrived(let key, true) in await MastodonLine.land(home, of: source, in: session.store) {
                     above += 1
                     newestAbove = key.rowID
                 }
@@ -407,5 +419,47 @@ final class ShellLines {
             return .dropped
         }
         return .dropped
+    }
+
+    /// `events` handed on in bursts (#458): from the first event after a quiet, everything told
+    /// until `gathered` returns goes on as one, in the order told. A line that ends or drops hands
+    /// on what it was gathering first, then ends or drops as it did. Let go, it lets the line go.
+    nonisolated static func bursts(
+        of events: AsyncThrowingStream<LineEvent, any Error>,
+        gathered: @escaping @Sendable () async throws -> Void
+    ) -> AsyncThrowingStream<[LineEvent], any Error> {
+        let (bursts, out) = AsyncThrowingStream<[LineEvent], any Error>.makeStream()
+        // What is gathered so far, and whether a gathering is under way for it.
+        let held = Mutex<(events: [LineEvent], gathering: Bool)>(([], false))
+        let handOn: @Sendable () -> Void = {
+            let burst = held.withLock { state in
+                defer { state = ([], false) }
+                return state.events
+            }
+            if !burst.isEmpty { out.yield(burst) }
+        }
+        let hearing = Task {
+            do {
+                for try await event in events {
+                    let first = held.withLock { state in
+                        state.events.append(event)
+                        defer { state.gathering = true }
+                        return !state.gathering
+                    }
+                    guard first else { continue }
+                    Task {
+                        try? await gathered()
+                        handOn()
+                    }
+                }
+                handOn()
+                out.finish()
+            } catch {
+                handOn()
+                out.finish(throwing: error)
+            }
+        }
+        out.onTermination = { _ in hearing.cancel() }
+        return bursts
     }
 }

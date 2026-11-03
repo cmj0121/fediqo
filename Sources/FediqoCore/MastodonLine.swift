@@ -131,6 +131,43 @@ extension MastodonLine {
         }
     }
 
+    /// `events`, each landed as `land(_:of:in:)` lands it and in the order told — but **posts that
+    /// arrive one after another go in together** (#458): one landing, so one change of the store and
+    /// one redraw for a burst, where each alone would be one each. A change or a deletion between
+    /// them lands in its place, after the posts told before it. One result an event, in order.
+    public static func land(_ events: [LineEvent], of source: Source, in store: ItemStore) async -> [MastodonLineLanded] {
+        let host = source.host
+        let stamp = Source(host: host, kind: source.kind)
+        var landed = [MastodonLineLanded](repeating: .passed, count: events.count)
+        // The posts waiting to go in together: where each one's result goes, and what it brings.
+        var gathered: [(at: Int, key: NoteKey, notes: [Note])] = []
+        func putIn() async {
+            guard !gathered.isEmpty else { return }
+            var seen: Set<NoteKey> = []
+            for post in gathered {
+                let fresh = seen.insert(post.key).inserted ? await store.note(post.key) == nil : false
+                landed[post.at] = .arrived(post.key, fresh: fresh)
+            }
+            await store.ingest(gathered.flatMap(\.notes), ifSourceHere: host)
+            gathered = []
+        }
+        for (at, event) in events.enumerated() {
+            guard event.name == "update" else {
+                await putIn()
+                landed[at] = await land(event, of: source, in: store)
+                continue
+            }
+            guard let status = decode(event.data) else {
+                landed[at] = .unreadable
+                continue
+            }
+            let listed = status.listed(source: stamp, category: .home, sent: ReadMoment.now())
+            gathered.append((at, listed.note.key, [listed.note] + listed.carried))
+        }
+        await putIn()
+        return landed
+    }
+
     private static func decode(_ data: String) -> StatusDTO? {
         do {
             return try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(data.utf8))

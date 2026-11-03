@@ -169,6 +169,29 @@ struct MastodonLineTests {
         #expect(await MastodonLine.land(told[3], of: Self.source, in: store) == .gone([]))
     }
 
+    @Test("A burst lands its posts in one change of the store, in the order told, a change and a deletion in their place (#458)")
+    func aBurst() async throws {
+        let store = await store()
+        let user = try Self.told(MastodonLineCaptures.user)
+        let reblog = try Self.told(MastodonLineCaptures.reblog)
+        let before = await store.drawn
+        let landed = await MastodonLine.land(
+            [user[0], reblog[0], user[0], LineEvent(name: "update", data: "{")], of: Self.source, in: store
+        )
+        guard case .arrived(let post, true) = landed[0], case .arrived(let boost, true) = landed[1] else {
+            Issue.record("not landed: \(landed)")
+            return
+        }
+        #expect(landed[2] == .arrived(post, fresh: false), "told twice in one burst, new once")
+        #expect(landed[3] == .unreadable)
+        #expect(await store.drawn == before + 1, "two posts, one landing")
+        #expect(await store.note(post)?.listed[.home] == "117510102024468580")
+        #expect(await store.note(boost)?.isReblog == true)
+
+        let next = await MastodonLine.land([user[1], reblog[1]], of: Self.source, in: store)
+        #expect(next == [.changed(post), .gone([boost])])
+    }
+
     @Test("A notice, an event it does not know, and words that will not read change nothing")
     func passes() async throws {
         let store = await store()
