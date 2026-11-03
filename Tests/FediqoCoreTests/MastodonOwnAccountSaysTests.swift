@@ -31,7 +31,8 @@ struct MastodonOwnAccountSaysTests {
         name: "Own 312", words: "Words of my own.",
         fields: [.init(name: "site", value: "own.example"), .init(name: "pronouns", value: "they")],
         followWithoutAsking: true, findable: false, listsShown: true,
-        pictureDescription: "", headerDescription: "", sites: [], automated: false, indexed: false, coversMedia: false
+        pictureDescription: "", headerDescription: "", sites: [], automated: false, indexed: false, coversMedia: false,
+        quotePolicy: .anyone
     )
 
     private struct Seeded {

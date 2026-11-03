@@ -162,9 +162,9 @@ struct MastodonLaterSaysTests {
             let at = MastodonLater.earliest().addingTimeInterval(3600)
             let once = try await write.postLater("keyed", visibility: .unlisted, at: at, key: key)
             made.append(once.id)
-            await #expect(throws: MastodonLaterError.mayHaveBeenMade) {
-                _ = try await write.postLater("keyed", visibility: .unlisted, at: at, key: key)
-            }
+            // 4.7.4 answers the repeat with the post that waits; 4.6.6 answered a 500.
+            let again = try await write.postLater("keyed", visibility: .unlisted, at: at, key: key)
+            #expect(again.id == once.id, "the repeat is answered with the one it made")
             #expect(try await write.waiting().posts.filter { $0.text == "keyed" }.map(\.id) == [once.id], "no second")
 
             // A day far enough ahead to hold nothing else: its 25, then a 26th.

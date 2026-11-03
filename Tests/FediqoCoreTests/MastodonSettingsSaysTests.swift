@@ -63,7 +63,7 @@ struct MastodonSettingsSaysTests {
     func whoSetAllThree() async throws {
         try await LocalServers.requireHealthy()
         let hidden = try #require(try Self.seeded().people).hidden.token
-        #expect(try await reader(hidden).0.postingDefaults() == PostingDefaults(reach: .known(.unlisted), language: "zh-TW", coversMedia: true))
+        #expect(try await reader(hidden).0.postingDefaults() == PostingDefaults(reach: .known(.unlisted), language: "zh-TW", coversMedia: true, quotePolicy: .anyone))
         #expect(try await plain(MastodonSettings.path, as: hidden).body == Data(MastodonSettingsCaptures.unlistedCovered.utf8))
     }
 

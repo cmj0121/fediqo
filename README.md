@@ -128,6 +128,9 @@ make servers-down
 brought the servers up, and that is the part a pull request checks. The servers, the
 cases they unlock, and a release build run when work lands on `main`.
 
+The checks ask more often than a person may, so a small service (`mastodon-limits`) lets go of
+what Mastodon has counted every two seconds, sign-ups apart; its limits and headers stay its own.
+
 The Mastodon server runs no worker, so its seed gives the first account its notices and runs
 the waiting jobs itself. The checks that dismiss a notice use notices up: four runs fit
 between seeds, a run past that says to seed again, and `make servers` once more makes up what

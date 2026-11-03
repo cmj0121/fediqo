@@ -85,8 +85,29 @@ services:
       retries: 20
     restart: unless-stopped
 
+  # How often the checks may ask, kept from deciding whether they pass. A run asks more than a
+  # person's allowance in five minutes, and takes back more posts than thirty in half an hour, so
+  # what has been counted is let go every two seconds: the server's own code still answers, with
+  # its own limits and their headers. Sign-ups alone stay counted, as a check reaches that limit.
+  mastodon-limits:
+    image: redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
+    command:
+      - sh
+      - -c
+      - |
+        while :; do
+          for pattern in 'cache:rack::attack:*' 'rate_limit:*'; do
+            redis-cli -h mastodon-redis --scan --pattern "$$pattern" | grep -v throttle_api_sign_up | xargs -r redis-cli -h mastodon-redis del >/dev/null
+          done
+          sleep 2
+        done
+    depends_on:
+      mastodon-redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   mastodon-web:
-    image: ghcr.io/mastodon/mastodon:v4.6.6@sha256:3579200b208d4ebbc1affd1218828f3b02dc19953d83d0217eb095dacb84dc00
+    image: ghcr.io/mastodon/mastodon:v4.7.4@sha256:8cbc9c9ffa595c4ced3854b63b8f173251be710f9bbf2d369926023c19666311
     environment:
       <<: *mastodon-env
     command: bundle exec puma -C config/puma.rb
@@ -118,7 +139,7 @@ services:
   # (`make servers-down`) before a run without it: `servers-up` refuses otherwise.
   mastodon-sidekiq:
     profiles: [worker]
-    image: ghcr.io/mastodon/mastodon:v4.6.6@sha256:3579200b208d4ebbc1affd1218828f3b02dc19953d83d0217eb095dacb84dc00
+    image: ghcr.io/mastodon/mastodon:v4.7.4@sha256:8cbc9c9ffa595c4ced3854b63b8f173251be710f9bbf2d369926023c19666311
     environment:
       <<: *mastodon-env
       ALLOWED_PRIVATE_ADDRESSES: ${FEDIQO_CARD_ADDRESS:-}
@@ -138,7 +159,7 @@ services:
   # worker (`worker` profile) hands it: with no worker up a line opens and nothing new is said.
   mastodon-streaming:
     profiles: [streaming]
-    image: ghcr.io/mastodon/mastodon-streaming:v4.6.6@sha256:0420a546ff1e8979b15bdf5685c9ce8ee16df939e313a7e8475a8110cc97019a
+    image: ghcr.io/mastodon/mastodon-streaming:v4.7.4@sha256:b896be8bc93db513695c3ebac8442c09453065ab1be06dfc49fe3c16a91c825c
     environment:
       <<: *mastodon-env
       BIND: 0.0.0.0

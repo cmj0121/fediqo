@@ -116,7 +116,7 @@ struct MastodonStandingSaysTests {
 
         #expect(try await stands.standing(to: people.person.id) == PersonStanding(accountID: people.person.id))
         #expect(try await stands.standing(to: people.blocked.id) == PersonStanding(accountID: people.blocked.id, blocking: true))
-        #expect(try await stands.standing(to: people.muted.id) == PersonStanding(accountID: people.muted.id, muting: true))
+        #expect(try await stands.standing(to: people.muted.id) == PersonStanding(accountID: people.muted.id, muting: true, mutesNotices: true))
         #expect(try await stands.standing(to: people.locked.id) == PersonStanding(accountID: people.locked.id, requested: true))
         #expect(try await stands.standing(to: people.blocker.id) == PersonStanding(accountID: people.blocker.id, blockedBy: true))
         #expect(try await stands.standing(to: people.gone.id) == nil, "a suspended account has no entry")
@@ -146,7 +146,7 @@ struct MastodonStandingSaysTests {
         #expect(Set(said.keys) == Set(known), "nobody but who is somebody there")
         #expect(said[people.person.id] == PersonStanding(accountID: people.person.id))
         #expect(said[people.blocked.id] == PersonStanding(accountID: people.blocked.id, blocking: true))
-        #expect(said[people.muted.id] == PersonStanding(accountID: people.muted.id, muting: true))
+        #expect(said[people.muted.id] == PersonStanding(accountID: people.muted.id, muting: true, mutesNotices: true))
         #expect(said[people.locked.id] == PersonStanding(accountID: people.locked.id, requested: true))
         #expect(said[people.blocker.id] == PersonStanding(accountID: people.blocker.id, blockedBy: true))
         #expect(said[me] == PersonStanding(accountID: me), "the reader themselves: an entry with nothing in it")
@@ -497,7 +497,7 @@ struct MastodonStandingSaysTests {
         let id = seeded.people.muted.id
         try await restoring(seeded, muted: id) {
             let stands = try reader(seeded.seeing)
-            #expect(try await stands.standing(to: id) == PersonStanding(accountID: id, muting: true))
+            #expect(try await stands.standing(to: id) == PersonStanding(accountID: id, muting: true, mutesNotices: true))
             let before = Date()
             #expect(try await ask(Self.account(id, "mute"), as: seeded.writer, "POST", form: "duration=3600").status == 200)
             let said = try #require(try await stands.standing(to: id))
@@ -508,6 +508,6 @@ struct MastodonStandingSaysTests {
             let raw = try #require(try await ask(Self.stands(id), as: seeded.seeing).list.first?["muting_expires_at"] as? String)
             #expect(raw.count == Captures.mutedForATime.split(separator: "\"muting_expires_at\":\"")[1].prefix { $0 != "\"" }.count, "to the second: \(raw)")
         }
-        #expect(try await reader(seeded.seeing).standing(to: id) == PersonStanding(accountID: id, muting: true))
+        #expect(try await reader(seeded.seeing).standing(to: id) == PersonStanding(accountID: id, muting: true, mutesNotices: true))
     }
 }
