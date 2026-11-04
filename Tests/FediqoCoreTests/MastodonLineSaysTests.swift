@@ -79,7 +79,6 @@ struct MastodonLineSaysTests {
         #expect(landed.categories == [.home])
         #expect(landed.listed[.home] == id)
         #expect(landed.body.contains(words))
-        #expect(await store.newestListedID(host: Self.host, category: .home) == id)
 
         _ = try await act("PUT", "/api/v1/statuses/\(id)", [("status", "\(words), changed")])
         let changed = await met("the change told on the line", by: reading) {

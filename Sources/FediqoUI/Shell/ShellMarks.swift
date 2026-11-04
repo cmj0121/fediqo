@@ -80,15 +80,6 @@ extension ShellReload {
         return try await asReader(source.host) { try await reading.older(category, than: floor) }
     }
 
-    /// A place where marks may be missing below `post`, reached (#317): read down as the reader.
-    /// Nothing where signed out since it was drawn.
-    func readDownMarks(_ category: FediqoCore.Category, of host: String, below post: NoteKey, in session: ShellSession) async throws {
-        guard let source = session.sources.first(where: { $0.host == host }),
-              let reading = marksReader(category, of: source, in: session)
-        else { return }
-        try await asReader(host) { try await reading.readDown(category, below: post) }
-    }
-
     /// What reads `category` of the reader's marks at `source`: its sign-in's door, named on the
     /// wire as every timeline of the source is (`names(of:)`) and bounded by the reload's
     /// deadline. Nothing where no sign-in is held there.

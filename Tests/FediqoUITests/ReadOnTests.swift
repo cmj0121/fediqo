@@ -95,20 +95,17 @@ actor TimelineServer: HTTPClient {
     }
 }
 
-/// A microblog timeline read again reads on from where this device left it, and says where it
-/// cannot (#201).
+/// A timeline read again reads its newest posts, and reading it down goes on from the oldest of
+/// them, each source on its own (#470).
 ///
-/// What a test can reach: what `r`, the wait and a place reached ask and in what order; what lands,
-/// with no hole and no row twice; where the list says the timeline is not whole, in which
-/// timelines, and in which words; and that the post being read stays. What it cannot: the row
-/// drawn in light and dark on a Mac and a phone, a finger or VoiceOver on it — those live in a
-/// lazy stack.
+/// What a test can reach: what `r` and an ask for more ask and in what order, what lands, and that
+/// the post being read stays. What it cannot: the rows drawn in light and dark on a Mac and a
+/// phone, a finger or VoiceOver on them — those live in a lazy stack.
 @MainActor
-@Suite("A timeline read again reads on from where this device left it", .watched)
+@Suite("A timeline read again reads its newest, and reading it down goes on from there", .watched)
 struct ReadOnTests {
     private static let one = "one.example"
     private static let source = Source(host: one, kind: .mastodon)
-    private static let stretch = Stretch(host: one, category: .public)
 
     nonisolated static func posted(_ id: Int) -> Date {
         Date(timeIntervalSince1970: 1_704_067_200 + Double(id) * 60)
@@ -130,7 +127,6 @@ struct ReadOnTests {
             http: server, store: store,
             mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: ActServer([:]))
         )
-        // A read's deadline, on a clock nobody turns: a read held at the gate is not ended by one.
         session.deadlineSleep = TurnedClock().sleep
         await session.reloadFromStore()
         return session
@@ -149,8 +145,8 @@ struct ReadOnTests {
         session.timelineItems(latest: nil).compactMap { $0.statusID.flatMap(Int.init) }
     }
 
-    @Test("r with more new posts than a stretch holds brings every one, in order, with no hole; the post being read stays")
-    func everyOneInOrder() async throws {
+    @Test("r reads the newest alone, whatever was held below it, and the post being read stays")
+    func newestAlone() async throws {
         let server = TimelineServer(host: Self.one, 1...10)
         let session = await shell(server, store: await store(holding: 1...10))
         let selected = Self.row(5)
@@ -158,219 +154,72 @@ struct ReadOnTests {
 
         await session.reload.timeline(.all, in: session)
 
-        #expect(await server.cursors == ["min_id=9", "min_id=49", "min_id=89"])
-        #expect(drawn(session) == Array((1...100).reversed()), "every one, newest first, none twice")
+        #expect(await server.cursors == ["newest"])
+        #expect(drawn(session) == Array((61...100).reversed()) + Array((1...10).reversed()), "what lies between is not read on to")
         let items = session.timelineItems(latest: nil)
         #expect(DummyCommand.focused(in: items, selected: selected) == .post(try #require(session.held(selected))))
-        #expect(session.gapMarks(in: items).isEmpty, "whole, and nothing says otherwise")
         #expect(session.reload.line == nil)
     }
 
-    /// #283: a busy server's public timeline brings more between two reads than one read reads on
-    /// through, so a read at its bound reads the newest stretch too — what is new now lands now —
-    /// and says between the two that posts may be missing, which reaching reads down.
-    @Test("Past the bound the newest stretch lands too, and the place between says posts may be missing; reaching it reads down, nothing moves, no row twice")
-    func boundThenReachIt() async throws {
-        let server = TimelineServer(host: Self.one, 1...10)
+    @Test("Scrolling down reads on from the oldest post r brought, then from the oldest each read down brought")
+    func downFromTheNewest() async throws {
+        let server = TimelineServer(host: Self.one, 1...100)
         let session = await shell(server, store: await store(holding: 1...10))
-        await server.post(11...300)
-
         await session.reload.timeline(.all, in: session)
-        #expect(drawn(session) == Array((261...300).reversed()) + Array((1...209).reversed()),
-                "read on as far as the bound, and the newest now")
-        let marks = session.gapMarks(in: session.timelineItems(latest: nil))
-        #expect(marks.keys.sorted() == [Self.row(261)], "said below the newest stretch's oldest")
-        #expect(marks[Self.row(261)]?.below == [Self.stretch])
-        #expect(marks[Self.row(261)]?.above.isEmpty == true, "the newest is held: nothing more belongs above")
-
-        // Trends reads no public timeline, so it says nothing of one.
-        session.stream = .trends
-        #expect(session.gapMarks(in: session.timelineItems(latest: nil)).isEmpty)
-        session.stream = .timeline
-        session.timelineID = nil
-
-        // Reached — scrolled, walked or pressed to: read down toward what was read on.
-        let landed = session.reload.landed
-        await session.reload.readDown(Self.stretch, below: Self.note(261).key, in: session)
-        #expect(drawn(session) == Array((1...300).reversed()), "every one, once each")
-        #expect(session.gapMarks(in: session.timelineItems(latest: nil)).isEmpty, "read, and said no more")
-        #expect(session.reload.landed == landed, "reaching the place does not re-centre")
-        #expect(session.reload.asking.isEmpty)
-    }
-
-    /// Where the newest stretch could not be read, a read at its bound says more belong above the
-    /// newest it read, as it did before it caught up (#201, #283).
-    @Test("Past the bound with the newest stretch failing, the place says more belong there; reaching it reads them, nothing moves, no row twice")
-    func boundNewestFailsThenReachIt() async throws {
-        let server = TimelineServer(host: Self.one, 1...10)
-        let session = await shell(server, store: await store(holding: 1...10))
-        await server.post(11...300)
-
-        await server.refuseNewest(true)
-        await session.reload.timeline(.all, in: session)
-        await server.refuseNewest(false)
-        let newest = try #require(drawn(session).first)
-        #expect(newest < 300, "the bound stopped it short")
-        #expect(drawn(session) == Array((1...newest).reversed()), "what came, came with no hole")
-        let marks = session.gapMarks(in: session.timelineItems(latest: nil))
-        #expect(marks == [Self.row(newest): TimelineGapMarks(above: [Self.stretch])], "said above the newest read")
-
-        // Trends reads no public timeline, so it says nothing of one.
-        session.stream = .trends
-        #expect(session.gapMarks(in: session.timelineItems(latest: nil)).isEmpty)
-        session.stream = .timeline
-        session.timelineID = nil
-
-        // Reached — scrolled, walked or pressed to — as `r` lands too: both read on from the
-        // same newest post, and nothing lands twice.
-        let landed = session.reload.landed
-        async let reached: Void = session.reload.readOn(Self.stretch, in: session)
-        async let pressed: Void = session.reload.timeline(.all, in: session)
-        _ = await (reached, pressed)
-        #expect(drawn(session) == Array((1...300).reversed()), "every one, once each")
-        #expect(session.gapMarks(in: session.timelineItems(latest: nil)).isEmpty, "read, and said no more")
-        #expect(session.reload.landed <= landed + 1, "only r re-centres; reaching the place does not")
-        #expect(session.reload.asking.isEmpty)
-    }
-
-    @Test("Reaching the place alone does not re-centre the list")
-    func reachingDoesNotMove() async {
-        let server = TimelineServer(host: Self.one, 1...10)
-        let session = await shell(server, store: await store(holding: 1...10))
-        await server.post(11...300)
-        // The newest stretch failing, so more belong above the newest read (#283).
-        await server.refuseNewest(true)
-        await session.reload.timeline(.all, in: session)
-        await server.refuseNewest(false)
-        let landed = session.reload.landed
-        await session.reload.readOn(Self.stretch, in: session)
-        #expect(session.reload.landed == landed)
-        #expect(drawn(session).count == 300)
-    }
-
-    @Test("Where the source no longer gives back what lay between, the place says posts may be missing")
-    func mayBeMissing() async {
-        let server = TimelineServer(host: Self.one, 1...10)
-        let session = await shell(server, store: await store(holding: 1...10))
-        await server.post(11...60)
-        await server.keep(from: 31)
-
-        await session.reload.timeline(.all, in: session)
-
-        #expect(drawn(session) == Array((31...60).reversed()) + Array((1...10).reversed()), "nothing invented")
-        let marks = session.gapMarks(in: session.timelineItems(latest: nil))
-        #expect(marks.keys.sorted() == [Self.row(31)], "said below the oldest it gave")
-        #expect(marks[Self.row(31)]?.below == [Self.stretch])
-        #expect(session.reload.line == nil, "the source answered: nothing failed")
-    }
-
-    @Test("Listing as you go after a relaunch reads on below what was held, and leaves no hole")
-    func moreAfterRelaunch() async throws {
-        // Held from the last run: 51 to 60. While the app was closed, 61 to 200 arrived.
-        let server = TimelineServer(host: Self.one, 1...200)
-        let before = await store(holding: 51...60)
-        let snapshot = await before.snapshot()
-        let session = await shell(server, store: ItemStore(sources: snapshot.sources, notes: snapshot.notes))
-
-        await session.reload.timeline(.all, in: session)
-        #expect(drawn(session) == Array((51...200).reversed()), "today's newest reaches what was held")
         await session.reload.more(.all, in: session)
         await session.reload.more(.all, in: session)
-        #expect(drawn(session) == Array((1...200).reversed()), "and on below it, with no hole")
-        #expect(await server.cursors.suffix(2) == ["max_id=51", "max_id=11"])
+        #expect(await server.cursors == ["newest", "max_id=61", "max_id=21"])
+        #expect(drawn(session) == Array((1...100).reversed()), "no hole, and no row twice")
     }
 
-    @Test("A place reached while an ask for more is out waits for it, then reads on")
-    func reachedWhileMore() async throws {
-        let server = TimelineServer(host: Self.one, 1...10)
-        let session = await shell(server, store: await store(holding: 1...10))
-        await server.post(11...300)
-        // The newest stretch failing, so more belong above the newest read (#283).
-        await server.refuseNewest(true)
+    @Test("r again starts the place over: posts already held below are asked for again as they are reached")
+    func startsOver() async throws {
+        let server = TimelineServer(host: Self.one, 1...100)
+        let session = await shell(server, store: await store(holding: []))
         await session.reload.timeline(.all, in: session)
-        await server.refuseNewest(false)
-        #expect(drawn(session).first == 209)
-
-        await server.hold("max_id")
-        let guardTask = watching(server.gate, "the ask for more, held on the wire")
-        defer { guardTask.cancel() }
-        let more = Task { await session.reload.more(.all, in: session) }
-        await met("the ask for more is held on the wire", by: more) { await server.parked == 1 }
-        await session.reload.readOn(Self.stretch, in: session)
-        #expect(session.reload.asking == [.more], "not dropped, and not beside the other")
-        await server.gate.open()
-        await more.value
-        // No `by:`: the place kept is read by a task the reload starts for itself.
-        await met("the place is read on once the ask for more ended") {
-            drawn(session).first == 300 && session.reload.asking.isEmpty
-        }
-    }
-
-    @Test("A place waiting is not read once the timeline in front no longer says more belong there")
-    func waitingLeftBehind() async throws {
-        let server = TimelineServer(host: Self.one, 1...10)
-        let session = await shell(server, store: await store(holding: 1...10))
-        await server.post(11...300)
-        // The newest stretch failing, so more belong above the newest read (#283).
-        await server.refuseNewest(true)
+        await session.reload.more(.all, in: session)
         await session.reload.timeline(.all, in: session)
-        await server.refuseNewest(false)
-
-        await server.hold("max_id")
-        let guardTask = watching(server.gate, "the ask for more, held on the wire")
-        defer { guardTask.cancel() }
-        let more = Task { await session.reload.more(.all, in: session) }
-        await met("the ask for more is held on the wire", by: more) { await server.parked == 1 }
-        await session.reload.readOn(Self.stretch, in: session)
-        session.stream = .trends
-        await server.gate.open()
-        await more.value
-        // Counted turns, behind the ask for more having ended: the place kept is looked at by a
-        // task the reload starts for itself, which says nothing where it finds nothing to read.
-        for _ in 0..<200 { await Task.yield() }
-        #expect(session.reload.asking.isEmpty)
-        #expect(await server.cursors.filter { $0 == "min_id=208" }.isEmpty, "Trends reads no public timeline")
+        await session.reload.more(.all, in: session)
+        #expect(await server.cursors == ["newest", "max_id=61", "newest", "max_id=61"])
     }
 
-    @Test("A place reached while r reads its source asks nothing: r reads it on from there")
-    func reachedWhileR() async throws {
-        let server = TimelineServer(host: Self.one, 1...10)
-        let session = await shell(server, store: await store(holding: 1...10))
-        await server.post(11...300)
-        // The newest stretch failing, so more belong above the newest read (#283).
-        await server.refuseNewest(true)
+    @Test("With nothing read yet this run, scrolling down asks nothing: there is no place to read down from")
+    func noPlaceYet() async {
+        let server = TimelineServer(host: Self.one, 1...100)
+        let session = await shell(server, store: await store(holding: 61...100))
+        await session.reload.more(.all, in: session)
+        #expect(await server.cursors.isEmpty)
+    }
+
+    @Test("The source having no more there, scrolling down asks nothing again until r")
+    func ended() async {
+        let server = TimelineServer(host: Self.one, 1...50)
+        let session = await shell(server, store: await store(holding: []))
         await session.reload.timeline(.all, in: session)
-        await server.refuseNewest(false)
-
-        await server.hold("min_id=208")
-        let guardTask = watching(server.gate, "r's read, held on the wire")
-        defer { guardTask.cancel() }
-        let reload = Task { await session.reload.timeline(.all, in: session) }
-        await met("r's read is held on the wire", by: reload) { await server.parked == 1 }
-        await session.reload.readOn(Self.stretch, in: session)
-        #expect(session.reload.asking == [.timeline])
-        await server.gate.open()
-        await reload.value
-        // Counted turns, behind r having ended: nothing was kept to read, so a read begun all the
-        // same would be a task of the reload's own, with no end to wait for.
-        for _ in 0..<200 { await Task.yield() }
-        #expect(drawn(session).first == 300)
-        #expect(await server.cursors.filter { $0 == "min_id=208" }.count == 1, "asked once, by r")
+        await session.reload.more(.all, in: session)
+        await session.reload.more(.all, in: session)
+        await session.reload.more(.all, in: session)
+        #expect(await server.cursors == ["newest", "max_id=11", "max_id=1"], "nothing older than 1: it has no more")
+        await session.reload.timeline(.all, in: session)
+        await session.reload.more(.all, in: session)
+        #expect(await server.cursors.suffix(2) == ["newest", "max_id=11"])
     }
 
-    @Test("The words are said in English and in 中文, naming the source, in every bundle")
-    func words() throws {
-        for kind in [TimelineGap.Kind.newerRemain, .mayBeMissing] {
-            let english = TimelineGapRow.words(kind, host: Self.one, language: .english)
-            let chinese = TimelineGapRow.words(kind, host: Self.one, language: .taiwanese)
-            #expect(english.contains(Self.one) && chinese.contains(Self.one))
-            #expect(english != chinese)
-            #expect(!english.hasPrefix("timeline.gap"))
-        }
-        let resources = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/FediqoUI/Resources")
-        let hant = try String(contentsOf: resources.appendingPathComponent("zh-Hant.lproj/Localizable.strings"), encoding: .utf8)
-        #expect(hant.contains("\"timeline.gap.more\"") && hant.contains("\"timeline.gap.missing\""))
+    @Test("Each source reads down from its own place")
+    func perSource() async {
+        let two = "two.example"
+        let server = TimelineServer(host: Self.one, 1...100)
+        let store = await store(holding: [])
+        await store.add(Source(host: two, kind: .mastodon))
+        let session = await shell(server, store: store)
+        await store.landNewest((1...5).map(Self.note), of: .public, ifSourceHere: Self.one)
+        await store.landNewest([Note(
+            id: "https://\(two)/users/bo/statuses/700", source: Source(host: two, kind: .mastodon), author: "Bo", handle: "@bo",
+            body: "700", postedAt: Self.posted(700), categories: [.public], statusID: "700", listed: [.public: "700"]
+        )], of: .public, ifSourceHere: two)
+        await session.reloadFromStore()
+        let places = await ShellReload.places(.all, in: session)
+        #expect(places[Stretch(host: Self.one, category: .public)] == ReadDownPlace(id: "1"))
+        #expect(places[Stretch(host: two, category: .public)] == ReadDownPlace(id: "700"))
     }
 }

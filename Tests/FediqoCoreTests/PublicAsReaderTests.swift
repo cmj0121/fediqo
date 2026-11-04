@@ -46,14 +46,14 @@ struct PublicAsReaderCoreTests {
         let signed = Recorder()
         let client = MastodonClient(http: bare, host: Self.host).reading(as: door(signed))
 
-        _ = try await client.publicTimeline(source: source, readingOnFrom: "100")
+        _ = try await client.publicTimeline(source: source)
         _ = try await client.publicTimeline(source: source, olderThan: "50")
 
         let asked = await signed.requests
         #expect(asked.count >= 2)
         #expect(asked.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer tok" })
         #expect(asked.allSatisfy { $0.url?.path == "/api/v1/timelines/public" && $0.url?.host() == Self.host })
-        #expect(asked.contains { $0.url?.query?.contains("min_id=99") == true })
+        #expect(asked.contains { $0.url?.query?.contains("max_id") != true })
         #expect(asked.contains { $0.url?.query?.contains("max_id=50") == true })
         #expect(await bare.requests.isEmpty)
     }
@@ -82,14 +82,14 @@ struct PublicAsReaderCoreTests {
         let said = #"{"error":"This method requires an authenticated user"}"#
         let bare = MastodonClient(http: Recorder(status: 422, body: said), host: Self.host)
         let thrown = await #expect(throws: MastodonRequestError.http(422)) {
-            try await bare.publicTimeline(source: source, readingOnFrom: nil)
+            try await bare.publicTimeline(source: source)
         }
         #expect(thrown.map(MastodonClient.asksSignIn) == true)
 
         let signed = Recorder(status: 422, body: said)
         let asYou = MastodonClient(http: Recorder(), host: Self.host).reading(as: door(signed))
         let refused = await #expect(throws: MastodonAuthError.http(422)) {
-            try await asYou.publicTimeline(source: source, readingOnFrom: nil)
+            try await asYou.publicTimeline(source: source)
         }
         #expect(refused.map(MastodonClient.asksSignIn) == false)
     }

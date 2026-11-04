@@ -226,24 +226,6 @@ public struct MastodonMarks: Sendable {
         return next
     }
 
-    /// A place where marks may be missing, said on `key`, read down from: a stretch at a time
-    /// from the mark it keeps, at most `bound`, until a stretch meets what is held or the list
-    /// ends — and the place goes — or the bound is reached, and it moves down to where the last
-    /// stretch stopped. Nothing where `key` says no such place. Throws what a stretch threw.
-    public func readDown(_ category: Category, below key: NoteKey) async throws {
-        guard let source = await source(), let path = Self.path(of: category),
-              var cursor = await store.markHole(key, in: category)
-        else { return }
-        var held = await store.marked(host: host, category: category)
-        for _ in 0..<reach {
-            var (read, next) = try await step(category, path, source, below: cursor, holding: &held)
-            read.fills = cursor
-            await store.land(read, of: category, ifSourceHere: host, membersPooled: true)
-            guard !read.connected, let next else { return }
-            cursor = next
-        }
-    }
-
     /// One stretch asked below `cursor` and made ready to land — its place among the reads of its
     /// category, what it covers, whether it met a post `held` names — and the mark its next
     /// begins below, nothing at the end. `held` grows by what it brought, so the next stretch of

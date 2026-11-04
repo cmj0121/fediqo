@@ -582,16 +582,18 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// A `var` for `categories`' reason: the store sets it on a row it already holds, and a read
     /// that finds the post again takes it off.
     public var goneSince: Date?
-    /// Where a timeline this post arrived through is not whole next to it (#201): newer posts
+    /// Where a timeline this post arrived through was said not whole next to it (#201): newer posts
     /// that remain above it, or posts that may be missing below it. Empty on nearly every post.
+    /// **No timeline says it any more** (#470); what a row kept from before still carries is drawn
+    /// by nothing, and the reader's marks (#317) still keep theirs.
     ///
     /// A `var` for `categories`' reason: the store sets it on a row it already holds, as a read
     /// lands. Kept with the row, so it goes when the row goes and outlives a relaunch with it.
     public var gaps: Set<TimelineGap>
     /// The id each timeline listed this post under when a read of that timeline brought it — a
-    /// boost's own, not the boosted post's (#201). What a timeline is read on from, and the only
-    /// thing that moves where: a post the reader wrote, a search's find or a thread's answer was
-    /// listed by no timeline, and so is never read on from.
+    /// boost's own, not the boosted post's (#201). What a timeline is read down from (#470): a
+    /// post the reader wrote, a search's find or a thread's answer was listed by no timeline, and
+    /// so never moves where.
     ///
     /// A `var` for `categories`' reason: the store grows it as the same post is listed again.
     public var listed: [Category: String]

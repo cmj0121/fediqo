@@ -5,16 +5,16 @@ import Foundation
 //
 // A source may keep its public timeline for signed-in readers — g0v.social and mastodon.social
 // answer an ask without a token 422, "This method requires an authenticated user", every time.
-// So every read of it — `r` and the wait reading on, an ask for more, a place reached and read
-// down — goes through the reader's sign-in where one is held there that reads, and is then the
+// So every read of it — `r` and the wait reading its newest, and reading it down (#470) — goes
+// through the reader's sign-in where one is held there that reads, and is then the
 // reader's own read, ended by a sign-out as Home is. Unsigned, it is asked as it always was.
 //
-// **A reload's read of it catches up** (`MastodonReadOn.read`'s `catchingUp`): a busy server's
-// public timeline outruns reading on, so its newest stretch is read too at the bound.
+// **A reload reads its newest posts** (#470), and reading it down starts over from the oldest of
+// them, as every timeline's does.
 
 extension ShellReload {
-    /// The public timeline read on from the newest id it listed, and landed with what it says
-    /// about where it is not whole. A reader walking away is not a failure; anything else is.
+    /// The public timeline's newest posts, landed: reading it down starts over from the oldest of
+    /// them (#470). A reader walking away is not a failure; anything else is.
     ///
     /// **As the reader where signed in** (`publicReader`), and ended by a sign-out as every read
     /// as the reader is. A source that reads it only to a signed-in reader, asked by one who is
@@ -24,20 +24,10 @@ extension ShellReload {
         let host = stamp.host
         let reader = publicReader(client, of: host, in: session)
         do {
-            let store = session.store
-            let read = try await asReader(host, if: reader.asYou) {
-                let anchor = await store.newestListedID(host: host, category: .public)
-                let held = anchor == nil ? await store.held(host: host, category: .public) : []
-                return try await reader.client.publicTimeline(
-                    source: stamp, readingOnFrom: anchor, holding: held, catchingUp: true
-                )
-            }
+            let read = try await asReader(host, if: reader.asYou) { try await reader.client.publicTimeline(source: stamp) }
             try Task.checkCancellation()
-            await session.store.land(read, of: .public, ifSourceHere: host)
-            // What came before a stretch that failed has landed; the read still did not come back.
-            guard let stopped = read.stopped else { return true }
-            _ = walkedAway(from: .public, of: host, stopped)
-            return false
+            await session.store.landNewest(read, of: .public, ifSourceHere: host)
+            return true
         } catch MastodonAuthError.signedOut {
             session.mastodon.endedByServer(host: host)
             noteSignedOut(.public, of: host)

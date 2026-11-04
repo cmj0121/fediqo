@@ -88,13 +88,9 @@ public struct MastodonAccount: Sendable {
         return complete && all
     }
 
-    /// Home read on to now and landed, as the line opens (#325): what was missed while no line was
-    /// open is read, or said to be missing, before anything the line tells lands above it. Reads
-    /// the newest stretch too where the bound is reached, so it ends at the source's newest.
-    ///
-    /// Returns whether Home is read through to its newest, with nothing said to remain above
-    /// it: only then may a line's posts land over it, since landing one moves where reading on
-    /// starts. Throws what the read threw.
+    /// Home's newest posts read and landed, as the line opens (#325, #470): what the line tells
+    /// then lands over a timeline read up to now. Returns whether it was read. Throws what the read
+    /// threw.
     public func catchUp() async throws -> Bool {
         try await catchUp(.home)
     }
@@ -112,8 +108,8 @@ public struct MastodonAccount: Sendable {
             path = "/api/v1/timelines/list/\(id)"
         default: return false
         }
-        let read = try await read(path, source: source, category: category, catchingUp: true)
-        return read.newerRemainAbove == nil
+        try await readOn(path, source: source, category: category)
+        return true
     }
 
     /// Makes `picks` the lists this source reads, and reads the ones that were not chosen before.
@@ -134,27 +130,9 @@ public struct MastodonAccount: Sendable {
     public func older(_ category: Category, than maxID: String) async throws -> [Note] {
         guard let source = await source(), let path = Self.path(of: category, in: source) else { return [] }
         let notes = try await statuses(path, source: source, category: category, olderThan: maxID)
-        try await ingest(notes)
-        return notes
-    }
-
-    /// Home, or one list this source reads, read down from the place below `key` where posts may
-    /// be missing (#204), and landed with what it says of that place. Nothing where `key` carries
-    /// no such mark in it. `me` is who the reader is there, where known (`ItemStore.missing`).
-    ///
-    /// Throws what the read threw — a stretch after the first once what came before it has landed.
-    public func readDown(
-        _ category: Category, below key: NoteKey, writtenBy me: String? = nil, at moment: Date = Date()
-    ) async throws {
-        guard let source = await source(), let path = Self.path(of: category, in: source),
-              let place = await store.missing(below: key, in: category, writtenBy: me, signedIn: true)
-        else { return }
-        let down = try await MastodonReadOn.readDown(from: place) { maxID in
-            try await listed(path, source: source, category: category, query: try MastodonPage.older(than: maxID))
-        }
         try Task.checkCancellation()
-        await store.land(down, below: key, of: category, at: moment, ifSourceHere: host)
-        if let stopped = down.stopped { throw stopped }
+        await store.landOlder(notes, of: category, below: maxID, ifSourceHere: host)
+        return notes
     }
 
     /// The newest posts the account itself wrote, by the id this source gives the account,
@@ -194,12 +172,6 @@ public struct MastodonAccount: Sendable {
         await store.sources().first { $0.host == host }
     }
 
-    /// Only into a source still here, in one step: a source removed while its reads were on the
-    /// wire must not get its posts back. Nor does a read stopped meanwhile — a sign-out or a Clear.
-    private func ingest(_ notes: [Note]) async throws {
-        try Task.checkCancellation()
-        await store.ingest(notes, ifSourceHere: host)
-    }
 
     /// Each of `lists` read on and landed, one after another. Whether every one came back.
     private func readOn(_ lists: [ListSubscription], source: Source) async throws -> Bool {
@@ -218,30 +190,13 @@ public struct MastodonAccount: Sendable {
         return all
     }
 
-    /// One timeline read on from the newest post held of it (#201), and landed as it answers, so
-    /// one that fails after it holds back none of what it brought.
-    ///
-    /// A stretch that failed after the first lands what came before it, then fails the read.
+    /// One timeline's newest posts, read and landed (#470): reading it down starts over from the
+    /// oldest of them (`ItemStore.landNewest`). Nothing older is read on to, and nothing is said
+    /// of what lay between them and what was held before: reading down reads it again.
     private func readOn(_ path: String, source: Source, category: Category) async throws {
-        _ = try await read(path, source: source, category: category)
-    }
-
-    /// `readOn(_:source:category:)`, and what it said: `catchingUp` reads the newest stretch too
-    /// where the bound is reached (`MastodonReadOn.read`).
-    private func read(
-        _ path: String, source: Source, category: Category, catchingUp: Bool = false
-    ) async throws -> ReadOn {
-        let anchor = await store.newestListedID(host: host, category: category)
-        let held = anchor == nil ? await store.held(host: host, category: category) : []
-        let read = try await MastodonReadOn.read(from: anchor, holding: held, catchingUp: catchingUp) { minID in
-            try await listed(path, source: source, category: category, query: try MastodonPage.newer(than: minID))
-        } older: { maxID in
-            try await listed(path, source: source, category: category, query: try MastodonPage.older(than: maxID))
-        }
+        let read = try await statuses(path, source: source, category: category)
         try Task.checkCancellation()
-        await store.land(read, of: category, ifSourceHere: host)
-        if let stopped = read.stopped { throw stopped }
-        return read
+        await store.landNewest(read, of: category, ifSourceHere: host)
     }
 
     private func statuses(

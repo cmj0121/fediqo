@@ -286,40 +286,6 @@ struct MarksCategoriesTests {
         #expect(await server.asked.allSatisfy { !$0.hasPrefix("/api/v1/bookmarks") }, "the end is the end")
     }
 
-    @Test("Where more were marked since than a reload reads, the place where marks may be missing is said beside the timeline's rows, and reaching it reads down until it meets what is held")
-    func aPlaceMissingIsReadDown() async throws {
-        let (session, server, _) = try await shell(holding: "\(Self.reading) \(Self.marks)")
-        let marked = TimelineDefinition(name: "Marked", rules: [
-            try #require(Rule.category(.bookmarks, in: .source(host: host), sources: session.sources)),
-        ])
-        session.written = [marked]
-        session.timelineID = .written(marked.id)
-        // The third post held, under the end.
-        await server.answer(["/api/v1/bookmarks?limit=40": .json(Self.listing([Self.third]))])
-        await session.reload.timeline(.written(marked.id), in: session)
-        // Since then, more than a reload walks: every stretch of it brings a new post and names a next.
-        var routes: [String: MarksHost.Answer] = [:]
-        for n in 0..<MastodonMarks.thoroughBound {
-            let ask = n == 0 ? "/api/v1/bookmarks?limit=40" : "/api/v1/bookmarks?limit=40&max_id=\(1000 - n)"
-            routes[ask] = .json(Self.listing([Self.status("\(200 + n)", minute: 10 + n % 40)]),
-                                link: #"<https://social.example/api/v1/bookmarks?limit=40&max_id=\#(999 - n)>; rel="next""#)
-        }
-        routes["/api/v1/bookmarks?limit=40&max_id=975"] = .json(Self.listing([Self.second, Self.third]))
-        await server.answer(routes)
-        await session.reload.timeline(.written(marked.id), in: session)
-        await session.reloadFromStore()
-        let carrier = try #require(await session.store.all().first { !$0.gaps.isEmpty })
-        #expect(carrier.statusID == "224", "on the lowest post the walk brought")
-        let marks = session.gapMarks(in: session.timelineItems(latest: nil))
-        #expect(marks.values.contains { $0.below.contains(Stretch(host: host, category: .bookmarks)) }, "said where it is")
-
-        await server.forget()
-        await session.reload.readDown(Stretch(host: host, category: .bookmarks), below: carrier.key, in: session)
-        #expect(await server.asked == ["/api/v1/bookmarks?limit=40&max_id=975"])
-        #expect(await session.store.all().allSatisfy { $0.gaps.isEmpty }, "met what is held: the place goes")
-        #expect(await through(session, .bookmarks).contains("102"))
-    }
-
     @Test("One read of a category of marks at a source at a time, however it was asked: a press while a read of bookmarks is on its way asks only for favourites, and once it has ended, for both")
     func oneReadAtATime() async throws {
         let (session, server, _) = try await shell(holding: "\(Self.reading) \(Self.marks)")

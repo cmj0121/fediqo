@@ -129,7 +129,7 @@ struct MastodonLineTests {
         #expect(note.categories == [.home])
         #expect(note.listed[.home] == "117510102024468580")
         #expect(note.body.contains("a line test"))
-        #expect(await store.newestListedID(host: Self.host, category: .home) == "117510102024468580")
+        #expect(await store.readDownPlace(host: Self.host, category: .home) == nil, "a post told moves no place to read down from")
         #expect(await MastodonLine.land(update, of: Self.source, in: store) == .arrived(key, fresh: false))
         #expect(await store.all().count == 1)
     }
