@@ -664,11 +664,13 @@ public actor ItemStore {
     }
 
     /// `ingest(_:)`, only while `host` is still a source here — in the same step, so a source
-    /// removed while its reads were on the wire does not get their posts back.
-    public func ingest(_ incoming: [Note], ifSourceHere host: String) {
+    /// removed while its reads were on the wire does not get their posts back. Whether it was.
+    @discardableResult
+    public func ingest(_ incoming: [Note], ifSourceHere host: String) -> Bool {
         let host = host.lowercased()
-        guard sourceList.contains(where: { $0.host == host }) else { return }
+        guard sourceList.contains(where: { $0.host == host }) else { return false }
         ingest(incoming)
+        return true
     }
 
     /// Takes notes in. The same item through one source stays one row: the first copy wins and
@@ -1173,13 +1175,16 @@ public actor ItemStore {
         readDownPlaces[raw.lowercased()]?[category]
     }
 
+    /// `readDownPlace(host:category:)` of every category of `host` that has one.
+    public func readDownPlaces(host raw: String) -> [Category: ReadDownPlace] {
+        readDownPlaces[raw.lowercased()] ?? [:]
+    }
+
     /// The newest posts of `category`, read: taken in as `ingest(_:ifSourceHere:)` takes a read,
     /// and **reading it down starts over** from the oldest of them, whatever was read below before.
     public func landNewest(_ read: [Note], of category: Category, ifSourceHere raw: String) {
-        let host = raw.lowercased()
-        guard sourceList.contains(where: { $0.host == host }) else { return }
-        ingest(read)
-        readDownPlaces[host, default: [:]][category] = Self.oldestListed(read, in: category).map { ReadDownPlace(id: $0) }
+        guard ingest(read, ifSourceHere: raw) else { return }
+        readDownPlaces[raw.lowercased(), default: [:]][category] = Self.oldestListed(read, in: category).map { ReadDownPlace(id: $0) }
     }
 
     /// The posts of `category` older than `below`, read down from its place: taken in, and the
@@ -1188,9 +1193,7 @@ public actor ItemStore {
     /// meanwhile, the posts are taken in and the place is left to it.
     public func landOlder(_ read: [Note], of category: Category, below id: String, ifSourceHere raw: String) {
         let host = raw.lowercased()
-        guard sourceList.contains(where: { $0.host == host }) else { return }
-        ingest(read)
-        guard readDownPlaces[host]?[category]?.id == id else { return }
+        guard ingest(read, ifSourceHere: host), readDownPlaces[host]?[category]?.id == id else { return }
         let older = Self.oldestListed(read, in: category).flatMap { StatusID.later(id, than: $0) ? $0 : nil }
         readDownPlaces[host, default: [:]][category] = older.map { ReadDownPlace(id: $0) } ?? ReadDownPlace(id: id, ended: true)
     }

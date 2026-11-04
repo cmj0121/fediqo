@@ -246,12 +246,13 @@ extension ShellReload {
         for ask in asks {
             guard let source = sources.first(where: { $0.host == ask.host }) else { continue }
             // A forum's stretches are asked by page, and hold no place: none is found for them.
-            for stretch in stretches(of: source, for: ask.categories, signedIn: true) {
-                guard let category = stretch.category, category != .trends, !category.isMarks, places[stretch] == nil,
-                      let place = await session.store.readDownPlace(host: source.host, category: category)
-                else { continue }
-                places[stretch] = place
+            // Trends are asked by offset and marks by floor; the store is asked only where one reads down.
+            let reading = stretches(of: source, for: ask.categories, signedIn: true).compactMap { stretch in
+                stretch.category.flatMap { $0 != .trends && !$0.isMarks ? (stretch, $0) : nil }
             }
+            guard !reading.isEmpty else { continue }
+            let held = await session.store.readDownPlaces(host: source.host)
+            for (stretch, category) in reading { places[stretch] = held[category] }
         }
         return places
     }

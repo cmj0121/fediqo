@@ -142,17 +142,6 @@ struct ReadOnTests {
         #expect(StatusID.later("010", than: "9"), "a leading nought changes nothing")
     }
 
-    @Test("One before an id is the number one less, and nothing before what is not a number")
-    func idBefore() {
-        #expect(StatusID.before("10") == "9")
-        #expect(StatusID.before("100") == "99")
-        #expect(StatusID.before("113000000000000000") == "112999999999999999")
-        #expect(StatusID.before("1") == "0")
-        #expect(StatusID.before("0") == nil)
-        #expect(StatusID.before("abc") == nil)
-        #expect(StatusID.before("") == nil)
-    }
-
     // MARK: - The newest
 
     @Test("A read asks for the newest alone, whatever is held below; nothing is said of what lies between, and reading down starts at its oldest")

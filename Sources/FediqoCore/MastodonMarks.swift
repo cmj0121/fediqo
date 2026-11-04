@@ -31,8 +31,7 @@ import Foundation
 // lowest mark held, so that every post held is decided, up to `thoroughBound`. One that stops at
 // its bound having met nothing held — more were marked since than it reads — leaves a place where
 // marks may be missing, said on the lowest post it brought with the mark to read on below
-// (`TimelineGap.mayBeMissing`), which reading down from fills (`readDown`); a walk that passes
-// every mark held settles every such place.
+// (`TimelineGap.mayBeMissing`); a walk that passes every mark held settles every such place.
 //
 // **Reading on reaches the oldest mark**: the stretch below a mark, one at a time, until the
 // source names no next. Where it goes next is the source's own next (`older` hands it back), not
