@@ -151,11 +151,11 @@ struct FollowedTagsList<Lead: View>: View {
             .clearsFloatingCorner()
             // Come back to from a hashtag's page, the row it was opened from is in view.
             .onAppear {
-                if let id = DummyCommand.returning(selected: &selectedID, touch: touch) { proxy.scrollTo(id, anchor: .center) }
+                if let id = DummyCommand.returning(selected: &selectedID, touch: touch) { proxy.scrollTo(id, anchor: ShellScroll.focus) }
             }
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }
-                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) }
+                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: ShellScroll.focus) }
             }
             .onChange(of: jumpToTop) { _, _ in
                 withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(ShellPageTop.id, anchor: .top) }

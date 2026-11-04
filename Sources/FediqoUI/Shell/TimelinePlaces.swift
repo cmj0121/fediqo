@@ -7,7 +7,7 @@
 ///
 /// **One lamp for the whole shell was the defect.** `FediqoRootView` holds a single selected id,
 /// which is right while there is one list: a thread opened and escaped comes back to the post it
-/// opened from (#23), and a reload lands newer rows above the selected one and leaves it centred
+/// opened from (#23), and a reload lands newer rows above the selected one and leaves it in focus
 /// (#29). It is wrong the moment the reader changes which list they are reading. Standing on a
 /// post in All, pressing Trends, and pressing All again put them back at the top, because the
 /// lamp went out on the way past a timeline that did not hold that post.

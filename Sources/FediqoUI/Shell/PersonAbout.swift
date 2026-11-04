@@ -252,7 +252,7 @@ struct PersonAbout<Lead: View>: View {
             .clearsFloatingCorner()
             .onChange(of: lit) { _, id in
                 guard let id else { return }
-                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) }
+                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: ShellScroll.focus) }
             }
             .onChange(of: jumpToTop) { _, _ in
                 withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(Self.top, anchor: .top) }

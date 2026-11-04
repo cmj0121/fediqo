@@ -31,8 +31,7 @@ import Foundation
 // lowest mark held, so that every post held is decided, up to `thoroughBound`. One that stops at
 // its bound having met nothing held — more were marked since than it reads — leaves a place where
 // marks may be missing, said on the lowest post it brought with the mark to read on below
-// (`TimelineGap.mayBeMissing`), which reading down from fills (`readDown`); a walk that passes
-// every mark held settles every such place.
+// (`TimelineGap.mayBeMissing`); a walk that passes every mark held settles every such place.
 //
 // **Reading on reaches the oldest mark**: the stretch below a mark, one at a time, until the
 // source names no next. Where it goes next is the source's own next (`older` hands it back), not
@@ -224,24 +223,6 @@ public struct MastodonMarks: Sendable {
         let (read, next) = try await step(category, path, source, below: cursor, holding: &held)
         await store.land(read, of: category, ifSourceHere: host, membersPooled: true)
         return next
-    }
-
-    /// A place where marks may be missing, said on `key`, read down from: a stretch at a time
-    /// from the mark it keeps, at most `bound`, until a stretch meets what is held or the list
-    /// ends — and the place goes — or the bound is reached, and it moves down to where the last
-    /// stretch stopped. Nothing where `key` says no such place. Throws what a stretch threw.
-    public func readDown(_ category: Category, below key: NoteKey) async throws {
-        guard let source = await source(), let path = Self.path(of: category),
-              var cursor = await store.markHole(key, in: category)
-        else { return }
-        var held = await store.marked(host: host, category: category)
-        for _ in 0..<reach {
-            var (read, next) = try await step(category, path, source, below: cursor, holding: &held)
-            read.fills = cursor
-            await store.land(read, of: category, ifSourceHere: host, membersPooled: true)
-            guard !read.connected, let next else { return }
-            cursor = next
-        }
     }
 
     /// One stretch asked below `cursor` and made ready to land — its place among the reads of its

@@ -196,7 +196,7 @@ struct ReblogItemTests {
         let all = await store.all()
         #expect(all.map(\.statusID) == ["900", "7"], "the reblog at its time, above the post at its own")
         #expect(all[0].categories == [.home] && all[1].categories.isEmpty)
-        #expect(await store.newestListedID(host: Self.host, category: .home) == "900")
+        #expect(await store.all().contains { $0.listed[.home] == "900" }, "the reblog is listed under its own id")
 
         await store.ingest([try Self.listed(Self.status("7"))].landing)
         let post = await store.all().first { $0.statusID == "7" }
@@ -256,7 +256,7 @@ struct ReblogItemTests {
         let held = await store.note(post.key)
         #expect(held?.isReblog == false && held?.body == "post 7 about cats")
         #expect(held?.listed.isEmpty == true && held?.categories.isEmpty == true, "nothing of the copy was taken: not its listing, not what it came through")
-        #expect(await store.newestListedID(host: Self.host, category: .home) == nil)
+        #expect(await store.all().allSatisfy { $0.listed[.home] == nil })
 
         let reblog = try Self.arrival(Self.reblog("901", of: Self.status("8"))).item
         await store.ingest([reblog])
@@ -597,7 +597,7 @@ struct ReblogItemTests {
         let reblog = try #require(await store.all().first { $0.isReblog })
         #expect(reblog.listed == [.home: "900"] && reblog.gaps == [TimelineGap(.mayBeMissing, in: .home)])
         #expect(reblog.postedAt == Self.origin.addingTimeInterval(600 * 60), "the source's own time for the reblog; none is guessed")
-        #expect(await store.newestListedID(host: Self.host, category: .home) == "900")
+        #expect(await store.all().contains { $0.listed[.home] == "900" }, "the reblog is listed under its own id")
     }
 
     @Test("Somebody else's reblog of that post leaves the word on it: it arrived as the reblog it says, and that one has not come")

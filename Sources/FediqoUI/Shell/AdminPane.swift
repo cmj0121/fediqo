@@ -227,11 +227,11 @@ struct AdminHostsList: View {
             .scrollIndicators(.never)
             .clearsFloatingCorner()
             .onAppear {
-                if let id = DummyCommand.returning(selected: &lamp, touch: touch) { proxy.scrollTo(id, anchor: .center) }
+                if let id = DummyCommand.returning(selected: &lamp, touch: touch) { proxy.scrollTo(id, anchor: ShellScroll.focus) }
             }
             .onChange(of: lamp) { _, id in
                 guard let id else { return }
-                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) }
+                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: ShellScroll.focus) }
             }
             .onChange(of: jump) { _, _ in
                 withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(Self.top, anchor: .top) }

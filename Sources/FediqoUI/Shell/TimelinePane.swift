@@ -586,7 +586,7 @@ struct TimelinePane: View {
         return ((touch ? marked : nil) ?? top).map(Landing.top)
     }
 
-    /// Where a timeline returned to puts the post it was left at (#100, #303): in the middle
+    /// Where a timeline returned to puts the post it was left at (#100, #303): at the focus (#473)
     /// where it is the selection, and at the top where it is the mark under a finger — the
     /// first row wholly on screen is then that post. Nothing for a timeline with no post kept.
     ///
@@ -1238,9 +1238,6 @@ struct TimelinePane: View {
         )
         let rows = shown.rows
         let last = rows.count - 1
-        // Where the timeline in front is not whole, said at its place (#201). A search's results
-        // are not a timeline, and say nothing of the kind.
-        let gaps = searching ? [:] : session.gapMarks(in: items)
         // What is new to this drawing, which eases in where it stands (#357).
         let arrived = searching ? [] : session.timelineArrived(latest: prefs.latestDate)
         // Which drawing this is, for the place to be held across one that moved the rows above
@@ -1327,7 +1324,6 @@ struct TimelinePane: View {
                         ))
                         // And a search's, its next pages from the file (#360).
                         .modifier(SearchReadsOn(asks: searching && index >= rows.count - Self.moreAhead, session: session))
-                        .modifier(TimelineGapMarked(marks: gaps[item.id], session: session))
                         if !isLast {
                             ShellRule()
                         }
@@ -1358,7 +1354,7 @@ struct TimelinePane: View {
                 let mark = session.readingMark
                 mark.returning = nil
                 switch Self.landing(selected: selectedID, top: session.scrolledTop, touch: touch, marked: mark.id) {
-                case .centred(let id): Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
+                case .centred(let id): Task { @MainActor in proxy.scrollTo(id, anchor: ShellScroll.focus) }
                 case .top(let id): Task { @MainActor in proxy.scrollTo(id, anchor: .top) }
                 case nil: break
                 }
@@ -1374,10 +1370,10 @@ struct TimelinePane: View {
                 mark.handed = nil
                 guard let id, ShellReadingMark.centres(onSelecting: id, touch: touch, handed: handed) else { return }
                 withAnimation(.easeInOut(duration: 0.18)) {
-                    proxy.scrollTo(id, anchor: .center)
+                    proxy.scrollTo(id, anchor: ShellScroll.focus)
                 }
             }
-            // Coming back to a timeline, the post it kept is centred again (#100) — "still
+            // Coming back to a timeline, the post it kept is at the focus again (#100, #473) — "still
             // focused" and "still in view" are two halves of one sentence, and lighting a row
             // the reader would have to scroll to find is only the first half.
             //
@@ -1402,7 +1398,7 @@ struct TimelinePane: View {
                     )
                     mark.returning = nil
                     switch arrival {
-                    case .centred(let id): proxy.scrollTo(id, anchor: .center)
+                    case .centred(let id): proxy.scrollTo(id, anchor: ShellScroll.focus)
                     case .top(let id): proxy.scrollTo(id, anchor: .top)
                     case nil: break
                     }
@@ -1416,11 +1412,11 @@ struct TimelinePane: View {
                     proxy.scrollTo(id, anchor: .top)
                 }
             }
-            // A reload lands newer rows above the selected one; it stays centred (#23, #29).
+            // A reload lands newer rows above the selected one; it stays at the focus (#23, #29, #473).
             // Under a finger nothing is selected to centre, and the list stays where it is read.
             .onChange(of: session.reload.landed) { _, _ in
                 guard let selectedID, ShellReadingMark.centres(onSelecting: selectedID, touch: touch, handed: nil) else { return }
-                proxy.scrollTo(selectedID, anchor: .center)
+                proxy.scrollTo(selectedID, anchor: ShellScroll.focus)
             }
             // A keyboard attached or taken away (#303): the marked row becomes the selected one,
             // or the selection goes and the mark is the list's again. Only with the list in

@@ -184,35 +184,6 @@ struct TimelinePagesTests {
         #expect(session.timelineItems(latest: nil).count == ShellSession.pageRows)
     }
 
-    @Test("A gap's mark is read off the timeline as drawn, latest date and all, and leaves the drawing as it was")
-    func gapMarksAsDrawn() async throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        var posts = Self.posts(150)
-        posts[0] = Note(
-            id: "p0", source: Self.source, author: "A", handle: "a@one.example", body: "words 0", postedAt: Self.at,
-            categories: [.home], gaps: [TimelineGap(.newerRemain, in: .home)]
-        )
-        do {
-            let file = try StoreFile(at: dir)
-            try await file.save(sources: [Self.source], notes: posts)
-        }
-        let opened = StoreFile.open(at: dir, rows: false)
-        let file = try #require(opened.file)
-        let session = ShellSession(http: FixtureHTTP(), store: ItemStore(sources: opened.sources, said: opened.said, rows: file))
-        session.readPage = { query, ask, limit in try await file.page(query, ask, limit: limit) }
-        await session.reprojectSources()
-        let latest = try #require(LatestDate("2030-12-31"))
-        await session.cover(latest: latest)
-        let drawn = session.timelineItems(latest: latest)
-        #expect(drawn.count == ShellSession.pageRows)
-        let evaluations = session.timelineEvaluations
-        #expect(ShellReload.says(.more(Stretch(host: Self.source.host, category: .home)), in: session))
-        #expect(session.timelineItems(latest: latest).count == ShellSession.pageRows)
-        #expect(session.timelineEvaluations == evaluations, "the drawing on screen was drawn over")
-    }
-
     @Test("A file still making its pages' index draws a provisional page, reads nothing below it, and gives way to the first page with the rows both hold kept")
     func provisionalThenFirstPage() async throws {
         // Saved oldest first, as they arrived: the newest by arrival are the newest by time —
@@ -349,14 +320,6 @@ struct TimelinePagesTests {
         }
         #expect(session.leavingEnded == ended + 1)
         #expect(session.timelineShown(latest: nil, anchor: id(5), moving: true).rows.map(\.id) == drawn.map(\.id))
-    }
-
-    @Test("Asked for its rows as drawn, a timeline never drawn draws nothing")
-    func asDrawnNeverDrawn() async {
-        let session = ShellSession(http: FixtureHTTP(), store: ItemStore(sources: [Self.source], notes: Self.posts(5)))
-        await session.reloadFromStore()
-        #expect(session.timelineItemsAsDrawn().isEmpty)
-        #expect(session.timelineEvaluations == 0)
     }
 
     @Test("A months limit moved reads the timeline afresh: its first page asked again for what it now is")

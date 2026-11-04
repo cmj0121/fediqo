@@ -174,57 +174,6 @@ struct StoreEvictionTests {
         }
     }
 
-    @Test("a read on takes newer posts remain off rows let go, and marks the one it names, which stays")
-    func readOn() async throws {
-        try await agree(targets: [9, 87]) { store, churn in
-            var copy = Self.seed()[9]
-            copy.listed = [.home: "200000"]
-            await store.land(ReadOn(notes: [copy], newerRemainAbove: Self.key(9)), of: .home, ifSourceHere: "two.example")
-            try await churn()
-            return await store.newestListedID(host: "two.example", category: .home)
-        }
-    }
-
-    @Test("the newest id a timeline listed counts the rows let go of the pool")
-    func newestListed() async throws {
-        try await agree(targets: [1, 2, 5]) { store, _ in
-            var newest: [String?] = []
-            for host in ["one.example", "two.example"] {
-                for category: FediqoCore.Category in [.home, .public] {
-                    newest.append(await store.newestListedID(host: host, category: category))
-                }
-            }
-            return newest
-        }
-    }
-
-    @Test("a row let go of the pool, then let go of the file by the room and landed, is no newest listed id (#360)")
-    func newestListedAfterTheRoom() async throws {
-        let (pooledFile, wholeFile) = try await twoFiles()
-        let pool = ItemStore(sources: Self.sources, rows: pooledFile, cap: Self.cap)
-        await readAll(pool)
-        await pool.hold([], drawnAt: await pool.drawn)
-        #expect(await pool.pooled <= Self.cap)
-        let whole = try wholeStore(wholeFile)
-        #expect(await pool.letGoOldest(count: 230) == (await whole.letGoOldest(count: 230)))
-        try await land(pool, to: pooledFile)
-        try await save(whole, to: wholeFile)
-        for host in ["one.example", "two.example"] {
-            for category: FediqoCore.Category in [.home, .public] {
-                let pooled = await pool.newestListedID(host: host, category: category)
-                #expect(pooled == (await whole.newestListedID(host: host, category: category)), "\(host) \(category)")
-            }
-        }
-    }
-
-    @Test("the newest listed row that left, read again and taken back, gives way to the next that left")
-    func newestListedTakenBack() async throws {
-        try await agree(targets: [1, 2]) { store, _ in
-            await store.forget(Self.key(1), at: Self.at)
-            return await store.newestListedID(host: "one.example", category: .home)
-        }
-    }
-
     @Test("keeping and un-keeping reach rows let go of the pool")
     func kept() async throws {
         try await agree(targets: [5]) { store, churn in

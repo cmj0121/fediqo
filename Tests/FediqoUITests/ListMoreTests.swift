@@ -54,7 +54,8 @@ struct ListMoreTests {
         }.joined() + "</table></body></html>")
     }
 
-    /// Posts 5 and 6 held from `one.example`'s public timeline, and thread 40125 from board 34.
+    /// Posts 5 and 6 held from `one.example`'s public timeline, as its newest read brought them,
+    /// and thread 40125 from board 34.
     private static var held: [Note] {
         let mastodon = Source(host: one, kind: .mastodon)
         let discuz = Source(host: forum, kind: .discuz, boards: [BoardSubscription(fid: 34, name: "工具箱讨论区")])
@@ -62,7 +63,7 @@ struct ListMoreTests {
             Note(
                 id: "https://\(one)/users/ada/statuses/\(id)", source: mastodon, author: "Ada",
                 handle: "@ada", body: id, postedAt: Date(timeIntervalSince1970: 1_800_000_000 + Double(id)!),
-                categories: [.public], statusID: id
+                categories: [.public], statusID: id, listed: [.public: id]
             )
         } + [
             Note(
@@ -80,6 +81,8 @@ struct ListMoreTests {
             host: Self.forum, kind: .discuz, boards: [BoardSubscription(fid: 34, name: "工具箱讨论区")]
         ))
         await store.ingest(Self.held)
+        // The public timeline read this run, as `r` would: reading down goes on below 5 (#470).
+        await store.landNewest(Self.held.filter { $0.source.host == Self.one }, of: .public, ifSourceHere: Self.one)
         let session = ShellSession(
             http: http, store: store,
             mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: ActServer([:])),
@@ -378,18 +381,18 @@ struct ListMoreTests {
         #expect(mastodon.count == 1, "an id says what is older than it whatever arrived since")
     }
 
-    @Test("Signed in, Home is asked as the reader for the stretch before its oldest post")
+    @Test("Signed in, Home is asked as the reader for the stretch before the oldest post its newest read brought")
     func homeAsTheReader() async throws {
         let tokens = MemoryMastodonTokens()
         try tokens.save(MastodonToken(host: Self.one, accessToken: "tok", clientID: "c", clientSecret: "s"))
         let server = ActServer(["/api/v1/timelines/home": .json("[" + Self.status("2", day: 2) + "]")])
         let store = ItemStore()
         await store.add(Source(host: Self.one, kind: .mastodon))
-        await store.ingest([Note(
+        await store.landNewest([Note(
             id: "https://\(Self.one)/users/ada/statuses/7", source: Source(host: Self.one, kind: .mastodon),
             author: "Ada", handle: "@ada", body: "7", postedAt: Date(timeIntervalSince1970: 1_800_000_000),
-            categories: [.home], statusID: "7"
-        )])
+            categories: [.home], statusID: "7", listed: [.home: "7"]
+        )], of: .home, ifSourceHere: Self.one)
         let session = ShellSession(
             http: FixtureHTTP([Self.older(than: "7"): Self.page()]), store: store,
             mastodon: MastodonSessions(tokens: tokens, sender: server)

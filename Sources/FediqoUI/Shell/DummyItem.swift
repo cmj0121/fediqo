@@ -171,9 +171,6 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// Whether `earlier` is its source's history and not only what this device saw (#332,
     /// `Note.historyAt`): its first wording is then the post as first written.
     public var earlierFromSource = false
-    /// Where a timeline this copy arrived through is not whole next to it — `Note.gaps`, carried
-    /// so the list can say so at its place (#201). **This copy's**, of its own source's timelines.
-    public var gaps: Set<TimelineGap> = []
     /// Whether the author covered it, or nothing where the source never said. Carried as the
     /// three answers it has, not folded down to two — see `covered`.
     public let sensitive: Bool?
@@ -572,7 +569,6 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         editedAt = note.editedAt
         earlier = note.earlier
         earlierFromSource = note.historyAt != nil
-        gaps = identity.gaps
         sensitive = note.sensitive
         spoiler = note.spoiler
         via = note.via

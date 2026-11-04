@@ -300,20 +300,6 @@ struct PinnedPagesTests {
         #expect(session.quotedRow(of: after) == deep.key.rowID)
     }
 
-    @Test("A timeline's next stretch is asked from the oldest post the file holds, not the oldest left in the pool")
-    func oldestFromTheFile() async throws {
-        let (session, file, dir) = try await launched()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        try await overflow(session, from: file)
-        let pooled = ShellReload.oldest(.home, of: Self.source.host, in: session.notes)
-        let onFile = await session.store.oldestStatusID(host: Self.source.host, category: .home)
-        #expect(onFile == String(9_000 - 599))
-        #expect(pooled != onFile, "the oldest were let go of the pool")
-        #expect(ShellReload.older(pooled, onFile) == onFile)
-        #expect(ShellReload.older(onFile, pooled) == onFile)
-        #expect(await session.store.oldestStatusID(host: Self.source.host, category: .public) == nil)
-    }
-
     @Test("A source removed whose posts the file alone holds is named by the kind they wrote down, and its posts can be let go by span")
     func removedSourceFromTheFile() async throws {
         let gone = Source(host: "gone.example", kind: .gotosocial)

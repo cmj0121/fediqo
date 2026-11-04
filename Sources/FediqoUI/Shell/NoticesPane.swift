@@ -848,7 +848,7 @@ private struct NoticeListPlace: ViewModifier {
                 mark.returning = nil
                 // A tick later: a lazy stack just built has not laid out the row to scroll to.
                 switch TimelinePane.landing(selected: selectedID, top: nil, touch: touch, marked: returning) {
-                case .centred(let id): Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
+                case .centred(let id): Task { @MainActor in proxy.scrollTo(id, anchor: ShellScroll.focus) }
                 case .top(let id): Task { @MainActor in proxy.scrollTo(id, anchor: .top) }
                 case nil: break
                 }
@@ -856,7 +856,7 @@ private struct NoticeListPlace: ViewModifier {
             }
             .onChange(of: selectedID) { _, id in
                 guard let id, ShellReadingMark.centres(onSelecting: id, touch: touch, handed: nil) else { return }
-                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) }
+                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: ShellScroll.focus) }
             }
             .onChange(of: touch) { _, now in
                 if now, selectedID != nil { selectedID = nil }

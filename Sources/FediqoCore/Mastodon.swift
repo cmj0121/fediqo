@@ -48,38 +48,6 @@ public struct MastodonClient: Sendable {
         )
     }
 
-    /// The public timeline read on from `anchor`, the newest post held of it (#201): stretch
-    /// after stretch toward the newest, or the newest stretch alone where nothing is held.
-    /// `held` is the posts held of it, which a read with no anchor looks for (`MastodonReadOn`).
-    /// `catchingUp` reads its newest stretch too where reading on reaches its bound: a busy
-    /// server's public timeline brings more between two reads than one read reads on through.
-    public func publicTimeline(
-        source: Source, readingOnFrom anchor: String?, holding held: Set<NoteKey> = [], catchingUp: Bool = false
-    ) async throws -> ReadOn {
-        try await MastodonReadOn.read(from: anchor, holding: held, catchingUp: catchingUp) { minID in
-            try await listed(
-                path: "/api/v1/timelines/public", limit: MastodonReadOn.limit,
-                query: try MastodonPage.newer(than: minID), source: source, category: .public
-            )
-        } older: { maxID in
-            try await listed(
-                path: "/api/v1/timelines/public", limit: MastodonReadOn.limit,
-                query: try MastodonPage.older(than: maxID), source: source, category: .public
-            )
-        }
-    }
-
-    /// The public timeline read down from a place posts may be missing (#204), toward what is held
-    /// below it (`MastodonReadOn.readDown`).
-    public func publicTimeline(source: Source, readingDownFrom place: MissingPlace) async throws -> ReadDown {
-        try await MastodonReadOn.readDown(from: place) { maxID in
-            try await listed(
-                path: "/api/v1/timelines/public", limit: MastodonReadOn.limit,
-                query: try MastodonPage.older(than: maxID), source: source, category: .public
-            )
-        }
-    }
-
     /// How many trending posts one ask brings: a stretch of what is rising.
     public static let trendsStretch = 20
 

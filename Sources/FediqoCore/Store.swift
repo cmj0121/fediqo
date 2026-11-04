@@ -77,11 +77,6 @@ public actor ItemStore {
     private var screensGone: Set<UUID> = []
     /// The screen `hold(_:drawnAt:)` says for: one, where nothing names another.
     private static let oneScreen = UUID()
-    /// The newest ids each timeline listed a row under, of the rows let go of the pool, newest
-    /// first, and each one's row (`newestListedID`): one read again or let go answers for
-    /// itself, and the next stands in. The newest `listedLeftKept` of each.
-    private var listedLeft: [String: [Category: [(id: String, key: NoteKey)]]] = [:]
-    private static let listedLeftKept = 64
     /// Whether the pool was told once it could not come under its cap: said once a run.
     private var overCapSaid = false
     /// Counts what may let a row leave that could not before — a row changed, laid in, taken
@@ -101,14 +96,9 @@ public actor ItemStore {
     /// The source's ids each host's rows were already looked for by (`HeldRows.rows(host:
     /// statusIDs:)`): one not found then is held, if ever, by a row that landed here since.
     private var namesAsked: [String: Set<String>] = [:]
-    /// The timelines a read on said "newer posts remain" of again this run, by host (`land(_:of:
-    /// ifSourceHere:)`): a row of the file laid in later says it of them no more, as every row
-    /// held then stopped saying it.
-    private var remainSaid: [String: Set<Category>] = [:]
-    /// Whether `gap` is a "newer posts remain" mark of a timeline in `said` (`remainSaid`).
-    private static func remains(_ gap: TimelineGap, _ said: Set<Category>) -> Bool {
-        gap.kind == .newerRemain && said.contains(gap.category)
-    }
+    /// Where reading each timeline down goes on from, by host (#470): this run's alone, started
+    /// over by every read of its newest posts.
+    private var readDownPlaces: [String: [Category: ReadDownPlace]] = [:]
     /// The first arrival of a row new to a store over a file: after every `rowid` there is, so a
     /// copy read from the file is the earlier of two (#114), as it arrived first.
     private static let arrivingAfterTheFile = 1 << 62
@@ -496,7 +486,7 @@ public actor ItemStore {
         if disk != nil {
             looked = Set(incoming.map(\.key))
             namesAsked = [:]
-            remainSaid = [:]
+            readDownPlaces = [:]
             undecodable = []
             keptSpared = []
             keptRead = true
@@ -504,7 +494,6 @@ public actor ItemStore {
             opsRun = []
             opsFloor = opsMade
             opsSettled = opsMade
-            listedLeft = [:]
             goneLanded = []
             putBackMay = false
         }
@@ -552,7 +541,7 @@ public actor ItemStore {
         arrivals = Self.arrivingAfterTheFile
         looked = []
         namesAsked = [:]
-        remainSaid = [:]
+        readDownPlaces = [:]
         undecodable = []
         keptSpared = []
         keptRead = false
@@ -561,7 +550,6 @@ public actor ItemStore {
         opsRun = []
         opsFloor = opsMade
         opsSettled = opsMade
-        listedLeft = [:]
         goneLanded = []
         putBackMay = false
         sourcesWatcher?(sourceList.map(\.host))
@@ -676,11 +664,13 @@ public actor ItemStore {
     }
 
     /// `ingest(_:)`, only while `host` is still a source here — in the same step, so a source
-    /// removed while its reads were on the wire does not get their posts back.
-    public func ingest(_ incoming: [Note], ifSourceHere host: String) {
+    /// removed while its reads were on the wire does not get their posts back. Whether it was.
+    @discardableResult
+    public func ingest(_ incoming: [Note], ifSourceHere host: String) -> Bool {
         let host = host.lowercased()
-        guard sourceList.contains(where: { $0.host == host }) else { return }
+        guard sourceList.contains(where: { $0.host == host }) else { return false }
         ingest(incoming)
+        return true
     }
 
     /// Takes notes in. The same item through one source stays one row: the first copy wins and
@@ -1043,71 +1033,6 @@ public actor ItemStore {
         return moved
     }
 
-    /// The anchor a timeline is read on from (#201): the newest id a read of `category` from
-    /// `host` listed a post under, of a post its source has not said is gone. A post the reader
-    /// wrote, or one a search or a thread brought, was listed by no read, and is never it.
-    ///
-    /// **The file's rows too** (#283): after a launch the pool holds only what the pages read in,
-    /// and an anchor of the pool's alone was an older post — read on from again — or none, which
-    /// read the newest stretch and said nothing of what lay between it and what the file held.
-    /// A row of the file the pool answers for and does not hold is not held, and is not it.
-    public func newestListedID(host raw: String, category: Category) -> String? {
-        let host = raw.lowercased()
-        let pooled = notes.values
-            .filter { $0.source.host == host && $0.goneSince == nil }
-            .compactMap { $0.listed[category] }
-            .max { StatusID.later($1, than: $0) }
-        let filed = fileNewestListed(host: host, category: category)
-        let held: String? = switch (pooled, filed) {
-        case (let pooled?, let filed?): StatusID.later(filed, than: pooled) ? filed : pooled
-        case (let one?, nil), (nil, let one?): one
-        case (nil, nil): nil
-        }
-        // Of the rows let go of the pool, the newest not answered for again: read back, one
-        // says for itself; let go of the file, it says nothing, as in the whole store.
-        if let left = listedLeft[host]?[category], let first = left.firstIndex(where: { !looked.contains($0.key) }) {
-            if first > 0 { listedLeft[host]?[category] = Array(left[first...]) }
-        } else {
-            listedLeft[host]?[category] = nil
-        }
-        guard let left = listedLeft[host]?[category]?.first else { return held }
-        guard let held else { return left.id }
-        return StatusID.later(left.id, than: held) ? left.id : held
-    }
-
-    /// The newest listing of `category` from `host` among the file's rows the pool does not
-    /// answer for (`newestListedID`); nothing with no file, or where it would not be read.
-    private func fileNewestListed(host: String, category: Category) -> String? {
-        guard let disk else { return nil }
-        do {
-            guard let newest = try disk.newestListed(host: host, category: category),
-                  !looked.contains(newest.key)
-            else { return nil }
-            return newest.id
-        } catch {
-            Self.unread(error)
-            return nil
-        }
-    }
-
-    /// The posts held of `category` from `host` that a timeline brought (#201): what a read with
-    /// no anchor looks for in the newest stretch, to tell whether it reached what was held — the
-    /// file's rows too, but those the pool answers for and does not hold.
-    public func held(host raw: String, category: Category) -> Set<NoteKey> {
-        let host = raw.lowercased()
-        var held = Set(notes.values.filter {
-            $0.source.host == host && $0.categories.contains(category)
-        }.map(\.key))
-        if let disk {
-            do {
-                held.formUnion(try disk.keys(host: host, in: category).filter { !looked.contains($0) })
-            } catch {
-                Self.unread(error)
-            }
-        }
-        return held
-    }
-
     /// Every post of `host` held through `category` of the reader's marks (#317), by the span of
     /// marks it is listed under there (`MarkSpan`, as `Note.listed` writes it) — **the file's rows
     /// too**, read in: a read of marks decides of every post held through it, and a post only the
@@ -1127,13 +1052,6 @@ public actor ItemStore {
     /// where reading on asks below at first (#317). Nothing where none is held.
     public func lowestMark(host raw: String, category: Category) -> String? {
         MarkSpan.lowestFloor(of: marked(host: raw, category: category).values)
-    }
-
-    /// The mark a place where marks of `category` may be missing below `key` reads down from
-    /// (#317), or nothing where `key` says no such place.
-    public func markHole(_ key: NoteKey, in category: Category) -> String? {
-        pool([key])
-        return notes[key]?.gaps.gap(.mayBeMissing, in: category)?.from
     }
 
     /// A read of the reader's marks is begun (#317): its place among the reads, which its landing
@@ -1249,116 +1167,40 @@ public actor ItemStore {
         }
     }
 
-    /// One timeline read on (#201), taken in as `ingest(_:ifSourceHere:)` takes a read, with where
-    /// it is not whole kept on the posts it sits against — in the same step, so a screen never
-    /// draws the posts without what is said about them.
-    ///
-    /// **Newer posts remaining is said once per timeline**: a read on from its newest post is what
-    /// reaching it asks for, so whatever this read says replaces what the last one said. Posts
-    /// that may be missing stay said; nothing read later can show they were not.
-    public func land(_ read: ReadOn, of category: Category, ifSourceHere raw: String) {
-        let host = raw.lowercased()
-        guard sourceList.contains(where: { $0.host == host }) else { return }
-        ingest(read.notes)
-        pool([read.newerRemainAbove, read.missingBelow].compactMap { $0 })
-        let remain = TimelineGap(.newerRemain, in: category)
-        // Said again, it is said again of the rows the file holds too, once they are read.
-        if disk != nil { remainSaid[host, default: []].insert(category) }
-        var marked: [NoteKey: Set<TimelineGap>] = [:]
-        for (key, note) in notes where key.host == host && note.gaps.gap(.newerRemain, in: category) != nil {
-            marked[key] = note.gaps
-            marked[key]?.clear(.newerRemain, in: category)
-        }
-        if let key = read.newerRemainAbove, let held = notes[key] {
-            marked[key, default: held.gaps].place(remain)
-        }
-        if let key = read.missingBelow, let held = notes[key] {
-            marked[key, default: held.gaps].add(TimelineGap(.mayBeMissing, in: category))
-        }
-        var moved = false
-        for (key, gaps) in marked where notes[key]?.gaps != gaps {
-            notes[key]?.gaps = gaps
-            moved = true
-        }
-        if moved { changed(shown: true, replies: false) }
+    // MARK: - Reading down (#470)
+
+    /// Where reading `category` of `host` down goes on from: the oldest post its latest read
+    /// brought. Nothing where no read of it landed this run, or it brought nothing.
+    public func readDownPlace(host raw: String, category: Category) -> ReadDownPlace? {
+        readDownPlaces[raw.lowercased()]?[category]
     }
 
-    /// Where posts may be missing below `key` in `category`, as reading down from it needs it
-    /// (#204): the id to read before, and what is held of that timeline below it. Nothing where
-    /// `key` carries no such mark, or neither the mark nor that timeline names an id to read before.
-    ///
-    /// **By listed ids alone** wherever this timeline listed an item held below: the items it
-    /// listed under an id below the mark's — a reblog being an item under its own key (#290), so
-    /// nothing is left out for being one. Only where it listed
-    /// none of them — a timeline held from before listings were kept (#201) — is below read off
-    /// when each was posted, and then never of a post `me` wrote or boosted, nor any row that
-    /// arrived as a reblog before a reblog was an item: those
-    /// are held for when they were written or boosted, not for where their timeline stands. And
-    /// never while the reader is `signedIn` there and who they are is not known yet: which posts
-    /// are theirs cannot be told, so nothing is guessed, nothing is asked, and the mark stays.
-    public func missing(
-        below key: NoteKey, in category: Category, writtenBy me: String? = nil, signedIn: Bool = false
-    ) -> MissingPlace? {
-        pool([key])
-        guard let marked = notes[key], let gap = marked.gaps.gap(.mayBeMissing, in: category),
-              let listed = gap.from ?? marked.listed[category]
-        else { return nil }
-        let timeline = notes.values.filter {
-            $0.key != key && $0.source.host == key.host && $0.categories.contains(category)
-        }
-        let listedBelow = timeline.filter { note in
-            note.listed[category].map { StatusID.later(listed, than: $0) } == true
-        }
-        if let floor = listedBelow.compactMap({ $0.listed[category] }).max(by: { StatusID.later($1, than: $0) }) {
-            return MissingPlace(
-                post: key, category: category, listed: listed,
-                held: Set(listedBelow.map(\.key)), floor: floor
-            )
-        }
-        let postedBelow = timeline.filter { $0.listed[category] == nil && $0.postedAt <= marked.postedAt }
-        if !postedBelow.isEmpty, signedIn, me == nil { return nil }
-        let held = postedBelow.filter { note in
-            note.boostedBy == nil && !note.isReblog && note.boosted != true
-                && me.map { note.handle.caseInsensitiveCompare($0) != .orderedSame } ?? true
-        }
-        return MissingPlace(
-            post: key, category: category, listed: listed, held: Set(held.map(\.key)), floor: nil,
-            hasBelow: !postedBelow.isEmpty
-        )
+    /// `readDownPlace(host:category:)` of every category of `host` that has one.
+    public func readDownPlaces(host raw: String) -> [Category: ReadDownPlace] {
+        readDownPlaces[raw.lowercased()] ?? [:]
     }
 
-    /// One place posts may be missing, read down (#204), taken in as `land(_:of:ifSourceHere:)`
-    /// takes a read on — what came and what it says in the same step. The mark below `key` goes;
-    /// met, nothing takes its place; stopped short, it moves down to the oldest post read, reading
-    /// on from the id that read reached; told there is nothing more, it settles there as of
-    /// `moment`. Nothing but the posts where `key` no longer carries the mark: a read meanwhile said
-    /// something else of that place.
-    ///
-    /// **Onto an item held**: the oldest the read listed that this store took in — a post or a
-    /// reblog alike, each being what its listing listed (#290) — and back onto `key` where it took
-    /// in none, one refused as older than what is kept, so the place is never left unsaid.
-    public func land(
-        _ down: ReadDown, below key: NoteKey, of category: Category, at moment: Date = Date(),
-        ifSourceHere raw: String
-    ) {
+    /// The newest posts of `category`, read: taken in as `ingest(_:ifSourceHere:)` takes a read,
+    /// and **reading it down starts over** from the oldest of them, whatever was read below before.
+    public func landNewest(_ read: [Note], of category: Category, ifSourceHere raw: String) {
+        guard ingest(read, ifSourceHere: raw) else { return }
+        readDownPlaces[raw.lowercased(), default: [:]][category] = Self.oldestListed(read, in: category).map { ReadDownPlace(id: $0) }
+    }
+
+    /// The posts of `category` older than `below`, read down from its place: taken in, and the
+    /// place moves to the oldest of them. **Nothing older brought, it has no more**: the place
+    /// stays, asked, until the next read of the newest starts it over. Where that read came in
+    /// meanwhile, the posts are taken in and the place is left to it.
+    public func landOlder(_ read: [Note], of category: Category, below id: String, ifSourceHere raw: String) {
         let host = raw.lowercased()
-        guard sourceList.contains(where: { $0.host == host }) else { return }
-        ingest(down.notes)
-        pool([key])
-        guard notes[key]?.gaps.gap(.mayBeMissing, in: category) != nil else { return }
-        notes[key]?.gaps.clear(.mayBeMissing, in: category)
-        let carrier = down.notes
-            .filter { $0.listed[category] != nil && notes[$0.key] != nil }
-            .min { StatusID.later($1.listed[category]!, than: $0.listed[category]!) }?.key ?? key
-        let place: TimelineGap? = switch down.end {
-        case .met: nil
-        case .further(let from): TimelineGap(.mayBeMissing, in: category, from: from)
-        case .settled: TimelineGap(.settled, in: category, since: moment)
-        }
-        // One of each kind per timeline per post: a place said there before gives way to this one,
-        // and the id or moment it says is the post's change to hold and write (#369).
-        if let place { notes[carrier]?.gaps.place(place) }
-        changed(shown: true, replies: false)
+        guard ingest(read, ifSourceHere: host), readDownPlaces[host]?[category]?.id == id else { return }
+        let older = Self.oldestListed(read, in: category).flatMap { StatusID.later(id, than: $0) ? $0 : nil }
+        readDownPlaces[host, default: [:]][category] = older.map { ReadDownPlace(id: $0) } ?? ReadDownPlace(id: id, ended: true)
+    }
+
+    /// The oldest id `category` listed one of `read` under.
+    private static func oldestListed(_ read: [Note], in category: Category) -> String? {
+        read.compactMap { $0.listed[category] }.min { StatusID.later($1, than: $0) }
     }
 
     /// Lets go of one server: the source, the boards the reader picked on it, and the notes it
@@ -1398,7 +1240,7 @@ public actor ItemStore {
         // Deleted by the next save whether or not this store knows the file to hold it.
         hostsOwed.insert(host)
         let told = letNoticesGo(host: host)
-        listedLeft[host] = nil
+        readDownPlaces[host] = nil
         sourcesWatcher?(sourceList.map(\.host))
         // Over a file, its rows of the host the pool does not hold go by key with the rest — or,
         // where the file would not say which they are, no post goes, as where they stay.
@@ -1826,20 +1668,6 @@ public actor ItemStore {
         }.value
     }
 
-    /// The source's own id of the oldest post of `host` the file holds through `category`, or
-    /// nothing where there is no file or it would not be read (`HeldRows.oldestStatusID`).
-    /// **Read off this actor**, as `rowsByHost` is: what a timeline's next stretch is asked from.
-    public nonisolated func oldestStatusID(host: String, category: Category) async -> String? {
-        guard let disk else { return nil }
-        return await Task.detached(priority: .utility) {
-            do {
-                return try disk.oldestStatusID(host: host.lowercased(), category: category)
-            } catch {
-                Self.unread(error)
-                return nil
-            }
-        }.value
-    }
 
     /// `mayGoForRoom`, **over the file** (#357), one hop of it (#360, C33): of the file's oldest
     /// rows not kept past `from`, at most `roomHop` read — fewer where fewer are wanted — each as
@@ -2168,28 +1996,13 @@ public actor ItemStore {
     /// save; **and never while a read back may still put the file back** (`mayBePutBack`): its undo
     /// owes a delete of each row the older file holds that the run let go, known by `looked`.
     /// A save that failed lands nothing here, so what it carried stays answered for.
-    ///
-    /// **And each leaves the rows let go of the pool** (`listedLeft`): one there and no longer
-    /// answered for would be taken for a row the file still holds, and its id for the newest a
-    /// timeline listed (#201) — of a post the file no longer has.
     private func forgetLanded() {
         guard !goneLanded.isEmpty, pagesOut == 0, !restoringFile, !putBackMay else { return }
-        var forgotten: [String: Set<NoteKey>] = [:]
         for key in goneLanded where notes[key] == nil && !notes.touched.contains(key) && !inFlight.contains(key) {
             looked.remove(key)
             readPastLimit[key] = nil
-            forgotten[key.host, default: []].insert(key)
         }
         goneLanded = []
-        for (host, keys) in forgotten {
-            guard let byCategory = listedLeft[host] else { continue }
-            var kept: [Category: [(id: String, key: NoteKey)]] = [:]
-            for (category, left) in byCategory {
-                let staying = left.filter { !keys.contains($0.key) }
-                if !staying.isEmpty { kept[category] = staying }
-            }
-            listedLeft[host] = kept.isEmpty ? nil : kept
-        }
     }
 
     /// Whether the file may be put back to what it held before a read back (#344, `restoring`):
@@ -2226,7 +2039,7 @@ public actor ItemStore {
 
     /// **How many entries each collection the store holds has** (#360, K-12): counts only, never
     /// what an entry says. A collection of collections is counted by what it holds summed
-    /// (`namesAsked`, `listedLeft`, …). The pool's own books — what each row holds, the order of
+    /// (`namesAsked`, …). The pool's own books — what each row holds, the order of
     /// sightings — are counted with their room (`.capacity`), as a dictionary or an array keeps
     /// its room when entries leave. The turns of a letting go are made and let go within a pass,
     /// and so held by nothing between passes.
@@ -2252,7 +2065,6 @@ public actor ItemStore {
             "pinsBy": pinsBy.count,
             "pinsBy.pins": pinsBy.values.reduce(0) { $0 + $1.pins.count },
             "screensGone": screensGone.count,
-            "listedLeft": listedLeft.values.reduce(0) { $0 + $1.values.reduce(0) { $0 + $1.count } },
             // A read back's waits and marks: those waiting for it to be put back or not, how
             // many files it copied in, and whether it may yet be put back or is being.
             "waitingForPutBack": waitingForPutBack.count,
@@ -2264,7 +2076,6 @@ public actor ItemStore {
             "looked": looked.count,
             "looked.capacity": looked.capacity,
             "namesAsked": namesAsked.values.reduce(0) { $0 + $1.count },
-            "remainSaid": remainSaid.values.reduce(0) { $0 + $1.count },
             "hostsOwed": hostsOwed.count,
             "arrival": arrival.count,
             "arrival.capacity": arrival.capacity,
@@ -2715,8 +2526,7 @@ public actor ItemStore {
     /// **What stays, whatever its turn**: a row changed and not taken by a save, or taken by
     /// one that has not landed (the file would bring it back older); a kept row; one drawn
     /// (`pins`), or laid in or changed since what is drawn was made; one owing a load not given
-    /// up (`owed(host:)` asks the pool alone); one carrying a mark a read on said again
-    /// (`remainSaid`: read back, it would lose it); and **what a row that stays holds with
+    /// up (`owed(host:)` asks the pool alone); and **what a row that stays holds with
     /// it** (`Note.heldWith`, `Note.topicKey`), so a reference not in the pool still means not
     /// held. A row let go frees what it held, which may then go in the same pass, in its turn.
     private func letRowsLeave() {
@@ -2737,7 +2547,6 @@ public actor ItemStore {
                 return false
             }
             if note.refsDue && !stalled.contains(key) { return false }
-            if let said = remainSaid[key.host], note.gaps.contains(where: { Self.remains($0, said) }) { return false }
             return true
         }
         // The rows in the order last seen, the least lately first (`HeldNotes.sightings`): each
@@ -2813,28 +2622,6 @@ public actor ItemStore {
         if (arrival[key] ?? 0) < Self.arrivingAfterTheFile { arrival[key] = nil }
         // A reference by its source's id asks the file again, rather than take it for not held.
         if let statusID = note.statusID { namesAsked[key.host]?.remove(statusID) }
-        if note.goneSince == nil {
-            for (category, id) in note.listed {
-                // Where it goes among the rest, newest first, found by halves: a letting go
-                // files hundreds of rows, and each list is read in place, not copied.
-                let (was, at) = Self.place(id, of: key, among: listedLeft[key.host]?[category] ?? [])
-                guard at < Self.listedLeftKept else { continue }
-                listedLeft[key.host, default: [:]][category, default: []].file((id, key), at: at, was: was, most: Self.listedLeftKept)
-            }
-        }
-    }
-
-    /// Where the row under `key`, listed under `id`, stands among `left` (newest first) — found
-    /// by halves — and where it stood, if it was there.
-    private static func place(_ id: String, of key: NoteKey, among left: [(id: String, key: NoteKey)]) -> (was: Int?, at: Int) {
-        let was = left.firstIndex { $0.key == key }
-        var low = 0
-        var high = left.count
-        while low < high {
-            let mid = (low + high) / 2
-            if StatusID.later(id, than: left[mid].id) { high = mid } else { low = mid + 1 }
-        }
-        return (was, was.map { $0 < low ? low - 1 : low } ?? low)
     }
 
     /// `note`'s key and what it holds with it: what reading it in reads.
@@ -2917,8 +2704,7 @@ public actor ItemStore {
     /// decode is left out alone (`RowsUnread`). Returns the keys not answered for.
     ///
     /// Each row laid in is then made what opening the whole store made every row: a forum reply
-    /// given its topic's board (#297), what it owes settled against what is held (#293) — and a
-    /// mark a read on said again this run taken off (`remainSaid`), as it came off every row.
+    /// given its topic's board (#297), what it owes settled against what is held (#293).
     private func lay(_ keys: Set<NoteKey>, found: [HeldRow]) -> Set<NoteKey> {
         guard let disk else { return [] }
         var arriving = found
@@ -2954,9 +2740,6 @@ public actor ItemStore {
                 readPastLimit[key] = row.note.isReblog
             }
             notes.lay(unlanded(row.note))
-            if let said = remainSaid[key.host], let held = notes[key], held.gaps.contains(where: { Self.remains($0, said) }) {
-                notes[key]?.gaps = held.gaps.filter { !Self.remains($0, said) }
-            }
             // One that arrived this run and left the pool keeps its place among the run's.
             arrival[key] = arrival[key] ?? Int(row.arrival)
             laid.append(key)
@@ -3774,14 +3557,5 @@ private struct Turns {
             heap.swapAt(parent, least)
             parent = least
         }
-    }
-}
-
-extension Array {
-    /// `entry` put at `at`, where it stood before taken out first, and the list kept to `most`.
-    fileprivate mutating func file(_ entry: Element, at: Int, was: Int?, most: Int) {
-        if let was { remove(at: was) }
-        insert(entry, at: at)
-        if count > most { removeLast(count - most) }
     }
 }

@@ -28,7 +28,8 @@ struct PublicAsReaderTests {
 
     private static let newest = "https://\(one)/api/v1/timelines/public?limit=40"
 
-    /// A session over `one.example`, holding post 5 of its public timeline where `holding`,
+    /// A session over `one.example`, holding post 5 of its public timeline where `holding`, as its
+    /// newest read this run brought it,
     /// signed in there where `signedIn`.
     private func shell(
         http: FixtureHTTP, server: ActServer, signedIn: Bool, holding: Bool = false
@@ -40,11 +41,11 @@ struct PublicAsReaderTests {
         let store = ItemStore()
         await store.add(Self.source)
         if holding {
-            await store.ingest([Note(
+            await store.landNewest([Note(
                 id: "https://\(Self.one)/users/ada/statuses/5", source: Self.source, author: "Ada", handle: "@ada",
                 body: "5", postedAt: Date(timeIntervalSince1970: 1_800_000_000), categories: [.public],
-                statusID: "5"
-            )])
+                statusID: "5", listed: [.public: "5"]
+            )], of: .public, ifSourceHere: Self.one)
         }
         let session = ShellSession(http: http, store: store, mastodon: MastodonSessions(tokens: tokens, sender: server))
         session.mastodon.refresh()

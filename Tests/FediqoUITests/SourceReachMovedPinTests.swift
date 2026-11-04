@@ -67,6 +67,10 @@ struct SourceReachMovedPinTests {
         session.blogs.work = work
         session.deadlinesUnturned()
         session.mastodon.refresh()
+        // What is held of each Mastodon timeline, as its newest read this run brought it (#470).
+        for note in notes where note.source.kind == .mastodon {
+            for category in note.listed.keys { await session.store.landNewest([note], of: category, ifSourceHere: note.source.host) }
+        }
         await session.reloadFromStore()
         _ = log.take()
         return (session, log)
@@ -133,26 +137,6 @@ struct SourceReachMovedPinTests {
         )
         await front.reload.more(.all, in: front)
         #expect(frontLog.take() == ["plain no token z.example/forum.php | timeline -"])
-    }
-
-    // MARK: - Reading down a gap
-
-    @Test("A place where posts may be missing is read down through the signed door where signed in — the public timeline, Home and a list, each under its own name; signed out, Home's is not asked at all")
-    func readingDown() async throws {
-        // In each timeline, a post with the mark and one held below it.
-        let held = [Self.post(31, .public, gap: true), Self.post(41, .home, gap: true), Self.post(51, .list(id: "7"), gap: true)]
-            + [Self.post(11, .public), Self.post(12, .home), Self.post(13, .list(id: "7"))]
-        let (session, log) = try await Self.shell(signedIn: true, sources: [Self.mastodon], holding: held)
-        await session.reload.readDown(Stretch(host: Self.m, category: .public), below: held[0].key, in: session)
-        #expect(log.take() == ["signed token m.example/api/v1/timelines/public | timeline Public"])
-        await session.reload.readDown(Stretch(host: Self.m, category: .home), below: held[1].key, in: session)
-        #expect(log.take() == ["signed token m.example/api/v1/timelines/home | timeline Home"])
-        await session.reload.readDown(Stretch(host: Self.m, category: .list(id: "7")), below: held[2].key, in: session)
-        #expect(log.take() == ["signed token m.example/api/v1/timelines/list/7 | timeline Friends"])
-
-        let (unsigned, unsignedLog) = try await Self.shell(signedIn: false, sources: [Self.mastodon], holding: held)
-        await unsigned.reload.readDown(Stretch(host: Self.m, category: .home), below: held[1].key, in: unsigned)
-        #expect(unsignedLog.take().isEmpty)
     }
 
     // MARK: - A forum's blog, and its reload
