@@ -4413,7 +4413,6 @@ extension ShellSession {
             "drawn.arrived": drawn.reduce(0) { $0 + $1.arrived.count },
             "drawn.left": drawn.reduce(0) { $0 + $1.left.count },
             "drawn.before": drawn.reduce(0) { $0 + $1.before.count },
-            "drawn.gapMarks": drawn.reduce(0) { $0 + $1.items.reduce(0) { $0 + $1.gaps.count } },
             "textIndex": builtTextIndex?.count ?? 0,
             "reblogTargets": builtReblogTargets?.count ?? 0,
             "owingRows": builtOwingRows?.count ?? 0,

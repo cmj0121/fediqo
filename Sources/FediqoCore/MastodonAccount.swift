@@ -123,8 +123,8 @@ public struct MastodonAccount: Sendable {
     }
 
     /// The stretch of Home, or of one list this source reads, older than the post `maxID` names —
-    /// the next of a listing read toward its end (#87). Into the store, and handed back as the page
-    /// carried it so the caller can tell a stretch that brought nothing from one that did.
+    /// the next of a listing read toward its end (#87). Into the store, moving where reading it
+    /// down goes on from (`ItemStore.landOlder`), and handed back as the page carried it.
     ///
     /// Throws what the read threw: this is one read, and a caller asked for exactly it.
     public func older(_ category: Category, than maxID: String) async throws -> [Note] {

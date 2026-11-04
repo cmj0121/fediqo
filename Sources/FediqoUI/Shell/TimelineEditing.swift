@@ -257,17 +257,6 @@ extension ShellSession {
         timelineDrawn(latest: latest).ids
     }
 
-    /// The rows of the timeline in front as it was last drawn, drawn again for what is held now
-    /// and the latest date it was drawn with: what a check of the marks on its rows asks, which
-    /// knows no latest date of its own — asked with none, it would draw another timeline over the
-    /// one on screen.
-    ///
-    /// **Nothing where it was never drawn**: there are then no marks on screen to ask about.
-    func timelineItemsAsDrawn() -> [DummyItem] {
-        guard let drawn = drawnTimelines[currentTimeline.id] else { return [] }
-        return timelineItems(latest: drawn.key.latest)
-    }
-
     /// How many timelines are kept drawn at once (`drawnTimelines`).
     static let drawnKept = 4
 

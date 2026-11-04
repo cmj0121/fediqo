@@ -19,24 +19,6 @@ public enum StatusID {
         return a.count != b.count ? a.count > b.count : a > b
     }
 
-    /// The id one before `id`, so a read of what is newer than it still brings `id` back.
-    /// Nothing for an id that is not a positive decimal number.
-    public static func before(_ id: String) -> String? {
-        let digits = Array(trimmed(id))
-        guard !digits.isEmpty, digits.allSatisfy({ $0.isASCII && $0.isNumber }), digits != ["0"] else {
-            return nil
-        }
-        var out = digits
-        var index = out.count - 1
-        while out[index] == "0" {
-            out[index] = "9"
-            index -= 1
-        }
-        out[index] = Character(String(out[index].wholeNumberValue! - 1))
-        let stepped = trimmed(String(out))
-        return stepped.isEmpty ? "0" : stepped
-    }
-
     private static func trimmed(_ id: String) -> String {
         String(id.drop { $0 == "0" })
     }
@@ -56,17 +38,16 @@ public struct ReadDownPlace: Hashable, Sendable {
 }
 
 /// A place in one timeline where it is not whole (#201), kept with the post it sits against.
+/// Nothing draws or reads one any more (#470); the reader's marks still say theirs, and rows on
+/// file still carry the others.
 public struct TimelineGap: Hashable, Sendable {
     public enum Kind: String, Hashable, Sendable {
-        /// Newer posts may remain above this one: the read that brought it stopped at its bound,
-        /// or failed a stretch later. Reaching it reads on.
+        /// Newer posts may remain above this one. No longer said (#470): only rows on file carry it.
         case newerRemain
         /// The source did not give back what lay below this one, and posts may be missing there.
-        /// Reaching it reads down (#204).
         case mayBeMissing
-        /// Read down, the source answered that it has nothing more below this one (#204): what lay
-        /// there is no longer there. Asks nothing again, and is let go as a post deleted at its
-        /// source is.
+        /// The source answered that it has nothing more below this one (#204). No longer said
+        /// (#470); one on file is let go as a post deleted at its source is.
         case settled
     }
 

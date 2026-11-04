@@ -322,14 +322,6 @@ struct TimelinePagesTests {
         #expect(session.timelineShown(latest: nil, anchor: id(5), moving: true).rows.map(\.id) == drawn.map(\.id))
     }
 
-    @Test("Asked for its rows as drawn, a timeline never drawn draws nothing")
-    func asDrawnNeverDrawn() async {
-        let session = ShellSession(http: FixtureHTTP(), store: ItemStore(sources: [Self.source], notes: Self.posts(5)))
-        await session.reloadFromStore()
-        #expect(session.timelineItemsAsDrawn().isEmpty)
-        #expect(session.timelineEvaluations == 0)
-    }
-
     @Test("A months limit moved reads the timeline afresh: its first page asked again for what it now is")
     func limitMovedReadsAfresh() async throws {
         let (session, _, _, dir) = try await launched()

@@ -65,12 +65,12 @@ struct ReblogRowTests {
 
     // MARK: - The row
 
-    @Test("The reblog's row is the reblog's — its id, its time, what it came through, where its timeline is not whole — and draws the post's words, author and counts from the post's own item")
+    @Test("The reblog's row is the reblog's — its id, its time, what it came through — and draws the post's words, author and counts from the post's own item")
     func drawnFromThePost() {
         let row = DummyItem(reblog, reblogging: post)
         #expect(row.id == reblog.key.rowID && row.noteID == reblog.id)
         #expect(row.postedAt == Self.reblogged, "it stands when it was reblogged")
-        #expect(row.categories == [.home] && row.gaps == reblog.gaps)
+        #expect(row.categories == [.home])
         #expect(row.isReblog && !row.reblogUnheld && !row.arrivedAsReblog)
         #expect(row.boostedBy == "Bob")
         #expect(row.author == "Ada" && row.handle == "@ada@social.example" && row.body == "hello about cats")
