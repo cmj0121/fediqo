@@ -6,9 +6,11 @@ import Testing
 /// here before it (`RuleTests.performance`, `SearchTests.performance`): 10,000 notes, 20 rules,
 /// the same six patterns — with one note in five a reblog of a post among the others.
 ///
-/// **Held to the lines those two already draw**, not to new ones: evaluating a timeline under 2.4
-/// plain reads and the slowest search under 4. The lookup of what each reblog reblogs is built
-/// once where the notes are replaced (`ReblogTargets`) and is measured on its own.
+/// **The rules held to what they cost before reblogs**: evaluating the timeline with one note in
+/// five a reblog, the lookup of what each reblog reblogs (`ReblogTargets`) built with it, is told
+/// against evaluating the same timeline over the same notes with posts in place of the reblogs —
+/// the budget the rules already had, measured in the same round (`Pace.each(against:)`, #478).
+/// The search is still held to its own line, the slowest under 4 plain reads.
 @Suite("What reblogs cost the rules and the search")
 struct ReblogCostTests {
     private static let hosts = (0..<10).map { Source(host: "h\($0).example", kind: .mastodon) }
@@ -16,9 +18,14 @@ struct ReblogCostTests {
 
     /// 8,000 posts and 2,000 reblogs, interleaved one in five, each reblog of a post held from
     /// the same source.
-    private static let notes: [Note] = (0..<10_000).map { i in
+    private static let notes: [Note] = (0..<10_000).map { note($0, reblogs: true) }
+
+    /// `notes` before reblogs: the same 10,000, with a post where each reblog is.
+    private static let posts: [Note] = (0..<10_000).map { note($0, reblogs: false) }
+
+    private static func note(_ i: Int, reblogs: Bool) -> Note {
         let source = hosts[i % 7]
-        if i % 5 == 4 {
+        if reblogs, i % 5 == 4 {
             // The post seven before it — seven after, for the first — is on the same source and
             // is not a reblog.
             return Note(
@@ -61,17 +68,19 @@ struct ReblogCostTests {
 
     @Test("10,000 notes, one in five a reblog, against 20 rules stay inside the budget the rules already had")
     func rules() {
-        let notes = Self.notes
+        let notes = Self.notes, posts = Self.posts
         let timeline = CompiledTimeline(TimelineDefinition(name: "t", rules: Self.rules), sources: Self.hosts)
-        let index = TextIndex(notes)
+        let index = TextIndex(notes), postsIndex = TextIndex(posts)
         var targets = ReblogTargets([])
         var shown: [Note] = []
         var alone: [Note] = []
-        // The lookup and the evaluation it feeds are timed as one piece of work for the sum,
-        // so the line holds one ratio rather than two added together. Debug measured 1.84 to 1.91
-        // on a quiet machine and 1.66 to 1.82 beside twelve busy threads on ten cores; a lookup
-        // made 2.3 times dearer measured 2.45 to 2.54 and fails.
-        let paces = Pace.each(notes, [
+        var before: [Note] = []
+        // The lookup and the evaluation it feeds are timed as one piece of work, so the line holds
+        // one ratio rather than two added together. Debug with coverage measured 1.19 to 1.20 on a
+        // quiet machine and 1.15 to 1.21 beside twelve busy loops on ten cores; the lookup built
+        // twice measured 1.40 to 1.51, so one made 2.3 times dearer fails. Against a plain read
+        // the same code measured 1.8 here and 2.1 to 2.5 on the shared runner.
+        let paces = Pace.each(against: { before = timeline.shown(posts, postsIndex) }, unit: "evaluations before reblogs", [
             { targets = ReblogTargets(notes) },
             { shown = timeline.shown(notes, index, targets: targets) },
             {
@@ -81,12 +90,14 @@ struct ReblogCostTests {
             { alone = timeline.shown(notes, index) },
         ])
         #expect(shown == alone && shown.contains { $0.isReblog } && shown.contains { !$0.isReblog })
+        #expect(!before.isEmpty && !before.contains { $0.isReblog })
         print("Reblog lookup built: \(paces[0])")
         print("Rules evaluated, one in five a reblog, lookup handed in: \(paces[1])")
         print("Reblog lookup built and rules evaluated with it: \(paces[2])")
         print("Rules evaluated, one in five a reblog, building its own lookup: \(paces[3])")
-        #expect(paces[1].reads < 2.4, "evaluating took \(paces[1])")
-        #expect(paces[2].reads < 2.4, "the lookup and one evaluation together took \(paces[2])")
+        // Handed in, it measured 0.90 to 0.95: a reblog is read through what it reblogs.
+        #expect(paces[1].reads < 1.15, "evaluating took \(paces[1])")
+        #expect(paces[2].reads < 1.45, "the lookup and one evaluation together took \(paces[2])")
     }
 
     @Test("10,000 notes, one in five a reblog, are searched inside the budget the search already had")

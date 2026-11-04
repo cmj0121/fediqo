@@ -25,15 +25,24 @@ import Foundation
 /// the mean of the reads on either side of it, taken moments apart, and the check keeps the
 /// middle of the five ratios. One or two rounds caught by the machine at a bad moment fall to the
 /// ends, whichever side they slowed, while work made dearer is dearer in every round.
+///
+/// **Or against the work it grew from** (#478). A plain read is Foundation's folding and nothing
+/// of Fediqo, so a runner whose text library or processor is quicker at it than at Fediqo's own
+/// code moves every ratio, and the shared runner put a reblog's rules near half a read dearer
+/// than this machine did, on the same code. Work that extends other work is told against that
+/// work instead (`each(against:)`), done the same way in the same round: whatever the runner,
+/// both sides are the same code but for what is checked.
 struct Pace: CustomStringConvertible {
     let work: Duration
     let plain: Duration
+    /// What the work is told against, as `description` says it.
+    private var unit = "plain reads"
 
-    /// How many plain reads the work took.
+    /// How many plain reads — or of the work it is told against — the work took.
     var reads: Double { work / plain }
 
     var description: String {
-        "\(reads.formatted(.number.precision(.fractionLength(2)))) plain reads (\(work) against \(plain))"
+        "\(reads.formatted(.number.precision(.fractionLength(2)))) \(unit) (\(work) against \(plain))"
     }
 
     init(_ notes: [Note], runs: Int = 5, _ work: () -> Void) {
@@ -44,23 +53,34 @@ struct Pace: CustomStringConvertible {
     /// doing each of them once in between — so every piece sits between two reads of its own
     /// round, and six searches cost seven plain reads a round rather than twelve.
     static func each(_ notes: [Note], runs: Int = 5, _ works: [() -> Void]) -> [Pace] {
+        each(runs: runs, works, between: { Self.read(notes) }, unit: "plain reads")
+    }
+
+    /// `each`, every piece told against `baseline` — the work it extends — in place of a plain
+    /// read, `baseline` done before the first piece and after each, `unit` naming it.
+    static func each(against baseline: () -> Void, unit: String, runs: Int = 5, _ works: [() -> Void]) -> [Pace] {
+        each(runs: runs, works, between: baseline, unit: unit)
+    }
+
+    private static func each(runs: Int, _ works: [() -> Void], between baseline: () -> Void, unit: String) -> [Pace] {
         precondition(runs >= 1, "a pace needs at least one round")
         var rounds = [[Pace]](repeating: [], count: works.count)
         for _ in 0 ..< runs {
-            var before = running { Self.read(notes) }
+            var before = running(baseline)
             for (i, work) in works.enumerated() {
                 let took = running(work)
-                let after = running { Self.read(notes) }
-                rounds[i].append(Pace(work: took, plain: (before + after) / 2))
+                let after = running(baseline)
+                rounds[i].append(Pace(work: took, plain: (before + after) / 2, unit: unit))
                 before = after
             }
         }
         return rounds.map { $0.sorted { $0.reads < $1.reads }[runs / 2] }
     }
 
-    private init(work: Duration, plain: Duration) {
+    private init(work: Duration, plain: Duration, unit: String) {
         self.work = work
         self.plain = plain
+        self.unit = unit
     }
 
     /// How long `work` kept this thread running. The work never suspends, so it runs on the one
