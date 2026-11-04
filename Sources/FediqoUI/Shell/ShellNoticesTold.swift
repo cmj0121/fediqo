@@ -138,7 +138,9 @@ struct NoSystemNotices: SystemNotices {
 ///   or a failure is said, and the count stands as it last said;
 /// - **and is shown as the system's own notice** only where the person turned that on, which is
 ///   when the system is asked, and never at launch. Refused there, the switch stays off, says so,
-///   and nothing asks again; the count works all the same.
+///   and nothing asks again; the count works all the same. **A favourite is not** (#462), unless
+///   the person switched favourites on for that source too: it is counted and listed as any other,
+///   and interrupts nobody unasked.
 ///
 /// **A notice the source holds back is never told**: it is never on the line
 /// (`MastodonNoticeLineCaptures`). **Signed in for less than notices need, it is not offered**: the
@@ -152,6 +154,15 @@ final class ShellNoticesTold {
         var system = false
         /// The kinds that tell nothing, by the word they are narrowed by (`Notice.Kind.narrowedAs`).
         var off: Set<String> = []
+        /// Whether a favourite is shown as the system's notice too (#462): off until the person turns
+        /// it on, as a favourite asks for no answer.
+        var systemFavourites = false
+
+        /// Whether a notice of `kind` is shown as the system's notice, the system allowing.
+        func showsSystem(_ kind: Notice.Kind) -> Bool {
+            guard system, !off.contains(kind.narrowedAs) else { return false }
+            return kind != .favourite || systemFavourites
+        }
     }
 
     /// What the source's page offers.
@@ -226,6 +237,13 @@ final class ShellNoticesTold {
         }
     }
 
+    /// Favourites shown as the system's notices too, at `host`, or not (#462).
+    func chooseSystemFavourites(_ on: Bool, host: String) {
+        var choice = choice(host: host)
+        choice.systemFavourites = on
+        keep(choice, host: host)
+    }
+
     func tell(_ narrowedAs: String, _ on: Bool, host: String) {
         var choice = choice(host: host)
         if on { choice.off.remove(narrowedAs) } else { choice.off.insert(narrowedAs) }
@@ -286,7 +304,7 @@ final class ShellNoticesTold {
         }
     }
 
-    /// One notice told on `host`'s line: listed, shown as the choice says, and the count read again
+    /// One notice told on `host`'s line: listed, shown as the choice says (`Choice.showsSystem`), and the count read again
     /// with the list (`afterRead`).
     func told(_ notice: Notice, in session: ShellSession) async {
         guard toldThisRun[notice.id] == nil else { return }
@@ -294,12 +312,8 @@ final class ShellNoticesTold {
         toldOrder.append(notice.id)
         if toldOrder.count > Self.keptTold { toldThisRun[toldOrder.removeFirst()] = nil }
         let choice = choice(host: notice.source.host)
-        if !choice.off.contains(notice.kind.narrowedAs) {
-            if choice.system, !systemRefused, !system.inFront() {
-                await system.post(
-                    id: notice.id, title: notice.source.host, body: NoticeWords.spoken(notice)
-                )
-            }
+        if choice.showsSystem(notice.kind), !systemRefused, !system.inFront() {
+            await system.post(id: notice.id, title: notice.source.host, body: NoticeWords.spoken(notice))
         }
         await list(host: notice.source.host, in: session)
     }
@@ -443,5 +457,20 @@ final class ShellNoticesTold {
         case .failure(let error) where Cancellation.happened(error): break
         case .failure: session.showToast(String(format: L10n.t("source.told.mark.failed"), host))
         }
+    }
+}
+
+extension ShellNoticesTold.Choice {
+    /// **A choice kept from before a part of it was asked is read as it was made**: what it does
+    /// not say is the part's default, and nothing it does say is lost. Out here, so the memberwise
+    /// one stands too.
+    init(from decoder: any Decoder) throws {
+        let kept = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            on: try kept.decodeIfPresent(Bool.self, forKey: .on) ?? false,
+            system: try kept.decodeIfPresent(Bool.self, forKey: .system) ?? false,
+            off: try kept.decodeIfPresent(Set<String>.self, forKey: .off) ?? [],
+            systemFavourites: try kept.decodeIfPresent(Bool.self, forKey: .systemFavourites) ?? false
+        )
     }
 }

@@ -420,6 +420,12 @@ final class ShellReload {
     /// (#197). A forum's topic carries its tags beside its words and not in them, so the page
     /// finds what a source filed under the tag by this as well as by the words.
     private(set) var sentUnderTag: [String: Set<NoteKey>] = [:]
+    /// Posts told on a line under `tag` as they happened (#460): sent under it, as a read's are.
+    func heard(_ keys: [NoteKey], under tag: PostTag) {
+        guard !keys.isEmpty else { return }
+        sentUnderTag[HeldUnderTag.folded(tag), default: []].formUnion(keys)
+    }
+
     /// The forums that said this run that they keep no tags: not asked again until the next.
     @ObservationIgnored private var tagsTurnedOff: Set<String> = []
 
@@ -764,6 +770,9 @@ final class ShellReload {
         let spoken = session.sources
 
         var unread: Set<String> = []
+        // **The wait leaves Home to a line that tells it** (#457): asked again it would bring only
+        // what the line already landed. A press still asks, and so does the wait once the line drops.
+        let heard = kind == .held ? session.lines.homeHeard : []
         // The sources read this round, and what of each the reads said failed (#371).
         var reached: [FetchAsk] = []
         let round = ReadRound()
@@ -780,7 +789,10 @@ final class ShellReload {
                     reached.append(ask)
                     group.addTask {
                         (ask.host, await self.onSource(ask.host) {
-                            await self.read(source, for: ask.categories, revisits: kind != .held, in: session)
+                            await self.read(
+                                source, for: ask.categories, revisits: kind != .held,
+                                homeHeard: heard.contains(ask.host.lowercased()), in: session
+                            )
                         })
                     }
                 }
@@ -1189,9 +1201,10 @@ final class ShellReload {
     /// Reads one source for `categories`, or for its usual reads where nil, into the store.
     /// Returns whether it came back. `revisits` is whether a forum's rows read their opening posts
     /// again when reached: a press asks what the forum says now, and a wait does not (#95).
+    /// `homeHeard` is whether a line tells this source's Home as it happens, which is then not read.
     private func read(
         _ source: Source, for categories: Set<FediqoCore.Category>?, revisits: Bool,
-        in session: ShellSession
+        homeHeard: Bool, in session: ShellSession
     ) async -> Bool {
         let host = source.host
         // What a note records is which server it came from, not that server's subscriptions.
@@ -1240,7 +1253,7 @@ final class ShellReload {
                 // And so the one that did not come is not counted as a source not read (#371).
                 if publicCame != trendsCame { ReadRound.current?.excuse(host, publicCame ? .trends : .public) }
             }
-            return await readAsYou(source, for: categories, thorough: revisits, in: session) && read
+            return await readAsYou(source, for: categories, thorough: revisits, homeHeard: homeHeard, in: session) && read
         case .discuz:
             // A board's read is shown under that board's name (#164); the front page names none.
             // The forum's transport is chosen once for the reload: every board and the ranking
@@ -1295,19 +1308,22 @@ final class ShellReload {
     /// and then the reader's bookmarks and favourites, where the sign-in may read them (#317).
     /// `thorough` is a reload the person pressed for, and not the wait (`readMarks`).
     private func readAsYou(
-        _ source: Source, for categories: Set<FediqoCore.Category>?, thorough: Bool, in session: ShellSession
+        _ source: Source, for categories: Set<FediqoCore.Category>?, thorough: Bool, homeHeard: Bool,
+        in session: ShellSession
     ) async -> Bool {
-        let timelines = await readTimelinesAsYou(source, for: categories, in: session)
+        let timelines = await readTimelinesAsYou(source, for: categories, homeHeard: homeHeard, in: session)
         // Nothing where the sign-in has gone meanwhile: it then reads no marks at all.
         guard !Task.isCancelled else { return timelines }
         return await readMarks(source, for: categories, thorough: thorough, in: session) && timelines
     }
 
     /// Home and the chosen lists, as the reader — only where signed in, and only what was asked.
+    /// Home not where a line tells it (`homeHeard`, #457); the lists still.
     private func readTimelinesAsYou(
-        _ source: Source, for categories: Set<FediqoCore.Category>?, in session: ShellSession
+        _ source: Source, for categories: Set<FediqoCore.Category>?, homeHeard: Bool,
+        in session: ShellSession
     ) async -> Bool {
-        let home = categories?.contains(.home) ?? true
+        let home = !homeHeard && (categories?.contains(.home) ?? true)
         let lists = categories.map { asked in
             Set(asked.compactMap { category -> String? in
                 if case .list(let id) = category { return id }
@@ -1317,7 +1333,7 @@ final class ShellReload {
         // The door reads the lists' names again, where every list is read; each timeline is read
         // through a door of its own, shown under the name the reader knows it by (#170). The
         // token is read from the Keychain once and every door is built from it.
-        guard home || lists?.isEmpty == false,
+        guard home || lists?.isEmpty == false || (lists == nil && !source.lists.isEmpty),
               let token = session.mastodon.token(host: source.host)
         else { return true }
         let mastodon = session.mastodon
@@ -1342,7 +1358,7 @@ final class ShellReload {
         do {
             return try await asReader(source.host) {
                 if let lists { return try await account.read(home: home, lists: lists) }
-                return try await account.read()
+                return try await account.read(home: home)
             }
         } catch MastodonAuthError.signedOut {
             session.mastodon.endedByServer(host: source.host)

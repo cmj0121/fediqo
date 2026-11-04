@@ -22,7 +22,7 @@ struct LineControl: View {
                     ))
                     .shellFont(.reading)
                     .shellHelp(verbatim: String(format: L10n.t("source.line.help"), host), about: title)
-                    if on, let line = Self.line(standing, host: host) {
+                    if on, let line = Self.line(standing, host: host, apart: session.lines.sockets.heardApart(host)) {
                         Text(line)
                             .shellFont(.meta)
                             .foregroundStyle(ShellChrome.inkDim(colorScheme))
@@ -49,11 +49,13 @@ struct LineControl: View {
         }
     }
 
-    /// What is said under the switch of how its line stands: open, or refused. Nothing while it
-    /// is opening, waiting after a drop, or not held — reading goes on as it does without it.
-    static func line(_ standing: ShellLines.Standing?, host: String, language: DummyLanguage? = nil) -> String? {
+    /// What is said under the switch of how its line stands: open — on one line, or `apart`, a line
+    /// for each thing heard where the source would not carry them on one (#459) — or refused.
+    /// Nothing while it is opening, waiting after a drop, or not held — reading goes on as it does
+    /// without it.
+    static func line(_ standing: ShellLines.Standing?, host: String, apart: Bool = false, language: DummyLanguage? = nil) -> String? {
         switch standing {
-        case .open?: String(format: L10n.t("source.line.open", language: language), host)
+        case .open?: String(format: L10n.t(apart ? "source.line.apart" : "source.line.open", language: language), host)
         case .refused(let status)?: String(format: L10n.t("source.line.refused", language: language), host, status)
         case .opening?, .waiting?, nil: nil
         }
@@ -118,8 +120,11 @@ struct HearsLines: ViewModifier {
 
     func body(content: Content) -> some View {
         let wants = session.lines.wants(running: phase != .background, in: session)
+        let fronts = session.lines.frontWants(running: phase != .background, in: session)
         content
             .task(id: wants) { await session.lines.hear(wants, in: session) }
+            // A list, the public timeline or a hashtag in front, as it happens (#460).
+            .task(id: fronts) { await session.lines.hearFront(fronts, in: session) }
             .task(id: session.lines.directWanted(running: phase != .background, in: session)) {
                 if let host = session.lines.directWanted(running: phase != .background, in: session) {
                     await session.lines.hearDirect(host, in: session)
@@ -129,6 +134,8 @@ struct HearsLines: ViewModifier {
             .task { SystemNoticePresses.shared.told = session.noticesTold }
             .onReceive(NotificationCenter.default.publisher(for: .fediqoCameForward)) { _ in
                 Task { await session.noticesTold.cameForward(in: session) }
+                // What a filter changed elsewhere meanwhile does, applied here as the person is back (#461).
+                Task { await session.serverFilters.cameForward(hosts: session.lines.heldHosts, in: session) }
             }
             .onChange(of: session.noticesTold.pressedID) { _, id in
                 if id != nil { onToldPressed(session.noticesTold.takePressed()) }

@@ -64,8 +64,12 @@ public struct MastodonLine: Sendable {
         try await open(path: Self.directPath)
     }
 
-    private func open(path: String) async throws -> AsyncThrowingStream<LineEvent, any Error> {
-        guard let url = Host.httpsURL(host: token.host, path: path) else { throw URLError(.badURL) }
+    func open(path: String, query: [URLQueryItem] = []) async throws -> AsyncThrowingStream<LineEvent, any Error> {
+        guard let base = Host.httpsURL(host: token.host, path: path),
+              var parts = URLComponents(url: base, resolvingAgainstBaseURL: false)
+        else { throw URLError(.badURL) }
+        if !query.isEmpty { parts.queryItems = query }
+        guard let url = parts.url, url.host() == base.host(), url.path() == base.path() else { throw URLError(.badURL) }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token.accessToken)", forHTTPHeaderField: "Authorization")
         let line = try await opener.open(request)
@@ -105,17 +109,19 @@ extension MastodonLine {
     /// The event of the direct line that says a conversation has something new.
     public static let conversationEvent = "conversation"
 
-    /// `event` landed as a read of Home would land it, while `source` is still here.
-    public static func land(_ event: LineEvent, of source: Source, in store: ItemStore) async -> MastodonLineLanded {
-        let host = source.host
-        let stamp = Source(host: host, kind: source.kind)
+    /// `event` landed as a read of Home would land it — or of `category`, a list or the public
+    /// timeline (#460), or of no category as a hashtag's page lands a post (#124) — while `source`
+    /// is still here.
+    public static func land(
+        _ event: LineEvent, of source: Source, as category: Category? = .home, in store: ItemStore
+    ) async -> MastodonLineLanded {
+        await land([event], of: source, as: category, in: store)[0]
+    }
+
+    /// An event that is no new post, landed: a change, a deletion, or nothing.
+    private static func landOther(_ event: LineEvent, of stamp: Source, in store: ItemStore) async -> MastodonLineLanded {
+        let host = stamp.host
         switch event.name {
-        case "update":
-            guard let status = decode(event.data) else { return .unreadable }
-            let listed = status.listed(source: stamp, category: .home, sent: ReadMoment.now())
-            let fresh = await store.note(listed.note.key) == nil
-            await store.ingest([listed.note] + listed.carried, ifSourceHere: host)
-            return .arrived(listed.note.key, fresh: fresh)
         case "status.update":
             guard let status = decode(event.data) else { return .unreadable }
             let item = status.arrival(source: stamp, categories: [], sent: ReadMoment.now()).item
@@ -129,6 +135,57 @@ extension MastodonLine {
         default:
             return .passed
         }
+    }
+
+    /// `events`, each landed as `land(_:of:in:)` lands it and in the order told — but **posts that
+    /// arrive one after another go in together** (#458): one landing, so one change of the store and
+    /// one redraw for a burst, where each alone would be one each. A change or a deletion between
+    /// them lands in its place, after the posts told before it. One result an event, in order.
+    public static func land(
+        _ events: [LineEvent], of source: Source, as category: Category? = .home, in store: ItemStore
+    ) async -> [MastodonLineLanded] {
+        let host = source.host
+        let stamp = Source(host: host, kind: source.kind)
+        var landed = [MastodonLineLanded](repeating: .passed, count: events.count)
+        // The posts waiting to go in together: where each one's result goes, and what it brings.
+        var gathered: [(at: Int, key: NoteKey, notes: [Note])] = []
+        func putIn() async {
+            guard !gathered.isEmpty else { return }
+            let held = await store.notes(gathered.map(\.key))
+            var seen: Set<NoteKey> = []
+            for post in gathered {
+                landed[post.at] = .arrived(post.key, fresh: seen.insert(post.key).inserted && held[post.key] == nil)
+            }
+            await store.ingest(gathered.flatMap(\.notes), ifSourceHere: host)
+            gathered = []
+        }
+        for (at, event) in events.enumerated() {
+            guard event.name == "update" else {
+                await putIn()
+                landed[at] = await landOther(event, of: stamp, in: store)
+                continue
+            }
+            guard let status = decode(event.data) else {
+                landed[at] = .unreadable
+                continue
+            }
+            let (key, notes) = arrived(status, of: stamp, as: category)
+            gathered.append((at, key, notes))
+        }
+        await putIn()
+        return landed
+    }
+
+    /// A post told as arriving through `category`: listed there under the id the timeline lists it
+    /// by, with what it reblogs beside it — or, through none, the post itself as a tag's page holds
+    /// it (`MastodonTag.posts`).
+    private static func arrived(_ status: StatusDTO, of source: Source, as category: Category?) -> (NoteKey, [Note]) {
+        guard let category else {
+            let note = status.asNote(source: source, categories: [], sent: ReadMoment.now())
+            return (note.key, [note])
+        }
+        let listed = status.listed(source: source, category: category, sent: ReadMoment.now())
+        return (listed.note.key, [listed.note] + listed.carried)
     }
 
     private static func decode(_ data: String) -> StatusDTO? {

@@ -30,6 +30,12 @@ private final class Lines: LineOpener, Sendable {
     }
 }
 
+/// How many times the session took in what the store holds.
+@MainActor
+private final class Adopts {
+    var count = 0
+}
+
 /// Home as the source answers it, and what was asked of it.
 private actor HomeServer: HTTPSender {
     var home = "[]"
@@ -56,7 +62,8 @@ struct LiveLineTests {
     }
 
     private func make(
-        signedIn: Bool = true, lines: Lines = Lines(), clock: TurnedClock = TurnedClock(), defaults: UserDefaults? = nil
+        signedIn: Bool = true, lines: Lines = Lines(), clock: TurnedClock = TurnedClock(), defaults: UserDefaults? = nil,
+        gather: TurnedClock? = nil
     ) async throws -> (ShellSession, HomeServer, SourceWork) {
         let tokens = MemoryMastodonTokens()
         if signedIn {
@@ -72,7 +79,9 @@ struct LiveLineTests {
         let work = SourceWork()
         session.work = work
         session.mastodon.work = work
-        session.lines = ShellLines(defaults: defaults, opener: lines, sleep: clock.sleep)
+        session.lines = gather.map { gate in
+            ShellLines(defaults: defaults, opener: lines, sleep: clock.sleep, gather: { try await gate.sleep(for: ShellLines.gathering) })
+        } ?? ShellLines(defaults: defaults, opener: lines, sleep: clock.sleep)
         session.mastodon.refresh()
         await session.reloadFromStore()
         return (session, server, work)
@@ -156,6 +165,55 @@ struct LiveLineTests {
         #expect(work.record.filter { $0.purpose == .line }.count == 1, "one ask, open for as long as it was")
     }
 
+    @Test("A burst is gathered from its first post, then lands at once and is drawn once; one post alone lands after the same moment; what a burst says of announcements is asked once (#458)")
+    func aBurst() async throws {
+        let lines = Lines()
+        let gate = TurnedClock()
+        let (session, _, _) = try await make(lines: lines, gather: gate)
+        let hearing = Task { await session.lines.hear([Self.host], in: session) }
+        defer { hearing.cancel() }
+        let open = await met("the line open", by: hearing) { if case .open? = session.lines.standing[Self.host] { true } else { false } }
+        try #require(open)
+        let adopts = Adopts()
+        session.adopting = { adopts.count += 1 }
+
+        for id in ["3", "4", "5"] { lines.last?.yield(LineEvent(name: "update", data: Self.status(id))) }
+        let gathering = await met("the burst gathered", by: hearing) { gate.sleeping == 1 }
+        try #require(gathering)
+        #expect(gate.asked == [ShellLines.gathering], "one moment for the burst, not one a post")
+        #expect(await session.store.all().isEmpty, "nothing lands while the burst is gathered")
+        #expect(adopts.count == 0)
+
+        gate.turn()
+        let landed = await met("the burst lands", by: hearing) { session.lines.above == 3 }
+        try #require(landed)
+        #expect(await session.store.all().count == 3)
+        let drawn = await met("the burst drawn", by: hearing) { adopts.count >= 1 }
+        try #require(drawn)
+        #expect(adopts.count == 1, "drawn once for the burst")
+        #expect(session.lines.newestAbove == NoteKey(host: Self.host, id: "https://social.example/users/ada/statuses/5").rowID)
+
+        lines.last?.yield(LineEvent(name: "update", data: Self.status("6")))
+        let alone = await met("one post gathered alone", by: hearing) { gate.sleeping == 1 }
+        try #require(alone)
+        gate.turn()
+        let one = await met("it lands and is drawn", by: hearing) { session.lines.above == 4 && adopts.count >= 2 }
+        #expect(one)
+        #expect(adopts.count == 2)
+
+        let asked = Adopts()
+        session.lines.announced = { _ in asked.count += 1 }
+        for name in ["announcement", "announcement.reaction", "announcement.reaction"] {
+            lines.last?.yield(LineEvent(name: name, data: "{}"))
+        }
+        let told = await met("the announcements gathered", by: hearing) { gate.sleeping == 1 }
+        try #require(told)
+        gate.turn()
+        let heard = await met("announcements asked again", by: hearing) { asked.count >= 1 }
+        #expect(heard)
+        #expect(asked.count == 1, "asked again once for the burst")
+    }
+
     @Test("Dropped, nothing is said, and after the wait the line is opened again and Home read up to now again")
     func dropped() async throws {
         let lines = Lines()
@@ -180,6 +238,39 @@ struct LiveLineTests {
         #expect(reread)
     }
 
+    @Test("While a line tells Home, the wait does not ask for it; dropped, the wait asks for it again (#457)")
+    func waitLeavesHomeToTheLine() async throws {
+        let lines = Lines()
+        let clock = TurnedClock()
+        let (session, server, _) = try await make(lines: lines, clock: clock)
+        let homeReads = { await server.asked.filter { $0 == "/api/v1/timelines/home" }.count }
+
+        await session.reload.held(in: session)
+        #expect(await homeReads() == 1, "with no line, the wait reads Home")
+
+        let hearing = Task { await session.lines.hear([Self.host], in: session) }
+        defer { hearing.cancel() }
+        let open = await met("the line open", by: hearing) { if case .open? = session.lines.standing[Self.host] { true } else { false } }
+        try #require(open)
+        #expect(session.lines.homeHeard == [Self.host])
+        let caughtUp = await homeReads()
+        #expect(caughtUp == 2, "the line read Home up to now as it opened")
+
+        await session.reload.held(in: session)
+        #expect(await homeReads() == caughtUp, "the line tells Home, so the wait does not ask")
+        #expect(await server.asked.contains("/api/v1/timelines/public"), "what the line does not tell is still asked")
+
+        await session.reload.timeline(.all, in: session)
+        #expect(await homeReads() == caughtUp + 1, "a press still asks")
+
+        lines.last?.finish(throwing: URLError(.networkConnectionLost))
+        let waiting = await met("waiting after the drop", by: hearing) { clock.sleeping == 1 }
+        try #require(waiting)
+        #expect(session.lines.homeHeard.isEmpty)
+        await session.reload.held(in: session)
+        #expect(await homeReads() == caughtUp + 2, "dropped, the wait asks for Home again")
+    }
+
     @Test("Refused, it is said on the source's page, not asked again this run, and nothing held changes")
     func refused() async throws {
         let lines = Lines(status: 401)
@@ -196,7 +287,7 @@ struct LiveLineTests {
 
     @Test("Every word it says is in each language, and the two Chinese tables are one", arguments: [
         "work.purpose.line", "activity.detail.until", "activity.detail.stillOpen", "source.line", "source.line.help",
-        "source.line.open", "source.line.refused", "source.line.signIn", "source.line.cannot", "timeline.line.above",
+        "source.line.open", "source.line.apart", "source.line.refused", "source.line.signIn", "source.line.cannot", "timeline.line.above",
         "timeline.line.above.one", "timeline.line.above.hint",
     ])
     func words(key: String) {

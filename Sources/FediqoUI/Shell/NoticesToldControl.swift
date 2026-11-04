@@ -62,6 +62,9 @@ struct NoticesToldControl: View {
             .shellFont(.reading)
             .disabled(systemRefused && !choice.system)
             .shellHelp(verbatim: L10n.t("source.told.system.help"), about: system)
+            if choice.system, session.noticesTold.kinds(host: host, in: session).contains(Notice.Kind.favourite.narrowedAs) {
+                favourites(choice)
+            }
             if systemRefused {
                 Text(L10n.t("source.told.system.refused"))
                     .shellFont(.meta)
@@ -80,6 +83,22 @@ struct NoticesToldControl: View {
                 .shellFont(.reading)
             }
         }
+    }
+
+    /// Whether a favourite is shown as the system's notice too (#462): off until turned on, and dim
+    /// while favourites tell nothing at all. A listener hears what it does as they reach it.
+    private func favourites(_ choice: ShellNoticesTold.Choice) -> some View {
+        let title = L10n.t("source.told.system.favourites")
+        let help = L10n.t("source.told.system.favourites.help")
+        return Toggle(title, isOn: Binding(
+            get: { choice.systemFavourites },
+            set: { session.noticesTold.chooseSystemFavourites($0, host: host) }
+        ))
+        .shellFont(.reading)
+        .disabled(choice.off.contains(Notice.Kind.favourite.narrowedAs))
+        .accessibilityHint(help)
+        .shellHelp(verbatim: help, about: title)
+        .padding(.leading, ShellSpace.pad)
     }
 
     /// Why the count beside notices may not move as the person expects, where it may not (#429): the

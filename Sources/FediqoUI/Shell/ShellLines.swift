@@ -1,6 +1,7 @@
 import FediqoCore
 import Foundation
 import Observation
+import Synchronization
 
 /// What is new in Home arrives as it happens, while a timeline that reads it is in front (#325).
 ///
@@ -60,6 +61,15 @@ final class ShellLines {
     private(set) var chosen: Set<String>
     /// Each source's line as it stands now; nothing for one not held.
     private(set) var standing: [String: Standing] = [:]
+    /// The hosts whose Home this line tells as it happens now: open, held for Home, and Home read up
+    /// to now as it opened. **The wait does not ask these for Home** (#457) — the line already says
+    /// it — and asks again the moment the line drops, as a line opened again reads Home up to now
+    /// before anything lands. Not observed: nothing is drawn from it.
+    ///
+    /// Kept by which opening holds it, so a line let go as another to the same source opens takes
+    /// only its own mark away.
+    var homeHeard: Set<String> { Set(homeHeardBy.keys) }
+    @ObservationIgnored private var homeHeardBy: [String: UUID] = [:]
     /// Posts arrived on a line above where the reader is, since they were last at the top.
     private(set) var above = 0
     /// The newest row that arrived so, by its row id.
@@ -77,6 +87,8 @@ final class ShellLines {
     /// What the line saying something of announcements does: handed in with the one keeper of them,
     /// which is not the session's. Nothing in a session that has none.
     @ObservationIgnored var announced: (String) async -> Void = { _ in }
+    /// The streams for what is in front refused for good this run (#460): not asked again.
+    @ObservationIgnored var frontRefused: Set<FrontWant> = []
     /// The sources whose direct line was refused for good, by the sign-in refused: not asked again
     /// under that sign-in. Another is asked afresh.
     private var directRefused: [String: String] = [:]
@@ -100,17 +112,29 @@ final class ShellLines {
     @ObservationIgnored private let defaults: UserDefaults?
     @ObservationIgnored let opener: any LineOpener
     @ObservationIgnored let sleep: @Sendable (Duration) async throws -> Void
-    @ObservationIgnored private let now: @Sendable () -> Date
+    @ObservationIgnored let now: @Sendable () -> Date
+    /// How long a burst is gathered from its first event before it lands (#458): `gathering` but
+    /// for a test, which ends it by hand.
+    @ObservationIgnored let gather: @Sendable () async throws -> Void
+    /// The one line to each source that carries everything heard of it (#459); a line of its own for
+    /// each stream where there is none.
+    @ObservationIgnored let sockets: ShellSockets
+    /// The moment a burst is gathered for: short enough that one post alone still shows at once.
+    nonisolated static let gathering: Duration = .milliseconds(250)
 
     init(
         defaults: UserDefaults? = nil, opener: any LineOpener = URLSessionLines.signedIn(),
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        gather: @escaping @Sendable () async throws -> Void = { try await Task.sleep(for: ShellLines.gathering) },
+        sockets: ShellSockets = ShellSockets()
     ) {
         self.defaults = defaults
         self.opener = opener
         self.sleep = sleep
         self.now = now
+        self.gather = gather
+        self.sockets = sockets
         chosen = Set(defaults?.stringArray(forKey: Self.key) ?? [])
     }
 
@@ -229,6 +253,21 @@ final class ShellLines {
         wentUp += 1
     }
 
+    /// The sources a line is held to now: the reader's own open, or the one socket held (#461).
+    var heldHosts: Set<String> {
+        var hosts = sockets.heldHosts
+        for (host, standing) in standing {
+            if case .open = standing { hosts.insert(host) }
+        }
+        return hosts
+    }
+
+    /// A post new here arrived on a line, above where the reader is.
+    func arrivedAbove(_ key: NoteKey) {
+        above += 1
+        newestAbove = key.rowID
+    }
+
     /// The timeline in front changed: what arrived above the last is not said over this one.
     func forgetAbove() {
         above = 0
@@ -245,16 +284,30 @@ final class ShellLines {
 
     /// `hear(_:in:)` of lines held for what each is wanted for.
     func hear(_ wants: [Want], in session: ShellSession) async {
-        let held = wants.map { want in Task { await self.keep(want, in: session) } }
+        await holdEach(wants) { await self.keep($0, in: session) }
+        for want in wants {
+            if case .refused? = standing[want.host] { continue }
+            standing[want.host] = nil
+        }
+    }
+
+    /// `keep` of each of `items` at once, until cancelled, when every one is let go.
+    func holdEach<Item: Sendable>(_ items: [Item], _ keep: @escaping @MainActor (Item) async -> Void) async {
+        let held = items.map { item in Task { await keep(item) } }
         await withTaskCancellationHandler {
             for line in held { await line.value }
         } onCancel: {
             for line in held { line.cancel() }
         }
-        for want in wants {
-            if case .refused? = standing[want.host] { continue }
-            standing[want.host] = nil
-        }
+    }
+
+    /// The wait after a line dropped, then `wait` doubled for the next, up to the longest. **A line
+    /// held a while before it dropped starts over from the first wait.** False where cancelled.
+    func waitAfterDrop(_ wait: inout Duration, opened: Date) async -> Bool {
+        if now().timeIntervalSince(opened) >= Double(Self.held.components.seconds) { wait = Self.firstWait }
+        do { try await sleep(wait) } catch { return false }
+        wait = min(wait * 2, Self.longestWait)
+        return true
     }
 
     /// One source's line, opened, heard, and opened again after a drop, until cancelled or
@@ -275,9 +328,7 @@ final class ShellLines {
                 return
             case .dropped:
                 standing[host] = .waiting
-                if now().timeIntervalSince(opened) >= Double(Self.held.components.seconds) { wait = Self.firstWait }
-                do { try await sleep(wait) } catch { return }
-                wait = min(wait * 2, Self.longestWait)
+                guard await waitAfterDrop(&wait, opened: opened) else { return }
             }
         }
     }
@@ -289,15 +340,10 @@ final class ShellLines {
         var wait = Self.firstWait
         while !Task.isCancelled {
             guard let token = session.mastodon.token(host: host) else { return }
-            let work = session.mastodon.work
-            guard let admission = work.admission(reached: host, source: nil, for: .line), work.spend(admission, at: host) else { return }
-            let record = work.begin(host: host, for: .line, name: nil, allowedBy: admission.allowedBy)
-            defer { work.endLine(record) }
             let opened = now()
             do {
-                let events = try await Outward.$admitted.withValue(true) {
-                    try await MastodonLine(token: token, opener: opener).openDirect()
-                }
+                guard let (events, end) = try await heard(.direct, host: host, token: token, name: nil, in: session) else { return }
+                defer { end() }
                 await session.directs.heard(host, in: session)
                 for try await event in events where event.name == MastodonLine.conversationEvent {
                     await session.directs.heard(host, in: session)
@@ -306,11 +352,28 @@ final class ShellLines {
                 directRefused[host] = token.accessToken
                 return
             } catch {}
-            guard !Task.isCancelled else { return }
-            if now().timeIntervalSince(opened) >= Double(Self.held.components.seconds) { wait = Self.firstWait }
-            do { try await sleep(wait) } catch { return }
-            wait = min(wait * 2, Self.longestWait)
+            guard !Task.isCancelled, await waitAfterDrop(&wait, opened: opened) else { return }
         }
+    }
+
+    /// `stream` of `host` as it happens: on the source's one socket where it carries it (#459), on a
+    /// line of its own where not — through **the gate** (#220) as every request is, and on the record
+    /// for as long as it is heard: a socket's act is the socket's, and a line's ends with `end`.
+    /// Nothing where the gate does not let it out.
+    func heard(
+        _ stream: MastodonStream, host: String, token: MastodonToken, name: SourceWork.Name?, in session: ShellSession
+    ) async throws -> (events: AsyncThrowingStream<LineEvent, any Error>, end: () -> Void)? {
+        let work = session.mastodon.work
+        do {
+            if let events = try await sockets.hear(stream, host: host, token: token, work: work) { return (events, {}) }
+        } catch is ShellSockets.Shut {
+            return nil
+        }
+        let opener = opener
+        let line = try await work.openLine(host: host, name: name) {
+            try await MastodonLine(token: token, opener: opener).open(stream)
+        }
+        return line.map { ($0.opened, $0.end) }
     }
 
     private enum End {
@@ -328,22 +391,22 @@ final class ShellLines {
               let source = session.sources.first(where: { $0.host.lowercased() == host })
         else { return .over }
         standing[host] = .opening
-        let work = session.mastodon.work
-        // **The gate** (#220), as every request's: a line belongs to the source it is of.
-        guard let admission = work.admission(reached: host, source: nil, for: .line), work.spend(admission, at: host) else {
-            return .over
-        }
-        let record = work.begin(host: host, for: .line, name: want.home ? .home : nil, allowedBy: admission.allowedBy)
-        defer { work.endLine(record) }
-        let line = MastodonLine(token: token, opener: opener)
+        // However this line ends, its Home is the wait's to ask again from then on.
+        let opening = UUID()
+        defer { if homeHeardBy[host] == opening { homeHeardBy[host] = nil } }
         let events: AsyncThrowingStream<LineEvent, any Error>
+        let end: () -> Void
         do {
-            events = try await Outward.$admitted.withValue(true) { try await line.open() }
+            guard let heard = try await heard(.user, host: host, token: token, name: want.home ? .home : nil, in: session) else {
+                return .over
+            }
+            (events, end) = heard
         } catch let refused as MastodonLineRefused where (400..<500).contains(refused.status) {
             return .refused(refused.status)
         } catch {
             return .dropped
         }
+        defer { end() }
         // Home up to now, before anything the line tells lands over it.
         if want.home {
             let door = session.mastodon.authorized(token: token, for: .timeline, name: .home)
@@ -364,29 +427,33 @@ final class ShellLines {
             await session.noticesTold.caughtUp(host: host, in: session)
         }
         standing[host] = .open(since: now())
+        if want.home { homeHeardBy[host] = opening }
         do {
-            for try await event in events {
-                if want.notices, let notice = MastodonNotices.told(event, source: source) {
-                    await session.noticesTold.told(notice, in: session)
-                    continue
+            for try await burst in Self.bursts(of: events, gathered: gather) {
+                // Home's events of the burst, landed together once the rest is said (#458). What
+                // the source is asked again for — notices merged, announcements, filters — is asked
+                // once a burst, however often the burst says it.
+                var home: [LineEvent] = []
+                var merged = false, announcements = false, filters = false
+                for event in burst {
+                    if want.notices, let notice = MastodonNotices.told(event, source: source) {
+                        await session.noticesTold.told(notice, in: session)
+                    } else if want.notices, MastodonNotices.saysMerged(event) {
+                        merged = true
+                    } else if MastodonLine.announcementEvents.contains(event.name) {
+                        announcements = true
+                    } else if event.name == MastodonLine.filtersEvent {
+                        filters = true
+                    } else if want.home, MastodonLine.homeEvents.contains(event.name) {
+                        home.append(event)
+                    }
                 }
-                if want.notices, MastodonNotices.saysMerged(event) {
-                    await session.noticesTold.caughtUp(host: host, in: session)
-                    continue
-                }
-                if MastodonLine.announcementEvents.contains(event.name) {
-                    await announced(host)
-                    continue
-                }
-                if event.name == MastodonLine.filtersEvent {
-                    await session.serverFilters.heard(host: host, in: session)
-                    continue
-                }
-                guard want.home, MastodonLine.homeEvents.contains(event.name) else { continue }
-                let landed = await MastodonLine.land(event, of: source, in: session.store)
-                if case .arrived(let key, true) = landed {
-                    above += 1
-                    newestAbove = key.rowID
+                if merged { await session.noticesTold.caughtUp(host: host, in: session) }
+                if announcements { await announced(host) }
+                if filters { await session.serverFilters.heard(host: host, in: session) }
+                guard !home.isEmpty else { continue }
+                for case .arrived(let key, true) in await MastodonLine.land(home, of: source, in: session.store) {
+                    arrivedAbove(key)
                 }
                 await session.reloadFromStore()
             }
@@ -394,5 +461,47 @@ final class ShellLines {
             return .dropped
         }
         return .dropped
+    }
+
+    /// `events` handed on in bursts (#458): from the first event after a quiet, everything told
+    /// until `gathered` returns goes on as one, in the order told. A line that ends or drops hands
+    /// on what it was gathering first, then ends or drops as it did. Let go, it lets the line go.
+    nonisolated static func bursts(
+        of events: AsyncThrowingStream<LineEvent, any Error>,
+        gathered: @escaping @Sendable () async throws -> Void
+    ) -> AsyncThrowingStream<[LineEvent], any Error> {
+        let (bursts, out) = AsyncThrowingStream<[LineEvent], any Error>.makeStream()
+        // What is gathered so far, and whether a gathering is under way for it.
+        let held = Mutex<(events: [LineEvent], gathering: Bool)>(([], false))
+        let handOn: @Sendable () -> Void = {
+            let burst = held.withLock { state in
+                defer { state = ([], false) }
+                return state.events
+            }
+            if !burst.isEmpty { out.yield(burst) }
+        }
+        let hearing = Task {
+            do {
+                for try await event in events {
+                    let first = held.withLock { state in
+                        state.events.append(event)
+                        defer { state.gathering = true }
+                        return !state.gathering
+                    }
+                    guard first else { continue }
+                    Task {
+                        try? await gathered()
+                        handOn()
+                    }
+                }
+                handOn()
+                out.finish()
+            } catch {
+                handOn()
+                out.finish(throwing: error)
+            }
+        }
+        out.onTermination = { _ in hearing.cancel() }
+        return bursts
     }
 }
