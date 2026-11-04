@@ -169,20 +169,20 @@ struct DummyThreadPane: View {
                     guard let id = DummyCommand.returning(selected: &selectedID, touch: touch, opening: root.id)
                     else { return }
                     // A tick later: a lazy stack just built has not laid out the row to scroll to.
-                    Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
+                    Task { @MainActor in proxy.scrollTo(id, anchor: ShellScroll.focus) }
                 }
                 // **A reply opened from a timeline is brought into view once its topic's replies
                 // are drawn** (#297): they are read from this device, or off the page, a moment
                 // after the pane is, so the pane's own appearance is too early to find it.
                 .onChange(of: replyInView) { _, id in
                     guard let id else { return }
-                    Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
+                    Task { @MainActor in proxy.scrollTo(id, anchor: ShellScroll.focus) }
                 }
                 .onChange(of: selectedID) { _, id in
                     guard let id else { return }
                     returningID = nil
                     withAnimation(.easeInOut(duration: 0.18)) {
-                        proxy.scrollTo(id, anchor: .center)
+                        proxy.scrollTo(id, anchor: ShellScroll.focus)
                     }
                 }
                 // The first row drawn — the first ancestor, or the opened post where there is
