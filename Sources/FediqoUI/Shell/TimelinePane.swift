@@ -1238,9 +1238,6 @@ struct TimelinePane: View {
         )
         let rows = shown.rows
         let last = rows.count - 1
-        // Where the timeline in front is not whole, said at its place (#201). A search's results
-        // are not a timeline, and say nothing of the kind.
-        let gaps = searching ? [:] : session.gapMarks(in: items)
         // What is new to this drawing, which eases in where it stands (#357).
         let arrived = searching ? [] : session.timelineArrived(latest: prefs.latestDate)
         // Which drawing this is, for the place to be held across one that moved the rows above
@@ -1327,7 +1324,6 @@ struct TimelinePane: View {
                         ))
                         // And a search's, its next pages from the file (#360).
                         .modifier(SearchReadsOn(asks: searching && index >= rows.count - Self.moreAhead, session: session))
-                        .modifier(TimelineGapMarked(marks: gaps[item.id], session: session))
                         if !isLast {
                             ShellRule()
                         }

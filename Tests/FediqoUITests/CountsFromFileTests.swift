@@ -107,12 +107,6 @@ struct CountsFromFileTests {
         func rowsByPeriod(_ period: HeldPeriod, calendar: Calendar, most: Int) throws -> [Holdings.Bucket] {
             try call { try file.rowsByPeriod(period, calendar: calendar, most: most) }
         }
-        func oldestStatusID(host: String, category: FediqoCore.Category) throws -> String? {
-            try call { try file.oldestStatusID(host: host, category: category) }
-        }
-        func newestListed(host: String, category: FediqoCore.Category) throws -> (id: String, key: NoteKey)? {
-            try call { try file.newestListed(host: host, category: category) }
-        }
     }
 
     /// A file of `everything`, and a session over it as a launch makes one, with a small cap, its

@@ -171,8 +171,8 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// Whether `earlier` is its source's history and not only what this device saw (#332,
     /// `Note.historyAt`): its first wording is then the post as first written.
     public var earlierFromSource = false
-    /// Where a timeline this copy arrived through is not whole next to it — `Note.gaps`, carried
-    /// so the list can say so at its place (#201). **This copy's**, of its own source's timelines.
+    /// Where a timeline this copy arrived through was said not whole next to it — `Note.gaps`. No
+    /// list draws it any more (#470). **This copy's**, of its own source's timelines.
     public var gaps: Set<TimelineGap> = []
     /// Whether the author covered it, or nothing where the source never said. Carried as the
     /// three answers it has, not folded down to two — see `covered`.

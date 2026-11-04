@@ -58,8 +58,7 @@ final class ShellReload {
         /// A hashtag's posts, asked of the sources of the timeline in front that keep tags (#197).
         case tag
         /// The next, older stretch of the timeline in front, asked as the reader nears its end
-        /// (#87), or one timeline read on from a place that says more belong there (#201). See
-        /// `ShellMore.swift` and `ShellReadOn.swift`.
+        /// (#87), from where its latest read ended (#470). See `ShellMore.swift`.
         case more
         /// The thread open in front, asked again on the wait (#198). Said at the thread's own
         /// foot, not in the toast. See `ShellRenewal.swift`.
@@ -175,9 +174,7 @@ final class ShellReload {
         let ended = Set(stretches.trendsEnded.map(\.host))
         if ended != trendsEnded { trendsEnded = ended }
     }
-    /// Places reached while another ask for more was out, each read on as that one ends (#201).
-    @ObservationIgnored var pendingReadOn = PendingReadOn()
-    /// The hosts each running read of many sources — `r`'s, the wait's — is reading (#201).
+    /// The hosts each running read of many sources — `r`'s, the wait's — is reading.
     @ObservationIgnored var readingHosts: [Ask: Set<String>] = [:]
     /// The thread open in front of this window, which the wait asks again (#198). Nothing with no
     /// thread in front. See `ShellRenewal.swift`.
@@ -1027,7 +1024,6 @@ final class ShellReload {
         if ask == .tag { tagWaiting = [] }
         if ask == .timeline { landed += 1 }
         run.waiter.resume()
-        if ask == .more { readOnPending() }
     }
 
     private static func purposes(of ask: Ask) -> Set<SourceWork.Purpose> {
@@ -1067,7 +1063,7 @@ final class ShellReload {
     ///
     /// **Why the open, and only for these.** A row kept by an earlier build was read with its
     /// quote spelled into its words as an `RE:` address, and nothing reads it again by itself:
-    /// a timeline reads on only from the newest post it holds (#201), and opening the thread
+    /// a timeline reads only its newest posts (#470), and opening the thread
     /// reads the posts around it, not the post (#90). So a reader who opens it would see the
     /// address and no quote until they pressed `r`. The post read here is `r`'s own read of it,
     /// once, quietly: what it says lands in the store, and a failure changes nothing drawn.
@@ -1215,7 +1211,7 @@ final class ShellReload {
             let client = { (name: SourceWork.Name) in
                 session.reach.mastodon(host, for: .timeline, name: name, within: self.deadline)
             }
-            // Read on from the newest post held of it, not its newest stretch alone (#201).
+            // Its newest posts, which start reading it down over (#470).
             let publicRead = { await self.readOnPublic(client(.public), stamp: stamp, in: session) }
             // The top of what is rising. **Read by the reader's own reload, reading on starts
             // from under it again** (#288) — and only then: the wait reads the same top every

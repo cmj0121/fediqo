@@ -295,15 +295,15 @@ struct MastodonAccountTests {
         #expect(source.lists == [Self.friends])
     }
 
-    @Test("Caught up as a line opens, Home is read and landed, read on from what is held, and whole")
+    @Test("Caught up as a line opens, Home's newest is read and landed, and reading it down starts at its oldest")
     func catchUp() async throws {
         let (account, store, server, _) = try await account(["/api/v1/timelines/home": Self.timeline("2", "1")])
         #expect(try await account.catchUp())
         #expect(await categories(store) == ["1": [.home], "2": [.home]])
-        #expect(await store.newestListedID(host: host, category: .home) == "2")
+        #expect(await store.readDownPlace(host: host, category: .home) == ReadDownPlace(id: "1"))
         #expect(try await account.catchUp())
         let again = try #require(await server.requests.last?.url?.query())
-        #expect(again.contains("min_id=1"), "read on from one before what is held: \(again)")
+        #expect(!again.contains("min_id") && !again.contains("max_id"), "the newest again, never read on: \(again)")
     }
 
     @Test("A catch-up that could not read Home throws, and nothing lands")

@@ -350,8 +350,8 @@ struct MastodonMarksTests {
         #expect(deep.listed[.bookmarks] == "6:6", "only the deeper mark is gone, and the post is listed by the one it still has")
     }
 
-    @Test("A walk that reaches its bound having met nothing held — more marked since than it reads — says where marks may be missing on the lowest post it brought; reading down from there fills it, and the place goes")
-    func aPlaceMissingIsSaidAndFilled() async throws {
+    @Test("A walk that reaches its bound having met nothing held — more marked since than it reads — keeps where marks may be missing on the lowest post it brought")
+    func aPlaceMissingIsKept() async throws {
         let (marks, store, server) = try await reader(Self.byTwo, reach: 1)
         // The third post alone held, under the end.
         await server.answer(["\(Self.bookmarks)?limit=2&max_id=2": .json(Captures.bookmarkStretches[2].body, link: Captures.bookmarkStretches[2].link)])
@@ -362,18 +362,6 @@ struct MastodonMarksTests {
         try await marks.read(.bookmarks)
         let lowest = try #require(await store.all().first { $0.statusID == Captures.ids[1] })
         #expect(lowest.gaps == [TimelineGap(.mayBeMissing, in: .bookmarks, from: "4")])
-        #expect(await store.markHole(lowest.key, in: .bookmarks) == "4")
-        // Read down: below `4` brings the fifth and the first; one stretch is the bound, and it
-        // met nothing held, so the place moves down to `2`.
-        await server.forget()
-        try await marks.readDown(.bookmarks, below: lowest.key)
-        #expect(await server.asked == ["\(Self.bookmarks)?limit=2&max_id=4"])
-        #expect(await store.markHole(lowest.key, in: .bookmarks) == "2")
-        // Again: below `2` is the third, held — the place is filled, and goes.
-        try await marks.readDown(.bookmarks, below: lowest.key)
-        #expect(await store.markHole(lowest.key, in: .bookmarks) == nil)
-        #expect(await held(store, .bookmarks) == [1, 2, 3, 4, 5])
-        #expect(await store.all().allSatisfy { $0.gaps.isEmpty })
     }
 
     @Test("The wait's walk stops at the first stretch that brings only what is held; a reload walks to the lowest mark held")

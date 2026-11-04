@@ -221,22 +221,6 @@ struct StorePoolTests {
         #expect(await pool.all() == (await whole.all()))
     }
 
-    @Test("a mark a read on said again comes off a row the file still has it on, once read")
-    func remainSaidAgain() async throws {
-        let remain = TimelineGap(.newerRemain, in: .home)
-        let old = Self.post("old", at: Self.at.addingTimeInterval(-60), gaps: [remain])
-        let file = try await seededFile([old])
-        let whole = try wholeStore(file)
-        let pool = ItemStore(sources: Self.sources, rows: file)
-        let fresh = Self.post("new")
-        for store in [whole, pool] {
-            await store.land(ReadOn(notes: [fresh], newerRemainAbove: fresh.key), of: .home, ifSourceHere: "one.example")
-        }
-        _ = try await read(try query([]), pages: 1, limit: 10, from: file, into: pool)
-        #expect(await pool.note(old.key)?.gaps == [])
-        #expect(await pool.all() == (await whole.all()))
-    }
-
     // MARK: - A file that will not be read
 
     /// The file, failing every read from the `failingFrom`th on (counted from 1) while `failing`
@@ -299,12 +283,6 @@ struct StorePoolTests {
         func rowCounts() throws -> [String: HostRows] { try call { try file.rowCounts() } }
         func rowsByPeriod(_ period: HeldPeriod, calendar: Calendar, most: Int) throws -> [Holdings.Bucket] {
             try call { try file.rowsByPeriod(period, calendar: calendar, most: most) }
-        }
-        func oldestStatusID(host: String, category: FediqoCore.Category) throws -> String? {
-            try call { try file.oldestStatusID(host: host, category: category) }
-        }
-        func newestListed(host: String, category: FediqoCore.Category) throws -> (id: String, key: NoteKey)? {
-            try call { try file.newestListed(host: host, category: category) }
         }
 
         /// How many times the kept rows were asked for.

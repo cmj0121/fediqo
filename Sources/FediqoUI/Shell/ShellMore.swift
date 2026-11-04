@@ -6,26 +6,24 @@ import SwiftUI
 //
 // `r` asks for the newest of the timeline in front. Reading toward its end is a different ask:
 // the next, older stretch of each read the timeline draws from — a Mastodon timeline before the
-// oldest post held from it, a forum's front page or board one page further on. It runs as its own
+// oldest post its latest read brought, a forum's front page or board one page further on. It runs as its own
 // kind beside `r` and a thread (#175), lands through `ItemStore.ingest` like every timeline read,
 // and the listing renews from the store: older rows arrive below the place being read, so the
 // selected post stays selected and nothing is scrolled.
 //
-// **Before the oldest post held, because no hole lies above it unsaid** (#201). A read used to
-// bring a timeline's newest stretch alone, so after a relaunch the oldest post held lay past a
-// hole between that stretch and what an earlier run held, and asking before it skipped the hole.
-// Every read of a Mastodon timeline now reads on from the newest post held of it: what lay
-// between is read, or said at its place where it could not be (`ShellReadOn.swift`). So this
-// run's newest stretch reaches down, unbroken but for what is said, to the oldest post held, and
-// that is where it reads on from. Asking before a post further up instead would ask again for
-// pages this device holds, and bring nothing new below a reader already at the end.
+// **Before the oldest post the latest read brought, each source and timeline on its own** (#470,
+// `ItemStore.readDownPlace`). A read of a Mastodon timeline brings its newest posts alone, and
+// starts that place over; each stretch read down moves it to the oldest it brought. So what lies
+// below is asked of the source again as it is reached, even where this device holds it from an
+// earlier read — never skipped past, and nothing said of what lay between. A timeline not read
+// this run has no place, and asks nothing until it is.
 //
 // **What a stretch does not carry says nothing.** A post missing from a page merely did not
 // arrive on it; nothing here drops a row or marks one (#179 is what a post its source really
 // deleted becomes, and only a read of that one post says so).
 //
-// **Asked once, and not past the end.** A Mastodon stretch is asked before one post once: a page
-// that brought nothing older leaves the same oldest post, and the same ask is not made again. A
+// **Asked once, and not past the end.** A Mastodon stretch that brought nothing older has no more
+// there (`ReadDownPlace.ended`), and is not asked again until its newest is read again. A
 // forum's stretch ends at a page with no thread on it, or at a page the same as the one before —
 // which is what a Discuz! answers past its last page, the last page again. **Not at a page this
 // device already holds**: what an earlier run read is still here, and ending there would stop
@@ -190,9 +188,9 @@ extension ShellReload {
     func more(_ query: TimelineQuery, in session: ShellSession) async {
         guard !asking.contains(.more), session.editing == nil else { return }
         let readingNewest = !asking.isDisjoint(with: [.timeline, .held, .renew])
-        let onFile = await Self.oldestOnFile(query, in: session)
+        let places = await Self.places(query, in: session)
         let floors = await Self.marksFloors(query, in: session, after: stretches)
-        let due = Self.due(query, in: session, stretches: stretches, onFile: onFile, marks: floors)
+        let due = Self.due(query, in: session, stretches: stretches, places: places, marks: floors)
             .filter { !readingNewest || $0.source.kind == .mastodon }
         guard !due.isEmpty else { return }
         let hosts = due.map(\.stretch.host).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
@@ -239,36 +237,31 @@ extension ShellReload {
         )
     }
 
-    /// The oldest post the file holds of each stretch of `query` a Mastodon reads on through time
-    /// (#201, #359), read off the main actor: the pool holds only the rows lately seen, and a
-    /// stretch asked from the oldest of those would ask its source again for what the device
-    /// holds. Nothing where there is no file.
-    static func oldestOnFile(_ query: TimelineQuery, in session: ShellSession) async -> [Stretch: String] {
-        guard session.store.heldInPart else { return [:] }
+    /// Where each stretch of `query` a Mastodon reads through time is read down from (#470): the
+    /// oldest post its latest read brought (`ItemStore.readDownPlace`). One with none is not read.
+    static func places(_ query: TimelineQuery, in session: ShellSession) async -> [Stretch: ReadDownPlace] {
         let sources = session.sources
         let asks = CompiledTimeline(query.definition(among: session.written), sources: sources).sourcesToAsk()
-        var oldest: [Stretch: String] = [:]
+        var places: [Stretch: ReadDownPlace] = [:]
         for ask in asks {
             guard let source = sources.first(where: { $0.host == ask.host }) else { continue }
-            // Every stretch it could read, signed in or not: one not read is never asked from.
+            // A forum's stretches are asked by page, and hold no place: none is found for them.
             for stretch in stretches(of: source, for: ask.categories, signedIn: true) {
-                // A board's stretches are asked by page, and what is rising by how far in.
-                if case .board = stretch.category { continue }
-                guard let category = stretch.category, category != .trends, oldest[stretch] == nil,
-                      let id = await session.store.oldestStatusID(host: source.host, category: category)
+                guard let category = stretch.category, category != .trends, !category.isMarks, places[stretch] == nil,
+                      let place = await session.store.readDownPlace(host: source.host, category: category)
                 else { continue }
-                oldest[stretch] = id
+                places[stretch] = place
             }
         }
-        return oldest
+        return places
     }
 
-    /// Every stretch of `query` there is a next of now. `onFile` is the oldest post the file
-    /// holds of each (`oldestOnFile`), asked before where it is older than what is held; `marks`
-    /// is the lowest floor held of each stretch of the reader's marks (`marksFloors`, #317),
-    /// asked below — and a stretch of marks with none there has no next to ask.
+    /// Every stretch of `query` there is a next of now. `places` is where each is read down from
+    /// (`places`, #470), asked before unless its source said it has no more there; `marks` is the
+    /// lowest floor held of each stretch of the reader's marks (`marksFloors`, #317), asked below
+    /// — and a stretch of marks with none there has no next to ask.
     static func due(
-        _ query: TimelineQuery, in session: ShellSession, stretches: ShellStretches, onFile: [Stretch: String] = [:],
+        _ query: TimelineQuery, in session: ShellSession, stretches: ShellStretches, places: [Stretch: ReadDownPlace] = [:],
         marks: [Stretch: String] = [:]
     ) -> [Due] {
         let sources = session.sources
@@ -296,11 +289,9 @@ extension ShellReload {
                         else { return nil }
                         return Due(stretch: stretch, source: source, cursor: .mark(cursor))
                     }
-                    guard let category = stretch.category,
-                          let oldest = Self.older(Self.oldest(category, of: source.host, in: session.notes), onFile[stretch]),
-                          !stretches.hasAsked(stretch, before: oldest)
-                    else { return nil }
-                    return Due(stretch: stretch, source: source, cursor: .before(oldest))
+                    // Read down from where the latest read of it ended, each source on its own (#470).
+                    guard let place = places[stretch], !place.ended else { return nil }
+                    return Due(stretch: stretch, source: source, cursor: .before(place.id))
                 case .discuz, .discourse:
                     return stretches.next(stretch).map { Due(stretch: stretch, source: source, cursor: .page($0)) }
                 case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
@@ -339,20 +330,6 @@ extension ShellReload {
         }
     }
 
-    /// The server id of the oldest post held from `host` through `category`: a Mastodon id grows
-    /// with time, and a longer one is a later one.
-    static func oldest(_ category: FediqoCore.Category, of host: String, in notes: [Note]) -> String? {
-        notes.filter { $0.source.host == host && $0.categories.contains(category) }
-            .compactMap(\.statusID)
-            .min { $0.count != $1.count ? $0.count < $1.count : $0 < $1 }
-    }
-
-    /// The older of two server ids, or whichever there is.
-    static func older(_ one: String?, _ two: String?) -> String? {
-        guard let one, let two else { return one ?? two }
-        return (two.count != one.count ? two.count < one.count : two < one) ? two : one
-    }
-
     /// What asking a source for its stretches came to: whether every one came back, and whether
     /// any of it may have changed what is held or who is signed in — a stretch that landed, or a
     /// sign-in the source ended — which is when the listing is drawn again.
@@ -383,7 +360,6 @@ extension ShellReload {
             switch due.cursor {
             case .before(let id):
                 try await mastodon(due, before: id, stamp: stamp, in: session)
-                stretches.asked(due.stretch, before: id)
             case .mark(let cursor):
                 guard let category = due.stretch.category else { return true }
                 let next = try await olderMarks(category, of: due.source, below: cursor, in: session)
@@ -432,7 +408,7 @@ extension ShellReload {
                 try await reader.client.publicTimeline(source: stamp, olderThan: id)
             }
             try Task.checkCancellation()
-            await session.store.ingest(notes, ifSourceHere: host)
+            await session.store.landOlder(notes, of: .public, below: id, ifSourceHere: host)
         // The reader's marks are asked by mark (`Due.Cursor.mark`), never before a post's id.
         case .some(let category) where category.isMarks:
             return
