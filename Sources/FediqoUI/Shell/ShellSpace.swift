@@ -26,6 +26,17 @@ enum ShellSpace {
     static let room: CGFloat = 24
 }
 
+/// Where a list puts the row in focus as it scrolls to it, a keyboard or a pointer walking it
+/// (#473): **a little above the middle**, two fifths of the way down, so more of what comes after
+/// it is in view. One place on a Mac and a phone, at any height, since it is a share of the list.
+/// Under a finger the row read goes to the top instead, which is no focus of this.
+///
+/// A row taller than the list is placed as any other: its own two fifths meet the list's, as its
+/// middle met the list's middle before.
+enum ShellScroll {
+    static let focus = UnitPoint(x: 0.5, y: 0.4)
+}
+
 /// One ladder of corners, as `ShellSpace` is one ladder of gaps: the four rungs a corner that was
 /// spelled as a bare number is now read from.
 ///
