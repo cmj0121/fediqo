@@ -44,6 +44,11 @@ struct LoadsLetGoTests {
         let session = ShellSession(
             http: FixtureHTTP(), store: store, mastodon: MastodonSessions(tokens: tokens, sender: ActServer([:]))
         )
+        // **On a clock nobody turns** (#469): a try's deadline is the pacer's own tests', and on the
+        // system's clock it came for the other source's load whenever a busy run took longer than
+        // it between putting that load on the wire and looking at it — ending its try as failed and
+        // putting it back in line, which read as the source let go reaching past itself.
+        session.loads = LoadPacer(clock: StillClock())
         session.mastodon.refresh()
         await session.reloadFromStore()
         return session
