@@ -2209,8 +2209,9 @@ public struct FediqoRootView: View {
         return setOutFromNotices(to: .person(person), for: notice, lighting: nil)
     }
 
-    /// Who boosted or favourited a post a line is about (#375): that list, a step of the timeline
-    /// place's walk, as from the post's own row.
+    /// The people a line is about: who boosted or favourited its post (#375), or who is in its
+    /// collection (#430). That list is a step of the timeline place's walk, as from the post's own
+    /// row or the owner's page.
     private func openNoticePeople(_ list: PeopleList, of notice: Notice) -> Bool {
         guard Self.noticesInFront(place: place, open: openLayers, held: noticesHeld) else { return false }
         return setOutFromNotices(to: .people(list), for: notice, lighting: nil)
