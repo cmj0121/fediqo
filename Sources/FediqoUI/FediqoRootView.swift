@@ -2076,6 +2076,8 @@ public struct FediqoRootView: View {
             return false
         case .person(let person):
             return openNoticePerson(person, of: notice)
+        case .people(let list):
+            return openNoticePeople(list, of: notice)
         case .post(let post):
             Task { await openNoticePost(post, of: notice) }
             return true

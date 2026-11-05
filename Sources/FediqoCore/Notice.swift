@@ -107,10 +107,10 @@ public struct Notice: Hashable, Sendable, Identifiable {
     /// what opens it among the reports of the server tended. Held for the run: a notice read
     /// back from this device's store names none, and opens the reports at their top.
     public let report: String?
-    /// The name of the collection a notice of one is about (#430), as its source says it, fit for a
-    /// line. Held for the run, as `report` is: a notice read back from the store names none, and says
-    /// so in words that need none.
-    public let collection: String?
+    /// The collection a notice of one is about (#430), as its source says it: what its line names,
+    /// and what a press on it opens. Held for the run, as `report` is: a notice read back from the
+    /// store names none, says so in words that need none, and opens who put it together.
+    public let collection: PersonCollection?
     /// The oldest notice id it stands for **on the pages read so far**: a gathered line the
     /// source cut at a page edge reaches further down once the next page is folded in.
     public let oldestID: String
@@ -121,7 +121,7 @@ public struct Notice: Hashable, Sendable, Identifiable {
 
     public init(
         source: Source, handle: Handle, kind: Kind, people: [NoticePerson], count: Int = 1, post: Note? = nil,
-        at: Date, newestID: String, oldestID: String, report: String? = nil, collection: String? = nil
+        at: Date, newestID: String, oldestID: String, report: String? = nil, collection: PersonCollection? = nil
     ) {
         self.report = report
         self.collection = collection

@@ -573,10 +573,10 @@ struct NoticeWordsTests {
     func newerKinds() {
         let ada = NoticePerson(handle: "@ada@a.example", name: "Ada")
         let source = Source(host: "a.example", kind: .mastodon)
-        func notice(_ kind: Notice.Kind, collection: String? = nil, post: Note? = nil) -> Notice {
+        func notice(_ kind: Notice.Kind, collection name: String? = nil, post: Note? = nil) -> Notice {
             Notice(
                 source: source, handle: .one(id: "1"), kind: kind, people: [ada], post: post, at: Date(timeIntervalSince1970: 0),
-                newestID: "1", oldestID: "1", collection: collection
+                newestID: "1", oldestID: "1", collection: name.map { PersonCollection(id: "7", name: $0, words: nil, count: 2) }
             )
         }
         #expect(NoticeWords.what(notice(.quotedUpdate), language: .english) == "changed a post you quoted")
@@ -592,10 +592,31 @@ struct NoticeWordsTests {
             }
         }
         #expect(Set([Notice.Kind.quotedUpdate, .addedToCollection, .collectionUpdate].map { NoticeWords.symbol(notice($0)) }).count == 3)
-        // A collection's news opens its owner's page, where their collections are listed.
-        guard case .person = NoticeWords.opens(notice(.addedToCollection)) else {
-            Issue.record("a collection's news opens nothing")
-            return
+        #expect(NoticeWords.what(notice(.collectionUpdate, collection: ""), language: .english) == NoticeWords.what(notice(.collectionUpdate), language: .english), "a name of nothing is no name")
+    }
+
+    @Test("A collection's news opens who is in that collection; read back without it, who put it together")
+    func collectionOpens() throws {
+        let owner = NoticePerson(handle: "@ada@a.example", name: "Ada")
+        let friends = PersonCollection(id: "7", name: "Friends", words: nil, count: 2, ownerID: "11")
+        for kind in [Notice.Kind.addedToCollection, .collectionUpdate] {
+            let told = Notice(
+                source: Self.source, handle: .one(id: "1"), kind: kind, people: [owner], at: Self.at,
+                newestID: "1", oldestID: "1", collection: friends
+            )
+            guard case .people(let list) = NoticeWords.opens(told) else {
+                Issue.record("\(kind) opens the collection")
+                continue
+            }
+            #expect(list.which == .collection && list.host == "a.example" && list.accountID == "7")
+            #expect(list.words == "Friends" && list.counted == 2 && list.owner == "11" && list.handle == "@ada@a.example")
+            #expect(list.id == PeopleList.collectionKey("7", at: "a.example"), "the page the person's own collections open")
+            let readBack = Notice(source: Self.source, handle: .one(id: "1"), kind: kind, people: [owner], at: Self.at, newestID: "1", oldestID: "1")
+            guard case .person(let person) = NoticeWords.opens(readBack) else {
+                Issue.record("\(kind), read back, opens who put it together")
+                continue
+            }
+            #expect(person.handle == "@ada@a.example")
         }
     }
 }

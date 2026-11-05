@@ -68,14 +68,20 @@ struct NoticeNewerKindsTests {
         #expect(line.kind == .quotedUpdate && line.people.count == 1)
     }
 
-    @Test("A collection's news names the collection and its owner, on both reads")
+    @Test("A collection's news names the collection — what it is called, which it is, how many are in it — and its owner, on both reads")
     func collections() async throws {
         let ones = try await page("/api/v1/notifications", MastodonLiveCaptures.collectionNews).notices
         #expect(ones.map(\.kind) == [.collectionUpdate, .addedToCollection])
-        #expect(ones.allSatisfy { $0.collection == "Close friends" && $0.people.count == 1 && $0.post == nil })
+        #expect(ones.allSatisfy { Self.closeFriends($0.collection) && $0.people.count == 1 && $0.post == nil })
         let lines = try await page("/api/v2/notifications", MastodonLiveCaptures.collectionNewsGathered).notices
         #expect(lines.map(\.kind) == [.collectionUpdate, .addedToCollection])
-        #expect(lines.allSatisfy { $0.collection == "Close friends" && $0.people.count == 1 })
+        #expect(lines.allSatisfy { Self.closeFriends($0.collection) && $0.people.count == 1 })
+    }
+
+    /// The collection both captures carry, as its source said it.
+    private static func closeFriends(_ collection: PersonCollection?) -> Bool {
+        collection?.id == "117546234184318013" && collection?.name == "Close friends" && collection?.count == 1
+            && collection?.ownerID == "117546217477227263"
     }
 }
 
