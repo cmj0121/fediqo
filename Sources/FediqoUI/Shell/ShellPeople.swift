@@ -172,14 +172,7 @@ struct PeopleList: Hashable, Sendable, Identifiable {
     /// The people of `collection`, which the reader appears in (#434): counted as its source
     /// counts it, and named as the one who put it together was, where their source could say.
     init(appearance: CollectionAppearance, at host: String) {
-        which = .collection
-        self.host = host
-        accountID = appearance.collection.id
-        handle = appearance.owner?.handle ?? ""
-        counted = appearance.collection.count
-        hidden = false
-        words = appearance.collection.name
-        owner = appearance.collection.ownerID
+        self.init(collection: appearance.collection, ownedBy: appearance.owner?.handle, at: host)
     }
 
     /// The people of `collection` at `host` that a notice is about (#430): counted as its source
