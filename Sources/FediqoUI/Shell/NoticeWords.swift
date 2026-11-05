@@ -195,7 +195,7 @@ enum NoticeWords {
     /// What happened to a collection, by its name where this run was told it, and without one where
     /// the notice was read back from this device.
     private static func collectionWords(_ word: String, _ notice: Notice, language: DummyLanguage?) -> String {
-        guard let name = notice.collection else { return L10n.t("notices.what.\(word)", language: language) }
+        guard let name = notice.collection?.name, !name.isEmpty else { return L10n.t("notices.what.\(word)", language: language) }
         return String(format: L10n.t("notices.what.\(word).named", language: language), name)
     }
 
@@ -260,14 +260,21 @@ enum NoticeWords {
         case post(Note)
         /// The person, as far as this device shows one.
         case person(DummyPerson)
+        /// The people of the collection it is about (#430).
+        case people(PeopleList)
         /// Nothing: the line is words, and offers no press.
         case nothing
     }
 
-    /// The post where the notice is about one, else the person, else nothing. A follow and a
-    /// request to follow are about nobody's post, so they lead to who followed.
+    /// The post where the notice is about one, else the collection, else the person, else nothing.
+    /// A follow and a request to follow are about nobody's post, so they lead to who followed; a
+    /// collection's news leads to who is in it (#430), and to who put it together where the
+    /// notice was read back without it.
     static func opens(_ notice: Notice) -> Opens {
         if let post = notice.post { return .post(post) }
+        if let collection = notice.collection {
+            return .people(PeopleList(collection: collection, ownedBy: notice.people.first?.handle, at: notice.source.host))
+        }
         if let person = notice.firstPerson { return .person(person) }
         return .nothing
     }

@@ -312,7 +312,7 @@ private struct CollectionsDTO: Decodable {
     let collections: [StatusDTO.Lenient<CollectionDTO.Body>]?
 }
 
-private struct CollectionDTO: Decodable {
+struct CollectionDTO: Decodable {
     struct Item: Decodable {
         let id: String?
         let accountId: String?
