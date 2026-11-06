@@ -7,7 +7,7 @@ enum FixtureHTTPError: Error {
     case unreachable
 }
 
-actor FixtureHTTP: HTTPClient {
+actor FixtureHTTP: HTTPClient, HTTPSender {
     enum Outcome: Sendable {
         case body(Data, status: Int = 200)
         case text(String, status: Int = 200)
@@ -20,6 +20,8 @@ actor FixtureHTTP: HTTPClient {
 
     private let routes: [String: Outcome]
     private(set) var requested: [URL] = []
+    /// Every request sent whole, method, headers and body included — what a POST is asked by.
+    private(set) var sent: [URLRequest] = []
 
     init(_ routes: [String: Outcome] = [:]) {
         self.routes = routes
@@ -47,6 +49,14 @@ actor FixtureHTTP: HTTPClient {
         case .cancelled:
             throw URLError(.cancelled)
         }
+    }
+
+    /// Answered from the same routes as a GET, so a suite says what a host answers once whichever
+    /// wire asks it; `sent` keeps the request a GET has no room for.
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        sent.append(request)
+        guard let url = request.url else { throw FixtureHTTPError.unmapped }
+        return try await data(from: url)
     }
 
     private static func response(_ url: URL, _ status: Int) -> HTTPURLResponse {
