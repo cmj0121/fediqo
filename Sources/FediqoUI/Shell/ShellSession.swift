@@ -3410,7 +3410,7 @@ final class ShellSession {
         let unremoved = RemovedStops(WatchedHTTP(client, for: purpose, name: name, in: work)) { [weak self] in
             self?.removes[folded, default: 0] != asked
         }
-        return SourceJoin(http: unremoved, store: store, catalogues: emoji)
+        return SourceJoin(http: unremoved, sender: unremoved, store: store, catalogues: emoji)
     }
 
     private func report(_ error: JoinError, raw: String, host: String) {
@@ -4361,11 +4361,16 @@ struct ProgressReport: Equatable {
 
 /// A join's way out that closes once its source is removed (#221): its next board, page or look
 /// is not asked for, and nothing is recorded against the source that went.
-private struct RemovedStops: HTTPClient {
-    let inner: any HTTPClient
+///
+/// **A sender as well, and typed on `WatchedHTTP` so it is one by construction.** A Misskey is
+/// asked everything by POST, and a join that held only a reader would reach it through a cast
+/// that compiles and fails at the first request. The removal check stands in front of both doors,
+/// because a source that went is gone whichever way the next question would have been asked.
+private struct RemovedStops: HTTPClient, HTTPSender {
+    let inner: WatchedHTTP
     let removed: @MainActor @Sendable () -> Bool
 
-    init(_ inner: any HTTPClient, removed: @escaping @MainActor @Sendable () -> Bool) {
+    init(_ inner: WatchedHTTP, removed: @escaping @MainActor @Sendable () -> Bool) {
         self.inner = inner
         self.removed = removed
     }
@@ -4373,6 +4378,11 @@ private struct RemovedStops: HTTPClient {
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
         if await removed() { throw CancellationError() }
         return try await inner.data(from: url)
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        if await removed() { throw CancellationError() }
+        return try await inner.send(request)
     }
 }
 

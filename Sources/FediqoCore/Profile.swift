@@ -235,9 +235,12 @@ public enum Cancellation {
 /// One request for Mastodon, two for Discourse, and **none at all** for everything else.
 public struct SourceProfiles: Sendable {
     private let http: any HTTPClient
+    /// The sending half, which only a Misskey needs: its `/api/meta` is served by POST alone.
+    private let sender: (any HTTPSender)?
 
-    public init(http: any HTTPClient) {
+    public init(http: any HTTPClient, sender: (any HTTPSender)? = nil) {
         self.http = http
+        self.sender = sender
     }
 
     /// What `host` says about itself, given what it was already found to speak.
@@ -310,9 +313,17 @@ public struct SourceProfiles: Sendable {
         // difference so it is a recorded fact rather than a surprise.
         case .discuz:
             return .silent(host: host, kind: kind)
+        // A Misskey publishes `/api/meta`, but answers it only to a POST — two of three real hosts
+        // answered a GET with 405. With no sender nothing can ask, so it is silent rather than a
+        // request this wire cannot make, recorded as a server that would not answer.
+        case .misskey:
+            guard let sender else { return .silent(host: host, kind: kind) }
+            return try await read(host: host, kind: kind) {
+                try await MisskeyClient(sender: sender, host: host).profile()
+            }
         // Silent because nothing can ask: none of these can be joined yet, so there is no preview
         // for a reader to be shown. Each becomes a real answer in the unit that gives it a client.
-        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
+        case .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
             .unknown:
             return .silent(host: host, kind: kind)
         }

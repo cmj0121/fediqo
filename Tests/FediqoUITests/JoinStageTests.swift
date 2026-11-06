@@ -400,10 +400,10 @@ struct JoinStageTests {
     }
 
     /// **The two steps, and what the second one says when there is nothing to suggest.** Until M3
-    /// this is the majority state: three protocols are readable and one has a directory.
+    /// this is the majority state: four protocols are readable and one has a directory.
     @Test("The browser offers what this app can read, and only Mastodon has servers to suggest")
     func theBrowserOffersWhatCanBeRead() {
-        #expect(JoinSheet.protocols == [.mastodon, .discourse, .discuz], """
+        #expect(JoinSheet.protocols == [.mastodon, .misskey, .discourse, .discuz], """
             The browser's first step is derived from `SourceJoin.reads` and is offering something \
             else. A second list is a protocol still offered the day Core stopped reading it.
             """)
