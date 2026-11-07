@@ -27,7 +27,8 @@ CATALOG         := $(ROOT)/Sources/FediqoUI/Resources/Media.xcassets
 # app drew it, and nothing anywhere said so.
 ARTWORK         := mascot:Mascot octopus:Octopus \
                    kind-mastodon:KindMastodon kind-mastodon-small:KindMastodonSmall \
-                   kind-discuz:KindDiscuz kind-discuz-small:KindDiscuzSmall
+                   kind-discuz:KindDiscuz kind-discuz-small:KindDiscuzSmall \
+                   kind-misskey:KindMisskey kind-misskey-small:KindMisskeySmall
 # Where the UI run leaves what it did, and what the coverage is read out of.
 UITEST_RESULT   := $(DERIVED)/uitest.xcresult
 UITEST_IOS_RESULT := $(DERIVED)/uitest-ios.xcresult

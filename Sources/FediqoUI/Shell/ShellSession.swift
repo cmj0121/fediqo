@@ -2461,6 +2461,24 @@ final class ShellSession {
         }
     }
 
+    /// What the servers step says in place of a list, for a protocol the directory does not
+    /// cover — or nothing, at any other stage and where the list or its waiting is drawn instead.
+    ///
+    /// **Read off the stage and not decided in the sheet's body**, because a sentence decided in
+    /// a `View` body is reachable from nothing: a protocol that fell to an empty list instead
+    /// would be a step with nothing on it and no word about the field behind it, which is where a
+    /// Misskey, a Discourse or a Discuz! is joined from. The same `covers` that decides whether
+    /// `chooseProtocol` asks the directory decides this, so the two cannot disagree.
+    func noSuggestions(language: DummyLanguage? = nil) -> String? {
+        switch stage {
+        case .browsingServers(let kind):
+            guard !ServerDirectory.covers(kind) else { return nil }
+            return String(format: L10n.t("join.browse.none", language: language), kind.displayName)
+        case .browsing, .previewing, .choosingBoards, .choosingLists, nil:
+            return nil
+        }
+    }
+
     /// The one place the directory is asked for: the browse step, a protocol it covers chosen.
     private func askDirectory() {
         Task { await loadCatalog() }
