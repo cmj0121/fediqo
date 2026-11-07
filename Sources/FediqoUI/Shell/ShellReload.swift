@@ -471,6 +471,8 @@ final class ShellReload {
                 case (nil, .mastodon): asked.append(ask.host)
                 case (nil, .discourse) where tagsOff.contains(ask.host): off.append(ask.host)
                 case (nil, .discourse): asked.append(ask.host)
+                // A Misskey among them too: it keeps tags, but this app reads only its local
+                // timeline (#486), and a tag asked of it would be a read with no client behind it.
                 default: tagless.append(ask.host)
                 }
             }
@@ -1123,7 +1125,11 @@ final class ShellReload {
                 let note = try await client.topic(topic, source: stamp, board: held.board)
                 try Task.checkCancellation()
                 await session.store.refresh([note], ifSourceHere: host)
-            case .discuz, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+            case .misskey:
+                // No one note is read again yet (#486): its local timeline is all a Misskey is
+                // asked, and a reload brings the note's newest words where it is still there.
+                return .read
+            case .discuz, .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica,
                  .gotosocial, .unknown:
                 // A Discuz! thread is `ForumPosts`'; nothing else is joined.
                 return .read
@@ -1293,7 +1299,10 @@ final class ShellReload {
             guard categories == nil else { return true }
             let client = session.reach.discourse(host, for: .timeline, within: deadline)
             return await land(host, in: session) { try await client.latest(source: stamp) }
-        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
+        case .misskey:
+            // Its local timeline is its one read (`readMisskey`); nothing else of it is asked.
+            return await readMisskey(stamp, for: categories, in: session)
+        case .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
              .unknown:
             // Nothing of these is joined, so there is nothing to ask.
             return true

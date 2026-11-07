@@ -43,6 +43,17 @@ struct SourceReach {
         return limit.map { Deadline(watched, within: $0, sleep: sleep) } ?? watched
     }
 
+    /// `wire`, for an ask sent as a whole request rather than fetched by its address: the same
+    /// listing and the same deadline, **keeping the sender** — `wire` hands back a client a
+    /// `Deadline` built over can only GET through, and a POST through it fails at run time.
+    func wire(
+        sending base: any HTTPClient, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil,
+        within limit: Duration?
+    ) -> any HTTPSender {
+        let watched = WatchedHTTP(base, for: purpose, name: name, in: work) as any HTTPSender
+        return limit.map { Deadline(watched, within: $0, sleep: sleep) } ?? watched
+    }
+
     /// What a read of `host` goes through before it is listed or bounded: that forum's own
     /// browser where the reader is signed in to it, and the plain client for everything else.
     /// **Asked by the host being read, always** — a forum's sign-in goes to that forum.
@@ -321,6 +332,17 @@ struct SourceReach {
     /// An act, a post or a taking back, through `door`; its answer lands in `store`.
     func write(_ door: MastodonAuthorized, landingIn store: ItemStore) -> MastodonWrite {
         MastodonWrite(door: door, store: store)
+    }
+
+    // MARK: - A Misskey
+
+    /// A Misskey read as a guest: its local timeline, what it says of itself. **Sent, never
+    /// fetched** — every ask a Misskey answers is a POST (`MisskeyClient`) — on the plain client,
+    /// which holds a timeline's body to the ceiling a Mastodon's has.
+    func misskey(
+        _ host: String, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil, within limit: Duration?
+    ) -> MisskeyClient {
+        MisskeyClient(sender: wire(sending: http, for: purpose, name: name, within: limit), host: host)
     }
 
     // MARK: - A forum

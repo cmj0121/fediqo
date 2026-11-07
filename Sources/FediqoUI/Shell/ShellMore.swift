@@ -293,9 +293,14 @@ extension ShellReload {
                     // Read down from where the latest read of it ended, each source on its own (#470).
                     guard let place = places[stretch], !place.ended else { return nil }
                     return Due(stretch: stretch, source: source, cursor: .before(place.id))
+                case .misskey:
+                    // Its local timeline is read down by id as a Mastodon's is (#486): from where
+                    // its latest read ended, and not past where it said it has no more.
+                    guard let place = places[stretch], !place.ended else { return nil }
+                    return Due(stretch: stretch, source: source, cursor: .before(place.id))
                 case .discuz, .discourse:
                     return stretches.next(stretch).map { Due(stretch: stretch, source: source, cursor: .page($0)) }
-                case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
+                case .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
                      .unknown:
                     return nil
                 }
@@ -326,7 +331,10 @@ extension ShellReload {
                 .map { Stretch(host: host, category: $0) }
         case .discourse:
             return categories == nil ? [Stretch(host: host, category: nil)] : []
-        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial, .unknown:
+        case .misskey:
+            // Its local timeline, filed as its public one: the one stretch a guest has (#486).
+            return categories?.contains(.public) ?? true ? [Stretch(host: host, category: .public)] : []
+        case .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial, .unknown:
             return []
         }
     }
@@ -360,7 +368,7 @@ extension ShellReload {
         do {
             switch due.cursor {
             case .before(let id):
-                try await mastodon(due, before: id, stamp: stamp, in: session)
+                try await readOn(due, before: id, stamp: stamp, in: session)
             case .mark(let cursor):
                 guard let category = due.stretch.category else { return true }
                 let next = try await olderMarks(category, of: due.source, below: cursor, in: session)
@@ -398,7 +406,7 @@ extension ShellReload {
         }
     }
 
-    private func mastodon(_ due: Due, before id: String, stamp: Source, in session: ShellSession) async throws {
+    func mastodon(_ due: Due, before id: String, stamp: Source, in session: ShellSession) async throws {
         let host = stamp.host
         switch due.stretch.category {
         case .public?:
@@ -453,6 +461,7 @@ extension ShellReload {
             // Discourse counts from nought, so the one past the first is page one.
             let client = session.reach.discourse(host, for: .timeline, within: deadline)
             return try await client.latest(source: stamp, page: further)
+        // A Misskey among them: it is read down by id (`readOn(_:before:stamp:in:)`), never by page.
         default:
             return []
         }
