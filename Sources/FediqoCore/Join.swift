@@ -793,7 +793,7 @@ public struct SourceJoin: Sendable {
         guard Self.reads(kind) else { throw JoinError.unsupportedKind(kind) }
         // A Misskey can be read, but not by a join with no way to send: `begin` would refuse it,
         // so the look refuses it here and never draws a preview whose Subscribe can only throw.
-        if kind == .misskey, sender == nil { throw JoinError.unsupportedKind(kind) }
+        if kind == .misskey { _ = try misskeySender() }
         switch kind {
         case .discuz:
             let (profile, categories) = try await lookAtForum(host: host, kind: kind)
@@ -954,8 +954,7 @@ public struct SourceJoin: Sendable {
         case .misskey:
             // Without a sender there is no way to ask a Misskey anything, so it is a kind this
             // join cannot read — the same answer `look` gives one step earlier.
-            guard let sender else { throw JoinError.unsupportedKind(kind) }
-            try await MisskeyJoin(sender: sender, store: store).ingest(host: host)
+            try await MisskeyJoin(sender: misskeySender(), store: store).ingest(host: host)
             return .joined
         case .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial, .unknown:
             throw JoinError.unsupportedKind(kind)
@@ -989,6 +988,13 @@ public struct SourceJoin: Sendable {
         }
     }
 
+    /// The sender a Misskey is asked through, or a refusal of it as a kind this join cannot read
+    /// where there is none: `look` and `begin` give the one answer.
+    private func misskeySender() throws -> any HTTPSender {
+        guard let sender else { throw JoinError.unsupportedKind(.misskey) }
+        return sender
+    }
+
     /// The second half: the reader has picked, so read those boards and add the source.
     ///
     /// **The offer is what says which host and what it speaks**, so nothing here asks a
@@ -1016,9 +1022,7 @@ public struct SourceJoin: Sendable {
                 .subscribe(host: offer.host, to: picks, keeping: keeping)
         // A Misskey's local timeline is one timeline, with no boards to pick between, so no
         // offer from one can carry a pick.
-        case .misskey:
-            throw JoinError.unsupportedKind(offer.kind)
-        case .mastodon, .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica,
+        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
             .gotosocial, .discourse, .unknown:
             throw JoinError.unsupportedKind(offer.kind)
         }
@@ -1053,9 +1057,7 @@ public struct SourceJoin: Sendable {
             return JoinOffer(host: source.host, kind: source.kind, categories: categories)
         // Channels are the nearest thing a Misskey has to boards, and they are left out of the
         // first cut: a Misskey source is its local timeline and nothing to choose between.
-        case .misskey:
-            throw JoinError.unsupportedKind(source.kind)
-        case .mastodon, .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica,
+        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
             .gotosocial, .discourse, .unknown:
             throw JoinError.unsupportedKind(source.kind)
         }
@@ -1099,9 +1101,7 @@ public struct SourceJoin: Sendable {
                 throw JoinError.unreachable
             }
         // A board page is a Discuz! page; a Misskey serves nothing of the kind to read.
-        case .misskey:
-            throw JoinError.unsupportedKind(offer.kind)
-        case .mastodon, .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica,
+        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
             .gotosocial, .discourse, .unknown:
             throw JoinError.unsupportedKind(offer.kind)
         }

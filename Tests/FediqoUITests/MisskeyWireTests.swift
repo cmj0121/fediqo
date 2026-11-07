@@ -102,7 +102,7 @@ struct MisskeyWireTests {
 
     @Test("Every ask of a Misskey is kept to its host: a POST redirected off it is refused, not carried on with its body, and the timeline keeps a Mastodon's ceiling")
     func aRedirectOffTheHostIsRefused() throws {
-        let sent = try #require(SourceReach.misskeySent(URLSessionClient()) as? URLSessionClient)
+        let sent = try #require(SourceReach.onOrigin(URLSessionClient()) as? URLSessionClient)
         #expect(sent.sameOriginOnly && sent.byteLimit == URLSessionClient.defaultByteLimit)
         var post = URLRequest(url: URL(string: "https://\(Self.host)\(Self.timeline)")!)
         post.httpMethod = "POST"
@@ -143,7 +143,7 @@ struct MisskeyWireTests {
 
     @Test("What a Misskey says of itself at a look is held to a small body: an answer past it is not read, and the timeline that follows still is")
     func anOversizedMetaIsRefused() async throws {
-        let look = try #require(SourceReach.misskeyLook(URLSessionClient()) as? URLSessionClient)
+        let look = try #require(SourceReach.smallOnOrigin(URLSessionClient()) as? URLSessionClient)
         #expect(look.byteLimit == SourceReach.smallBody && look.sameOriginOnly)
 
         var routes = Self.routes()

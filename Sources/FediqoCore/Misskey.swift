@@ -43,34 +43,35 @@ public struct MisskeyClient: Sendable {
     /// **Through `ProfileError`, not `MisskeyRequestError`**, as `DiscourseClient.profile` is: a
     /// preview has one vocabulary for a server that said no, whatever the server speaks.
     public func profile() async throws -> SourceProfile {
-        guard let request = request("/api/meta", body: Data("{}".utf8)) else {
-            // Nothing was asked, so nothing answered badly — `DiscourseClient.profile`'s reason.
-            throw ProfileError.unreachable
-        }
-        let (data, response) = try await sender.send(request)
-        guard (200..<300).contains(response.statusCode) else {
-            throw ProfileError.of(status: response.statusCode)
+        // Nothing was asked where there is no address, so nothing answered badly —
+        // `DiscourseClient.profile`'s reason.
+        let data = try await send("/api/meta", body: Data("{}".utf8), unaddressed: ProfileError.unreachable) { status, _ in
+            guard (200..<300).contains(status) else { throw ProfileError.of(status: status) }
         }
         return try MisskeyJSON.decoder.decode(MisskeyMetaDTO.self, from: data).asProfile(host: host)
     }
 
     private func post(_ path: String, body: some Encodable) async throws -> Data {
-        guard let request = request(path, body: try JSONEncoder().encode(body)) else {
-            throw MisskeyRequestError.invalidURL
+        try await send(path, body: try MisskeyJSON.encoder.encode(body), unaddressed: MisskeyRequestError.invalidURL) {
+            try Self.check($0, body: $1)
         }
-        let (data, response) = try await sender.send(request)
-        try Self.check(response.statusCode, body: data)
-        return data
     }
 
-    private func request(_ path: String, body: Data) -> URLRequest? {
-        guard let url = Host.httpsURL(host: host, path: path) else { return nil }
+    /// The one way an ask leaves: `body` POSTed as JSON to `path` on this host, `unaddressed`
+    /// thrown where the host and path make no address, and the answer's status and body handed
+    /// to `check`, which throws in the caller's own words for a failed one.
+    private func send(
+        _ path: String, body: Data, unaddressed: some Error, check: (Int, Data) throws -> Void
+    ) async throws -> Data {
+        guard let url = Host.httpsURL(host: host, path: path) else { throw unaddressed }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.httpBody = body
-        return request
+        let (data, response) = try await sender.send(request)
+        try check(response.statusCode, data)
+        return data
     }
 
     /// Turns a failed answer into the one distinction that changes what a reader is told.
@@ -109,17 +110,12 @@ enum MisskeyJSON {
     /// fractional seconds and all, so they are read by the parsing that is already tested.
     static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let raw = try decoder.singleValueContainer().decode(String.self)
-            guard let date = MastodonJSON.date(from: raw) else {
-                throw DecodingError.dataCorrupted(
-                    .init(codingPath: decoder.codingPath, debugDescription: "unparsable date: \(raw)")
-                )
-            }
-            return date
-        }
+        decoder.dateDecodingStrategy = MastodonJSON.isoDates
         return decoder
     }()
+
+    /// One for every ask's body, as there is one decoder for every answer.
+    static let encoder = JSONEncoder()
 }
 
 /// `{"error":{"code":…}}` — how a Misskey says why it said no.
@@ -211,7 +207,12 @@ struct MisskeyNoteDTO: Decodable, Sendable {
     /// Misskey's own test for a renote with nothing of its own: no words, no warning, no files,
     /// no poll. One with any of them is a quote, and is read as a note in its own right.
     private var isPureRenote: Bool {
-        (renote != nil || renoteId != nil) && text == nil && cw == nil && (files ?? []).isEmpty && poll == nil
+        (renote != nil || renoteId != nil) && text == nil && cw == nil && attached.isEmpty && poll == nil
+    }
+
+    /// The files it carries, none where it says nothing of them.
+    private var attached: [File] {
+        files ?? []
     }
 
     /// This note as the timeline listed it: the note, and — where it is a pure renote — the note
@@ -222,28 +223,26 @@ struct MisskeyNoteDTO: Decodable, Sendable {
     /// (`untilId`), and without it the store records no place and read-on is never due.
     func listed(source: Source, host: String) -> [Note] {
         let inner = renote?.value
-        guard isPureRenote, let innerID = inner?.id ?? renoteId else {
-            var note = asNote(source: source, host: host, categories: [.public])
-            note.listed = [.public: id]
-            return [note]
-        }
-        let reference = Reference(kind: .reblogs, id: Self.noteID(host: host, innerID), statusID: innerID)
-        var item = Note(
-            id: Self.noteID(host: host, id), source: source, author: user.name ?? user.username,
-            handle: user.handle, body: "", postedAt: createdAt, categories: [.public],
-            avatarURL: Host.fetchableURL(user.avatarUrl), url: address(host: host),
-            statusID: id, refs: [reference]
-        )
+        let carried = isPureRenote ? inner?.id ?? renoteId : nil
+        // A renote is not `asNote`: what it carries is a reference, which a note is made with,
+        // and it has none of its own counts or files to say.
+        var item = carried.map { innerID in
+            Note(
+                id: Self.noteID(host: host, id), source: source, author: user.name ?? user.username,
+                handle: user.handle, body: "", postedAt: createdAt, categories: [.public],
+                avatarURL: Host.fetchableURL(user.avatarUrl), url: address(host: host), statusID: id,
+                refs: [Reference(kind: .reblogs, id: Self.noteID(host: host, innerID), statusID: innerID)]
+            )
+        } ?? asNote(source: source, host: host, categories: [.public])
         item.listed = [.public: id]
         // The renote is listed whatever it carries — it is the place the next read goes on below —
         // and the note it renotes comes beside it only where the payload brought one.
-        guard let inner, !inner.isPureRenote else { return [item] }
+        guard carried != nil, let inner, !inner.isPureRenote else { return [item] }
         return [item, inner.asNote(source: source, host: host, categories: [])]
     }
 
     func asNote(source: Source, host: String, categories: Set<Category>) -> Note {
-        let attachments = (files ?? []).map(\.asAttachment)
-        return Note(
+        Note(
             id: Self.noteID(host: host, id),
             source: source,
             author: user.name ?? user.username,
@@ -252,8 +251,8 @@ struct MisskeyNoteDTO: Decodable, Sendable {
             postedAt: createdAt,
             categories: categories,
             avatarURL: Host.fetchableURL(user.avatarUrl),
-            attachments: attachments,
-            sensitive: (files ?? []).contains { $0.isSensitive == true },
+            attachments: attached.map(\.asAttachment),
+            sensitive: attached.contains { $0.isSensitive == true },
             spoiler: cw,
             url: address(host: host),
             counts: Counts(replies: repliesCount, reblogs: renoteCount),

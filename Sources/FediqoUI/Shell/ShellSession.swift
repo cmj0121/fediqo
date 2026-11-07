@@ -3420,9 +3420,9 @@ final class ShellSession {
     /// board they read, by the name the reader knows it by — nil for a read of no one board,
     /// such as the forum's front page.
     ///
-    /// Its sending half is a Misskey's alone, and kept to the host asked (`SourceReach.misskeySent`);
+    /// Its sending half is a Misskey's alone, and kept to the host asked (`SourceReach.onOrigin`);
     /// at a look, which asks only what a host the reader has just typed says of itself, it is
-    /// held to a small body as well (`SourceReach.misskeyLook`).
+    /// held to a small body as well (`SourceReach.smallOnOrigin`).
     private func joiner(
         for host: String, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil, looking: Bool = false
     ) -> SourceJoin {
@@ -3433,8 +3433,12 @@ final class ShellSession {
             self?.removes[folded, default: 0] != asked
         }
         let unremoved = RemovedStops(WatchedHTTP(client, for: purpose, name: name, in: work), removed: removed)
-        let sending = looking ? SourceReach.misskeyLook(client) : SourceReach.misskeySent(client)
-        let sender = RemovedStops(WatchedHTTP(sending, for: purpose, name: name, in: work), removed: removed)
+        let sending: WatchedHTTP = if looking, let plain = client as? any HTTPSender {
+            WatchedHTTP(sender: SourceReach.smallOnOrigin(plain), for: purpose, name: name, in: work)
+        } else {
+            WatchedHTTP(SourceReach.onOrigin(client), for: purpose, name: name, in: work)
+        }
+        let sender = RemovedStops(sending, removed: removed)
         return SourceJoin(http: unremoved, sender: sender, store: store, catalogues: emoji)
     }
 

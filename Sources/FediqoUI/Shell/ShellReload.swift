@@ -1125,13 +1125,11 @@ final class ShellReload {
                 let note = try await client.topic(topic, source: stamp, board: held.board)
                 try Task.checkCancellation()
                 await session.store.refresh([note], ifSourceHere: host)
-            case .misskey:
-                // No one note is read again yet (#486): its local timeline is all a Misskey is
-                // asked, and a reload brings the note's newest words where it is still there.
-                return .read
-            case .discuz, .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica,
+            case .discuz, .misskey, .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica,
                  .gotosocial, .unknown:
-                // A Discuz! thread is `ForumPosts`'; nothing else is joined.
+                // A Discuz! thread is `ForumPosts`'; nothing else is joined. No one Misskey note
+                // is read again yet (#486): its local timeline is all a Misskey is asked, and a
+                // reload brings the note's newest words where it is still there.
                 return .read
             }
             return .read
@@ -1607,12 +1605,14 @@ struct Deadline: HTTPClient, HTTPSender {
     /// What `limit` is waited on: `Task.sleep` but for a test, which turns it by hand.
     private let sleep: @Sendable (Duration) async throws -> Void
 
+    /// Over a client that may send as well: where `inner` is a sender too, its sends are bounded
+    /// alike, as `WatchedHTTP` keeps them.
     init(
         _ inner: any HTTPClient, within limit: Duration,
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) {
         get = { try await inner.data(from: $0) }
-        sender = nil
+        sender = inner as? any HTTPSender
         self.limit = limit
         self.sleep = sleep
     }

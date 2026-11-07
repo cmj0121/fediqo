@@ -69,13 +69,11 @@ public struct ServerDirectory: Sendable {
         switch kind {
         case .mastodon: true
         // Discourse and Discuz! publish no directory anybody aggregates, and the protocols this
-        // app cannot read are not offered at all. M3's unit 9 is what changes this.
-        case .discourse, .discuz, .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica,
-            .gotosocial, .unknown:
-            false
-        // Misskey's own hub lists instances, but this app reads nothing from it yet; the reader
-        // types a Misskey's host, as they did a forum's.
-        case .misskey:
+        // app cannot read are not offered at all. M3's unit 9 is what changes this. Misskey's own
+        // hub lists instances, but this app reads nothing from it yet; the reader types a
+        // Misskey's host, as they did a forum's.
+        case .discourse, .discuz, .misskey, .pleroma, .akkoma, .pixelfed, .lemmy, .peertube,
+            .friendica, .gotosocial, .unknown:
             false
         }
     }
