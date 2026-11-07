@@ -46,7 +46,6 @@ struct DrawsNotKnowingKindTests {
         "Sources/FediqoUI/Shell/NoticesPane.swift": 3,
         "Sources/FediqoUI/Shell/SearchFound.swift": 13,
         "Sources/FediqoUI/Shell/ShellFollowedTags.swift": 18,
-        "Sources/FediqoUI/Shell/ShellMore.swift": 40,
         "Sources/FediqoUI/Shell/ShellPartAsk.swift": 33,
         "Sources/FediqoUI/Shell/ShellReload.swift": 55,
         "Sources/FediqoUI/Shell/SourceMark.swift": 14,

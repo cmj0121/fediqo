@@ -200,6 +200,56 @@ public struct DiscourseJoin: Sendable {
     }
 }
 
+/// A Misskey joined, and its local timeline read.
+///
+/// `DiscourseJoin`'s shape, for its reason: the local timeline is the page the reader actually
+/// wants, and an instance may switch it off for guests (`LTL_DISABLED`) while answering everything
+/// else. So it is read **before** the source is added, and a host that keeps it from a guest is a
+/// refusal the reader is told about rather than a source that draws an empty timeline forever.
+///
+/// **A sender, not a reader.** Misskey is asked everything by POST, so this holds only the half
+/// of the wire that can send a body; see `MisskeyClient`.
+///
+/// No catalogue is fetched: custom emoji are left out of the first cut (the notes carry none), so
+/// there is nothing to hold and nothing to clear.
+public struct MisskeyJoin: Sendable {
+    private let sender: any HTTPSender
+    private let store: ItemStore
+
+    public init(sender: any HTTPSender, store: ItemStore) {
+        self.sender = sender
+        self.store = store
+    }
+
+    func ingest(host: String) async throws {
+        let source = Source(host: host, kind: .misskey)
+        let client = MisskeyClient(sender: sender, host: host)
+
+        let notes: [Note]
+        do {
+            notes = try await client.localTimeline(source: source)
+        } catch let error where Cancellation.happened(error) {
+            throw CancellationError()
+        } catch let error as MisskeyRequestError {
+            switch error {
+            // Misskey said, in its own error code, that a guest may not read this. The one
+            // failure the reader can sometimes do something about, so it keeps its own sentence.
+            case .refused(let status): throw JoinError.refused(status)
+            case .http, .invalidURL: throw JoinError.publicTimelineFailed
+            }
+        } catch is DecodingError {
+            // It answered, and the answer was not a page of notes — a fork with a schema of its
+            // own, or a filter's page dressed as a 200.
+            throw JoinError.publicTimelineFailed
+        } catch {
+            throw JoinError.unreachable
+        }
+
+        await store.add(source)
+        await store.ingest(notes)
+    }
+}
+
 /// A Discuz! forum joined, and its front page read.
 ///
 /// `DiscourseJoin`'s shape exactly, and for the same reason rather than out of symmetry: the host
@@ -679,11 +729,22 @@ public struct DiscuzBoardJoin: Sendable {
 /// protocol added, against servers that did nothing to deserve it.
 public struct SourceJoin: Sendable {
     private let http: any HTTPClient
+    /// The wire's sending half, for a protocol that is asked by POST. **Optional and defaulted**
+    /// because only Misskey needs it and every caller that never joins one stays as it was; a
+    /// join without it refuses a Misskey as a kind it cannot read, rather than reaching for a
+    /// cast that compiles and fails at the first request.
+    private let sender: (any HTTPSender)?
     private let store: ItemStore
     private let catalogues: EmojiCatalogueStore
 
-    public init(http: any HTTPClient, store: ItemStore, catalogues: EmojiCatalogueStore) {
+    public init(
+        http: any HTTPClient,
+        sender: (any HTTPSender)? = nil,
+        store: ItemStore,
+        catalogues: EmojiCatalogueStore
+    ) {
         self.http = http
+        self.sender = sender
         self.store = store
         self.catalogues = catalogues
     }
@@ -730,13 +791,19 @@ public struct SourceJoin: Sendable {
     public func look(host raw: String) async throws -> SourcePreview {
         let (host, kind) = try await self.kind(of: raw)
         guard Self.reads(kind) else { throw JoinError.unsupportedKind(kind) }
+        // A Misskey can be read, but not by a join with no way to send: `begin` would refuse it,
+        // so the look refuses it here and never draws a preview whose Subscribe can only throw.
+        if kind == .misskey { _ = try misskeySender() }
         switch kind {
         case .discuz:
             let (profile, categories) = try await lookAtForum(host: host, kind: kind)
             return SourcePreview(host: host, kind: kind, profile: profile, boards: categories)
+        // A Misskey describes itself at `/api/meta`, a document like Mastodon's, so it is asked
+        // through the same door — with the sender, because that document is only served by POST.
         case .mastodon, .discourse, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube,
              .friendica, .gotosocial, .unknown:
-            let profile = try await SourceProfiles(http: http).answer(host: host, kind: kind)
+            let profile = try await SourceProfiles(http: http, sender: sender)
+                .answer(host: host, kind: kind)
             return SourcePreview(host: host, kind: kind, profile: profile)
         }
     }
@@ -884,8 +951,12 @@ public struct SourceJoin: Sendable {
                 ? await DiscuzBoardJoin(http: http, store: store).index(host: host)
                 : index
             return .chooseBoards(JoinOffer(host: host, kind: kind, categories: categories))
-        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
-            .unknown:
+        case .misskey:
+            // Without a sender there is no way to ask a Misskey anything, so it is a kind this
+            // join cannot read — the same answer `look` gives one step earlier.
+            try await MisskeyJoin(sender: misskeySender(), store: store).ingest(host: host)
+            return .joined
+        case .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial, .unknown:
             throw JoinError.unsupportedKind(kind)
         }
     }
@@ -910,12 +981,18 @@ public struct SourceJoin: Sendable {
     /// the day this one stopped reading it, and the reader would meet the refusal after the press.
     public static func reads(_ kind: ProtocolKind) -> Bool {
         switch kind {
-        case .mastodon, .discourse, .discuz:
+        case .mastodon, .discourse, .discuz, .misskey:
             true
-        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
-            .unknown:
+        case .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial, .unknown:
             false
         }
+    }
+
+    /// The sender a Misskey is asked through, or a refusal of it as a kind this join cannot read
+    /// where there is none: `look` and `begin` give the one answer.
+    private func misskeySender() throws -> any HTTPSender {
+        guard let sender else { throw JoinError.unsupportedKind(.misskey) }
+        return sender
     }
 
     /// The second half: the reader has picked, so read those boards and add the source.
@@ -943,6 +1020,8 @@ public struct SourceJoin: Sendable {
         case .discuz:
             return try await DiscuzBoardJoin(http: http, store: store)
                 .subscribe(host: offer.host, to: picks, keeping: keeping)
+        // A Misskey's local timeline is one timeline, with no boards to pick between, so no
+        // offer from one can carry a pick.
         case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
             .gotosocial, .discourse, .unknown:
             throw JoinError.unsupportedKind(offer.kind)
@@ -976,6 +1055,8 @@ public struct SourceJoin: Sendable {
             let categories = try await DiscuzBoardJoin(http: http, store: store)
                 .index(host: source.host)
             return JoinOffer(host: source.host, kind: source.kind, categories: categories)
+        // Channels are the nearest thing a Misskey has to boards, and they are left out of the
+        // first cut: a Misskey source is its local timeline and nothing to choose between.
         case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
             .gotosocial, .discourse, .unknown:
             throw JoinError.unsupportedKind(source.kind)
@@ -1019,6 +1100,7 @@ public struct SourceJoin: Sendable {
             } catch {
                 throw JoinError.unreachable
             }
+        // A board page is a Discuz! page; a Misskey serves nothing of the kind to read.
         case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
             .gotosocial, .discourse, .unknown:
             throw JoinError.unsupportedKind(offer.kind)

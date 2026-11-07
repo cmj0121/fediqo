@@ -17,6 +17,8 @@ kept because the slots are where the timeline it came from is still legible.
 | `kind-mastodon-small.svg` | 32 px and below, as a template | The same silhouette on the 64-unit grid |
 | `kind-discuz.svg` | 64 px and up, as a template | The letters D and !, one ink |
 | `kind-discuz-small.svg` | 32 px and below, as a template | D! on the 64-unit grid |
+| `kind-misskey.svg` | 64 px and up, as a template | A round-stroked M and its dot, one ink |
+| `kind-misskey-small.svg` | 32 px and below, as a template | The M and dot on the 64-unit grid |
 | `source-mastodon.svg` | 64 px and up, protocol as subject | The same mark on the mascot plate, in the creature's metal |
 | `source-mastodon-small.svg` | 32 px and below | The same mark on the 64-unit grid |
 | `source-discuz.svg` | 64 px and up, protocol as subject | D! on the mascot plate |
@@ -60,7 +62,8 @@ catalogue was moved off that page to avoid.
 They are **templates**: one ink, transparent ground, so the row can paint them with `inkDim`
 (or `filament` where signed in) rather than a brand colour.
 Mastodon is this repo's drawing of the well-known squircle-and-trunk, with an m cut out —
-not the official file, and not purple. Discuz! is the letters D and !.
+not the official file, and not purple. Discuz! is the letters D and !. Misskey is this repo's
+own round-stroked M with a dot beside it, in the spirit of Misskey's mark and not its file.
 
 The `source-*` drawings are the same subjects on the mascot plate, for where the protocol
 is the subject rather than a glyph in the chrome.

@@ -15,7 +15,8 @@ import Testing
 @Suite("Looking before taking")
 struct PreviewTests {
     private static func joiner(_ http: FixtureHTTP, _ store: ItemStore) -> SourceJoin {
-        SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+        // With the sender, as the app's join has it, so a Misskey is the kind it reads.
+        SourceJoin(http: http, sender: http, store: store, catalogues: EmojiCatalogueStore())
     }
 
     /// A Discuz! front page, at the smallest shape that detects as one.

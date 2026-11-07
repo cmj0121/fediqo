@@ -248,15 +248,7 @@ enum DiscourseJSON {
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         // Discourse sends the same ISO 8601 Mastodon does, fractional seconds and all, so the
         // parsing that was already written and already tested is the parsing used here.
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let raw = try decoder.singleValueContainer().decode(String.self)
-            guard let date = MastodonJSON.date(from: raw) else {
-                throw DecodingError.dataCorrupted(
-                    .init(codingPath: decoder.codingPath, debugDescription: "unparsable date: \(raw)")
-                )
-            }
-            return date
-        }
+        decoder.dateDecodingStrategy = MastodonJSON.isoDates
         return decoder
     }()
 }

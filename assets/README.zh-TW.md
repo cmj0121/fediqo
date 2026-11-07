@@ -16,6 +16,8 @@
 | `kind-mastodon-small.svg`   | 32 px 以下，當 template     | 同一剪影，64 單位格線                                            |
 | `kind-discuz.svg`           | 64 px 以上，當 template     | 字母 D 與 !，單一 ink                                            |
 | `kind-discuz-small.svg`     | 32 px 以下，當 template     | D!，64 單位格線                                                  |
+| `kind-misskey.svg`          | 64 px 以上，當 template     | 圓筆畫的 M 與旁邊一點，單一 ink                                  |
+| `kind-misskey-small.svg`    | 32 px 以下，當 template     | M 與點，64 單位格線                                              |
 | `source-mastodon.svg`       | 64 px 以上，協定本身是主體  | 同一 mark 放在 mascot 的金屬底板上，邊光與金屬跟章魚同一套       |
 | `source-mastodon-small.svg` | 32 px 以下                  | 同一 mark，64 單位格線                                           |
 | `source-discuz.svg`         | 64 px 以上，協定本身是主體  | D! 放在 mascot 的金屬底板上                                      |
@@ -50,7 +52,7 @@
 它們是 **template**：一種 ink、透明底，所以 row 用 `inkDim`（登入則 `filament`）上色，
 不用品牌色。
 Mastodon 是這個 repo 自己畫的圓角方塊加象鼻，中間挖一顆 m——不是官方檔案，也不是紫色。
-Discuz! 是字母 D 與 !。
+Discuz! 是字母 D 與 !。Misskey 是這個 repo 自己畫的圓筆畫 M 加一點，取 Misskey mark 的神韻，不是它的檔案。
 
 `source-*` 是同一組主體，放在 mascot 的金屬底板上，給協定本身就是主體的場合。
 

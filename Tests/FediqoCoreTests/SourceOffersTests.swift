@@ -7,9 +7,9 @@ import Testing
 /// purpose, and a kind added later fails here until it says what it offers.
 @Suite("What a kind of source offers")
 struct SourceOffersTests {
-    private static let microblogs: [ProtocolKind] = [.pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial]
+    private static let microblogs: [ProtocolKind] = [.pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial]
 
-    @Test("Each kind offers exactly what it offered: a Mastodon everything a microblog has, its five fields, loads, the reader's marks, quotes and writing; every other microblog its timelines and what is rising; a Discuz! its boards and its ranking lists; a Discourse its boards; an unknown kind nothing")
+    @Test("Each kind offers exactly what it offered: a Mastodon everything a microblog has, its five fields, loads, the reader's marks, quotes and writing; a Misskey its local timeline alone; every other microblog its timelines and what is rising; a Discuz! its boards and its ranking lists; a Discourse its boards; an unknown kind nothing")
     func eachKind() {
         #expect(ProtocolKind.mastodon.offers == SourceOffers(
             timelines: true, trends: true, writes: true,
@@ -34,10 +34,12 @@ struct SourceOffersTests {
         for kind in Self.microblogs {
             #expect(kind.offers == SourceOffers(timelines: true, trends: true), "\(kind)")
         }
+        // Trends are left out of a Misskey's first cut, so it claims none rather than an empty read.
+        #expect(ProtocolKind.misskey.offers == SourceOffers(timelines: true))
         #expect(ProtocolKind.discuz.offers == SourceOffers(trends: true, boards: true, authorsAreItsOwn: true))
         #expect(ProtocolKind.discourse.offers == SourceOffers(boards: true, authorsAreItsOwn: true))
         #expect(ProtocolKind.unknown.offers == SourceOffers())
-        #expect(Set([ProtocolKind.mastodon, .discuz, .discourse, .unknown] + Self.microblogs) == Set(ProtocolKind.allCases), "every kind is pinned above")
+        #expect(Set([ProtocolKind.mastodon, .misskey, .discuz, .discourse, .unknown] + Self.microblogs) == Set(ProtocolKind.allCases), "every kind is pinned above")
     }
 
     @Test("The names the package already asks by read the one value, for every kind")
@@ -53,8 +55,8 @@ struct SourceOffersTests {
             #expect(offers.field(named: "mood") == nil)
         }
         // As they were, spelled out: the lists these facts used to be.
-        #expect(ProtocolKind.allCases.filter(\.hasTimelines) == [.mastodon] + Self.microblogs)
-        #expect(ProtocolKind.allCases.filter(\.hasTrends) == [.mastodon] + Self.microblogs + [.discuz])
+        #expect(Set(ProtocolKind.allCases.filter(\.hasTimelines)) == Set([.mastodon, .misskey] + Self.microblogs))
+        #expect(Set(ProtocolKind.allCases.filter(\.hasTrends)) == Set([.mastodon, .discuz] + Self.microblogs))
         #expect(ProtocolKind.allCases.filter(\.isForum) == [.discourse, .discuz])
         for only in [\ProtocolKind.canWrite, \.loadsReferences, \.saysReaderMarks, \.saysQuotes] {
             #expect(ProtocolKind.allCases.filter { $0[keyPath: only] } == [.mastodon])
@@ -68,6 +70,7 @@ struct SourceOffersTests {
         func served(_ kind: ProtocolKind) -> [FediqoCore.Category] { every.filter(kind.offers.serves) }
         #expect(served(.mastodon) == [.public, .trends, .home, .list(id: "7")])
         #expect(served(.pleroma) == [.public, .trends, .home, .list(id: "7")])
+        #expect(served(.misskey) == [.public, .home, .list(id: "7")])
         #expect(served(.discuz) == [.trends, .board(id: "2")])
         #expect(served(.discourse) == [.board(id: "2")])
         #expect(served(.unknown).isEmpty)

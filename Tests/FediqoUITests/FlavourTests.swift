@@ -65,16 +65,17 @@ struct FlavourTests {
 
     @Test("A server that now answers as something this app does not read is not spoken to as Mastodon")
     func migratedAway() async {
+        // A Pleroma, because a Misskey is now a kind this app reads and would be read here.
         let (session, http) = await shell([
-            Self.flavour: Self.says("2.7.2 (compatible; Misskey 13.0.0)"),
+            Self.flavour: Self.says("2.7.2 (compatible; Pleroma 2.5.0)"),
             Self.publicTimeline: Self.oneNote,
             Self.trends: Self.oneNote,
         ])
 
         await session.reload.timeline(.all, in: session)
 
-        #expect(session.flavours.flavour(of: Self.host) == .said(.misskey))
-        #expect(session.sources.map(\.kind) == [.misskey],
+        #expect(session.flavours.flavour(of: Self.host) == .said(.pleroma))
+        #expect(session.sources.map(\.kind) == [.pleroma],
                 "the session speaks to it as what it says it is, everywhere at once")
         #expect(session.notes.isEmpty, "nothing was read from a server this app does not speak")
         #expect(await !http.requested.map(\.absoluteString).contains(Self.publicTimeline))
@@ -82,7 +83,7 @@ struct FlavourTests {
         #expect(session.reload.failed.isEmpty, "it answered; it did not fail to answer")
         #expect(
             session.reload.line
-                == "one.example now answers as Misskey, which Fediqo does not read. "
+                == "one.example now answers as Pleroma, which Fediqo does not read. "
                 + "What it brought here is still here."
         )
     }

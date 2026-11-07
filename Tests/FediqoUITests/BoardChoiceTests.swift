@@ -338,9 +338,10 @@ struct BoardChoiceTests {
     func trendsIsDecidedPerProtocol() {
         for kind in ProtocolKind.allCases {
             switch kind {
-            case .discourse, .unknown:
+            // A Misskey's trends are left out of its first cut, so it is offered none.
+            case .discourse, .misskey, .unknown:
                 #expect(!ShellSession.hasTrends(kind), "\(kind) should be offered no trends")
-            case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+            case .mastodon, .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica,
                 .gotosocial, .discuz:
                 #expect(ShellSession.hasTrends(kind), "\(kind) should be offered trends")
             }

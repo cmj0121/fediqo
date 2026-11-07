@@ -661,6 +661,32 @@ struct ProfileTests {
         #expect(try await MastodonClient(http: odd, host: Self.mastodonHost).flavour() == .unknown)
     }
 
+    // MARK: - Misskey
+
+    @Test("A Misskey states itself through the sender, by POST to /api/meta")
+    func aMisskeyStatesItselfThroughTheSender() async throws {
+        let meta = #"{"name": "Misskey Example", "description": "A place to try things."}"#
+        let http = FixtureHTTP(["/api/meta": .text(meta)])
+        let answer = try await SourceProfiles(http: http, sender: http)
+            .answer(host: "misskey.example", kind: .misskey)
+
+        let profile = try Self.stated(answer)
+        #expect(profile.title == "Misskey Example")
+        #expect(profile.summary == "A place to try things.")
+        #expect(await http.sent.map(\.httpMethod) == ["POST"])
+    }
+
+    @Test("A Misskey that refuses its /api/meta is unread, not silent")
+    func aMisskeyThatRefusesIsUnread() async throws {
+        let http = FixtureHTTP(["/api/meta": .text("no", status: 503)])
+        let answer = try await SourceProfiles(http: http, sender: http)
+            .answer(host: "misskey.example", kind: .misskey)
+        guard case .unread(host: "misskey.example", kind: .misskey, _) = answer else {
+            Issue.record("expected unread, got \(answer)")
+            return
+        }
+    }
+
     @Test("Every protocol has an answer, and none of them is unasked")
     func everyProtocolIsAnswered() async throws {
         // **The `allCases` half of this package's mitigation.** The exhaustive switch in
@@ -681,7 +707,12 @@ struct ProfileTests {
             // Nothing to ask, so nothing asked. Each of these becomes a real answer in the unit
             // that gives it a client; until then a request would be traffic for a document that
             // does not exist.
-            case .discuz, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+            // Asked only by POST, and no sender was given here, so nothing can ask it. Its real
+            // answer is pinned by `aMisskeyStatesItselfThroughTheSender`.
+            case .misskey:
+                #expect(answer == .silent(host: "any.example", kind: kind))
+                #expect(asked.isEmpty)
+            case .discuz, .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica,
                 .gotosocial, .unknown:
                 #expect(answer == .silent(host: "any.example", kind: kind))
                 #expect(asked.isEmpty)

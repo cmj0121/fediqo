@@ -340,6 +340,109 @@ struct JoinTests {
         }
     }
 
+    // MARK: - Misskey
+
+    /// A Misskey's front page, at the smallest shape that detects as one, and its local timeline
+    /// answering `timeline`. Every request to it is a POST, which `FixtureHTTP` routes by path.
+    private static func misskeyHTTP(timeline: FixtureHTTP.Outcome) -> FixtureHTTP {
+        FixtureHTTP([
+            "/": .text(#"<html><body><script>window.__misskey_boot__ = {};</script></body></html>"#),
+            "/api/notes/local-timeline": timeline,
+        ])
+    }
+
+    private static let misskeyNote = #"""
+    [{
+      "id": "9xk2a1b2c3", "createdAt": "2026-11-06T09:15:30.123Z",
+      "user": { "id": "9aaa", "username": "wren", "name": "Wren", "host": null, "avatarUrl": null },
+      "text": "Kettle's on.", "cw": null, "files": [], "repliesCount": 0, "renoteCount": 0,
+      "uri": null, "url": null
+    }]
+    """#
+
+    @Test("A Misskey is joined by reading its local timeline, by POST, before the source is added")
+    func aMisskeyIsJoinedByItsLocalTimeline() async throws {
+        let store = ItemStore()
+        let http = Self.misskeyHTTP(timeline: .text(Self.misskeyNote))
+        try await SourceJoin(http: http, sender: http, store: store, catalogues: EmojiCatalogueStore())
+            .join(host: "misskey.example")
+
+        #expect(await store.sources() == [Source(host: "misskey.example", kind: .misskey)])
+        #expect(await store.all().map(\.id) == ["misskey:misskey.example:9xk2a1b2c3"])
+        let read = try #require(await http.sent.last)
+        #expect(read.httpMethod == "POST")
+        #expect(read.url?.path == "/api/notes/local-timeline")
+    }
+
+    @Test("A Misskey that keeps its local timeline from guests is refused, and leaves no source")
+    func aClosedMisskeyLeavesNoSource() async {
+        let store = ItemStore()
+        let closed = #"{"error":{"message":"no","code":"LTL_DISABLED","id":"x"}}"#
+        let http = Self.misskeyHTTP(timeline: .text(closed, status: 400))
+        await #expect(throws: JoinError.refused(400)) {
+            try await SourceJoin(http: http, sender: http, store: store, catalogues: EmojiCatalogueStore())
+                .join(host: "misskey.example")
+        }
+        #expect(await store.sources().isEmpty)
+    }
+
+    @Test("A Misskey whose answer is not a timeline, or that does not answer, is named as such")
+    func aMisskeyThatFailsIsNamed() async {
+        for (timeline, expected) in [
+            (FixtureHTTP.Outcome.text("<html>a proxy page</html>"), JoinError.publicTimelineFailed),
+            (.text(#"{"error":{"code":"INVALID_PARAM"}}"#, status: 400), .publicTimelineFailed),
+            (.fail, .unreachable),
+        ] {
+            let store = ItemStore()
+            let http = Self.misskeyHTTP(timeline: timeline)
+            await #expect(throws: expected) {
+                try await SourceJoin(http: http, sender: http, store: store, catalogues: EmojiCatalogueStore())
+                    .join(host: "misskey.example")
+            }
+            #expect(await store.sources().isEmpty)
+        }
+    }
+
+    /// A join built with no way to send cannot ask a Misskey anything, so it says the kind is one
+    /// it cannot read — at the look as at the press, and having sent nothing.
+    @Test("With no sender, a Misskey is a kind the join cannot read")
+    func noSenderIsUnsupported() async {
+        let store = ItemStore()
+        let http = Self.misskeyHTTP(timeline: .text(Self.misskeyNote))
+        let join = SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+        await #expect(throws: JoinError.unsupportedKind(.misskey)) {
+            try await join.join(host: "misskey.example")
+        }
+        await #expect(throws: JoinError.unsupportedKind(.misskey)) {
+            _ = try await join.look(host: "misskey.example")
+        }
+        #expect(await store.sources().isEmpty)
+        #expect(await http.sent.isEmpty)
+    }
+
+    /// The board doors stay shut to a Misskey: its source is one local timeline, with nothing to
+    /// pick between, so an offer or a source of that kind has no boards to answer with.
+    @Test("A Misskey has no boards to offer, restate or read")
+    func aMisskeyHasNoBoards() async {
+        let http = Self.misskeyHTTP(timeline: .text(Self.misskeyNote))
+        let join = SourceJoin(http: http, sender: http, store: ItemStore(), catalogues: EmojiCatalogueStore())
+        let offer = JoinOffer(host: "misskey.example", kind: .misskey, categories: [])
+        let board = DiscuzBoard(fid: 1, name: "Any", category: "Any", gid: 1)
+        await #expect(throws: JoinError.unsupportedKind(.misskey)) {
+            try await join.subscribe(offer, to: [], keeping: [])
+        }
+        await #expect(throws: JoinError.unsupportedKind(.misskey)) {
+            _ = try await join.boards(of: Source(host: "misskey.example", kind: .misskey))
+        }
+        await #expect(throws: JoinError.unsupportedKind(.misskey)) {
+            _ = try await join.subBoards(of: board, in: offer)
+        }
+        await #expect(throws: JoinError.unsupportedKind(.misskey)) {
+            _ = try await join.around(1, in: offer)
+        }
+        #expect(await http.paths.isEmpty)
+    }
+
     // A whole Mastodon written out here rather than a page taken off one: a front page that
     // names itself, the probe behind it, and the two timelines a join reads. It is one server,
     // not a sample document, and the only thing more than one test can share is a server.

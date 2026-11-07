@@ -29,10 +29,10 @@ existing one with a filter put on it.
 revisions, what you can do to an item, and how one is let go.
 
 The concept is where Fediqo is going, and Using it, below, is what this checkout does today.
-Today a Mastodon host or a Discuz forum can be joined. A post's own revisions are here; a
-timeline's are not. A rule can ask a Mastodon source's own fields; no other kind of source
-declares any yet. The deleted mark before a purge, and a timeline built on another timeline,
-are not here yet.
+Today a Mastodon host, a Misskey host or a Discuz forum can be joined; a Misskey is read
+only, through its local timeline. A post's own revisions are here; a timeline's are not. A
+rule can ask a Mastodon source's own fields; no other kind of source declares any yet. The
+deleted mark before a purge, and a timeline built on another timeline, are not here yet.
 
 ## How it works
 
@@ -160,12 +160,18 @@ make servers-down
 ## Using it
 
 An empty launch opens Account. Add a Mastodon host or a Discuz forum from the catalog or by
-typing its hostname. It names the protocol; only those two join this session. A server that
-only answers as a Mastodon does — a GoToSocial — is named as what it is, and is not added. What a source
-sends lands in this device's store, and every timeline is a query of that store, read a page
-at a time as far as you read, so Fediqo opens on a timeline at once however much it holds. Compose
-stays off until it has something; Notices can always be entered, and says what would make it
-fill.
+typing its hostname, and a Misskey host by typing its hostname. It names the protocol; only
+those three join this session. A server that only answers as a Mastodon does — a GoToSocial —
+is named as what it is, and is not added. A fork of Misskey — a Sharkey, a Firefish — is not
+read. What a source sends lands in this device's store, and every timeline is a query of that
+store, read a page at a time as far as you read, so Fediqo opens on a timeline at once however
+much it holds. Compose stays off until it has something; Notices can always be entered, and
+says what would make it fill.
+
+A Misskey is read as a guest: its local timeline, which a reload brings in and reading on
+continues below, and what it says of itself. There is no signing in to one, so nothing is
+written there, and its trends are not read. A Misskey that keeps its local timeline from
+guests says so when you add it, and is not added.
 
 ### Writing a post
 
@@ -345,6 +351,7 @@ A post carries the categories its source put it in. They are how the source itse
 what it serves, and you do not make, rename, or delete them in Fediqo.
 
 - Mastodon: public, trends, Home, and each of your lists.
+- Misskey: public, which is its local timeline.
 - A forum: each board.
 
 Trends is read on its own page, so a rule does not name it. A rule on trends kept from an
