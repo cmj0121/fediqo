@@ -2237,7 +2237,7 @@ final class ShellSession {
         progress = ProgressReport(owner: .page, key: "account.detect.progress")
         defer { progress = nil }
         do {
-            let preview = try await joiner(for: parsed, for: .joining).look(host: raw)
+            let preview = try await joiner(for: parsed, for: .joining, looking: true).look(host: raw)
             guard mine == errand else { return nil }
             profiles[preview.host] = preview.profile
             return preview
@@ -3419,16 +3419,23 @@ final class ShellSession {
     /// `purpose` is what its requests are shown as while they run (#164), and `name` the one
     /// board they read, by the name the reader knows it by — nil for a read of no one board,
     /// such as the forum's front page.
+    ///
+    /// Its sending half is a Misskey's alone, and kept to the host asked (`SourceReach.misskeySent`);
+    /// at a look, which asks only what a host the reader has just typed says of itself, it is
+    /// held to a small body as well (`SourceReach.misskeyLook`).
     private func joiner(
-        for host: String, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil
+        for host: String, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil, looking: Bool = false
     ) -> SourceJoin {
         let client = forums.readTransport(host: host, else: http)
         let folded = host.lowercased()
         let asked = removes[folded, default: 0]
-        let unremoved = RemovedStops(WatchedHTTP(client, for: purpose, name: name, in: work)) { [weak self] in
+        let removed: @MainActor @Sendable () -> Bool = { [weak self] in
             self?.removes[folded, default: 0] != asked
         }
-        return SourceJoin(http: unremoved, sender: unremoved, store: store, catalogues: emoji)
+        let unremoved = RemovedStops(WatchedHTTP(client, for: purpose, name: name, in: work), removed: removed)
+        let sending = looking ? SourceReach.misskeyLook(client) : SourceReach.misskeySent(client)
+        let sender = RemovedStops(WatchedHTTP(sending, for: purpose, name: name, in: work), removed: removed)
+        return SourceJoin(http: unremoved, sender: sender, store: store, catalogues: emoji)
     }
 
     private func report(_ error: JoinError, raw: String, host: String) {

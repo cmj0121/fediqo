@@ -337,12 +337,35 @@ struct SourceReach {
     // MARK: - A Misskey
 
     /// A Misskey read as a guest: its local timeline, what it says of itself. **Sent, never
-    /// fetched** — every ask a Misskey answers is a POST (`MisskeyClient`) — on the plain client,
-    /// which holds a timeline's body to the ceiling a Mastodon's has.
+    /// fetched** — every ask a Misskey answers is a POST (`MisskeyClient`) — on the plain client
+    /// kept to that host (`misskeySent`), which holds a timeline's body to the ceiling a
+    /// Mastodon's has.
     func misskey(
         _ host: String, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil, within limit: Duration?
     ) -> MisskeyClient {
-        MisskeyClient(sender: wire(sending: http, for: purpose, name: name, within: limit), host: host)
+        MisskeyClient(sender: wire(sending: Self.misskeySent(http), for: purpose, name: name, within: limit), host: host)
+    }
+
+    /// `http` with every redirect off the host it is asked at refused: what every ask of a
+    /// Misskey goes out on. **A redirected POST is still a POST** — a 307 or 308 carries the
+    /// method and the body on — and the gate saw only the host first asked, so a Misskey that
+    /// pointed elsewhere would have had its ask sent, whole, to wherever it pointed. A test's
+    /// client, which follows nothing, is itself.
+    ///
+    /// **Handed the plain client, before it is listed or bounded**, for `small`'s reason.
+    static func misskeySent(_ http: any HTTPClient) -> any HTTPClient {
+        (http as? URLSessionClient)?.stayingOnOrigin() ?? http
+    }
+
+    /// What a Misskey is asked what it says of itself through, at a look: `misskeySent`, and
+    /// under `smallBody` — the host is one the reader has only typed, and its `/api/meta` is a
+    /// page of words. Held to it as the body arrives where it is the live client, and refused
+    /// what it brought past it where it is any other.
+    static func misskeyLook(_ http: any HTTPClient) -> any HTTPClient {
+        if let live = http as? URLSessionClient {
+            return live.capped(to: Self.smallBody).stayingOnOrigin()
+        }
+        return (http as? any HTTPSender).map { SmallAnswer($0, limit: Self.smallBody) } ?? http
     }
 
     // MARK: - A forum
@@ -396,14 +419,19 @@ private struct SmallBody: HTTPClient {
     }
 }
 
-/// `SmallBody`, for a client that is sent a request.
-private struct SmallAnswer: HTTPSender {
+/// `SmallBody`, for a client that is sent a request — and fetched from as one is sent a GET,
+/// so it can stand where a client is held (`misskeyLook`).
+private struct SmallAnswer: HTTPClient, HTTPSender {
     private let inner: any HTTPSender
     private let limit: Int
 
     init(_ inner: any HTTPSender, limit: Int) {
         self.inner = inner
         self.limit = limit
+    }
+
+    func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        try await send(URLRequest(url: url))
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
