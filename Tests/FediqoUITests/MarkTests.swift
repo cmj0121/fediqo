@@ -311,7 +311,7 @@ struct MarkTests {
     @Test("The reasons and the menu's name are in all three tables, and the two Chinese ones agree")
     func theWordsAreInEveryTable() throws {
         let keys = DimReason.allCases.map(\.key) + ["mark.more", "mark.more.one", "mark.dim.said", "mark.dim.names"]
-        #expect(Set(keys).count == 7)
+        #expect(Set(keys).count == 8)
         #expect(L10n.t("mark.dim.said", language: .taiwanese) == "%1$@。%2$@" && L10n.t("mark.dim.names", language: .taiwanese) == "、")
         for key in keys {
             #expect(L10n.t(key, language: .english) != L10n.t(key, language: .taiwanese), "\(key)")
