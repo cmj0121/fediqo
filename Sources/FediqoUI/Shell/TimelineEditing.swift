@@ -561,6 +561,60 @@ extension ShellSession {
         if wasInFront, let left, queries.contains(left) { timelineID = left }
     }
 
+    /// What the reader's timelines are offered for joining `host` (#372): `TimelineJoin.offers` with this session's
+    /// sources and what the sign-in there may read. Empty while the kept timelines cannot be read.
+    func timelineJoinOffers(host: String) -> [TimelineJoinOffer] {
+        guard !timelinesUnreadable else { return [] }
+        return TimelineJoin.offers(
+            for: host, in: written, sources: sources, signedIn: isSignedIn(host: host),
+            marks: !readableMarks(host: host).isEmpty, directs: directsReads(host: host)
+        )
+    }
+
+    /// Whether the source's page has anything to open for joining timelines (#372).
+    func joinsTimelines(host: String) -> Bool {
+        !timelineJoinOffers(host: host).isEmpty
+    }
+
+    /// What was chosen for `host` joining the reader's timelines (#372), kept and read at once.
+    ///
+    /// **Applied to the timelines as kept now**, read again just before the save: another window may have changed
+    /// them since these were read, and its change is not written over. Kept once, then `host` is asked once for
+    /// what the changed timelines now want of it, so they fill without waiting for the next reload. Nothing chosen,
+    /// or nothing that adds anything, keeps nothing; timelines that cannot be read are not written over.
+    func joinTimelines(_ choices: [TimelineID: Set<FediqoCore.Category>], host: String) async {
+        guard !choices.isEmpty else { return }
+        let host = host.lowercased()
+        let fresh: [TimelineDefinition]
+        switch timelineStore?.load() {
+        case .unreadable?:
+            timelinesUnreadable = true
+            return
+        case .timelines(let kept)?:
+            timelinesUnreadable = false
+            fresh = kept
+        case nil:
+            guard !timelinesUnreadable else { return }
+            fresh = written
+        }
+        let joined = TimelineJoin.apply(choices, of: host, to: fresh, sources: sources)
+        guard !joined.changed.isEmpty else { return }
+        keep(joined.timelines)
+        let changed = joined.timelines.filter { joined.changed.contains($0.id) }
+        guard let ask = Self.ask(host, joining: changed, sources: sources) else { return }
+        await reload.joined(ask, in: self)
+    }
+
+    /// What `host` is asked for once it has joined `timelines` (#372): every category they now want of it, or its
+    /// usual reads where any of them wants those. Nothing where none of them reaches it.
+    static func ask(_ host: String, joining timelines: [TimelineDefinition], sources: [Source]) -> FetchAsk? {
+        let asks = timelines.flatMap { CompiledTimeline($0, sources: sources).sourcesToAsk() }.filter { $0.host == host }
+        guard !asks.isEmpty else { return nil }
+        let categories: Set<FediqoCore.Category>? = asks.contains { $0.categories == nil }
+            ? nil : asks.reduce(into: []) { $0.formUnion($1.categories ?? []) }
+        return FetchAsk(host: host, categories: categories)
+    }
+
     private func keep(_ timelines: [TimelineDefinition]) {
         written = timelines
         // Where the device would not keep it, what is shown is not what is kept: said.
