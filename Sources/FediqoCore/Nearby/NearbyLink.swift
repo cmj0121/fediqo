@@ -32,11 +32,15 @@ public struct NearbyPeer: Sendable, Hashable, Identifiable {
     public let name: String
     /// The session it is holding under, which the code is bound to.
     public let sessionID: String
+    /// A pairing hold (TXT `p=1`) rather than a Move hold. Move's list leaves these out; the
+    /// pairing list shows only these.
+    public let pairing: Bool
 
-    public init(id: String, name: String, sessionID: String) {
+    public init(id: String, name: String, sessionID: String, pairing: Bool = false) {
         self.id = id
         self.name = name
         self.sessionID = sessionID
+        self.pairing = pairing
     }
 }
 

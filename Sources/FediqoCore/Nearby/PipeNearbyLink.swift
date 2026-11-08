@@ -14,7 +14,7 @@ import Synchronization
 /// **A listen hands over as the real one does**, through the same `NearbyListen`: the end that
 /// joined is the holder's once it is yielded, and a listen put away closes only an end not yet
 /// handed over.
-public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
+public final class PipeNearbyLink: SyncLink, @unchecked Sendable {
     private struct Holding {
         let peer: NearbyPeer
         let psk: SymmetricKey
@@ -85,8 +85,16 @@ public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
     }
 
     public func advertise(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
+        hold(NearbyPeer(id: sessionID, name: name, sessionID: sessionID), psk: psk)
+    }
+
+    public func advertisePairing(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
+        hold(NearbyPeer(id: sessionID, name: name, sessionID: sessionID, pairing: true), psk: psk)
+    }
+
+    private func hold(_ peer: NearbyPeer, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
+        let sessionID = peer.sessionID
         let (stream, continuation) = AsyncThrowingStream<NearbyArrival, any Error>.makeStream()
-        let peer = NearbyPeer(id: sessionID, name: name, sessionID: sessionID)
         let listen = NearbyListen<PipeConnection>(continuation)
         let denied = room.withLock { room in
             guard !room.denied else { return true }

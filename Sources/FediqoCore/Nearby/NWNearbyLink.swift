@@ -21,7 +21,7 @@ import Synchronization
 /// `NearbyRefusal.notAllowed`: said as that, never as "nobody nearby". A handshake that fails
 /// on the joining side is `.wrongCode`; on the holding side it is `.failedHandshake`, so the
 /// code is rolled — and only a handshake: a probe that never got that far rolls nothing.
-public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
+public final class NWNearbyLink: SyncLink, @unchecked Sendable {
     /// How long a join may take before it is a device out of reach.
     public static let connectTimeout: Duration = .seconds(20)
     /// The suites this link speaks, in order of preference: ECDHE-PSK with ChaCha20-Poly1305,
@@ -68,6 +68,14 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
     }
 
     public func advertise(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
+        listen(name: name, sessionID: sessionID, psk: psk, pairing: false)
+    }
+
+    public func advertisePairing(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
+        listen(name: name, sessionID: sessionID, psk: psk, pairing: true)
+    }
+
+    private func listen(name: String, sessionID: String, psk: SymmetricKey, pairing: Bool) -> AsyncThrowingStream<NearbyArrival, any Error> {
         let (stream, continuation) = AsyncThrowingStream<NearbyArrival, any Error>.makeStream()
         let listener: NWListener
         do {
@@ -78,6 +86,7 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
         }
         var txt = NWTXTRecord()
         txt["id"] = sessionID
+        if pairing { txt[SyncDiscovery.pairingKey] = "1" }
         listener.service = NWListener.Service(name: name, type: NearbyCode.service, txtRecord: txt)
         // A connection still opening is the listen's, cancelled with it so a stream put away
         // leaves no socket open; one that is ready is handed over and is its taker's — the
@@ -148,7 +157,7 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
                 else { continue }
                 let key = "\(result.endpoint)"
                 found[key] = result.endpoint
-                peers.append(NearbyPeer(id: key, name: name, sessionID: id))
+                peers.append(NearbyPeer(id: key, name: name, sessionID: id, pairing: txt[SyncDiscovery.pairingKey] == "1"))
             }
             self.endpoints.withLock { $0 = found }
             continuation.yield(peers.sorted { $0.name < $1.name })
