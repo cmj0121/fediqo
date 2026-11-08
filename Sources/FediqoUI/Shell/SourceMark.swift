@@ -67,8 +67,15 @@ enum SourceMark {
         // One drawing for the whole Mastodon-API family. What the mark says is *this is a place
         // that speaks the Mastodon API*, which is true of every fork in this list — and unit 6
         // unlocks five of them at once, so a per-fork drawing would be five drawings for one fact.
-        case .mastodon, .pleroma, .akkoma, .gotosocial, .pixelfed, .friendica, .misskey:
+        case .mastodon, .pleroma, .akkoma, .gotosocial, .pixelfed, .friendica:
             base = "KindMastodon"
+        // **Its own drawing, and not the family's.** Misskey is the one microblog this app reads
+        // that does *not* speak Mastodon's API — it is read through a client of its own — so the
+        // family mark would say the one fact Misskey lacks, and the shape glyph is Lemmy's and an
+        // unknown server's too. Its forks that do speak Mastodon's API are detected as Mastodon
+        // and keep the family mark.
+        case .misskey:
+            base = "KindMisskey"
         case .discuz:
             base = "KindDiscuz"
         // No drawing yet. The shape glyph answers, and that is a decision and not a gap.

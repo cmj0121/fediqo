@@ -264,17 +264,23 @@ enum MastodonJSON {
     static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        decoder.dateDecodingStrategy = .custom { decoder in
+        decoder.dateDecodingStrategy = isoDates
+        return decoder
+    }()
+
+    /// Dates as ISO 8601, fractional seconds and all (`date(from:)`): Mastodon's, and those of
+    /// every other source that sends the same.
+    static var isoDates: JSONDecoder.DateDecodingStrategy {
+        .custom { decoder in
             let raw = try decoder.singleValueContainer().decode(String.self)
-            guard let date = Self.date(from: raw) else {
+            guard let date = date(from: raw) else {
                 throw DecodingError.dataCorrupted(
                     .init(codingPath: decoder.codingPath, debugDescription: "unparsable date: \(raw)")
                 )
             }
             return date
         }
-        return decoder
-    }()
+    }
 
     static func date(from raw: String) -> Date? {
         let fractional = ISO8601DateFormatter()

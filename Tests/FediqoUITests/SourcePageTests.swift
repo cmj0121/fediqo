@@ -1085,12 +1085,16 @@ struct SourcePageTests {
             let fine = SourceMark.kindMark(kind, pixels: 48)
             let small = SourceMark.kindMark(kind, pixels: 24)
             switch kind {
-            case .mastodon, .pleroma, .akkoma, .gotosocial, .pixelfed, .friendica, .misskey:
+            case .mastodon, .pleroma, .akkoma, .gotosocial, .pixelfed, .friendica:
                 #expect(fine == "KindMastodon", "\(kind)")
                 #expect(small == "KindMastodonSmall", "\(kind)")
             case .discuz:
                 #expect(fine == "KindDiscuz")
                 #expect(small == "KindDiscuzSmall")
+            // Not the family's drawing: Misskey does not speak Mastodon's API.
+            case .misskey:
+                #expect(fine == "KindMisskey")
+                #expect(small == "KindMisskeySmall")
             // Drawn, joinable, and deliberately nil: this repo has no Discourse drawing, and the
             // shape glyph answering is a decision rather than an omission.
             case .discourse, .lemmy, .peertube, .unknown:
@@ -1214,7 +1218,10 @@ struct SourcePageTests {
                 if let name = SourceMark.kindMark(kind, pixels: pixels) { asked.insert(name) }
             }
         }
-        #expect(asked == ["KindMastodon", "KindMastodonSmall", "KindDiscuz", "KindDiscuzSmall"])
+        #expect(asked == [
+            "KindMastodon", "KindMastodonSmall", "KindDiscuz", "KindDiscuzSmall", "KindMisskey",
+            "KindMisskeySmall",
+        ])
         for name in asked.sorted() {
             #expect(Self.drawingExists(name), """
                 \(name) is not in Media.xcassets. `Image(_:bundle:)` draws nothing for a name it \

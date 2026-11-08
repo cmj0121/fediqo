@@ -2237,7 +2237,7 @@ final class ShellSession {
         progress = ProgressReport(owner: .page, key: "account.detect.progress")
         defer { progress = nil }
         do {
-            let preview = try await joiner(for: parsed, for: .joining).look(host: raw)
+            let preview = try await joiner(for: parsed, for: .joining, looking: true).look(host: raw)
             guard mine == errand else { return nil }
             profiles[preview.host] = preview.profile
             return preview
@@ -2458,6 +2458,24 @@ final class ShellSession {
         // preview and a board list are about one server, and a detail is about one the reader has.
         case .browsingServers, .previewing, .choosingBoards, .choosingLists, nil:
             return
+        }
+    }
+
+    /// What the servers step says in place of a list, for a protocol the directory does not
+    /// cover — or nothing, at any other stage and where the list or its waiting is drawn instead.
+    ///
+    /// **Read off the stage and not decided in the sheet's body**, because a sentence decided in
+    /// a `View` body is reachable from nothing: a protocol that fell to an empty list instead
+    /// would be a step with nothing on it and no word about the field behind it, which is where a
+    /// Misskey, a Discourse or a Discuz! is joined from. The same `covers` that decides whether
+    /// `chooseProtocol` asks the directory decides this, so the two cannot disagree.
+    func noSuggestions(language: DummyLanguage? = nil) -> String? {
+        switch stage {
+        case .browsingServers(let kind):
+            guard !ServerDirectory.covers(kind) else { return nil }
+            return String(format: L10n.t("join.browse.none", language: language), kind.displayName)
+        case .browsing, .previewing, .choosingBoards, .choosingLists, nil:
+            return nil
         }
     }
 
@@ -3401,16 +3419,27 @@ final class ShellSession {
     /// `purpose` is what its requests are shown as while they run (#164), and `name` the one
     /// board they read, by the name the reader knows it by — nil for a read of no one board,
     /// such as the forum's front page.
+    ///
+    /// Its sending half is a Misskey's alone, and kept to the host asked (`SourceReach.onOrigin`);
+    /// at a look, which asks only what a host the reader has just typed says of itself, it is
+    /// held to a small body as well (`SourceReach.smallOnOrigin`).
     private func joiner(
-        for host: String, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil
+        for host: String, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil, looking: Bool = false
     ) -> SourceJoin {
         let client = forums.readTransport(host: host, else: http)
         let folded = host.lowercased()
         let asked = removes[folded, default: 0]
-        let unremoved = RemovedStops(WatchedHTTP(client, for: purpose, name: name, in: work)) { [weak self] in
+        let removed: @MainActor @Sendable () -> Bool = { [weak self] in
             self?.removes[folded, default: 0] != asked
         }
-        return SourceJoin(http: unremoved, store: store, catalogues: emoji)
+        let unremoved = RemovedStops(WatchedHTTP(client, for: purpose, name: name, in: work), removed: removed)
+        let sending: WatchedHTTP = if looking, let plain = client as? any HTTPSender {
+            WatchedHTTP(sender: SourceReach.smallOnOrigin(plain), for: purpose, name: name, in: work)
+        } else {
+            WatchedHTTP(SourceReach.onOrigin(client), for: purpose, name: name, in: work)
+        }
+        let sender = RemovedStops(sending, removed: removed)
+        return SourceJoin(http: unremoved, sender: sender, store: store, catalogues: emoji)
     }
 
     private func report(_ error: JoinError, raw: String, host: String) {
@@ -4361,11 +4390,16 @@ struct ProgressReport: Equatable {
 
 /// A join's way out that closes once its source is removed (#221): its next board, page or look
 /// is not asked for, and nothing is recorded against the source that went.
-private struct RemovedStops: HTTPClient {
-    let inner: any HTTPClient
+///
+/// **A sender as well, and typed on `WatchedHTTP` so it is one by construction.** A Misskey is
+/// asked everything by POST, and a join that held only a reader would reach it through a cast
+/// that compiles and fails at the first request. The removal check stands in front of both doors,
+/// because a source that went is gone whichever way the next question would have been asked.
+private struct RemovedStops: HTTPClient, HTTPSender {
+    let inner: WatchedHTTP
     let removed: @MainActor @Sendable () -> Bool
 
-    init(_ inner: any HTTPClient, removed: @escaping @MainActor @Sendable () -> Bool) {
+    init(_ inner: WatchedHTTP, removed: @escaping @MainActor @Sendable () -> Bool) {
         self.inner = inner
         self.removed = removed
     }
@@ -4373,6 +4407,11 @@ private struct RemovedStops: HTTPClient {
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
         if await removed() { throw CancellationError() }
         return try await inner.data(from: url)
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        if await removed() { throw CancellationError() }
+        return try await inner.send(request)
     }
 }
 

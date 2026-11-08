@@ -1016,7 +1016,9 @@ struct JoinSheet: View {
 
     @ViewBuilder
     private func servers(of kind: ProtocolKind) -> some View {
-        if ServerDirectory.covers(kind) {
+        if let none = session.noSuggestions() {
+            note { Text(none) }
+        } else {
             switch session.catalog {
             case .loading:
                 // One way of waiting, `ShellType.body` dropped to `meta` with it: a sentence about
@@ -1045,8 +1047,6 @@ struct JoinSheet: View {
                 }
                 .scrollIndicators(.never)
             }
-        } else {
-            note { Text(String(format: L10n.t("join.browse.none"), kind.displayName)) }
         }
     }
 

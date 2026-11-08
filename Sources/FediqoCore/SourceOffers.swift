@@ -167,7 +167,11 @@ extension ProtocolKind {
                 follows: true, polls: true, marks: true, blocks: true, reports: true, changesPosts: true,
                 sendsLater: true, tendsLists: true, tendsCollections: true, conversations: true
             )
-        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial:
+        // Its local timeline and nothing else: a guest's read, with no sign-in to write through,
+        // and what is rising left out of the first cut rather than claimed.
+        case .misskey:
+            SourceOffers(timelines: true)
+        case .pleroma, .akkoma, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial:
             SourceOffers(timelines: true, trends: true)
         // A forum's categories are its boards, and neither forum has a public or a home
         // timeline. **A forum is read only although it signs in**: a Discuz! sign-in is a cookie
