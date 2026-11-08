@@ -1674,6 +1674,7 @@
 "mark.dim.never" = "這個來源沒有這一項";
 "mark.dim.notNow" = "現在不行";
 "mark.dim.askAgain" = "要先再問一次這個登入";
+"mark.dim.noTimeline" = "沒有可加入的時間軸";
 "mark.dim.said" = "%1$@。%2$@";
 "mark.dim.names" = "、";
 "mark.more" = "更多";
@@ -3056,3 +3057,5 @@
 "timeline.join.locked" = "已經在裡面";
 "timeline.join.hint.on" = "加進這條時間軸";
 "timeline.join.hint.off" = "不加進這條時間軸";
+"source.settings.join" = "加入時間軸";
+"source.settings.join.hint" = "選擇這個來源要加入你的哪些時間軸";

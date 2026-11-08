@@ -36,12 +36,16 @@ enum DimReason: Equatable, CaseIterable {
     case notNow
     /// The sign-in must be asked again before this is offered.
     case askAgain
+    /// None of the reader's timelines can take this source (#372): a fact about what they
+    /// wrote, not a passing state — writing or changing a timeline, or a sign-in, may change it.
+    case noTimeline
 
     var key: String {
         switch self {
         case .never: "mark.dim.never"
         case .notNow: "mark.dim.notNow"
         case .askAgain: "mark.dim.askAgain"
+        case .noTimeline: "mark.dim.noTimeline"
         }
     }
 }

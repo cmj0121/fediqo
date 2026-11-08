@@ -7,7 +7,9 @@ import SwiftUI
 /// filters (`ServerFiltersBlock`). The page itself opens on what the server says.
 ///
 /// **Absent, not dim, for what a source lacks**: a part the source has no such thing for is not
-/// listed, and a source with none of them has no gear. **The gear is lit while something there
+/// listed. **Joining the timelines already written is there for every joined source** (#372),
+/// greyed with the same icon where none of them can take it now, so every joined source has a
+/// gear. **The gear is lit while something there
 /// narrows what is shown**: kinds of notice it does not tell, a filter of the server's, or
 /// someone's notices held back or let go.
 @MainActor
@@ -64,6 +66,15 @@ enum SourceSettings {
         }
     }
 
+    /// The page's "join timelines" (#372): live where some timeline already written can take the
+    /// source, greyed with the same icon, saying no timeline can, where none can — one may later,
+    /// as home comes with a sign-in and lists as they are chosen.
+    static func joinMark(host: String, in session: ShellSession, language: DummyLanguage? = nil) -> ShellMark {
+        let name = L10n.t("source.settings.join", language: language)
+        let look: MarkLook = session.joinsTimelines(host: host) ? .live : .dim(.noTimeline)
+        return ShellMark(TimelineJoinEntry.symbol, name, look: look, word: name)
+    }
+
     /// What a listener hears of the gear beside its name: whether something there narrows.
     static func spoken(narrows: Bool, language: DummyLanguage? = nil) -> String {
         L10n.t(narrows ? "source.settings.narrows" : "source.settings.plain", language: language)
@@ -81,8 +92,14 @@ struct SourceSettingsGear: View {
 
     static let symbol = ShellGearLabel.symbol
 
+    /// Whether the gear is drawn: for every joined source, whose page always holds the entry to
+    /// join the timelines (#372), and where the source has a part.
+    static func shows(host: String, in session: ShellSession) -> Bool {
+        session.isAdded(host) || SourceSettings.hasAny(host: host, in: session)
+    }
+
     var body: some View {
-        if SourceSettings.hasAny(host: host, in: session) {
+        if Self.shows(host: host, in: session) {
             let narrows = SourceSettings.narrows(host: host, in: session)
             ShellIconButton(Self.symbol, name: "source.settings", tone: narrows ? .lit : .quiet, action: onOpen)
                 .accessibilityValue(SourceSettings.spoken(narrows: narrows))
@@ -123,8 +140,32 @@ struct SourceSettingsPage: View {
                     case .filters: ServerFiltersBlock(host: host, session: session)
                     }
                 }
+                TimelineJoinEntry(host: host, session: session)
             }
         }
         .onAppear { titleFocused = true }
+    }
+}
+
+/// The source page's row that opens the timelines already written it can join (#372) — the
+/// join's last step, for a source already held. Greyed with the same icon where none can take it.
+struct TimelineJoinEntry: View {
+    let host: String
+    let session: ShellSession
+
+    static let symbol = "rectangle.stack.badge.plus"
+
+    /// What a press on it does, said to a listener.
+    static func hint(language: DummyLanguage? = nil) -> String {
+        L10n.t("source.settings.join.hint", language: language)
+    }
+
+    var body: some View {
+        let mark = SourceSettings.joinMark(host: host, in: session)
+        ShellMarkButton(mark) { session.openTimelineJoin(host: host) }
+            .accessibilityHint(Text(Self.hint()))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, ShellSpace.pad)
+            .padding(.vertical, ShellSpace.snug)
     }
 }

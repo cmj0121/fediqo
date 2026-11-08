@@ -1718,6 +1718,7 @@
 "mark.dim.never" = "This source has none";
 "mark.dim.notNow" = "Not right now";
 "mark.dim.askAgain" = "This sign-in must be asked again first";
+"mark.dim.noTimeline" = "None of your timelines can take it";
 "mark.dim.said" = "%1$@. %2$@";
 "mark.dim.names" = ", ";
 "mark.more" = "More";
@@ -3116,3 +3117,5 @@
 "timeline.join.locked" = "Already in it";
 "timeline.join.hint.on" = "Add to this timeline";
 "timeline.join.hint.off" = "Leave out of this timeline";
+"source.settings.join" = "Join timelines";
+"source.settings.join.hint" = "Choose which of your timelines this source joins";
