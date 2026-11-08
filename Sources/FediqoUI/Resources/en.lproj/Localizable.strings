@@ -3105,3 +3105,14 @@
 "account.signup.told.notAdded" = "Your account at %@ works, but the source could not be added just now. Try adding it again, then sign in.";
 "account.signup.held" = "Your new account at %@ waits for its mail to be opened.";
 "account.signup.mail.quit" = "If Fediqo is quit before this ends, the sign-in it began stays allowed at %@ until you end it there.";
+"timeline.join.title" = "Add %@ to your timelines";
+"timeline.join.timelines" = "Timelines";
+"timeline.join.line" = "What you tick is added to that timeline.";
+"timeline.join.detail" = "Tick what of it each of your timelines reads, as if you had written it with it. What is already in a timeline stays ticked. Nothing ticked changes nothing.";
+"timeline.join.done" = "Done";
+"timeline.join.whole" = "All of %@";
+"timeline.join.asIs" = "Only what it already takes in";
+"timeline.join.spoken" = "%1$@, in %2$@";
+"timeline.join.locked" = "Already in it";
+"timeline.join.hint.on" = "Add to this timeline";
+"timeline.join.hint.off" = "Leave out of this timeline";

@@ -2353,10 +2353,11 @@ final class ShellSession {
                 // already been written by the time this line runs, so a reader who dismissed the
                 // sheet mid-press has still joined this server — skipping `adopt` would leave it
                 // added and invisible, with the list disagreeing with the store until something
-                // else happened to refresh it. What the token protects is only the sheet.
-                closeIfStillMine(mine)
+                // else happened to refresh it. What the token protects is only the sheet, which
+                // stays up through `adopt` into the timelines it may join (#372).
                 await adopt()
                 showJoined()
+                offerTimelines(host: preview.host, ifStillMine: mine)
             case .chooseBoards(let offer):
                 // D28's pause, and the third stage. **Nothing has been added**, so a reader who
                 // left takes the whole errand with them — which is why this one *is* entirely
@@ -2392,6 +2393,53 @@ final class ShellSession {
     private func closeIfStillMine(_ mine: Int) {
         guard mine == errand else { return }
         stage = nil
+    }
+
+    /// Takes down the sheet about `host`, where the errand is still the reader's; a sheet about
+    /// anything else is theirs, and stays.
+    private func closeAbout(_ host: String, ifStillMine mine: Int) {
+        guard mine == errand, stage?.host?.lowercased() == host.lowercased() else { return }
+        stage = nil
+    }
+
+    /// A join ending's last step (#372): the timelines already written that `host` can join, where
+    /// the errand is still the reader's and the sheet up is nothing or about `host`. Otherwise the
+    /// sheet about `host` comes down as before — and one that is about anything else is left, as is
+    /// a sheet the reader dismissed mid-press: the token has moved, and nothing springs back.
+    private func offerTimelines(host: String, ifStillMine mine: Int) {
+        guard mine == errand else { return }
+        let about = stage.map { $0.host?.lowercased() == host.lowercased() } ?? true
+        guard about else { return }
+        if let choice = TimelineJoinChoice(host: host.lowercased(), offers: timelineJoinOffers(host: host), sources: sources) {
+            stage = .joiningTimelines(choice)
+        } else {
+            stage = nil
+        }
+    }
+
+    /// The source page's "join timelines" (#372): the same chooser, for a source already held —
+    /// from no stage, or from that source's own page. Nothing where nothing is offered.
+    func openTimelineJoin(host: String) {
+        guard !checking else { return }
+        switch stage {
+        case nil: break
+        case .previewing(_, .joined(let source), _) where source.host == host.lowercased(): break
+        case .browsing, .browsingServers, .previewing, .choosingBoards, .choosingLists, .joiningTimelines: return
+        }
+        guard let choice = TimelineJoinChoice(
+            host: host.lowercased(), offers: timelineJoinOffers(host: host), sources: sources
+        ) else { return }
+        errand += 1
+        stage = .joiningTimelines(choice)
+    }
+
+    /// Done on the timelines a source can join (#372): the sheet comes down, and what was ticked
+    /// is kept and read. Nothing ticked keeps nothing.
+    func chooseTimelines() async {
+        guard case .joiningTimelines(let choice) = stage else { return }
+        errand += 1
+        stage = nil
+        await joinTimelines(choice.picks, host: choice.host)
     }
 
     /// Browse pressed. **It opens the protocols this app can read, and contacts nobody** —
@@ -2456,7 +2504,7 @@ final class ShellSession {
             askDirectory()
         // None of these offers a protocol to press: the server list is a step further in, a
         // preview and a board list are about one server, and a detail is about one the reader has.
-        case .browsingServers, .previewing, .choosingBoards, .choosingLists, nil:
+        case .browsingServers, .previewing, .choosingBoards, .choosingLists, .joiningTimelines, nil:
             return
         }
     }
@@ -2474,7 +2522,7 @@ final class ShellSession {
         case .browsingServers(let kind):
             guard !ServerDirectory.covers(kind) else { return nil }
             return String(format: L10n.t("join.browse.none", language: language), kind.displayName)
-        case .browsing, .previewing, .choosingBoards, .choosingLists, nil:
+        case .browsing, .previewing, .choosingBoards, .choosingLists, .joiningTimelines, nil:
             return nil
         }
     }
@@ -2494,7 +2542,7 @@ final class ShellSession {
         case .browsingServers(let kind):
             guard ServerDirectory.covers(kind) else { return }
             askDirectory()
-        case .browsing, .previewing, .choosingBoards, .choosingLists, nil:
+        case .browsing, .previewing, .choosingBoards, .choosingLists, .joiningTimelines, nil:
             return
         }
     }
@@ -2521,8 +2569,8 @@ final class ShellSession {
         guard stage?.surface != .pane else { return }
         switch stage {
         case .choosingBoards(_, .preview): backToPreview()
-        case .choosingBoards(_, .joined), .choosingLists, .browsing, .browsingServers, .previewing,
-            nil:
+        case .choosingBoards(_, .joined), .choosingLists, .joiningTimelines, .browsing, .browsingServers,
+            .previewing, nil:
             // **A swipe on the server list is a cancel and not a step back to the protocols.** The
             // reader dismissed the browser, not a step of it; landing them on the protocol list
             // would keep a sheet up that they asked to be rid of. Back is the button for that, and
@@ -2638,7 +2686,12 @@ final class ShellSession {
                 await store.remove(host: offer.host)
             }
             await adopt()
-            if mine == errand, !origin.isRestate { showJoined() }
+            if mine == errand, !origin.isRestate {
+                showJoined()
+                // Not where some boards could not be read: that sentence is on the page, and the
+                // source's own page joins its timelines later.
+                if unread.isEmpty { offerTimelines(host: offer.host, ifStillMine: mine) }
+            }
             // Where a board that failed was the only thing the reader was after, the rail is
             // still worth landing them on the one that worked — `adopt` does that — but the
             // sentence about the rest is `unread`, and it is read on Account.
@@ -3091,7 +3144,7 @@ final class ShellSession {
         // `JoinSheet.leading(for:)` offers this button to none of them, so this is unreachable
         // from the sheet — and it declines by deciding rather than by falling through somebody
         // else's answer.
-        case .browsing, .previewing, .choosingBoards, .choosingLists, nil:
+        case .browsing, .previewing, .choosingBoards, .choosingLists, .joiningTimelines, nil:
             return
         }
     }
@@ -3946,6 +3999,8 @@ final class ShellSession {
             progress = report
         }
         defer { if reports, progress == report { progress = nil } }
+        var holding = false
+        var mine = errand
         if !isAdded(host) {
             do {
                 _ = try await joiner(for: host, for: .joining).begin(preview)
@@ -3954,14 +4009,19 @@ final class ShellSession {
                 if !Cancellation.happened(error) { signUp.tell(.notAdded, host: host) }
                 return
             }
+            // The sheet about it stays up until the sign-in is kept, then joins its timelines
+            // (#372); the bump, read again here, is what lets a reader who dismissed during the
+            // add, or dismisses during the adopt, keep it down.
             if stage?.host?.lowercased() == host {
                 errand += 1
-                stage = nil
+                holding = true
+                mine = errand
             }
             await adopt()
         }
         // Removed in the wait: there is no row for a sign-in to stand under.
         guard isAdded(host) else {
+            if holding { closeAbout(host, ifStillMine: mine) }
             await mastodon.letGoSignedUp(traded)
             return
         }
@@ -3969,10 +4029,15 @@ final class ShellSession {
         switch await mastodon.keepSignedUp(traded, as: who) {
         case .kept:
             await forgetReaderMarksDue()
+            // Signed in now, so home is among what its timelines are offered — only as the end of
+            // the join whose sheet this held up, and never to a reader who left it meanwhile.
+            if holding { offerTimelines(host: host, ifStillMine: mine) }
             await readAsYou(host: host)
         case .another:
+            if holding { closeAbout(host, ifStillMine: mine) }
             rowRefusal = (host: host, key: "account.signin.replaced")
         case .failed:
+            if holding { closeAbout(host, ifStillMine: mine) }
             rowRefusal = (host: host, key: Self.signInFailureKey(.keychain))
         }
     }
