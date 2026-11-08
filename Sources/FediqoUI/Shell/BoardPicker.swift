@@ -335,29 +335,75 @@ struct ListPickerList: View {
 
     private func row(_ list: ListSubscription) -> some View {
         let on = picked.contains(list.id)
-        return Button {
+        return PickRow(name: list.name, on: on, tickSize: tickSize) {
             if on { picked.remove(list.id) } else { picked.insert(list.id) }
-        } label: {
+        }
+        .accessibilityHint(Text(L10n.t(on ? "list.choose.hint.off" : "list.choose.hint.on")))
+        .accessibilityLabel(Text(list.name))
+    }
+}
+
+/// One row of a picker: a tick and a name, filled while ticked. **Locked** is ticked and cannot be
+/// pressed — drawn dim and unfilled — and `detail` is a line under the name; both are off by default.
+/// The caller says what the row is to a listener.
+struct PickRow: View {
+    let name: String
+    let on: Bool
+    let locked: Bool
+    let detail: String?
+    let tickSize: CGFloat
+    let press: () -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    init(name: String, on: Bool, locked: Bool = false, detail: String? = nil, tickSize: CGFloat, press: @escaping () -> Void) {
+        self.name = name
+        self.on = on
+        self.locked = locked
+        self.detail = detail
+        self.tickSize = tickSize
+        self.press = press
+    }
+
+    var body: some View {
+        Button(action: press) {
             HStack(alignment: .center, spacing: ShellSpace.step) {
                 PickTick(on: on, size: tickSize)
-                Text(list.name)
-                    .shellFont(.name)
-                    .foregroundStyle(
-                        on ? ShellChrome.selectInk(colorScheme) : ShellChrome.ink(colorScheme)
-                    )
-                    .modifier(PickName())
+                if let detail {
+                    VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                        nameText
+                        Text(detail)
+                            .shellFont(.meta)
+                            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    nameText
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .padding(.horizontal, ShellSpace.pad)
             .padding(.vertical, ShellSpace.snug)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(on ? ShellChrome.selectFill(colorScheme) : .clear)
+            .background(on && !locked ? ShellChrome.selectFill(colorScheme) : .clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(locked)
         .accessibilityAddTraits(on ? [.isSelected] : [])
-        .accessibilityHint(Text(L10n.t(on ? "list.choose.hint.off" : "list.choose.hint.on")))
-        .accessibilityLabel(Text(list.name))
+    }
+
+    private var nameText: some View {
+        Text(name)
+            .shellFont(.name)
+            .foregroundStyle(nameInk)
+            .modifier(PickName())
+    }
+
+    private var nameInk: Color {
+        if locked { return ShellChrome.inkDim(colorScheme) }
+        return on ? ShellChrome.selectInk(colorScheme) : ShellChrome.ink(colorScheme)
     }
 }
 

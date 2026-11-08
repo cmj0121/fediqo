@@ -150,6 +150,12 @@ public struct SourceOffers: Hashable, Sendable {
         served += source.boards.map { .board(id: String($0.fid)) }
         return served
     }
+
+    /// The categories a timeline can pick `source` by now: `categories(of:signedIn:marks:directs:)` less what is
+    /// trending, which is the Trends page's and no timeline's.
+    public func timelineCategories(of source: Source, signedIn: Bool, marks readsMarks: Bool = false, directs readsDirects: Bool = false) -> [Category] {
+        categories(of: source, signedIn: signedIn, marks: readsMarks, directs: readsDirects).filter { $0 != .trends }
+    }
 }
 
 extension ProtocolKind {

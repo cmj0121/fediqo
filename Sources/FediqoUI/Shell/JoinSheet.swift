@@ -203,8 +203,7 @@ struct TimelineJoinChoice: Equatable {
         var picks: [TimelineID: Set<FediqoCore.Category>] = [:]
         for offer in offers {
             guard let picked = ticked[offer.timeline] else { continue }
-            let locked = Set(offer.divisions.filter(\.locked).map(\.category))
-            let adding = picked.subtracting(locked)
+            let adding = picked.subtracting(offer.lockedCategories)
             if !adding.isEmpty || offer.joinsAsIs { picks[offer.timeline] = adding }
         }
         return picks
@@ -212,21 +211,20 @@ struct TimelineJoinChoice: Equatable {
 
     /// Whether `category` is drawn ticked on `offer`: locked, or ticked by the reader.
     func isTicked(_ category: FediqoCore.Category, on offer: TimelineJoinOffer) -> Bool {
-        offer.divisions.contains { $0.category == category && $0.locked }
-            || ticked[offer.timeline]?.contains(category) == true
+        offer.lockedCategories.contains(category) || ticked[offer.timeline]?.contains(category) == true
     }
 
     /// Whether `offer`'s timeline is chosen as it is — the whole source, or with what is already
     /// on — and not with a new division: the two are distinct choices, drawn on distinct rows.
     func joinsAsIs(_ offer: TimelineJoinOffer) -> Bool {
         guard let picked = ticked[offer.timeline] else { return false }
-        return picked.subtracting(offer.divisions.filter(\.locked).map(\.category)).isEmpty
+        return picked.subtracting(offer.lockedCategories).isEmpty
     }
 
     /// The same choice with `category` ticked or unticked on `offer`. A locked division does not
     /// move; the last division unticked takes the timeline out.
     func ticking(_ category: FediqoCore.Category, on offer: TimelineJoinOffer) -> TimelineJoinChoice {
-        guard offer.divisions.contains(where: { $0.category == category && !$0.locked }) else { return self }
+        guard offer.openCategories.contains(category) else { return self }
         var next = self
         var picked = ticked[offer.timeline] ?? []
         if picked.contains(category) { picked.remove(category) } else { picked.insert(category) }

@@ -11,7 +11,6 @@ import SwiftUI
 struct TimelineJoinList: View {
     @Binding var choice: TimelineJoinChoice?
 
-    @Environment(\.colorScheme) private var colorScheme
     @ShellMetric(relativeTo: .callout) private var tickSize: CGFloat = 20
 
     var body: some View {
@@ -67,39 +66,12 @@ struct TimelineJoinList: View {
     private func row(
         _ name: String, in offer: TimelineJoinOffer, on: Bool, locked: Bool, press: @escaping () -> Void
     ) -> some View {
-        Button(action: press) {
-            HStack(alignment: .center, spacing: ShellSpace.step) {
-                PickTick(on: on, size: tickSize)
-                VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                    Text(name)
-                        .shellFont(.name)
-                        .foregroundStyle(nameInk(on: on, locked: locked))
-                        .modifier(PickName())
-                    if locked {
-                        Text(L10n.t("timeline.join.locked"))
-                            .shellFont(.meta)
-                            .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal, ShellSpace.pad)
-            .padding(.vertical, ShellSpace.snug)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(on && !locked ? ShellChrome.selectFill(colorScheme) : .clear)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(locked)
-        .accessibilityAddTraits(on ? [.isSelected] : [])
+        PickRow(
+            name: name, on: on, locked: locked, detail: locked ? L10n.t("timeline.join.locked") : nil,
+            tickSize: tickSize, press: press
+        )
         .accessibilityLabel(Text(Self.spoken(name, in: offer)))
         .accessibilityValue(Text(locked ? L10n.t("timeline.join.locked") : ""))
         .accessibilityHint(Text(locked ? "" : L10n.t(on ? "timeline.join.hint.off" : "timeline.join.hint.on")))
-    }
-
-    private func nameInk(on: Bool, locked: Bool) -> Color {
-        if locked { return ShellChrome.inkDim(colorScheme) }
-        return on ? ShellChrome.selectInk(colorScheme) : ShellChrome.ink(colorScheme)
     }
 }

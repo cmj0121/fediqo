@@ -571,9 +571,19 @@ extension ShellSession {
         )
     }
 
-    /// Whether the source's page has anything to open for joining timelines (#372).
+    /// The chooser for `host` joining the reader's timelines (#372), nothing ticked — none where nothing is offered.
+    func timelineJoinChoice(host: String) -> TimelineJoinChoice? {
+        TimelineJoinChoice(host: host.lowercased(), offers: timelineJoinOffers(host: host), sources: sources)
+    }
+
+    /// Whether the source's page has anything to open for joining timelines (#372): `timelineJoinOffers` not
+    /// empty, stopping at the first timeline offered something.
     func joinsTimelines(host: String) -> Bool {
-        !timelineJoinOffers(host: host).isEmpty
+        guard !timelinesUnreadable else { return false }
+        return TimelineJoin.hasOffer(
+            for: host, in: written, sources: sources, signedIn: isSignedIn(host: host),
+            marks: !readableMarks(host: host).isEmpty, directs: directsReads(host: host)
+        )
     }
 
     /// What was chosen for `host` joining the reader's timelines (#372), kept and read at once.
@@ -586,14 +596,10 @@ extension ShellSession {
         guard !choices.isEmpty else { return }
         let host = host.lowercased()
         let fresh: [TimelineDefinition]
-        switch timelineStore?.load() {
-        case .unreadable?:
-            timelinesUnreadable = true
-            return
-        case .timelines(let kept)?:
-            timelinesUnreadable = false
+        if let loaded = timelineStore?.load() {
+            guard let kept = taking(loaded) else { return }
             fresh = kept
-        case nil:
+        } else {
             guard !timelinesUnreadable else { return }
             fresh = written
         }
@@ -613,6 +619,19 @@ extension ShellSession {
         let categories: Set<FediqoCore.Category>? = asks.contains { $0.categories == nil }
             ? nil : asks.reduce(into: []) { $0.formUnion($1.categories ?? []) }
         return FetchAsk(host: host, categories: categories)
+    }
+
+    /// What the store just read, taken in: the timelines where they read, `timelinesUnreadable` let go — or nil
+    /// where they cannot be read, and that said.
+    func taking(_ loaded: WrittenTimelineStore.Loaded) -> [TimelineDefinition]? {
+        switch loaded {
+        case .timelines(let kept):
+            timelinesUnreadable = false
+            return kept
+        case .unreadable:
+            timelinesUnreadable = true
+            return nil
+        }
     }
 
     private func keep(_ timelines: [TimelineDefinition]) {

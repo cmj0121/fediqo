@@ -38,22 +38,36 @@ public struct TimelineJoinOffer: Hashable, Sendable, Identifiable {
         self.addsSource = addsSource
         self.joinsAsIs = joinsAsIs
     }
+
+    /// The divisions already on for Y: drawn ticked, never applied.
+    public var lockedCategories: Set<Category> { Set(divisions.filter(\.locked).map(\.category)) }
+
+    /// The divisions the reader may tick.
+    public var openCategories: Set<Category> { Set(divisions.filter { !$0.locked }.map(\.category)) }
 }
 
 public enum TimelineJoin {
     /// What each of `timelines` is offered for `host`, in order. Leaves out a timeline that excludes source(Y), one Y
     /// still could not reach once joined (`sourcesToAsk` on the joined definition), and one with nothing to add (D3).
-    /// Divisions: `kind.offers.categories(of:signedIn:marks:directs:)` less `.trends`; refused by the factory or
+    /// Divisions: `kind.offers.timelineCategories(of:signedIn:marks:directs:)`; refused by the factory or
     /// excluded for Y/`.every` → dropped (D4).
     public static func offers(
         for host: String, in timelines: [TimelineDefinition], sources: [Source],
         signedIn: Bool, marks: Bool, directs: Bool
     ) -> [TimelineJoinOffer] {
-        let host = host.lowercased()
-        guard let source = sources.first(where: { $0.host == host }) else { return [] }
-        let categories = source.kind.offers.categories(of: source, signedIn: signedIn, marks: marks, directs: directs)
-            .filter { $0 != .trends }
-        return timelines.compactMap { offer(of: $0, for: host, categories: categories, sources: sources) }
+        guard let joining = Joining(host, sources: sources, signedIn: signedIn, marks: marks, directs: directs)
+        else { return [] }
+        return timelines.compactMap { joining.offer(of: $0) }
+    }
+
+    /// Whether any of `timelines` is offered something for `host` (`offers` is not empty), stopping at the first.
+    public static func hasOffer(
+        for host: String, in timelines: [TimelineDefinition], sources: [Source],
+        signedIn: Bool, marks: Bool, directs: Bool
+    ) -> Bool {
+        guard let joining = Joining(host, sources: sources, signedIn: signedIn, marks: marks, directs: directs)
+        else { return false }
+        return timelines.contains { joining.offer(of: $0) != nil }
     }
 
     /// `timelines` with each choice applied (`TimelineDefinition.joining`), and the ids that changed.
@@ -61,39 +75,57 @@ public enum TimelineJoin {
         _ choices: [TimelineID: Set<Category>], of host: String,
         to timelines: [TimelineDefinition], sources: [Source]
     ) -> (timelines: [TimelineDefinition], changed: [TimelineID]) {
+        let host = host.lowercased()
+        let order = TimelineDefinition.order(of: sources.first { $0.host == host })
         var changed: [TimelineID] = []
         let joined = timelines.map { timeline -> TimelineDefinition in
             guard let picked = choices[timeline.id] else { return timeline }
-            let result = timeline.joining(host, categories: picked, sources: sources)
+            let result = timeline.joining(host, categories: picked, order: order, sources: sources)
             if result != timeline { changed.append(timeline.id) }
             return result
         }
         return (joined, changed)
     }
 
-    private static func offer(
-        of timeline: TimelineDefinition, for host: String, categories: [Category], sources: [Source]
-    ) -> TimelineJoinOffer? {
-        func adds(_ picked: Set<Category>) -> Bool {
-            timeline.joining(host, categories: picked, sources: sources) != timeline
+    /// Source Y resolved once for every timeline asked about: its host, the divisions a timeline may take of it,
+    /// and the order a join adds them in.
+    private struct Joining {
+        let host: String
+        let categories: [Category]
+        let order: [Category]
+        let sources: [Source]
+
+        init?(_ host: String, sources: [Source], signedIn: Bool, marks: Bool, directs: Bool) {
+            let host = host.lowercased()
+            guard let source = sources.first(where: { $0.host == host }) else { return nil }
+            self.host = host
+            categories = source.kind.offers.timelineCategories(of: source, signedIn: signedIn, marks: marks, directs: directs)
+            order = TimelineDefinition.order(of: source)
+            self.sources = sources
         }
-        // A stale list or board is never among `categories`, which are the lists and boards chosen now (D4).
-        var divisions: [TimelineJoinDivision] = []
-        if timeline.hasIncludes(.category) {
-            for category in categories where !timeline.excludes(category, for: host) {
-                if timeline.rules.contains(where: { $0.effect == .include && $0.isCategory(category, for: host) }) {
-                    divisions.append(TimelineJoinDivision(category: category, locked: true))
-                } else if Rule.category(category, in: .source(host: host), sources: sources) != nil, adds([category]) {
-                    divisions.append(TimelineJoinDivision(category: category, locked: false))
+
+        func offer(of timeline: TimelineDefinition) -> TimelineJoinOffer? {
+            func adds(_ picked: Set<Category>) -> Bool {
+                timeline.joining(host, categories: picked, order: order, sources: sources) != timeline
+            }
+            // A stale list or board is never among `categories`, which are the lists and boards chosen now (D4).
+            var divisions: [TimelineJoinDivision] = []
+            if timeline.hasIncludes(.category) {
+                for category in categories where !timeline.excludes(category, for: host) {
+                    if timeline.includes(category, for: host) {
+                        divisions.append(TimelineJoinDivision(category: category, locked: true))
+                    } else if Rule.category(category, in: .source(host: host), sources: sources) != nil, adds([category]) {
+                        divisions.append(TimelineJoinDivision(category: category, locked: false))
+                    }
                 }
             }
+            let asIs = (!timeline.hasIncludes(.category) || divisions.contains(where: \.locked)) && adds([])
+            guard asIs || divisions.contains(where: { !$0.locked }) else { return nil }
+            return TimelineJoinOffer(
+                timeline: timeline.id, name: timeline.name, divisions: divisions,
+                addsSource: timeline.lacksSource(host), joinsAsIs: asIs
+            )
         }
-        let asIs = (!timeline.hasIncludes(.category) || divisions.contains(where: \.locked)) && adds([])
-        guard asIs || divisions.contains(where: { !$0.locked }) else { return nil }
-        return TimelineJoinOffer(
-            timeline: timeline.id, name: timeline.name, divisions: divisions,
-            addsSource: timeline.lacksSource(host), joinsAsIs: asIs
-        )
     }
 }
 
@@ -105,11 +137,15 @@ extension TimelineDefinition {
     /// reach it (`sourcesToAsk`).
     public func joining(_ host: String, categories: Set<Category>, sources: [Source]) -> TimelineDefinition {
         let host = host.lowercased()
+        return joining(host, categories: categories, order: Self.order(of: sources.first { $0.host == host }), sources: sources)
+    }
+
+    /// `joining(_:categories:sources:)` for a lowercased `host`, with `order` (`order(of:)`) resolved by the caller.
+    func joining(_ host: String, categories: Set<Category>, order: [Category], sources: [Source]) -> TimelineDefinition {
         var joined = self
         if hasIncludes(.category) {
-            let added = Self.ordered(categories, of: sources.first { $0.host == host }).compactMap { category -> Rule? in
-                let held = rules.contains { $0.effect == .include && $0.isCategory(category, for: host) }
-                guard !held, !excludes(category, for: host) else { return nil }
+            let added = Self.ordered(categories, by: order).compactMap { category -> Rule? in
+                guard !includes(category, for: host), !excludes(category, for: host) else { return nil }
                 return Rule.category(category, in: .source(host: host), sources: sources)
             }
             joined.insert(added, after: .category)
@@ -134,6 +170,10 @@ extension TimelineDefinition {
         hasIncludes(.source) && !rules.contains { $0.effect == .include && $0.kind == .source(host: host) }
     }
 
+    func includes(_ category: Category, for host: String) -> Bool {
+        rules.contains { $0.effect == .include && $0.isCategory(category, for: host) }
+    }
+
     func excludes(_ category: Category, for host: String) -> Bool {
         rules.contains { $0.effect == .exclude && $0.isCategory(category, for: host) }
     }
@@ -145,10 +185,14 @@ extension TimelineDefinition {
         rules.insert(contentsOf: added, at: at)
     }
 
-    /// `categories` in the order the source offers them, so a join adds its rules the same way every time.
-    private static func ordered(_ categories: Set<Category>, of source: Source?) -> [Category] {
-        let offered = source.map { $0.kind.offers.categories(of: $0, signedIn: true, marks: true, directs: true) } ?? []
-        let known = offered.filter(categories.contains)
+    /// Every category `source` could offer, in its order: what a join orders its rules by.
+    static func order(of source: Source?) -> [Category] {
+        source.map { $0.kind.offers.categories(of: $0, signedIn: true, marks: true, directs: true) } ?? []
+    }
+
+    /// `categories` in the order the source offers them (`order`), so a join adds its rules the same way every time.
+    private static func ordered(_ categories: Set<Category>, by order: [Category]) -> [Category] {
+        let known = order.filter(categories.contains)
         let rest = categories.subtracting(known).sorted { String(describing: $0) < String(describing: $1) }
         return known + rest
     }

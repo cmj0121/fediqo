@@ -2386,20 +2386,19 @@ final class ShellSession {
         }
     }
 
-    /// Takes the sheet down, but only if it is still showing the errand that just finished.
+    /// Takes the sheet down, but only if it is still showing the errand that just finished — and,
+    /// given `host`, only a sheet about `host`: a sheet about anything else is the reader's, and stays.
     ///
     /// A reader who dismissed and moved on has a stage of their own by now, and closing *that* is
     /// the same fault as reopening one they left — a sheet changing under somebody either way.
-    private func closeIfStillMine(_ mine: Int) {
-        guard mine == errand else { return }
+    private func closeIfStillMine(_ mine: Int, about host: String? = nil) {
+        guard host.map({ stillMine(mine, nothingOrAbout: $0) }) ?? (mine == errand), stage != nil else { return }
         stage = nil
     }
 
-    /// Takes down the sheet about `host`, where the errand is still the reader's; a sheet about
-    /// anything else is theirs, and stays.
-    private func closeAbout(_ host: String, ifStillMine mine: Int) {
-        guard mine == errand, stage?.host?.lowercased() == host.lowercased() else { return }
-        stage = nil
+    /// Whether the errand is still the reader's and the sheet up is nothing or about `host`.
+    private func stillMine(_ mine: Int, nothingOrAbout host: String) -> Bool {
+        mine == errand && (stage.map { $0.host?.lowercased() == host.lowercased() } ?? true)
     }
 
     /// A join ending's last step (#372): the timelines already written that `host` can join, where
@@ -2407,14 +2406,8 @@ final class ShellSession {
     /// sheet about `host` comes down as before — and one that is about anything else is left, as is
     /// a sheet the reader dismissed mid-press: the token has moved, and nothing springs back.
     private func offerTimelines(host: String, ifStillMine mine: Int) {
-        guard mine == errand else { return }
-        let about = stage.map { $0.host?.lowercased() == host.lowercased() } ?? true
-        guard about else { return }
-        if let choice = TimelineJoinChoice(host: host.lowercased(), offers: timelineJoinOffers(host: host), sources: sources) {
-            stage = .joiningTimelines(choice)
-        } else {
-            stage = nil
-        }
+        guard stillMine(mine, nothingOrAbout: host) else { return }
+        stage = timelineJoinChoice(host: host).map { .joiningTimelines($0) }
     }
 
     /// The source page's "join timelines" (#372): the same chooser, for a source already held —
@@ -2426,9 +2419,7 @@ final class ShellSession {
         case .previewing(_, .joined(let source), _) where source.host == host.lowercased(): break
         case .browsing, .browsingServers, .previewing, .choosingBoards, .choosingLists, .joiningTimelines: return
         }
-        guard let choice = TimelineJoinChoice(
-            host: host.lowercased(), offers: timelineJoinOffers(host: host), sources: sources
-        ) else { return }
+        guard let choice = timelineJoinChoice(host: host) else { return }
         errand += 1
         stage = .joiningTimelines(choice)
     }
@@ -3207,15 +3198,8 @@ final class ShellSession {
     /// timelines and choices read again off the preferences, who is signed in read again off
     /// the Keychain, and the picture copies measured again.
     func adoptReadBack(prefs: DummyPrefs) async {
-        switch timelineStore?.load() {
-        case .timelines(let kept)?:
-            written = kept
-            timelinesUnreadable = false
-        case .unreadable?:
-            timelinesUnreadable = true
-        case nil:
-            break
-        }
+        // No store attached reads nothing again, and leaves what is said of the timelines as it was.
+        if let loaded = timelineStore?.load(), let kept = taking(loaded) { written = kept }
         prefs.reread()
         if work === SourceWork.shared { AllowanceBook.shared.reread() }
         mastodon.readBack()
@@ -3999,8 +3983,8 @@ final class ShellSession {
             progress = report
         }
         defer { if reports, progress == report { progress = nil } }
-        var holding = false
-        var mine = errand
+        // The errand whose sheet this holds up, where it holds one.
+        var heldErrand: Int?
         if !isAdded(host) {
             do {
                 _ = try await joiner(for: host, for: .joining).begin(preview)
@@ -4014,14 +3998,13 @@ final class ShellSession {
             // add, or dismisses during the adopt, keep it down.
             if stage?.host?.lowercased() == host {
                 errand += 1
-                holding = true
-                mine = errand
+                heldErrand = errand
             }
             await adopt()
         }
         // Removed in the wait: there is no row for a sign-in to stand under.
         guard isAdded(host) else {
-            if holding { closeAbout(host, ifStillMine: mine) }
+            if let heldErrand { closeIfStillMine(heldErrand, about: host) }
             await mastodon.letGoSignedUp(traded)
             return
         }
@@ -4031,13 +4014,13 @@ final class ShellSession {
             await forgetReaderMarksDue()
             // Signed in now, so home is among what its timelines are offered — only as the end of
             // the join whose sheet this held up, and never to a reader who left it meanwhile.
-            if holding { offerTimelines(host: host, ifStillMine: mine) }
+            if let heldErrand { offerTimelines(host: host, ifStillMine: heldErrand) }
             await readAsYou(host: host)
         case .another:
-            if holding { closeAbout(host, ifStillMine: mine) }
+            if let heldErrand { closeIfStillMine(heldErrand, about: host) }
             rowRefusal = (host: host, key: "account.signin.replaced")
         case .failed:
-            if holding { closeAbout(host, ifStillMine: mine) }
+            if let heldErrand { closeIfStillMine(heldErrand, about: host) }
             rowRefusal = (host: host, key: Self.signInFailureKey(.keychain))
         }
     }

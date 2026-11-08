@@ -356,8 +356,10 @@ struct TimelineJoinStepTests {
         let file = try ShellSource.shell("TimelineJoinList")
         #expect(file.contains(".accessibilityLabel(Text(Self.spoken(name, in: offer)))"))
         #expect(file.contains(#".accessibilityValue(Text(locked ? L10n.t("timeline.join.locked") : ""))"#))
-        #expect(file.contains(".accessibilityAddTraits(on ? [.isSelected] : [])"))
-        #expect(file.contains(".disabled(locked)"))
+        #expect(file.contains("PickRow(\n            name: name, on: on, locked: locked,"))
+        let row = try ShellSource.shell("BoardPicker")
+        #expect(row.contains(".accessibilityAddTraits(on ? [.isSelected] : [])"))
+        #expect(row.contains(".disabled(locked)"))
         let offer = Self.drawnChoice().offers[1]
         #expect(TimelineJoinList.spoken("Public", in: offer, language: .english) == "Public, in Friends")
         #expect(TimelineJoinList.asIsName(offer, host: Self.y, language: .english) == "All of first.example")
