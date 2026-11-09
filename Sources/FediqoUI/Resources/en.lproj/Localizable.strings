@@ -3200,7 +3200,7 @@
 "sync.refused.declined" = "Not merged with %@ yet: asked again next time they meet";
 "sync.refused.unreadableHere" = "Not merged with %@: the timelines here could not be read, and nothing was written";
 "sync.refused.unreadableThere" = "Not merged with %@: it could not write what this device sent, and nothing changed here";
-"sync.refused.clockAhead" = "Not merged with %@: its clock or this one is a day or more off";
+"sync.refused.clockAhead" = "Not merged with %@: its clock or this one is more than ten minutes off";
 "sync.refused.busy" = "A merge with %@ is already under way";
 "sync.refused.tooLarge" = "Not merged with %@: there is too much to send at once";
 "sync.refused.malformed" = "Not merged with %@: it did not speak as a Fediqo does";

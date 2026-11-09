@@ -7,7 +7,7 @@ public enum SyncRefusal: Error, Sendable, Equatable, Codable {
     case declined                          // a no, or no answer within answerWait: pair stays unmerged
     case unreadableHere                    // timelines here cannot be read: nothing written
     case unreadableThere
-    case clockAhead                        // a stamp a day or more past this clock
+    case clockAhead                        // a stamp more than ten minutes past this clock
     case busy                              // a merge with that device is already under way
     case tooLarge
     case malformed

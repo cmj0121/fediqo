@@ -35,7 +35,7 @@ public struct SyncTiming: Sendable {
 
     public init(
         dueCheck: Duration = .seconds(60), syncNowWindow: Duration = .seconds(60), answerWait: Duration = .seconds(120),
-        stepWait: Duration = .seconds(30), mostAhead: Duration = .seconds(86_400)
+        stepWait: Duration = .seconds(30), mostAhead: Duration = .seconds(600)
     ) {
         self.dueCheck = dueCheck
         self.syncNowWindow = syncNowWindow
@@ -95,7 +95,11 @@ public protocol SyncLocal: Sendable {
 ///
 /// **What counts as met.** A pair is met only by a dial that gets past the handshake: one that
 /// fails it (a stranger replaying the tag under its own name, a drop) is said nowhere, and the
-/// other listeners showing the pair's tag are tried.
+/// other listeners showing the pair's tag are tried — at most `mostListenersTried` of them per
+/// pair in one look, so a room full of strangers replaying a tag cannot keep it dialing. A
+/// listener that failed is remembered for the pair until a merge or the next tag bucket, and
+/// the next look tries the ones not yet tried first, so strangers listed first cannot take
+/// every look's dials.
 ///
 /// **Exchange** (both roles, over `NearbyChannel` keyed by `SyncDiscovery.psk(secret:tag:)`
 /// with `sessionID: tag`): hello → snapshot → `runsAhead` / `readable` checks → `plan`. Only
@@ -134,6 +138,11 @@ public actor SyncSession {
     private var ownNames: Set<String> = []
     private var listens = 0
     private var pairing: SyncPairing?
+
+    /// How many of a pair's listeners one look dials before it leaves the pair for the next.
+    static let mostListenersTried = 3
+    /// The listeners each pair's dials could not get past, in the tag bucket they failed in.
+    private var failedListeners: [String: (bucket: Int64, ids: Set<String>)] = [:]
 
     public init(
         link: any SyncLink, pairs: any PairStore, clock: SyncClock, name: String,
@@ -344,7 +353,7 @@ public actor SyncSession {
             advertiser?.cancel()
             sink.finish()
         }
-        /// Pairs met, or no longer due.
+        /// Pairs met, no longer due, or whose `mostListenersTried` dials all failed.
         var settled: Set<String> = []
         var dialing: Set<String> = []
         /// The listeners each pair's dials could not get past.
@@ -354,9 +363,13 @@ public actor SyncSession {
         var over = false
         var refused = false
 
+        let bucket = SyncDiscovery.bucket(at: now())
+        let failedBefore = failedListeners.values.filter { $0.bucket == bucket }.reduce(into: Set<String>()) { $0.formUnion($1.ids) }
+
         func dialSeen() {
             guard !over else { return }
-            for peer in seen where !ownNames.contains(peer.name) {
+            let order = seen.filter { !failedBefore.contains($0.id) } + seen.filter { failedBefore.contains($0.id) }.shuffled()
+            for peer in order where !ownNames.contains(peer.name) {
                 guard let (pair, secret) = wanted.first(where: {
                     let device = $0.pair.device
                     return !settled.contains(device) && !dialing.contains(device) && !missed[device, default: []].contains(peer.id)
@@ -387,8 +400,11 @@ public actor SyncSession {
                 if let outcome {
                     settled.insert(device)
                     outcomes[device] = outcome
+                    failedListeners[device] = nil
                 } else {
                     missed[device, default: []].insert(peer)
+                    remember(peer, failedFor: device, in: bucket)
+                    if missed[device, default: []].count >= Self.mostListenersTried { settled.insert(device) }
                     dialSeen()
                 }
             case .over:
@@ -401,6 +417,12 @@ public actor SyncSession {
             if dialing.isEmpty, over || settled.count == wanted.count { break }
         }
         return (outcomes, refused)
+    }
+
+    private func remember(_ listener: String, failedFor device: String, in bucket: Int64) {
+        var failed = failedListeners[device].flatMap { $0.bucket == bucket ? $0.ids : nil } ?? []
+        failed.insert(listener)
+        failedListeners[device] = (bucket, failed)
     }
 
     /// One dial, or the merge already under way with that pair. nil where it did not get past
@@ -558,7 +580,7 @@ public actor SyncSession {
 
         let here: SyncSnapshot
         do {
-            here = try await local.snapshot()
+            here = try await local.snapshot().shared
         } catch let refusal as SyncRefusal {
             throw refusal
         } catch {

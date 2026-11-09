@@ -66,9 +66,9 @@ public struct SyncSource: Hashable, Sendable, Codable {
             throw SyncRefusal.peerNewer
         }
         let boards = try container.decode([Board].self, forKey: .boards)
-        guard host.isCanonicalHost, Set(boards.map(\.fid)).count == boards.count else {
+        guard host.isParsedHost, Set(boards.map(\.fid)).count == boards.count else {
             throw DecodingError.dataCorruptedError(
-                forKey: .host, in: container, debugDescription: "source \(host) not lowercase or repeats a board")
+                forKey: .host, in: container, debugDescription: "source host not as kept, or repeats a board")
         }
         self.init(host: host, kind: kind, boards: boards.map { BoardSubscription(fid: $0.fid, name: $0.name) })
     }
@@ -100,7 +100,8 @@ public struct SyncTimeline: Hashable, Sendable, Codable {
 /// Everything one side merges: every source entry by host and every timeline entry by id,
 /// tombstones included. Codable as two arrays sorted by key (`{"sources":[SourceEntry],
 /// "timelines":[TimelineEntry]}`), each entry `{"host"|"id", "stamp", "value"?}`. A repeated key,
-/// a host empty or not lowercase, or a value whose own host or id is not its key, is malformed.
+/// a host not as `Host.parse` keeps it, or a value whose own host or id is not its key, is
+/// malformed. A source entry whose host `isLocalHost` is read past, never merged.
 public struct SyncSnapshot: Hashable, Sendable, Codable {
     public var sources: [String: Stamped<SyncSource>]
     public var timelines: [UUID: Stamped<SyncTimeline>]
@@ -111,6 +112,11 @@ public struct SyncSnapshot: Hashable, Sendable, Codable {
     }
 
     public static let empty = SyncSnapshot()
+
+    /// It without any source whose host `isLocalHost`: what this side sends and merges.
+    public var shared: SyncSnapshot {
+        SyncSnapshot(sources: sources.filter { !$0.key.isLocalHost }, timelines: timelines)
+    }
 
     /// The greatest stamp in it: what `SyncClock.witness` is told after a merge.
     public var newest: SyncStamp {
@@ -138,14 +144,16 @@ public struct SyncSnapshot: Hashable, Sendable, Codable {
         let sourceEntries = try container.decode([SourceEntry].self, forKey: .sources)
         let timelineEntries = try container.decode([TimelineEntry].self, forKey: .timelines)
         var sources: [String: Stamped<SyncSource>] = [:]
+        var seen: Set<String> = []
         for entry in sourceEntries {
-            guard entry.host.isCanonicalHost,
+            guard entry.host.isParsedHost,
                   entry.value.map({ $0.host == entry.host }) ?? true,
-                  sources.updateValue(Stamped(entry.value, at: entry.stamp), forKey: entry.host) == nil
+                  seen.insert(entry.host).inserted
             else {
                 throw DecodingError.dataCorruptedError(
-                    forKey: .sources, in: container, debugDescription: "source entry \(entry.host) repeated or misnamed")
+                    forKey: .sources, in: container, debugDescription: "source entry repeated, misnamed or not as kept")
             }
+            if !entry.host.isLocalHost { sources[entry.host] = Stamped(entry.value, at: entry.stamp) }
         }
         var timelines: [UUID: Stamped<SyncTimeline>] = [:]
         for entry in timelineEntries {
@@ -172,8 +180,42 @@ public struct SyncSnapshot: Hashable, Sendable, Codable {
 }
 
 extension String {
-    /// A host as `Source.host` keeps it: not empty, already lowercase.
-    fileprivate var isCanonicalHost: Bool { !isEmpty && self == lowercased() }
+    /// Exactly what `Host.parse` makes of it (lowercase, no scheme, path, query or userinfo):
+    /// the only spelling a source host is kept in. Anything else in a snapshot is malformed.
+    fileprivate var isParsedHost: Bool { (try? Host.parse(self)) == self }
+
+    /// A parsed host that is this device or its link — loopback (`localhost`, 0/8, 127/8, `::`,
+    /// `::1`) or link-local (169.254/16, fe80::/10), a port or one trailing dot aside. Never
+    /// merged either way: left out of what is sent, ignored in what arrives. A merged source
+    /// is fetched from, and a peer's word must not point that fetch back inside the device or
+    /// its LAN; a person's own such source still stays theirs, here only.
+    var isLocalHost: Bool {
+        var name = self
+        if hasPrefix("["), hasSuffix("]") {
+            let inner = String(dropFirst().dropLast())
+            var address = in6_addr()
+            if inet_pton(AF_INET6, inner, &address) == 1 {
+                let bytes = withUnsafeBytes(of: address) { Array($0) }
+                let unspecifiedOrLoopback = bytes[0..<15].allSatisfy { $0 == 0 } && bytes[15] <= 1
+                let linkLocal = bytes[0] == 0xFE && bytes[1] & 0xC0 == 0x80
+                let mapped = bytes[0..<10].allSatisfy { $0 == 0 } && bytes[10] == 0xFF && bytes[11] == 0xFF
+                return unspecifiedOrLoopback || linkLocal || (mapped && Self.isLocalIPv4(bytes[12], bytes[13]))
+            }
+            // `Host.parse` keeps a name with a port bracketed: "[a.example:8443]".
+            name = inner.lastIndex(of: ":").map { String(inner[..<$0]) } ?? inner
+        }
+        if name.hasSuffix(".") { name.removeLast() }
+        if name == "localhost" || name.hasSuffix(".localhost") { return true }
+        var address = in_addr()
+        guard inet_aton(name, &address) == 1 else { return false }
+        let bytes = withUnsafeBytes(of: address.s_addr) { Array($0) }
+        return Self.isLocalIPv4(bytes[0], bytes[1])
+    }
+
+    /// 0/8, 127/8 or 169.254/16, by an IPv4 address's first two bytes.
+    private static func isLocalIPv4(_ first: UInt8, _ second: UInt8) -> Bool {
+        first == 0 || first == 127 || (first == 169 && second == 254)
+    }
 }
 
 /// The source stamps and tombstones a store keeps (U3) beside its `[Source]`.

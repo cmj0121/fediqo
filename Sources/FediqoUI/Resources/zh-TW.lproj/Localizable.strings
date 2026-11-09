@@ -3136,7 +3136,7 @@
 "sync.refused.declined" = "尚未與 %@ 合併：下次相遇時會再詢問";
 "sync.refused.unreadableHere" = "未與 %@ 合併：這裡的時間軸無法讀取，什麼都沒有寫入";
 "sync.refused.unreadableThere" = "未與 %@ 合併：它無法寫入這部裝置送去的內容，這裡沒有變動";
-"sync.refused.clockAhead" = "未與 %@ 合併：它或這部裝置的時鐘差了一天以上";
+"sync.refused.clockAhead" = "未與 %@ 合併：它或這部裝置的時鐘差了十分鐘以上";
 "sync.refused.busy" = "已經在和 %@ 合併中";
 "sync.refused.tooLarge" = "未與 %@ 合併：一次要送的內容太多";
 "sync.refused.malformed" = "未與 %@ 合併：它的回應不像 Fediqo";
