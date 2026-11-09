@@ -694,6 +694,20 @@ final class ShellReload {
         }
     }
 
+    /// One source asked at once for what the timelines it just joined want (#372), as a `.held` ask. Nothing while
+    /// `.held`, `.timeline` or `.more` is out, nor for a source no longer held; the next wait reads it.
+    ///
+    /// **What the last wait said of every other source stands**: this asked only the one, so only what is said of it
+    /// is this read's to change.
+    func joined(_ ask: FetchAsk, in session: ShellSession) async {
+        guard asking.isDisjoint(with: [.held, .timeline, .more]),
+              session.sources.contains(where: { $0.host == ask.host }), !gone.contains(ask.host)
+        else { return }
+        await run(.held, alone: true) {
+            await self.read([ask], as: .held, alone: true, in: session)
+        }
+    }
+
     /// `held(in:)` each time `wait` has passed, until the task running this is cancelled — the
     /// root view's, so a window closed or a wait chosen anew ends this one, and an ask of it
     /// still on the wire with it (#95). That is not the reader stopping it, so it says nothing.
@@ -739,13 +753,15 @@ final class ShellReload {
     }
 
     /// `asks`, each source read into the store as it answers, as `kind`: what did not answer is
-    /// that kind's to say.
-    func read(_ asks: [FetchAsk], as kind: Ask, in session: ShellSession) async {
+    /// that kind's to say. **`alone`** (#372): only these sources are this read's to speak of — what the kind last
+    /// said of every other one stands, as it is when this ends — and it is no round of the kind (#371).
+    func read(_ asks: [FetchAsk], as kind: Ask, alone: Bool = false, in session: ShellSession) async {
         let sources = session.sources
-        readingHosts[kind] = Set(asks.map(\.host))
+        let askedHosts = Set(asks.map(\.host))
+        readingHosts[kind] = askedHosts
         // What the last run found is not this run's fact about any server. Cleared here
         // rather than at the end, so a run that is stopped halfway leaves nothing standing.
-        unspokens[kind] = nil
+        if !alone || unspokens[kind].map({ askedHosts.contains($0.host) }) == true { unspokens[kind] = nil }
 
         // **Every server is asked what it is before any of them is spoken to** — #86.
         //
@@ -782,7 +798,8 @@ final class ShellReload {
                     // It answered, and it answered as something this app does not read. Nothing
                     // failed, so it is not reported silent; it is its own sentence, said once.
                     guard SourceJoin.reads(source.kind) else {
-                        self.unspokens[kind] = self.unspokens[kind] ?? Unspoken(host: source.host, kind: source.kind)
+                        let said = Unspoken(host: source.host, kind: source.kind)
+                        self.unspokens[kind] = alone ? said : self.unspokens[kind] ?? said
                         continue
                     }
                     reached.append(ask)
@@ -806,7 +823,7 @@ final class ShellReload {
         let held = Set(session.sources.map(\.host))
         // **A round of `r` or of the wait counts toward a source not being read** (#371); an ask
         // for more is the reader scrolling, and counts nothing.
-        if kind == .timeline || kind == .held {
+        if kind == .timeline || kind == .held, !alone {
             let moment = now()
             // A source whose read was stopped before it ended says nothing this round.
             for ask in reached where held.contains(ask.host) {
@@ -818,7 +835,10 @@ final class ShellReload {
                 )
             }
         }
-        failures[kind] = asks.map(\.host).filter { unread.contains($0) && held.contains($0) }
+        let missed = asks.map(\.host).filter { unread.contains($0) && held.contains($0) }
+        failures[kind] = alone
+            ? (failures[kind] ?? []).filter { !askedHosts.contains($0) && held.contains($0) } + missed
+            : missed
         // **A host that answered now is not still failing** (#95): what `r` said about it goes
         // when a wait reads it whole, and the reverse, rather than standing until that kind runs
         // again. A thread's failure is about its post, which this did not read.
@@ -982,11 +1002,14 @@ final class ShellReload {
     /// is asked again now. **A timeline's start clears the thread's too**, since `r` reaches the
     /// timeline only with no thread in front, and a thread left behind has nothing left to say
     /// about it. A thread's start leaves the timeline's standing, which is still true (#175).
-    func run(_ ask: Ask, _ body: @escaping @MainActor () async -> Void) async {
+    ///
+    /// **`alone`**: a run asking only some sources (#372) lets nothing the kind last said go as it starts; its read
+    /// changes only what it says of those.
+    func run(_ ask: Ask, alone: Bool = false, _ body: @escaping @MainActor () async -> Void) async {
         generation += 1
         let mine = generation
         asking.insert(ask)
-        forget(ask)
+        if !alone { forget(ask) }
         if ask == .timeline {
             forget(.thread)
             // And what asking for more said, and where a forum's pages had got to: the newest

@@ -171,6 +171,77 @@ enum BoardsOrigin: Equatable {
     }
 }
 
+/// The timelines a source can join, as the chooser draws them (#372): data only.
+///
+/// **A timeline is chosen when it has a key in `ticked`**; its set is the divisions ticked for
+/// it, and an empty set is "as is" — the whole source, or with what is already on — which only a
+/// timeline whose offer `joinsAsIs` can hand on. Opens with nothing ticked, so Done untouched
+/// changes nothing.
+struct TimelineJoinChoice: Equatable {
+    let host: String
+    let offers: [TimelineJoinOffer]
+    /// Each division's label (`RuleText.categoryName(_:host:sources:)`).
+    let labels: [FediqoCore.Category: String]
+    /// Ticked, per timeline. Empty set = as is / whole source (only where `joinsAsIs`).
+    var ticked: [TimelineID: Set<FediqoCore.Category>]
+
+    /// The choice for `host` over `offers`, nothing ticked — or none where nothing is offered.
+    init?(host: String, offers: [TimelineJoinOffer], sources: [Source], language: DummyLanguage? = nil) {
+        guard !offers.isEmpty else { return nil }
+        self.host = host
+        self.offers = offers
+        var labels: [FediqoCore.Category: String] = [:]
+        for division in offers.flatMap(\.divisions) where labels[division.category] == nil {
+            labels[division.category] = RuleText.categoryName(division.category, host: host, sources: sources, language: language)
+        }
+        self.labels = labels
+        ticked = [:]
+    }
+
+    /// What Done hands on: ticked timelines whose pick adds something (locked taken out).
+    var picks: [TimelineID: Set<FediqoCore.Category>] {
+        var picks: [TimelineID: Set<FediqoCore.Category>] = [:]
+        for offer in offers {
+            guard let picked = ticked[offer.timeline] else { continue }
+            let adding = picked.subtracting(offer.lockedCategories)
+            if !adding.isEmpty || offer.joinsAsIs { picks[offer.timeline] = adding }
+        }
+        return picks
+    }
+
+    /// Whether `category` is drawn ticked on `offer`: locked, or ticked by the reader.
+    func isTicked(_ category: FediqoCore.Category, on offer: TimelineJoinOffer) -> Bool {
+        offer.lockedCategories.contains(category) || ticked[offer.timeline]?.contains(category) == true
+    }
+
+    /// Whether `offer`'s timeline is chosen as it is — the whole source, or with what is already
+    /// on — and not with a new division: the two are distinct choices, drawn on distinct rows.
+    func joinsAsIs(_ offer: TimelineJoinOffer) -> Bool {
+        guard let picked = ticked[offer.timeline] else { return false }
+        return picked.subtracting(offer.lockedCategories).isEmpty
+    }
+
+    /// The same choice with `category` ticked or unticked on `offer`. A locked division does not
+    /// move; the last division unticked takes the timeline out.
+    func ticking(_ category: FediqoCore.Category, on offer: TimelineJoinOffer) -> TimelineJoinChoice {
+        guard offer.openCategories.contains(category) else { return self }
+        var next = self
+        var picked = ticked[offer.timeline] ?? []
+        if picked.contains(category) { picked.remove(category) } else { picked.insert(category) }
+        next.ticked[offer.timeline] = picked.isEmpty ? nil : picked
+        return next
+    }
+
+    /// The same choice with `offer`'s timeline joined as it is — its new divisions let go — or,
+    /// where it already was, taken out. Nothing where the offer cannot join as it is.
+    func tickingAsIs(_ offer: TimelineJoinOffer) -> TimelineJoinChoice {
+        guard offer.joinsAsIs else { return self }
+        var next = self
+        next.ticked[offer.timeline] = joinsAsIs(offer) ? nil : []
+        return next
+    }
+}
+
 /// Where the reader is in adding a source: looking for a protocol, looking through its servers,
 /// looking *at* one, or picking what of it to read.
 ///
@@ -222,6 +293,9 @@ enum JoinStage: Identifiable, Equatable {
     /// source the reader already has, so it is the boards restate's shape: Cancel, never Back.
     /// Its ticks are list ids and live in the choice, not in `ticked`, which is a board's `fid`.
     case choosingLists(ListChoice)
+    /// The join's last step, or opened from the source's page (#372): the timelines already
+    /// written that the source can join. Cancel or a swipe closes it, Done applies.
+    case joiningTimelines(TimelineJoinChoice)
 
     /// Whether this stage goes away when the reader leaves the window.
     ///
@@ -247,7 +321,7 @@ enum JoinStage: Identifiable, Equatable {
         case .previewing(_, .field, _): false
         // The detail of a source already held is a thing to read, not a question to answer.
         case .previewing(_, .joined, _): false
-        case .choosingBoards, .choosingLists: true
+        case .choosingBoards, .choosingLists, .joiningTimelines: true
         }
     }
 
@@ -258,6 +332,7 @@ enum JoinStage: Identifiable, Equatable {
         case .previewing(let preview, _, _): "previewing:\(preview.host)"
         case .choosingBoards(let offer, _): "choosingBoards:\(offer.host)"
         case .choosingLists(let choice): "choosingLists:\(choice.host)"
+        case .joiningTimelines(let choice): "joiningTimelines:\(choice.host)"
         }
     }
 
@@ -274,7 +349,7 @@ enum JoinStage: Identifiable, Equatable {
         case .previewing(_, _, let ticked): ticked
         case .choosingBoards(_, let origin): origin.ticked
         // Lists are ticked by id, in the choice itself; there is no board here to tick.
-        case .choosingLists: []
+        case .choosingLists, .joiningTimelines: []
         }
     }
 
@@ -289,7 +364,7 @@ enum JoinStage: Identifiable, Equatable {
         // Neither browsing step holds ticks, so both hand themselves back rather than rebuilding
         // a value equal to the one matched. Still exhaustive: a fifth stage breaks the build here
         // exactly as it did before.
-        case .browsing, .browsingServers, .choosingLists: self
+        case .browsing, .browsingServers, .choosingLists, .joiningTimelines: self
         case .previewing(let preview, let origin, _):
             .previewing(preview, from: origin, ticked: picked)
         case .choosingBoards(let offer, let origin):
@@ -309,6 +384,7 @@ enum JoinStage: Identifiable, Equatable {
         case .previewing(let preview, _, _): preview.host
         case .choosingBoards(let offer, _): offer.host
         case .choosingLists(let choice): choice.host
+        case .joiningTimelines(let choice): choice.host
         }
     }
 
@@ -330,7 +406,7 @@ enum JoinStage: Identifiable, Equatable {
         // push a screenful in above the list and scroll the reader away from the row they
         // pressed. Decision 31, and `DESIGN-R2` §4.1.
         case .previewing(_, .joined, _): .sheet
-        case .choosingBoards, .choosingLists: .sheet
+        case .choosingBoards, .choosingLists, .joiningTimelines: .sheet
         }
     }
 
@@ -351,7 +427,7 @@ enum JoinStage: Identifiable, Equatable {
         case .previewing(_, .joined, _): nil
         case .choosingBoards(_, .preview(let preview, _)): preview
         case .choosingBoards(_, .joined): nil
-        case .choosingLists: nil
+        case .choosingLists, .joiningTimelines: nil
         }
     }
 
@@ -377,7 +453,7 @@ enum JoinStage: Identifiable, Equatable {
         case .previewing(_, .field, _): true
         // A detail covers the field: the reader cannot see what a second look would replace.
         case .previewing(_, .joined, _): false
-        case .choosingBoards, .choosingLists: false
+        case .choosingBoards, .choosingLists, .joiningTimelines: false
         }
     }
 }
@@ -530,6 +606,8 @@ struct JoinSheet: View {
                 titled(String(format: L10n.t("board.choose.title"), offer.host))
             case .choosingLists(let choice):
                 titled(String(format: L10n.t("list.choose.title"), choice.host))
+            case .joiningTimelines(let choice):
+                titled(String(format: L10n.t("timeline.join.title"), choice.host))
             case nil:
                 EmptyView()
             }
@@ -578,6 +656,9 @@ struct JoinSheet: View {
         case .choosingLists:
             (L10n.t("list.choose.lists", language: language),
              L10n.t("list.choose.line", language: language), L10n.t("list.choose.detail", language: language))
+        case .joiningTimelines:
+            (L10n.t("timeline.join.timelines", language: language),
+             L10n.t("timeline.join.line", language: language), L10n.t("timeline.join.detail", language: language))
         case .previewing, nil:
             nil
         }
@@ -662,6 +743,8 @@ struct JoinSheet: View {
             BoardPickerList(offer: offer, picked: picked)
         case .choosingLists(let choice):
             ListPickerList(offered: choice.offered, picked: pickedLists)
+        case .joiningTimelines:
+            TimelineJoinList(choice: pickedTimelines)
         case nil:
             EmptyView()
         }
@@ -762,6 +845,20 @@ struct JoinSheet: View {
         )
     }
 
+    /// The timelines ticked — read and written straight through to the stage, as `pickedLists` is.
+    private var pickedTimelines: Binding<TimelineJoinChoice?> {
+        Binding(
+            get: {
+                guard case .joiningTimelines(let choice) = session.stage else { return nil }
+                return choice
+            },
+            set: { choice in
+                guard let choice, case .joiningTimelines = session.stage else { return }
+                session.stage = .joiningTimelines(choice)
+            }
+        )
+    }
+
     @ViewBuilder
     private var footer: some View {
         HStack(spacing: ShellSpace.step) {
@@ -858,7 +955,7 @@ struct JoinSheet: View {
         // different errands and `sheetDismissed()` already tells them apart the same way.
         case .choosingBoards(_, .joined): .cancel
         // A choice about a source already held, so nothing is behind it: Cancel, as a restate.
-        case .choosingLists: .cancel
+        case .choosingLists, .joiningTimelines: .cancel
         case nil: nil
         }
     }
@@ -931,6 +1028,12 @@ struct JoinSheet: View {
         case .choosingLists(let choice):
             Button(L10n.t("list.choose.done")) {
                 Task { await session.chooseLists(choice.picks) }
+            }
+            .keyboardShortcut(.defaultAction)
+        // Not disabled on an empty pick: joining none of them is a choice, and changes nothing.
+        case .joiningTimelines:
+            Button(L10n.t("timeline.join.done")) {
+                Task { await session.chooseTimelines() }
             }
             .keyboardShortcut(.defaultAction)
         case .browsing, .browsingServers, nil:

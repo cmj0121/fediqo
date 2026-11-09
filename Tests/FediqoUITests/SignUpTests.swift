@@ -337,6 +337,84 @@ struct SignUpTests {
         try deviceUnchanged(session, tokens)
     }
 
+    @Test("Signed up and kept, the join ends on the timelines it can join, home among what is offered (#372)")
+    func signedUpJoinsTimelines() async throws {
+        let (session, _) = shell(SignUpServer([.body(SignUpServer.works)]))
+        let mine = Self.mine()
+        session.written = [mine]
+        await press(session, through: Form())
+        #expect(session.isAdded(Self.host) && session.isSignedIn(host: Self.host))
+        guard case .joiningTimelines(let choice) = session.stage else {
+            Issue.record("the sheet closed instead of offering the timelines: \(String(describing: session.stage))")
+            return
+        }
+        #expect(choice.host == Self.host && choice.offers.map(\.timeline) == [mine.id])
+        #expect(choice.offers[0].divisions.map(\.category).contains(.home))
+    }
+
+    private static func mine() -> TimelineDefinition {
+        let other = [Source(host: "a.example", kind: .mastodon)]
+        return TimelineDefinition(name: "Mine", rules: [
+            Rule.source("a.example")!, Rule.category(.public, in: .source(host: "a.example"), sources: other)!,
+        ])
+    }
+
+    @Test("Dismissed while the source is being added, the chooser never springs up (#372)")
+    func dismissedWhileAdding() async {
+        let http = GatedHTTP([
+            "/api/v2/instance": .text(#"{"domain":"social.example","title":"S"}"#),
+            "/api/v1/timelines/public": .text("[]"),
+            "/api/v1/trends/statuses": .text("[]"),
+        ], holding: "/api/v1/timelines/public")
+        let watchdog = watching(http.gate, "the add, held on the public timeline")
+        defer { watchdog.cancel() }
+        let session = ShellSession(
+            http: http, store: ItemStore(),
+            mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: SignUpServer([.body(SignUpServer.works)]))
+        )
+        session.stage = .previewing(Self.preview(), from: .field, ticked: [])
+        session.written = [Self.mine()]
+        let pressing = Task { await press(session, through: Form()) }
+        await met("the add is on the wire", by: pressing) { await http.reached }
+        session.dismissStage()
+        await http.gate.open()
+        await pressing.value
+        #expect(session.isAdded(Self.host) && session.isSignedIn(host: Self.host), "the premise: signed up and kept")
+        #expect(session.stage == nil)
+    }
+
+    @Test("Dismissed while the added source is adopted, the chooser never springs up (#372)")
+    func dismissedWhileAdopting() async {
+        let (session, _) = shell(SignUpServer([.body(SignUpServer.works)]))
+        session.written = [Self.mine()]
+        session.adopting = {
+            session.adopting = nil
+            session.dismissStage()
+        }
+        await press(session, through: Form())
+        #expect(session.isAdded(Self.host) && session.isSignedIn(host: Self.host), "the premise: signed up and kept")
+        #expect(session.stage == nil)
+    }
+
+    @Test("A sign-up to a source already held opens no chooser unasked (#372)")
+    func alreadyHeldOpensNothing() async {
+        let gate = Door()
+        let (session, _) = shell(SignUpServer([.body(SignUpServer.works)]))
+        session.written = [Self.mine()]
+        let ask = ShellSignUp.Ask(preview: Self.preview(), terms: Self.open, invite: nil)
+        let answering = Task { await session.signUp.answer(ask, writing: false, through: Form(gate: gate), in: session) }
+        await gate.arrived()
+        // Held by the time the sign-in comes back, with no join's sheet up.
+        await session.store.add(Source(host: Self.host, kind: .mastodon))
+        await session.adopt()
+        session.stage = nil
+        #expect(session.isAdded(Self.host), "the premise: the source is held")
+        await gate.open()
+        await answering.value
+        #expect(session.isSignedIn(host: Self.host), "the premise: signed up and kept")
+        #expect(session.stage == nil)
+    }
+
     @Test("A host that will not say how the account stands is told as made, and nothing is kept")
     func unsaid() async throws {
         let (session, tokens) = shell(SignUpServer([.body("{}", status: 403)]))

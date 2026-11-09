@@ -269,6 +269,13 @@ relaunch. A change this device would not keep is said on the strip at the foot o
 it holds for now, and is gone the next time Fediqo is opened. Removing one takes its rules
 with it; its posts stay under All.
 
+A source added later can join the timelines you already wrote. Once it is added, Fediqo asks
+which of your timelines take it and what of it each reads — public, home once you are signed in,
+the lists or boards you chose — as if you had written that timeline with it from the start.
+What a timeline already lets through stays ticked. Tick nothing and nothing changes. To do it
+later, Join timelines on the source's page asks the same; it is dim where none of your timelines
+can take it.
+
 A timeline is its rules. A rule names one kind of thing:
 
 | Kind     | Lets through                                                   |

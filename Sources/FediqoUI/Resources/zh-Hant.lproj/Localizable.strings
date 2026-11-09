@@ -1674,6 +1674,7 @@
 "mark.dim.never" = "這個來源沒有這一項";
 "mark.dim.notNow" = "現在不行";
 "mark.dim.askAgain" = "要先再問一次這個登入";
+"mark.dim.noTimeline" = "沒有可加入的時間軸";
 "mark.dim.said" = "%1$@。%2$@";
 "mark.dim.names" = "、";
 "mark.more" = "更多";
@@ -3045,3 +3046,16 @@
 "account.signup.told.notAdded" = "你在 %@ 的帳號可以使用，但現在無法加入這個來源。請再加入一次，然後登入。";
 "account.signup.held" = "你在 %@ 的新帳號正在等待開啟信件。";
 "account.signup.mail.quit" = "如果在這之前結束 Fediqo，它開始的登入仍會在 %@ 保持允許，直到你在那裡結束它。";
+"timeline.join.title" = "把 %@ 加進你的時間軸";
+"timeline.join.timelines" = "時間軸";
+"timeline.join.line" = "你勾的會加進那條時間軸。";
+"timeline.join.detail" = "勾選每條時間軸要讀它的哪些部分，就像當初寫的時候就有它。已經在時間軸裡的會保持勾選。什麼都不勾就什麼都不變。";
+"timeline.join.done" = "完成";
+"timeline.join.whole" = "%@ 的全部";
+"timeline.join.asIs" = "只加入已包含的部分";
+"timeline.join.spoken" = "%1$@，在 %2$@";
+"timeline.join.locked" = "已經在裡面";
+"timeline.join.hint.on" = "加進這條時間軸";
+"timeline.join.hint.off" = "不加進這條時間軸";
+"source.settings.join" = "加入時間軸";
+"source.settings.join.hint" = "選擇這個來源要加入你的哪些時間軸";

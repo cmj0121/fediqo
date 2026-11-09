@@ -97,7 +97,7 @@ enum RuleBuilder {
     }
 
     /// The categories each source can be picked by: what it can be read by now, as it offers
-    /// them (`SourceOffers.categories`) — its public timeline, Home where it is signed in, every
+    /// them (`SourceOffers.timelineCategories`) — its public timeline, Home where it is signed in, every
     /// list chosen on it, its subscribed boards, the reader's bookmarks and favourites where the
     /// sign-in may read them (`marks`, #317) — and any other its held posts arrived through.
     /// **Never what is trending**, which is the Trends page's and no timeline's.
@@ -108,10 +108,9 @@ enum RuleBuilder {
         sources.compactMap { source in
             // What the source can be read by now, as it offers it — completed here with who is
             // signed in to it, which only the caller knows.
-            var picked = source.kind.offers.categories(
+            var picked = source.kind.offers.timelineCategories(
                 of: source, signedIn: signedIn(source.host), marks: marks(source.host), directs: directs(source.host)
             )
-                .filter { $0 != .trends }
             let held = Set(notes.filter { $0.source.host == source.host }.flatMap(\.categories))
             picked += held.subtracting(picked + [.trends]).sorted {
                 RuleText.categoryName($0, host: source.host, sources: sources)
