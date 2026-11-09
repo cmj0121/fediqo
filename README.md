@@ -87,7 +87,9 @@ your own hands, or moves to another of your devices nearby when both agree, and 
 through nowhere of ours and not through the Apple account. Part of it goes when you say so —
 by a span of dates, by a source — or when a limit you set is reached, and what a limit let go
 says which limit did. Nothing goes that neither you nor your own limit chose, and a post you
-keep goes by none of them. How each works is under What this device holds, below.
+keep goes by none of them. How each works is under What this device holds, below. Two of
+your devices you pair also keep the same sources and timelines, the same way: between the two
+alone.
 
 What Fediqo writes on this device is closed while the device is locked. A phone closes all of
 it. A Mac keeps what a running Fediqo already has open and refuses whatever would open it
@@ -553,7 +555,8 @@ store, it is not copied to iCloud, and it does not follow your Apple account to 
 device. It survives a relaunch. The only way it reaches another device is one you start:
 Take away carries it inside the locked file, and Move nearby sends it to another of your
 devices — with the store, or the sign-ins alone — when both sides agree. Both are below,
-under What this device holds.
+under What this device holds. The secret two paired devices share is kept the same way, in
+each one's Keychain, and goes nowhere: not to iCloud, not with Take away, not with Move nearby.
 
 Signing out, Clear, and Remove each delete the secret from this device. Signing out is the key
 on the row, and it asks first: the question names the source and says what goes, and only
@@ -1215,7 +1218,8 @@ breakdown. Keep holds the two limits, Posts you keep, Let go by dates, and What 
 holds the pictures this device is keeping, and the drop that takes them. Clear takes a
 server's cached copies and its sign-in, and keeps its posts. Preferences keeps what you
 choose: language, theme, type, the latest date, what becomes of a removed source's posts,
-and the two ways the store leaves — Take away and Move nearby.
+the two ways the store leaves — Take away and Move nearby — and the devices it stays merged
+with.
 
 Usage counts from the store itself, so these are exact however little of it has been read:
 each source's posts and all of them, and the week or month breakdown once the store has been
@@ -1480,8 +1484,50 @@ only shares one. Both devices ask before anything moves, either can refuse, and 
 device proves the whole of it before anything there changes; a store already there is
 replaced, as Read back says. A move that fails midway leaves it as it was. Each side lists
 the move under the other device's name in the run's requests. The first time, the system
-asks whether Fediqo may look for devices on the local network; it looks only while a move or
-a hold is under way.
+asks whether Fediqo may look for devices on the local network; it looks while a move or a
+hold is under way, and, while Fediqo is open, for the devices you paired, below.
+
+#### Paired devices
+
+In Preferences, below Move nearby. Two of your devices can keep the same sources and
+timelines, with no account between them. Pair them once: Show a pairing code, on one, shows a
+six-digit code and this device's name; Pair with a code, on the other, lists your devices
+showing one, asks for the code, then shows a four-character mark, and you say whether the
+first screen shows the same before anything joins, as for a move. A device cannot pair with
+itself.
+
+The first merge after pairing shows, for each device, which sources and timelines would be
+added, changed and removed, and waits for a yes on one of the two. Not now changes nothing
+on either; the two stay paired and are asked again the next time they meet. After a yes,
+they merge on their own.
+
+From then on, while Fediqo is open on both and they are near each other, they find each
+other once every period and merge: a source or timeline added, changed or removed on one
+shows up on the other, in every window. How often is chosen under the list — every 10
+minutes, every hour, every 6 hours, or never; every hour until you choose. Never merges
+nothing on its own, and Sync now stays: it looks for a minute and merges with each paired
+device it finds, whatever the period. A device set to never looks only while Sync now is
+pressed on it, so press it on both. Each merge says what changed here.
+
+Each source and timeline is kept as it was last changed, on whichever device. A source merges
+as its server, its kind and its boards; a written timeline merges whole. Sign-ins, posts,
+notes, lists, where you are in each timeline, your choices and the order things are listed
+in stay on each device, and a source or timeline new to a device goes at the end. A source that arrives is
+signed out there until you sign in on that device. A source removed on the other is removed
+here as Remove does, and its sign-in with it, but its posts stay, whatever Preferences says
+for a removed source's posts.
+
+Each paired device has a row with when the two last merged, and Forget. Forgetting is on
+this device only: the two stop merging, nothing already merged changes on either, and the
+other can no longer find this one. To merge again, pair again with a new code. Two devices
+on different builds of Fediqo do not merge, and say which one to update.
+
+Nothing passes through our servers, the Apple account or iCloud: only the two devices, over
+Wi-Fi or the direct link between them, joined under the secret both keep from pairing. While
+they look, neither gives the network its name, and what each shows changes over time, so a
+device that was not paired can neither join nor follow them. The device's own network name,
+the one the system gives it, is still seen on the local network, as any device's there is.
+The first time, the system asks whether Fediqo may look on the local network, as for a move.
 
 Opening reads none of the store's posts. Fediqo lands where your sources place it, and the
 timeline is there to use from the first moment: it says it is being read from this device
