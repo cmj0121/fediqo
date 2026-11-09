@@ -11,6 +11,10 @@ import Synchronization
 /// is told `.failedHandshake`, as the real handshake would. `cut()` drops every joined pair at
 /// once, as a walk out of range would, and `deny()` makes the next look nearby refused.
 ///
+/// **Sync listeners** (`advertise(name:tag:psk:)`) sit in the same room beside the holds, each
+/// under its instance name: `browseTags` lists only them and `browse` never does.
+/// `holdJoins()` keeps every join waiting until `releaseJoins()`, so two devices dial at once.
+///
 /// **A listen hands over as the real one does**, through the same `NearbyListen`: the end that
 /// joined is the holder's once it is yielded, and a listen put away closes only an end not yet
 /// handed over.
@@ -21,9 +25,21 @@ public final class PipeNearbyLink: SyncLink, @unchecked Sendable {
         let listen: NearbyListen<PipeConnection>
     }
 
+    private struct Listening {
+        let peer: SyncPeer
+        let psk: SymmetricKey
+        let listen: NearbyListen<PipeConnection>
+    }
+
     private struct Room {
         var holding: [String: Holding] = [:]
         var browsers: [Int: AsyncThrowingStream<[NearbyPeer], any Error>.Continuation] = [:]
+        /// Sync listeners by instance name, beside the holds and never listed with them.
+        var listening: [String: Listening] = [:]
+        var tagBrowsers: [Int: AsyncThrowingStream<[SyncPeer], any Error>.Continuation] = [:]
+        /// While set, every join waits here until `releaseJoins()`.
+        var gated = false
+        var gate: [(to: String, join: CheckedContinuation<Void, Never>)] = []
         var pairs: [PipePair] = []
         var next = 0
         var denied = false
@@ -68,6 +84,40 @@ public final class PipeNearbyLink: SyncLink, @unchecked Sendable {
     /// joining side never hears that word.
     public func cutNextBeforeLastWord() {
         room.withLock { $0.cutBeforeLastWord = true }
+    }
+
+    /// From now on every join waits, so two devices can be made to dial at once.
+    public func holdJoins() {
+        room.withLock { $0.gated = true }
+    }
+
+    /// How many joins are waiting at the gate.
+    public var joinsHeld: Int {
+        room.withLock { $0.gate.count }
+    }
+
+    /// Every join waiting goes on together, and later joins no longer wait.
+    public func releaseJoins() {
+        let waiting = room.withLock { room in
+            room.gated = false
+            defer { room.gate = [] }
+            return room.gate
+        }
+        for held in waiting { held.join.resume() }
+    }
+
+    /// The joins waiting to reach the listener or hold named `name` go on; the rest wait still.
+    public func releaseJoins(to name: String) {
+        let waiting = room.withLock { room in
+            defer { room.gate.removeAll { $0.to == name } }
+            return room.gate.filter { $0.to == name }
+        }
+        for held in waiting { held.join.resume() }
+    }
+
+    /// Every sync listener right now, as `browseTags` lists them.
+    public var listeners: [SyncPeer] {
+        room.withLock { $0.listening.values.map(\.peer).sorted { $0.name < $1.name } }
     }
 
     /// Every frame that crossed, in order, as it would be recorded off the wire.
@@ -136,6 +186,7 @@ public final class PipeNearbyLink: SyncLink, @unchecked Sendable {
     }
 
     public func connect(to peer: NearbyPeer, psk: SymmetricKey) async throws -> any NearbyPeerConnection {
+        await passGate(to: peer.name)
         let (holding, unreachable) = room.withLock { room -> (Holding?, Bool) in
             if room.unreachable > 0 {
                 room.unreachable -= 1
@@ -145,8 +196,82 @@ public final class PipeNearbyLink: SyncLink, @unchecked Sendable {
         }
         if unreachable { throw NearbyDropped() }
         guard let holding else { throw NearbyDropped() }
-        guard holding.psk == psk else {
-            holding.listen.failed(nil, handshake: true)
+        return try join(holding.listen, under: holding.psk, with: psk, name: peer.name)
+    }
+
+    public func advertise(name: String, tag: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
+        let peer = SyncPeer(id: name, name: name, tag: tag)
+        let (stream, continuation) = AsyncThrowingStream<NearbyArrival, any Error>.makeStream()
+        let listen = NearbyListen<PipeConnection>(continuation)
+        let denied = room.withLock { room in
+            guard !room.denied else { return true }
+            room.listening[name] = Listening(peer: peer, psk: psk, listen: listen)
+            return false
+        }
+        if denied {
+            continuation.finish(throwing: NearbyRefusal.notAllowed)
+            return stream
+        }
+        continuation.onTermination = { [weak self] _ in
+            self?.room.withLock { room in
+                if room.listening[name]?.listen === listen { room.listening[name] = nil }
+            }
+            listen.end()
+            self?.tellTagBrowsers()
+        }
+        tellTagBrowsers()
+        return stream
+    }
+
+    public func browseTags() -> AsyncThrowingStream<[SyncPeer], any Error> {
+        let (stream, continuation) = AsyncThrowingStream<[SyncPeer], any Error>.makeStream()
+        let (denied, id, peers) = room.withLock { room -> (Bool, Int, [SyncPeer]) in
+            guard !room.denied else { return (true, 0, []) }
+            room.next += 1
+            room.tagBrowsers[room.next] = continuation
+            return (false, room.next, room.listening.values.map(\.peer).sorted { $0.name < $1.name })
+        }
+        if denied {
+            continuation.finish(throwing: NearbyRefusal.notAllowed)
+            return stream
+        }
+        continuation.onTermination = { [weak self] _ in
+            self?.room.withLock { $0.tagBrowsers[id] = nil }
+        }
+        continuation.yield(peers)
+        return stream
+    }
+
+    public func connect(to peer: SyncPeer, psk: SymmetricKey) async throws -> any NearbyPeerConnection {
+        await passGate(to: peer.name)
+        let (listening, unreachable) = room.withLock { room -> (Listening?, Bool) in
+            if room.unreachable > 0 {
+                room.unreachable -= 1
+                return (nil, true)
+            }
+            return (room.listening[peer.name], false)
+        }
+        if unreachable { throw NearbyDropped() }
+        guard let listening else { throw NearbyDropped() }
+        return try join(listening.listen, under: listening.psk, with: psk, name: peer.name)
+    }
+
+    private func passGate(to name: String) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let wait = room.withLock { room in
+                guard room.gated else { return false }
+                room.gate.append((name, continuation))
+                return true
+            }
+            if !wait { continuation.resume() }
+        }
+    }
+
+    /// One join into `listen`, held under `held`: refused as the real handshake would where
+    /// `psk` is not it.
+    private func join(_ listen: NearbyListen<PipeConnection>, under held: SymmetricKey, with psk: SymmetricKey, name: String) throws -> any NearbyPeerConnection {
+        guard held == psk else {
+            listen.failed(nil, handshake: true)
             throw NearbyRefusal.wrongCode
         }
         let pair = PipePair(record: { [weak self] data in self?.room.withLock { $0.transcript.append(data) } })
@@ -157,12 +282,19 @@ public final class PipeNearbyLink: SyncLink, @unchecked Sendable {
             pair.cutBeforeLastWord = room.cutBeforeLastWord
             room.cutBeforeLastWord = false
         }
-        let (ours, theirs) = pair.ends(name: peer.name)
+        let (ours, theirs) = pair.ends(name: name)
         // A listen that ended while this join was on its way has nobody to take it: the end is
         // closed there, and this side sees the drop it would on the air.
-        guard holding.listen.opening(theirs) else { throw NearbyDropped() }
-        holding.listen.joined(theirs)
+        guard listen.opening(theirs) else { throw NearbyDropped() }
+        listen.joined(theirs)
         return ours
+    }
+
+    private func tellTagBrowsers() {
+        let (browsers, peers) = room.withLock { room in
+            (Array(room.tagBrowsers.values), room.listening.values.map(\.peer).sorted { $0.name < $1.name })
+        }
+        for browser in browsers { browser.yield(peers) }
     }
 
     private func tellBrowsers() {

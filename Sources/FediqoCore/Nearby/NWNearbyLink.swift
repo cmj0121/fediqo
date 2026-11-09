@@ -34,15 +34,22 @@ public final class NWNearbyLink: SyncLink, @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "dev.mini-poc.fediqo.nearby")
     private let endpoints = Mutex<[String: NWEndpoint]>([:])
+    /// Sync listeners found by `browseTags`, apart from the holds `browse` keeps.
+    private let syncEndpoints = Mutex<[String: NWEndpoint]>([:])
 
     public init() {}
 
     /// TLS 1.2 exactly, under `psk` named by the session id, asking for the ECDHE-PSK suite —
     /// so no certificate is ever asked for or trusted — over TCP, with peer-to-peer on.
     public static func parameters(psk: SymmetricKey, sessionID: String) -> NWParameters {
+        parameters(psk: psk, identity: NearbyCode.pskIdentity(sessionID: sessionID))
+    }
+
+    /// The same, under any PSK identity: a sync listener's is `SyncDiscovery.pskIdentity(tag:)`.
+    public static func parameters(psk: SymmetricKey, identity: Data) -> NWParameters {
         let tls = NWProtocolTLS.Options()
         let key = psk.withUnsafeBytes { DispatchData(bytes: $0) }
-        let identity = NearbyCode.pskIdentity(sessionID: sessionID).withUnsafeBytes { DispatchData(bytes: $0) }
+        let identity = identity.withUnsafeBytes { DispatchData(bytes: $0) }
         sec_protocol_options_add_pre_shared_key(tls.securityProtocolOptions, key as __DispatchData, identity as __DispatchData)
         sec_protocol_options_append_tls_ciphersuite(tls.securityProtocolOptions, suite)
         sec_protocol_options_append_tls_ciphersuite(tls.securityProtocolOptions, fallbackSuite)
@@ -68,25 +75,34 @@ public final class NWNearbyLink: SyncLink, @unchecked Sendable {
     }
 
     public func advertise(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
-        listen(name: name, sessionID: sessionID, psk: psk, pairing: false)
+        listen(name: name, txt: ["id": sessionID], parameters: Self.parameters(psk: psk, sessionID: sessionID))
     }
 
     public func advertisePairing(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
-        listen(name: name, sessionID: sessionID, psk: psk, pairing: true)
+        listen(
+            name: name, txt: ["id": sessionID, SyncDiscovery.pairingKey: "1"],
+            parameters: Self.parameters(psk: psk, sessionID: sessionID)
+        )
     }
 
-    private func listen(name: String, sessionID: String, psk: SymmetricKey, pairing: Bool) -> AsyncThrowingStream<NearbyArrival, any Error> {
+    public func advertise(name: String, tag: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
+        listen(
+            name: name, txt: [SyncDiscovery.tagKey: tag],
+            parameters: Self.parameters(psk: psk, identity: SyncDiscovery.pskIdentity(tag: tag))
+        )
+    }
+
+    private func listen(name: String, txt entries: [String: String], parameters: NWParameters) -> AsyncThrowingStream<NearbyArrival, any Error> {
         let (stream, continuation) = AsyncThrowingStream<NearbyArrival, any Error>.makeStream()
         let listener: NWListener
         do {
-            listener = try NWListener(using: Self.parameters(psk: psk, sessionID: sessionID))
+            listener = try NWListener(using: parameters)
         } catch {
             continuation.finish(throwing: error)
             return stream
         }
         var txt = NWTXTRecord()
-        txt["id"] = sessionID
-        if pairing { txt[SyncDiscovery.pairingKey] = "1" }
+        for (key, value) in entries { txt[key] = value }
         listener.service = NWListener.Service(name: name, type: NearbyCode.service, txtRecord: txt)
         // A connection still opening is the listen's, cancelled with it so a stream put away
         // leaves no socket open; one that is ready is handed over and is its taker's — the
@@ -152,8 +168,10 @@ public final class NWNearbyLink: SyncLink, @unchecked Sendable {
             var peers: [NearbyPeer] = []
             var found: [String: NWEndpoint] = [:]
             for result in results {
+                // A sync listener (TXT `t`) is never a hold.
                 guard case .service(let name, _, _, _) = result.endpoint,
-                      case .bonjour(let txt) = result.metadata, let id = txt["id"], !id.isEmpty
+                      case .bonjour(let txt) = result.metadata, let id = txt["id"], !id.isEmpty,
+                      txt[SyncDiscovery.tagKey] == nil
                 else { continue }
                 let key = "\(result.endpoint)"
                 found[key] = result.endpoint
@@ -167,10 +185,55 @@ public final class NWNearbyLink: SyncLink, @unchecked Sendable {
         return stream
     }
 
+    public func browseTags() -> AsyncThrowingStream<[SyncPeer], any Error> {
+        let (stream, continuation) = AsyncThrowingStream<[SyncPeer], any Error>.makeStream()
+        let parameters = NWParameters()
+        parameters.includePeerToPeer = true
+        let browser = NWBrowser(for: .bonjourWithTXTRecord(type: NearbyCode.service, domain: nil), using: parameters)
+        browser.stateUpdateHandler = { state in
+            switch state {
+            case .failed(let error), .waiting(let error):
+                NearbyLog.note(.sender, "sync browse failed", Self.kind(error))
+                continuation.finish(throwing: Self.refusal(error))
+            case .cancelled:
+                continuation.finish()
+            default:
+                break
+            }
+        }
+        browser.browseResultsChangedHandler = { [weak self] results, _ in
+            guard let self else { return }
+            var peers: [SyncPeer] = []
+            var found: [String: NWEndpoint] = [:]
+            for result in results {
+                guard case .service(let name, _, _, _) = result.endpoint,
+                      case .bonjour(let txt) = result.metadata, let tag = txt[SyncDiscovery.tagKey], !tag.isEmpty
+                else { continue }
+                let key = "\(result.endpoint)"
+                found[key] = result.endpoint
+                peers.append(SyncPeer(id: key, name: name, tag: tag))
+            }
+            self.syncEndpoints.withLock { $0 = found }
+            continuation.yield(peers.sorted { $0.name < $1.name })
+        }
+        continuation.onTermination = { _ in browser.cancel() }
+        browser.start(queue: queue)
+        return stream
+    }
+
+    public func connect(to peer: SyncPeer, psk: SymmetricKey) async throws -> any NearbyPeerConnection {
+        guard let endpoint = syncEndpoints.withLock({ $0[peer.id] }) else { throw NearbyDropped() }
+        return try await join(endpoint, parameters: Self.parameters(psk: psk, identity: SyncDiscovery.pskIdentity(tag: peer.tag)), name: peer.name)
+    }
+
     public func connect(to peer: NearbyPeer, psk: SymmetricKey) async throws -> any NearbyPeerConnection {
         guard let endpoint = endpoints.withLock({ $0[peer.id] }) else { throw NearbyDropped() }
-        let connection = NWConnection(to: endpoint, using: Self.parameters(psk: psk, sessionID: peer.sessionID))
-        let wrapped = NWPeerConnection(connection, peerName: peer.name, queue: queue)
+        return try await join(endpoint, parameters: Self.parameters(psk: psk, sessionID: peer.sessionID), name: peer.name)
+    }
+
+    private func join(_ endpoint: NWEndpoint, parameters: NWParameters, name: String) async throws -> any NearbyPeerConnection {
+        let connection = NWConnection(to: endpoint, using: parameters)
+        let wrapped = NWPeerConnection(connection, peerName: name, queue: queue)
         // A join put away — the person pressed Cancel — cancels the attempt, and one that takes
         // longer than a device in reach would is a device out of reach.
         let ready = await withTaskCancellationHandler {

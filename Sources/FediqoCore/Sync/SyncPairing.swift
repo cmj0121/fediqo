@@ -8,6 +8,12 @@ public enum PairingEvent: Sendable, Equatable {
     case connecting
     /// Both sides agreed a secret, and this side kept it.
     case paired(PairedDevice)
+    /// The first merge (D8) runs on the same channel.
+    case merging(PairedDevice)
+    /// Holder: the joiner is looking at the first-merge preview.
+    case waitingForAnswer(PairedDevice)
+    /// What the first merge came to; the pair stays kept whatever it was.
+    case done(PairedDevice, SyncOutcome)
     /// The other end has this device's own id: nothing kept.
     case sameDevice
     /// `.wrongCode`, `.guessing`, `.timedOut`, `.notAllowed`, `.lost`, `.malformed`, or another.
@@ -26,8 +32,22 @@ public enum PairingEvent: Sendable, Equatable {
 ///     both ──sync(paired)──▶   each keeps the pair once it has read the other's `paired`
 ///
 /// The same id on both ends refuses (`.sameDevice`). A device already paired is replaced, its
-/// first merge not yet made.
+/// first merge not yet made. Where `firstMerge` is given (`SyncSession`), the first merge runs
+/// on the same channel straight after, with the joiner — the one who typed the code — confirming.
 public actor SyncPairing {
+    /// A channel just paired over, handed to the first merge.
+    struct Opened: Sendable {
+        let channel: NearbyChannel
+        let pair: PairedDevice
+        let dialer: Bool
+        /// Closes the link: what a step that waits too long does.
+        let cut: @Sendable () -> Void
+    }
+
+    /// The first merge over a channel just paired; `waiting` is told when the other side is
+    /// looking at the preview.
+    typealias FirstMerge = @Sendable (Opened, _ waiting: @escaping @Sendable () async -> Void) async -> SyncOutcome
+
     private let link: any SyncLink
     private let pairs: any PairStore
     private let device: String
@@ -35,6 +55,7 @@ public actor SyncPairing {
     private let guessCap: Int
     private let holdClock: @Sendable () async throws -> Void
     private let now: @Sendable () -> Date
+    private let firstMerge: FirstMerge?
 
     private var continuation: AsyncStream<PairingEvent>.Continuation?
     private var task: Task<Void, Never>?
@@ -50,6 +71,20 @@ public actor SyncPairing {
         holdClock: (@Sendable () async throws -> Void)? = nil,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
+        self.init(
+            link: link, pairs: pairs, device: device, name: name, holdTimeout: holdTimeout, guessCap: guessCap,
+            holdClock: holdClock, now: now, firstMerge: nil
+        )
+    }
+
+    init(
+        link: any SyncLink, pairs: any PairStore, device: String, name: String,
+        holdTimeout: Duration = .seconds(600), guessCap: Int = 5,
+        holdClock: (@Sendable () async throws -> Void)? = nil,
+        now: @escaping @Sendable () -> Date = Date.init,
+        firstMerge: FirstMerge?
+    ) {
+        self.firstMerge = firstMerge
         self.link = link
         self.pairs = pairs
         self.device = device
@@ -114,24 +149,42 @@ public actor SyncPairing {
 
     // MARK: - Holding
 
+    private enum HoldEnd: Sendable {
+        case opened(Opened?)
+        case clock
+    }
+
+    /// The hold's clock runs only until a device pairs: the first merge after it is not held
+    /// to the hold's end. A device that paired just as the time ran out is paired: its pair is
+    /// kept, so it is said and merged as any other.
     private func runHold() async {
+        let opened: Opened?
         do {
-            try await withThrowingTaskGroup(of: Void.self) { group in
-                group.addTask { try await self.holdLoop() }
+            opened = try await withThrowingTaskGroup(of: HoldEnd.self) { group in
+                group.addTask { .opened(try await self.holdLoop()) }
                 group.addTask {
                     try await self.holdClock()
-                    throw NearbyRefusal.timedOut
+                    return .clock
                 }
-                try await group.next()
+                defer { group.cancelAll() }
+                if case .opened(let opened)? = try await group.next() { return opened }
                 group.cancelAll()
+                if case .opened(let opened?)? = try? await group.next() { return opened }
+                throw NearbyRefusal.timedOut
             }
         } catch {
             fail(error)
+            return
         }
+        guard let opened else { return }
+        defer { opened.cut() }
+        emit(.paired(opened.pair))
+        await mergeFirst(opened)
     }
 
-    /// Codes, rolled on each wrong guess, until one device pairs.
-    private nonisolated func holdLoop() async throws {
+    /// Codes, rolled on each wrong guess, until one device pairs: the channel it paired over,
+    /// still open, or nil where the hold was put away.
+    private nonisolated func holdLoop() async throws -> Opened? {
         var guesses = 0
         while true {
             try Task.checkCancellation()
@@ -151,9 +204,9 @@ public actor SyncPairing {
                     break
                 }
                 if !guessed {
-                    guard let connection = joined else { return }
+                    guard let connection = joined else { return nil }
                     let mailbox = Mailbox(connection)
-                    defer {
+                    let cut: @Sendable () -> Void = {
                         mailbox.close()
                         connection.close()
                     }
@@ -161,13 +214,18 @@ public actor SyncPairing {
                         let channel = try await NearbyChannel.open(
                             over: connection, inbox: mailbox, role: .receiver, psk: psk, sessionID: sessionID
                         )
-                        await emit(.paired(try await exchange(over: channel, role: .receiver, sessionID: sessionID)))
-                        return
+                        let pair = try await exchange(over: channel, role: .receiver, sessionID: sessionID)
+                        return Opened(channel: channel, pair: pair, dialer: false, cut: cut)
                     } catch is NearbyDropped {
+                        cut()
                         try Task.checkCancellation()
                         continue
                     } catch NearbyRefusal.wrongCode {
+                        cut()
                         guessed = true
+                    } catch {
+                        cut()
+                        throw error
                     }
                 }
                 guesses += 1
@@ -192,10 +250,21 @@ public actor SyncPairing {
             let channel = try await NearbyChannel.open(
                 over: connection, inbox: mailbox, role: .sender, psk: psk, sessionID: peer.sessionID
             )
-            emit(.paired(try await exchange(over: channel, role: .sender, sessionID: peer.sessionID)))
+            let pair = try await exchange(over: channel, role: .sender, sessionID: peer.sessionID)
+            emit(.paired(pair))
+            await mergeFirst(Opened(channel: channel, pair: pair, dialer: true, cut: { mailbox.close(); connection.close() }))
         } catch {
             fail(error)
         }
+    }
+
+    /// The first merge, where one is wanted, said as `merging` … `done`.
+    private nonisolated func mergeFirst(_ opened: Opened) async {
+        guard let firstMerge else { return }
+        let pair = opened.pair
+        await emit(.merging(pair))
+        let outcome = await firstMerge(opened) { await self.emit(.waitingForAnswer(pair)) }
+        await emit(.done(pair, outcome))
     }
 
     // MARK: - The exchange
