@@ -31,7 +31,7 @@ struct ReadBackOpenFileTests {
 
     static func run(on device: Device) async throws -> Run {
         let file = try #require(device.file)
-        let (sources, said) = try file.loadSources()
+        let (sources, said, _) = try file.loadSources()
         let store = ItemStore(sources: sources, said: said, rows: file)
         await store.hold(Unsent(host: mastodon.host, text: "a text of this device's", audience: .everyone))
         await store.hold(NoticeReach(host: mastodon.host, before: "9", gathered: true))

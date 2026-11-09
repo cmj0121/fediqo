@@ -171,6 +171,9 @@ struct NoticeStoreTests {
                     try db.execute(sql: "ALTER TABLE unsent DROP COLUMN \(column)")
                 }
                 for column in ["pinned", "muted", "card", "quote_approval", "may_quote"] { try db.execute(sql: "ALTER TABLE note DROP COLUMN \(column)") }
+                // And the sources' stamps (v25-sync-stamps).
+                try db.execute(sql: "DROP TABLE source_gone")
+                for column in ["stamp_ms", "stamp_n", "stamp_by"] { try db.execute(sql: "ALTER TABLE source DROP COLUMN \(column)") }
             }
         }
         #expect(try migrations(index).last == "v13-unsent", "the premise: a store from before")

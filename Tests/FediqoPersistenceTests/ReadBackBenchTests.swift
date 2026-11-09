@@ -91,7 +91,7 @@ struct ReadBackBenchTests {
         let file = try StoreFile(at: dir)
         try await file.makePageIndex()
         try await file.makeIndexes()
-        let (sources, said) = try file.loadSources()
+        let (sources, said, _) = try file.loadSources()
         let store = ItemStore(sources: sources, said: said, rows: file)
         let saver = StoreSaver(store: store, file: file)
         let packager = StorePackager(

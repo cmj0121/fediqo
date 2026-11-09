@@ -57,7 +57,7 @@ struct TakeAwayBenchTests {
     private static func run(_ dir: URL, label: String) async throws {
         let file = try StoreFile(at: dir)
         try await file.makeIndexes()
-        let (sources, said) = try file.loadSources()
+        let (sources, said, _) = try file.loadSources()
         let rows = try await file.db.read { db in try Int.fetchOne(db, sql: "SELECT count(*) FROM note") ?? 0 }
         let words = try await file.db.read(StoreFile.hasWords)
         print("[takeaway \(label)] \(rows) rows, \(file.bytesOnDisk() / 1_000_000) MB on disk, words index \(words ? "built" : "none")")

@@ -147,6 +147,9 @@ struct UnsentStoreTests {
                 for table in ["unsent", "notice", "notice_reach"] { try db.execute(sql: "DROP TABLE \(table)") }
                 try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier IN (\(StoreFile.steps(from: "v13-unsent")))")
                 for column in ["pinned", "muted", "card", "quote_approval", "may_quote"] { try db.execute(sql: "ALTER TABLE note DROP COLUMN \(column)") }
+                // And the sources' stamps (v25-sync-stamps).
+                try db.execute(sql: "DROP TABLE source_gone")
+                for column in ["stamp_ms", "stamp_n", "stamp_by"] { try db.execute(sql: "ALTER TABLE source DROP COLUMN \(column)") }
             }
         }
         #expect(try migrations(index) == Self.before, "the premise: a store no step after v12-references-only has touched")
