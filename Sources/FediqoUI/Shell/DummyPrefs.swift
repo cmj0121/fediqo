@@ -213,7 +213,7 @@ final class DummyPrefs {
         return (keepMonths, goneDays, roomBytes, removedPostsStay, latestDate, askMinutes, noticesHidden, language, theme, fontSize)
     }
 
-    private static let prefix = "fediqo.dummy."
+    static let prefix = "fediqo.dummy."
 
     private func write(_ name: String, _ value: String) {
         defaults.set(value, forKey: Self.prefix + name)

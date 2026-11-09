@@ -87,6 +87,9 @@ final class Launch {
     /// What every source and timeline change of this run is stamped by (D3): one clock, under
     /// this device's id — or `.unpaired` where its file would not be read.
     let clock: SyncClock
+    /// Merging with paired devices nearby (D6), one for every window; nil where this device's id
+    /// would not be read, so nothing is stamped as this device and nothing pairs.
+    let sync: ShellSync?
     let forums: ForumSessions
     let mastodon: MastodonSessions
     let saver: StoreSaver
@@ -170,6 +173,10 @@ final class Launch {
         // Before anything is asked: every act from here on belongs to one of these, or to a host
         // the person names to add (#220).
         lists = ListFiles(directory: StoreFile.applicationSupportDirectory, defaults: .standard, protected: protected)
+        sync = clock.device.isEmpty ? nil : ShellSync(
+            link: NWNearbyLink(), pairs: KeychainPairStore(), clock: clock, deviceName: Self.deviceName, store: store,
+            lists: lists
+        )
         FediqoRootView.onlyToSources(
             opened.sources.map(\.host), kept: store, read: opened.file != nil && opened.setAside == nil,
             lists: lists
@@ -536,7 +543,7 @@ private struct Live: View {
             carrier: launch.carrier,
             storeWritable: launch.file != nil,
             lists: launch.lists,
-            nearby: NWNearbyLink(), deviceName: Launch.deviceName, syncClock: launch.clock
+            nearby: NWNearbyLink(), deviceName: Launch.deviceName, sync: launch.sync
         )
         .onChange(of: scenePhase) { _, phase in
             if phase == .background {

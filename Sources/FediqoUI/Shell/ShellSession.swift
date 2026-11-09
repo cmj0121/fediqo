@@ -355,6 +355,9 @@ final class ShellSession {
     /// What every timelines save made here is stamped by (D3). `.unpaired` until the root view
     /// hands in the app's clock.
     @ObservationIgnored var syncClock = SyncClock.unpaired
+    /// The run's merging with paired devices, where the app made one: told when the person's
+    /// choices are read again.
+    @ObservationIgnored weak var sync: ShellSync?
     /// The timeline editor, where it is open. Edits apply on Done (Decision 21).
     var editing: TimelineDraft?
     /// Whether the list of every timeline is up, on a narrow page (#304).
@@ -3218,6 +3221,7 @@ final class ShellSession {
         // No store attached reads nothing again, and leaves what is said of the timelines as it was.
         if let loaded = timelineStore?.load(), let kept = taking(loaded) { written = kept }
         prefs.reread()
+        sync?.rereadPeriod()
         if work === SourceWork.shared { AllowanceBook.shared.reread() }
         mastodon.readBack()
         pictures.forgetAll()
@@ -4195,11 +4199,14 @@ final class ShellSession {
     /// does when they go — the reads on the wire, the sign-in, the pictures, the boards. The rows
     /// stay drawn from the store as they were, marked by the row as from a host no longer in
     /// `sources`.
-    func remove(host raw: String, keepingPosts: Bool = false) async {
-        await holdingStill { await removeNow(host: raw, keepingPosts: keepingPosts) }
+    ///
+    /// `stampedAs` is the stamp a merged removal arrived at (D4), kept as its tombstone; a press
+    /// here passes nothing and is stamped now.
+    func remove(host raw: String, keepingPosts: Bool = false, stampedAs: SyncStamp? = nil) async {
+        await holdingStill { await removeNow(host: raw, keepingPosts: keepingPosts, stampedAs: stampedAs) }
     }
 
-    private func removeNow(host raw: String, keepingPosts: Bool) async {
+    private func removeNow(host raw: String, keepingPosts: Bool, stampedAs: SyncStamp?) async {
         let host = raw.lowercased()
         dropSignOutAsk(host: host)
         if usageOpened?.lowercased() == host { usageOpened = nil }
@@ -4239,7 +4246,7 @@ final class ShellSession {
         // Its posts, where they go with it, and what it said happened to the person, posts
         // kept or not, are off the disk before the rest is said to have gone (#292): removing
         // a source is the person asking for them to be gone, whatever it held.
-        await store.remove(host: host, keepingPosts: keepingPosts)
+        await store.remove(host: host, keepingPosts: keepingPosts, stampedAs: stampedAs)
         // And their words out of the words index once that save has returned (C27).
         await saveNow(.source) { [weak self] in await self?.wordsLetGo() }
         // What waited to be sent to it goes with it, as its question said — off the disk

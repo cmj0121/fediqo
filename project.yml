@@ -102,7 +102,7 @@ targets:
         # the service named, the browser finds nothing and says nothing; without the reason,
         # the permission is never asked and the look is silently refused.
         NSBonjourServices: [_fediqo._tcp]
-        NSLocalNetworkUsageDescription: Fediqo looks for your other devices nearby only while you move what this device holds to one of them, or hold what one sends. Nothing passes through anywhere but the two devices.
+        NSLocalNetworkUsageDescription: Fediqo looks for your other devices nearby while you move what this device holds to one of them or hold what one sends, and, while Fediqo is open, to merge sources and timelines with the devices you paired. Nothing passes through anywhere but your devices.
         # HTTPS and nothing else, which is the exemption every app gets for free. Saying so
         # here is what keeps App Store Connect from stopping to ask a person, once per build,
         # a question whose answer never changes.
@@ -134,8 +134,10 @@ targets:
         # on purpose: a container that breaks the app should break it here, not at upload.
         ENABLE_APP_SANDBOX: YES
         ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
-        # And incoming, for one thing only: a device nearby joining this one to move a store
-        # to it (#253). The listener is up while Hold from nearby is, and at no other time.
+        # And incoming, for two things only: a device nearby joining this one to move a store
+        # to it (#253), while Hold from nearby is up; and a paired device joining to merge
+        # sources and timelines, while Fediqo is in front and its sync period is not Never (or
+        # for a minute after Sync now).
         ENABLE_INCOMING_NETWORK_CONNECTIONS: YES
         # And a file the person picks in a panel, and nothing else: a picture for their
         # profile (#312), read; a store carried in, read, and one carried out, written where
@@ -192,7 +194,7 @@ targets:
         # the service named, the browser finds nothing and says nothing; without the reason,
         # the permission is never asked and the look is silently refused.
         NSBonjourServices: [_fediqo._tcp]
-        NSLocalNetworkUsageDescription: Fediqo looks for your other devices nearby only while you move what this device holds to one of them, or hold what one sends. Nothing passes through anywhere but the two devices.
+        NSLocalNetworkUsageDescription: Fediqo looks for your other devices nearby while you move what this device holds to one of them or hold what one sends, and, while Fediqo is open, to merge sources and timelines with the devices you paired. Nothing passes through anywhere but your devices.
         # HTTPS and nothing else, which is the exemption every app gets for free. Saying so
         # here is what keeps App Store Connect from stopping to ask a person, once per build,
         # a question whose answer never changes.

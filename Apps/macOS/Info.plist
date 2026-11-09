@@ -45,7 +45,7 @@
 		<string>_fediqo._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Fediqo looks for your other devices nearby only while you move what this device holds to one of them, or hold what one sends. Nothing passes through anywhere but the two devices.</string>
+	<string>Fediqo looks for your other devices nearby while you move what this device holds to one of them or hold what one sends, and, while Fediqo is open, to merge sources and timelines with the devices you paired. Nothing passes through anywhere but your devices.</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.social-networking</string>
 </dict>
