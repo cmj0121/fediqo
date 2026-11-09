@@ -334,7 +334,7 @@ struct NearbyTests {
         defer { two.end() }
         await two.begin()
         let psk = NearbyCode.psk(code: "123456", sessionID: "p")
-        let pairing = two.link.advertisePairing(name: "a phone pairing", sessionID: "p", psk: psk)
+        let pairing = two.link.advertise(name: "a phone pairing", sessionID: "p", psk: psk, pairing: true)
         let move = two.link.advertise(name: "z laptop", sessionID: "m", psk: psk)
         await two.settle(two.offering, "the second Move hold is listed, on the sender") { if case .browsing(let peers) = $0 { peers.count == 2 } else { false } }
         #expect(two.offering.peers.map(\.name) == ["a tablet", "z laptop"])

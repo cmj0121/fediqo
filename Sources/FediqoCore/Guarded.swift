@@ -92,12 +92,15 @@ public enum Guarded {
             )
         }
         try settle(url, mine.isEmpty ? .wasThere : .folders(mine), on: device)
-        if excludedFromBackup {
-            var excluded = URLResourceValues()
-            excluded.isExcludedFromBackup = true
-            var marked = url
-            try marked.setResourceValues(excluded)
-        }
+        if excludedFromBackup { try excludeFromBackup(url) }
+    }
+
+    /// Marks `url`, a file or a folder, as this device's alone: no backup carries it.
+    public static func excludeFromBackup(_ url: URL) throws {
+        var excluded = URLResourceValues()
+        excluded.isExcludedFromBackup = true
+        var marked = url
+        try marked.setResourceValues(excluded)
     }
 
     package static func write(_ data: Data, to url: URL, atomic: Bool, on device: Device) throws {

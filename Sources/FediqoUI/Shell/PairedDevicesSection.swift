@@ -219,8 +219,8 @@ struct SyncPairSheet: View {
         case .holding(let code, let mark)?: holding(code: code, mark: mark)
         case .browsing(let peers)?: browsing(peers)
         case .checkingMark(let peer, _, let mark)?: checking(peer: peer, mark: mark)
-        case .running(let event)?: running(event)
-        case .ended(let event)?: ended(event)
+        case .running(let step)?: running(step)
+        case .ended(let step)?: ended(step)
         case nil: EmptyView()
         }
     }
@@ -240,41 +240,13 @@ struct SyncPairSheet: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Six digits or four characters in the display size, in the lamp's ink: the one loud thing.
-    private func big(_ text: String, spoken: String, value: String) -> some View {
-        Text(text)
-            .shellFont(.code)
-            .monospacedDigit()
-            .tracking(4)
-            .foregroundStyle(ShellChrome.selectInk(colorScheme))
-            .minimumScaleFactor(0.5)
-            .lineLimit(1)
-            .accessibilityLabel(spoken)
-            .accessibilityValue(value.map(String.init).joined(separator: " "))
-    }
-
     // MARK: - Holding
 
     @ViewBuilder
-    private func holding(code: String, mark: String) -> some View {
+    private func holding(code: String?, mark: String?) -> some View {
         title(L10n.t("sync.hold.title"))
-        if code.isEmpty {
-            ProgressView()
-        } else {
-            big(NearbyCode.spaced(code), spoken: L10n.t("nearby.code.spoken"), value: code)
-        }
-        HStack(spacing: ShellSpace.snug) {
-            Text(sync.deviceName)
-                .shellFont(.name)
-                .foregroundStyle(ShellChrome.ink(colorScheme))
-            if !mark.isEmpty {
-                Text(mark)
-                    .shellFont(.meta)
-                    .monospaced()
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .accessibilityLabel(String(format: L10n.t("nearby.mark.spoken"), mark))
-            }
-        }
+        NearbyCodeDigits(code: code, shrinks: true)
+        NearbyNameMark(name: sync.deviceName, mark: mark)
         said(String(format: L10n.t("sync.hold.line"), sync.deviceName))
             .shellHelp("sync.hold.help", about: L10n.t("sync.title"))
         presses {
@@ -314,20 +286,7 @@ struct SyncPairSheet: View {
                 if let picked, !now.contains(picked) { self.picked = nil }
             }
         }
-        if picked != nil {
-            TextField(L10n.t("nearby.pick.code"), text: $code)
-                .shellField(.alone)
-                .monospacedDigit()
-                .focused($focused)
-                .onSubmit(join)
-                #if os(iOS)
-                .keyboardType(.numberPad)
-                #endif
-                .onChange(of: code) { _, typed in
-                    let digits = typed.filter(\.isNumber).prefix(NearbyCode.digits)
-                    if String(digits) != typed { code = String(digits) }
-                }
-        }
+        if picked != nil { NearbyCodeField(code: $code, focused: $focused, onSubmit: join) }
         presses {
             cancel
             Button(L10n.t("sync.join.go"), action: join)
@@ -341,34 +300,52 @@ struct SyncPairSheet: View {
         sync.typed(code: code, for: picked)
     }
 
+    /// The mark asked about in Move's own words (`ShellQuestion.nearbyMark`), the mark itself
+    /// in the display size.
     @ViewBuilder
     private func checking(peer: NearbyPeer, mark: String) -> some View {
-        title(String(format: L10n.t("nearby.mark.ask.title"), mark))
-        big(mark, spoken: String(format: L10n.t("nearby.mark.spoken"), mark), value: mark)
-        said(String(format: L10n.t("nearby.mark.ask.line"), peer.name))
-            .shellHelp("nearby.mark.ask.help", about: L10n.t("sync.title"))
+        let asked = ShellQuestion.nearbyMark(mark, peer: peer.name)
+        title(asked.title)
+        Text(mark)
+            .shellFont(.code)
+            .monospacedDigit()
+            .tracking(4)
+            .foregroundStyle(ShellChrome.selectInk(colorScheme))
+            .minimumScaleFactor(0.5)
+            .lineLimit(1)
+            .accessibilityLabel(String(format: L10n.t("nearby.mark.spoken"), mark))
+            .accessibilityValue(mark.map(String.init).joined(separator: " "))
+        if let help = asked.help {
+            said(asked.line).shellHelp(verbatim: help, about: L10n.t("sync.title"))
+        } else {
+            said(asked.line)
+        }
         presses {
-            Button(L10n.t("nearby.mark.ask.different"), role: .cancel) {
-                code = ""
-                sync.markMismatched()
+            if let different = asked.cancel {
+                Button(different, role: .cancel) {
+                    code = ""
+                    sync.markMismatched()
+                }
+                .keyboardShortcut(.cancelAction)
             }
-            .keyboardShortcut(.cancelAction)
-            Button(L10n.t("nearby.mark.ask.same")) { sync.markMatched() }
-                .tint(ShellChrome.selectInk(colorScheme))
+            ForEach(asked.choices) { same in
+                Button(same.label) { sync.markMatched() }
+                    .tint(ShellChrome.selectInk(colorScheme))
+            }
         }
     }
 
     // MARK: - Paired, and the first merge
 
     @ViewBuilder
-    private func running(_ event: PairingEvent) -> some View {
+    private func running(_ step: ShellSync.PairStep.Running) -> some View {
         if let ask = sync.asking {
             SyncPreviewCard(ask: ask) { sync.answer($0) }
         } else {
             title(L10n.t("sync.hold.title"))
             HStack(spacing: ShellSpace.snug) {
                 ProgressView().controlSize(.small)
-                ShellStatusLine(Self.runningLine(event))
+                ShellStatusLine(Self.runningLine(step))
                     .fixedSize(horizontal: false, vertical: true)
             }
             presses { cancel }
@@ -376,18 +353,18 @@ struct SyncPairSheet: View {
     }
 
     /// What a running pairing is doing.
-    static func runningLine(_ event: PairingEvent, language: DummyLanguage? = nil) -> String {
-        switch event {
+    static func runningLine(_ step: ShellSync.PairStep.Running, language: DummyLanguage? = nil) -> String {
+        switch step {
+        case .connecting: L10n.t("sync.pairing.connecting", language: language)
         case .paired(let peer): String(format: L10n.t("sync.pairing.paired", language: language), peer.name)
         case .merging(let peer): String(format: L10n.t("sync.pairing.merging", language: language), peer.name)
-        case .waitingForAnswer(let peer): String(format: L10n.t("sync.status.waiting", language: language), peer.name)
-        case .connecting, .code, .done, .sameDevice, .refused: L10n.t("sync.pairing.connecting", language: language)
+        case .waiting(let peer): String(format: L10n.t("sync.status.waiting", language: language), peer.name)
         }
     }
 
     @ViewBuilder
-    private func ended(_ event: PairingEvent) -> some View {
-        let said = Self.endedWords(event)
+    private func ended(_ step: ShellSync.PairStep.Ended) -> some View {
+        let said = Self.endedWords(step)
         title(said.title)
         self.said(said.line)
         presses {
@@ -398,8 +375,8 @@ struct SyncPairSheet: View {
     }
 
     /// How a pairing ended: paired and what the first merge came to, this very device, or why not.
-    static func endedWords(_ event: PairingEvent, language: DummyLanguage? = nil) -> (title: String, line: String) {
-        switch event {
+    static func endedWords(_ step: ShellSync.PairStep.Ended, language: DummyLanguage? = nil) -> (title: String, line: String) {
+        switch step {
         case .done(let peer, let outcome):
             (String(format: L10n.t("sync.pairing.paired", language: language), peer.name),
              ShellSync.outcomeLine(outcome, peer: peer.name, language: language))
@@ -407,8 +384,6 @@ struct SyncPairSheet: View {
             (L10n.t("sync.pairing.same.title", language: language), L10n.t("sync.pairing.same.line", language: language))
         case .refused(let refusal):
             refused(ShellQuestion.nearbyRefused(refusal, language: language))
-        case .code, .connecting, .paired, .merging, .waitingForAnswer:
-            refused(ShellQuestion.nearbyRefused(.lost, language: language))
         }
     }
 

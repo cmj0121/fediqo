@@ -11,7 +11,7 @@ public struct SyncStamp: Hashable, Comparable, Sendable, Codable {
     public let ms: Int64
     /// Orders stamps made within one `ms`.
     public let counter: UInt32
-    /// The writing device's id (`DeviceIdentityStore.deviceID()`); "" for `zero`.
+    /// The writing device's id (`FileDeviceIdentity.deviceID()`); "" for `zero`.
     public let device: String
 
     public init(ms: Int64, counter: UInt32, device: String) {

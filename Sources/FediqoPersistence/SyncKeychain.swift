@@ -6,21 +6,18 @@ import Security
 /// The query dictionaries pairing keeps its items under, assertable as `ForumKeychain`'s are:
 /// class generic password, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, and
 /// `kSecAttrSynchronizable` written explicitly false — a pair secret never follows the Apple
-/// account to another device, and a restored backup never carries the device id (D1).
+/// account to another device, and a restored backup never carries one (D1).
 ///
 /// On macOS, as with `MastodonKeychain`, the items land in the file-based login keychain, which
 /// never syncs but ignores the accessibility class: `kSecUseDataProtectionKeychain` needs a
 /// team-signed build, and an ad-hoc one gets -34018. Once the app is team-signed, adding it to
-/// every query here moves them. The device id is no longer read from here at launch: the file
-/// keychain can ask for the password after every ad-hoc rebuild, so the launch keeps it in a
-/// file beside the store instead (`FileDeviceIdentity`).
+/// every query here moves them. The device id is not kept here: the file keychain can ask for
+/// the password after every ad-hoc rebuild, so it is a file beside the store
+/// (`FileDeviceIdentity`).
 public enum SyncKeychain {
     public static let accessibility = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String
     /// account = the peer's device id; data = JSON `{"secret": base64, "pair": PairedDevice}`.
     public static let pairService = "fediqo.sync.pair"
-    /// account = `deviceAccount`; data = this device's id, UTF-8.
-    public static let deviceService = "fediqo.sync.device"
-    public static let deviceAccount = "this"
 
     public static func lookup(service: String, account: String?) -> [String: Any] {
         var query: [String: Any] = [
@@ -128,13 +125,22 @@ public struct KeychainPairStore: PairStore {
     }
 
     public func pairs() throws -> [PairedDevice] {
-        try items.accounts(service: SyncKeychain.pairService)
-            .compactMap { try item(for: $0)?.pair }
-            .sorted { ($0.pairedAt, $0.device) < ($1.pairedAt, $1.device) }
+        try kept().map(\.pair)
     }
 
     public func secret(for device: String) throws -> SymmetricKey? {
         try item(for: device).map { SymmetricKey(data: $0.secret) }
+    }
+
+    /// Each item read once, the pair and its secret out of the same read.
+    public func kept() throws -> [(pair: PairedDevice, secret: SymmetricKey)] {
+        try items.accounts(service: SyncKeychain.pairService)
+            .compactMap { try kept($0) }
+            .sorted { ($0.pair.pairedAt, $0.pair.device) < ($1.pair.pairedAt, $1.pair.device) }
+    }
+
+    public func kept(_ device: String) throws -> (pair: PairedDevice, secret: SymmetricKey)? {
+        try item(for: device).map { ($0.pair, SymmetricKey(data: $0.secret)) }
     }
 
     public func keep(_ pair: PairedDevice, secret: SymmetricKey) throws {
@@ -166,39 +172,5 @@ public struct KeychainPairStore: PairStore {
         let data = try JSONEncoder().encode(item)
         guard try !items.update(service: SyncKeychain.pairService, account: item.pair.device, data: data) else { return }
         try items.add(service: SyncKeychain.pairService, account: item.pair.device, data: data)
-    }
-}
-
-/// This device's id, kept in the Keychain and made fresh only when its item is missing. **Not
-/// what the launch reads**: on an ad-hoc-signed Mac the file keychain can prompt after every
-/// rebuild, so the app keeps its id in `FileDeviceIdentity` instead.
-public struct KeychainDeviceIdentity: DeviceIdentityStore {
-    private let items: any SyncKeychainItems
-
-    public init() {
-        self.init(items: SecSyncKeychainItems())
-    }
-
-    public init(items: any SyncKeychainItems) {
-        self.items = items
-    }
-
-    public func deviceID() throws -> String {
-        if let id = try kept() { return id }
-        let id = UUID().uuidString
-        do {
-            try items.add(service: SyncKeychain.deviceService, account: SyncKeychain.deviceAccount, data: Data(id.utf8))
-        } catch SyncKeychainError.keychain(errSecDuplicateItem) {
-            // Another caller made one first: that one is the id.
-            guard let first = try kept() else { throw SyncKeychainError.keychain(errSecDuplicateItem) }
-            return first
-        }
-        return id
-    }
-
-    private func kept() throws -> String? {
-        guard let data = try items.read(service: SyncKeychain.deviceService, account: SyncKeychain.deviceAccount) else { return nil }
-        guard let id = String(data: data, encoding: .utf8), !id.isEmpty else { throw SyncKeychainError.unreadable }
-        return id
     }
 }

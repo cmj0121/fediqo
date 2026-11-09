@@ -35,17 +35,33 @@ struct SyncTold: Equatable {
 public final class ShellSync {
     /// Where pairing is, while it is up.
     enum PairStep: Equatable {
-        /// This device shows a code and its name, and waits for the other to join.
-        case holding(code: String, mark: String)
+        /// This device shows a code and its name, and waits for the other to join; nil until
+        /// the first code is made.
+        case holding(code: String?, mark: String?)
         /// The devices nearby holding a pairing code.
         case browsing([NearbyPeer])
         /// The code is typed; the person is asked whether the other screen shows this mark.
         case checkingMark(peer: NearbyPeer, code: String, mark: String)
-        /// Joined: pairing, then the first merge (`.connecting`, `.paired`, `.merging`,
-        /// `.waitingForAnswer`).
-        case running(PairingEvent)
-        /// How it ended (`.done`, `.sameDevice`, `.refused`).
-        case ended(PairingEvent)
+        /// Joined: pairing, then the first merge.
+        case running(Running)
+        /// How it ended.
+        case ended(Ended)
+
+        enum Running: Equatable {
+            case connecting
+            case paired(PairedDevice)
+            case merging(PairedDevice)
+            /// The other device is looking at the first-merge question.
+            case waiting(PairedDevice)
+        }
+
+        enum Ended: Equatable {
+            /// Paired, and what the first merge came to.
+            case done(PairedDevice, SyncOutcome)
+            /// The other end is this very device.
+            case sameDevice
+            case refused(NearbyRefusal)
+        }
     }
 
     /// A Sync now that found nobody, or a look the system refused.
@@ -63,26 +79,22 @@ public final class ShellSync {
     private(set) var told: SyncTold?
     private(set) var looked: Looked?
     private(set) var pairStep: PairStep?
-    /// Whether this device is the one showing the code.
-    private(set) var pairHolding = false
     private(set) var lookingNow = false
 
-    /// How often paired devices are looked for (D6), kept with the person's other choices.
-    /// Setting it starts listening and the due check again under it.
+    /// How often paired devices are looked for (D6), kept with the person's other choices
+    /// (`DummyPrefs.syncPeriod`). Setting it starts listening and the due check again under it.
     var period: SyncPeriod {
         didSet {
             guard period != oldValue else { return }
-            defaults.set(period.rawValue, forKey: Self.periodKey)
+            DummyPrefs.keep(syncPeriod: period, in: defaults)
             restart()
         }
     }
 
-    static let periodKey = DummyPrefs.prefix + "syncPeriod"
-
-    /// The period read again from the person's choices, as `DummyPrefs.reread` does after a read
-    /// back: one that came with the package takes effect at once.
-    func rereadPeriod() {
-        period = defaults.string(forKey: Self.periodKey).flatMap(SyncPeriod.init(rawValue:)) ?? .standard
+    /// The person's choices read again, as each window's are after a read back
+    /// (`DummyPrefs.reread`): a period that came with the package takes effect at once.
+    func reread() {
+        period = DummyPrefs.syncPeriod(in: defaults)
     }
 
     /// Whether the pairing sheet is the one showing the first-merge question.
@@ -148,14 +160,12 @@ public final class ShellSync {
         self.store = store
         self.timelines = timelines
         self.defaults = defaults
+        period = DummyPrefs.syncPeriod(in: defaults)
         self.timing = timing
         self.now = now
-        period = defaults.string(forKey: Self.periodKey).flatMap(SyncPeriod.init(rawValue:)) ?? .standard
         let relay = Relay()
         session = SyncSession(link: link, pairs: pairs, clock: clock, name: deviceName, local: relay, timing: timing, now: now)
         relay.owner = self
-        // Every timeline stamp kept, so a change made here from now on is later than each.
-        if let kept = timelines?.syncEntries() { clock.witness(SyncSnapshot(timelines: kept).newest) }
         refresh()
     }
 
@@ -222,8 +232,10 @@ public final class ShellSync {
             dueChecks = Task { [weak self] in
                 while !Task.isCancelled {
                     guard let self else { return }
-                    _ = await self.session.dialDue(period: self.period)
-                    self.refresh()
+                    // The pairs as last read: nothing is read again unless one is due.
+                    if await self.session.anyDue(self.paired, period: self.period) {
+                        _ = await self.session.dialDue(period: self.period)
+                    }
                     try? await Task.sleep(for: every)
                 }
             }
@@ -243,6 +255,8 @@ public final class ShellSync {
         start()
     }
 
+    /// The pairs read again: at the start, on coming to the front, and where pairing, a merge
+    /// or Forget changed them.
     private func refresh() {
         let now = (try? pairs.pairs()) ?? []
         if now != paired { paired = now }
@@ -261,7 +275,6 @@ public final class ShellSync {
             guard let self else { return }
             self.lookingNow = false
             self.looking = nil
-            self.refresh()
         }
     }
 
@@ -282,8 +295,7 @@ public final class ShellSync {
     func beginPairHold(from window: ShellSession? = nil) {
         guard pairStep == nil else { return }
         pairWindow = window
-        pairHolding = true
-        pairStep = .holding(code: "", mark: "")
+        pairStep = .holding(code: nil, mark: nil)
         follow { await $0.holdPairing() }
     }
 
@@ -291,13 +303,12 @@ public final class ShellSync {
     func beginPairBrowse(from window: ShellSession? = nil) {
         guard pairStep == nil else { return }
         pairWindow = window
-        pairHolding = false
         pairStep = .browsing([])
         browsing = Task { [weak self, link] in
             do {
-                for try await listed in link.browse() {
+                for try await listed in link.browse(pairing: true) {
                     guard let self else { return }
-                    self.lastPeers = listed.filter(\.pairing)
+                    self.lastPeers = listed
                     guard case .browsing = self.pairStep else { continue }
                     self.pairStep = .browsing(self.lastPeers)
                 }
@@ -330,7 +341,6 @@ public final class ShellSync {
     func beginPairJoin(peer: NearbyPeer, code: String) {
         browsing?.cancel()
         browsing = nil
-        pairHolding = false
         pairStep = .running(.connecting)
         follow { await $0.joinPairing(peer: peer, code: code) }
     }
@@ -343,7 +353,6 @@ public final class ShellSync {
         browsing = nil
         if case .running = pairStep { settleAsk(nil) }
         pairStep = nil
-        pairHolding = false
         pairWindow = nil
         let session = session
         Task { await session.stopPairing() }
@@ -361,37 +370,40 @@ public final class ShellSync {
         }
     }
 
+    /// Each event as the step it shows, once.
     private func took(_ event: PairingEvent) {
         switch event {
         case .code(let code, let sessionID):
             pairStep = .holding(code: code, mark: NearbyCode.mark(code: code, sessionID: sessionID))
-        case .connecting, .merging, .waitingForAnswer:
-            pairStep = .running(event)
-        case .paired:
-            pairStep = .running(event)
+        case .connecting:
+            pairStep = .running(.connecting)
+        case .paired(let peer):
+            pairStep = .running(.paired(peer))
             refresh()
             restart()
+        case .merging(let peer):
+            pairStep = .running(.merging(peer))
+        case .waitingForAnswer(let peer):
+            pairStep = .running(.waiting(peer))
         case .done(let peer, let outcome):
-            pairStep = .ended(event)
+            pairStep = .ended(.done(peer, outcome))
             told = SyncTold(peer: peer, outcome: outcome, at: now())
             refresh()
-        case .sameDevice, .refused:
-            pairStep = .ended(event)
+        case .sameDevice:
+            pairStep = .ended(.sameDevice)
+        case .refused(let refusal):
+            pairStep = .ended(.refused(refusal))
         }
     }
 
     // MARK: - The first-merge question
 
+    /// Asked until answered, or until the session stops waiting (`answerWait`, or the merge
+    /// put away): its cancellation takes the question down as no.
     fileprivate func confirm(_ preview: SyncPreview, with peer: PairedDevice) async -> Bool? {
         guard lead != nil || pairStep != nil else { return nil }
         settleAsk(nil)
         asking = SyncAsk(id: peer.device + "-" + UUID().uuidString, peer: peer, preview: preview)
-        let limit = timing.answerWait
-        let timer = Task { [weak self] in
-            try? await Task.sleep(for: limit)
-            if !Task.isCancelled { self?.settleAsk(nil) }
-        }
-        defer { timer.cancel() }
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 if asking == nil {
@@ -427,23 +439,23 @@ public final class ShellSync {
         }
     }
 
-    /// The store first, then the lead's removals and asks, then the timelines written once.
+    /// The timelines first, read and written once with nothing between, so nothing is laid in
+    /// where they cannot be; then the store, and the lead's removals and asks.
     fileprivate func apply(_ changes: SyncChanges, from peer: PairedDevice) async throws {
         if !changes.timelines.isEmpty {
-            guard let timelines, timelines.loadStamped() != nil else { throw SyncRefusal.unreadableHere }
+            guard let timelines, let held = timelines.loadStamped(),
+                  timelines.settle(arrived: changes.timelines, held: held) == true
+            else { throw SyncRefusal.unreadableHere }
         }
         if !changes.sources.isEmpty {
             let settled = await store.settle(arrived: changes.sources)
             if let lead {
                 await lead.takeMerged(settled)
             } else {
-                for (host, stamp) in settled.toRemove.sorted(by: { $0.key < $1.key }) {
-                    await store.remove(host: host, keepingPosts: true, stampedAs: stamp)
+                for host in settled.toRemove.keys.sorted() {
+                    await store.remove(host: host, keepingPosts: true)
                 }
             }
-        }
-        if !changes.timelines.isEmpty {
-            guard timelines?.settle(arrived: changes.timelines) == true else { throw SyncRefusal.unreadableHere }
         }
         lead?.saveSoon()
         let stamps = changes.sources.values.map(\.stamp) + changes.timelines.values.map(\.stamp)
@@ -561,12 +573,13 @@ private final class Relay: SyncLocal {
 
 extension ShellSession {
     /// This window's part of a merge (D4, D5). Each removal that arrived is the person's own Remove
-    /// with the posts kept, whatever `removedPostsStay` says, at the stamp it arrived with. Each
+    /// with the posts kept, whatever `removedPostsStay` says, at the stamp it arrived with (the
+    /// store keeps it from `settle(arrived:)`). Each
     /// source new here was added signed out by the store; it is read in and asked once, behind the
     /// merge rather than in it.
     func takeMerged(_ settled: SourcesSettled) async {
-        for (host, stamp) in settled.toRemove.sorted(by: { $0.key < $1.key }) {
-            await remove(host: host, keepingPosts: true, stampedAs: stamp)
+        for host in settled.toRemove.keys.sorted() {
+            await remove(host: host, keepingPosts: true)
         }
         guard !settled.added.isEmpty || !settled.restated.isEmpty else { return }
         await adopt()

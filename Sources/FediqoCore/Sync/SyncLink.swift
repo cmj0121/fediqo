@@ -1,11 +1,8 @@
 import CryptoKit
 
-/// The radios for syncing: a `NearbyLink` that can also hold for pairing, and advertise and
-/// find sync listeners. `NWNearbyLink` and `PipeNearbyLink` conform.
+/// The radios for syncing: a `NearbyLink` (whose pairing holds are `pairing: true`) that can
+/// also advertise and find sync listeners. `NWNearbyLink` and `PipeNearbyLink` conform.
 public protocol SyncLink: NearbyLink {
-    /// A pairing hold: `advertise(name:sessionID:psk:)` with `p=1` added to the TXT, so a
-    /// browser lists it as `NearbyPeer.pairing`.
-    func advertisePairing(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error>
     /// Lets the paired device find this one as `name`, with TXT `t=<tag>` only, and hands over
     /// each join made under `psk` (TLS identity `SyncDiscovery.pskIdentity(tag:)`). Ends when
     /// cancelled; throws `NearbyRefusal.notAllowed` where refused.

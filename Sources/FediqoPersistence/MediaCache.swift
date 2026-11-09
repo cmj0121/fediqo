@@ -174,6 +174,6 @@ public struct MediaCache: MediaCopies {
     private static func folderName(_ host: String) -> String { digest(host.lowercased()) }
 
     private static func digest(_ text: String) -> String {
-        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+        SHA256.hash(data: Data(text.utf8)).hex
     }
 }

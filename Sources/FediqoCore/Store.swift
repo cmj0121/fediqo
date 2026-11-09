@@ -113,6 +113,9 @@ public actor ItemStore {
     private var syncWritten: SourceSync?
     /// What every source change made here is stamped by (`stamp(with:)`).
     private var clock = SyncClock.unpaired
+    /// Each removal a merge handed back (`settle(arrived:)`), at the stamp it arrived with: the
+    /// tombstone the removal of that host made next keeps, in place of a stamp made now.
+    private var pendingGone: [String: SyncStamp] = [:]
     /// Hosts removed whose removal a write did not land: deleted by the next.
     private var hostsOwed: Set<String> = []
     /// When each row first arrived, as a count that only goes up. Nothing reads the number; what
@@ -627,11 +630,11 @@ public actor ItemStore {
         watcher(sourceList.map(\.host))
     }
 
-    /// A host new here is stamped as written now — or `stampedAs`, a merge's own stamp.
-    public func add(_ source: Source, stampedAs: SyncStamp? = nil) {
+    /// A host new here is stamped as written now.
+    public func add(_ source: Source) {
         if sourceList.contains(where: { $0.host == source.host }) { return }
         sourceList.append(source)
-        sync.stamps[source.host] = stampedAs ?? clock.now()
+        sync.stamps[source.host] = clock.now()
         sync.gone[source.host] = nil
         sourcesWatcher?(sourceList.map(\.host))
         changed(shown: false, replies: false)
@@ -1259,14 +1262,16 @@ public actor ItemStore {
     /// that must have them off the disk before it goes on knows to wait for the write.
     @discardableResult
     ///
-    /// **A source here leaves a tombstone** (D4), stamped now — or `stampedAs`, the stamp a
-    /// merged removal arrived at — so a merge does not bring it back.
-    public func remove(host raw: String, keepingPosts: Bool = false, stampedAs: SyncStamp? = nil) async -> Bool {
+    /// **A source here leaves a tombstone** (D4), stamped now — or, where a merge handed this
+    /// removal back (`settle(arrived:)`), at the stamp it arrived with — so a merge does not
+    /// bring it back.
+    public func remove(host raw: String, keepingPosts: Bool = false) async -> Bool {
         await untilNoPutBack()
         let host = raw.lowercased()
+        let arrived = pendingGone.removeValue(forKey: host)
         if sourceList.contains(where: { $0.host == host }) {
             sync.stamps[host] = nil
-            sync.gone[host] = stampedAs ?? clock.now()
+            sync.gone[host] = arrived ?? clock.now()
         }
         sourceList.removeAll { $0.host == host }
         saidByHost[host] = nil
@@ -1319,7 +1324,8 @@ public actor ItemStore {
     /// A host new here is added with no lists, signed out (D5); a host here takes the arrived
     /// kind and boards and keeps its own lists. A tombstone for a host not here is kept as it
     /// came; one for a host here is not applied but handed back in `toRemove`, for the removal
-    /// the person's own path makes. **No stamp is made**: each is kept as it arrived.
+    /// the person's own path makes, whose tombstone keeps the stamp it arrived with. **No stamp
+    /// is made**: each is kept as it arrived.
     public func settle(arrived: [String: Stamped<SyncSource>]) -> SourcesSettled {
         var settled = SourcesSettled()
         let held = sync.entries(sourceList)
@@ -1343,6 +1349,7 @@ public actor ItemStore {
                 settled.added.append(host)
             case (nil, _?):
                 settled.toRemove[host] = entry.stamp
+                pendingGone[host] = entry.stamp
             case (nil, nil):
                 sync.gone[host] = entry.stamp
             }
@@ -1367,6 +1374,7 @@ public actor ItemStore {
     private func takeSync(_ sync: SourceSync, of hosts: Set<String>) {
         self.sync = Self.held(sync, of: hosts)
         syncWritten = nil
+        pendingGone = [:]
         clock.witness(self.sync.newest)
     }
 

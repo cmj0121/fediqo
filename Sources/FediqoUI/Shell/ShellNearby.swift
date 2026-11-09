@@ -279,10 +279,8 @@ final class ShellNearby {
         browsing = Task { @MainActor [weak self] in
             if let weight = try? await carrier.weigh() { self?.weight = weight }
             do {
-                for try await listed in link.browse() {
+                for try await peers in link.browse() {
                     guard let self else { return }
-                    // A pairing hold takes no Move: only Move holds are offered to.
-                    let peers = listed.filter { !$0.pairing }
                     self.lastPeers = peers
                     guard case .browsing = self.step else { continue }
                     self.step = .browsing(peers)

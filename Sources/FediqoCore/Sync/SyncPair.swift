@@ -4,7 +4,7 @@ import Foundation
 /// A device this one is paired with (D1). No secret in it.
 public struct PairedDevice: Hashable, Sendable, Codable, Identifiable {
     public var id: String { device }
-    /// The other device's id (its `DeviceIdentityStore.deviceID()`), as it said at pairing.
+    /// The other device's id (its `FileDeviceIdentity.deviceID()`), as it said at pairing.
     public let device: String
     /// What it calls itself, said inside the sealed channel at pairing and at every join.
     public var name: String
@@ -33,14 +33,21 @@ public protocol PairStore: Sendable {
     func update(_ pair: PairedDevice) throws
     /// Gone on this side; the other no longer finds it (its tags and psk never match again).
     func forget(device: String) throws
+    /// Every pair with its secret, in `pairs()`' order: a pair whose secret is missing is left out.
+    func kept() throws -> [(pair: PairedDevice, secret: SymmetricKey)]
+    /// One pair with its secret, or nil where not paired.
+    func kept(_ device: String) throws -> (pair: PairedDevice, secret: SymmetricKey)?
 }
 
-/// This device's id, made once.
-public protocol DeviceIdentityStore: Sendable {
-    /// The id kept, or a fresh UUID string kept now **only where none is kept** (a restored
-    /// backup never carries a ThisDeviceOnly item, so it never shares one). A read that fails
-    /// any other way throws, and nothing fresh is made (else the id would rotate).
-    func deviceID() throws -> String
+extension PairStore {
+    public func kept() throws -> [(pair: PairedDevice, secret: SymmetricKey)] {
+        try pairs().compactMap { pair in (try? secret(for: pair.device)).map { (pair, $0) } }
+    }
+
+    public func kept(_ device: String) throws -> (pair: PairedDevice, secret: SymmetricKey)? {
+        guard let pair = try pairs().first(where: { $0.device == device }), let secret = try secret(for: device) else { return nil }
+        return (pair, secret)
+    }
 }
 
 /// The most pairs one device keeps (one listener each).

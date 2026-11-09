@@ -240,9 +240,7 @@ public actor SyncSession {
     /// `.busy` where a merge with it is under way, unless this side's own dial loses the
     /// tie-break — then that dial is closed and the join is served.
     private func arrived(_ connection: any NearbyPeerConnection, for device: String, tag: String, psk: SymmetricKey, secret: SymmetricKey) {
-        guard let pair = (try? pairs.pairs())?.first(where: { $0.device == device }),
-              (try? pairs.secret(for: device)) == secret
-        else {
+        guard let (pair, kept) = try? pairs.kept(device), kept == secret else {
             refuse(connection, tag: tag, psk: psk, .notPaired)
             return
         }
@@ -266,14 +264,13 @@ public actor SyncSession {
         let wait = timing.stepWait
         Task {
             let mailbox = Mailbox(connection)
-            let cut: @Sendable () -> Void = { mailbox.close(); connection.close() }
-            defer { cut() }
-            let timer = Self.timer(wait, cut)
+            defer { mailbox.cut() }
+            let timer = Self.timer(wait, mailbox.cut)
             defer { timer.cancel() }
             guard let channel = try? await NearbyChannel.open(
                 over: connection, inbox: mailbox, role: .receiver, psk: psk, sessionID: tag
             ) else { return }
-            await Self.say(.refused(refusal), over: channel, within: wait, cut: cut)
+            await Self.say(.refused(refusal), over: channel, within: wait, cut: mailbox.cut)
         }
     }
 
@@ -301,13 +298,24 @@ public actor SyncSession {
     /// older than `period`; at most one merge per pair. Returns as soon as every due pair was
     /// met or `syncNowWindow` ran out (pairs not seen are left for the next check).
     public func dialDue(period: SyncPeriod) async -> [String: SyncOutcome] {
-        guard let interval = period.interval else { return [:] }
-        let seconds = Double(interval.components.seconds)
+        guard period.interval != nil else { return [:] }
         let at = now()
-        return await look(advertising: false) { pair, tried in
-            guard let last = [pair.lastMerged, tried].compactMap({ $0 }).max() else { return true }
-            return at.timeIntervalSince(last) >= seconds
-        }.outcomes
+        return await look(advertising: false) { pair, tried in Self.due(pair, tried: tried, period: period, at: at) }.outcomes
+    }
+
+    /// Whether any of `paired` is due under `period` by what is known already — each one's
+    /// `lastMerged` and this run's last try of it — without reading the pairs again: what tells
+    /// a check whether `dialDue` has anything to look for.
+    public func anyDue(_ paired: [PairedDevice], period: SyncPeriod) -> Bool {
+        let at = now()
+        return paired.prefix(PairLimit.most).contains { Self.due($0, tried: tried[$0.device], period: period, at: at) }
+    }
+
+    /// Never merged nor tried, or the last of the two a whole `period` ago; never for `never`.
+    private static func due(_ pair: PairedDevice, tried: Date?, period: SyncPeriod, at: Date) -> Bool {
+        guard let interval = period.interval else { return false }
+        guard let last = [pair.lastMerged, tried].compactMap({ $0 }).max() else { return true }
+        return at.timeIntervalSince(last) >= Double(interval.components.seconds)
     }
 
     /// "Sync now": advertise (where not already listening) and browse for `syncNowWindow`,
@@ -376,7 +384,7 @@ public actor SyncSession {
                         && SyncDiscovery.accepts(peer.tag, secret: $0.secret, at: now())
                 }) else { continue }
                 // Merged meanwhile by the other's join, or forgotten: not dialed.
-                guard let fresh = (try? pairs.pairs())?.first(where: { $0.device == pair.device }),
+                guard let fresh = (try? pairs.kept(pair.device))?.pair,
                       due(fresh, tried[fresh.device])
                 else {
                     settled.insert(pair.device)
@@ -463,7 +471,7 @@ public actor SyncSession {
         over connection: any NearbyPeerConnection, pair: PairedDevice, tag: String, psk: SymmetricKey, dialer: Bool
     ) async -> SyncOutcome? {
         let mailbox = Mailbox(connection)
-        let cut: @Sendable () -> Void = { mailbox.close(); connection.close() }
+        let cut = mailbox.cut
         defer { cut() }
         let outcome: SyncOutcome? = await withTaskCancellationHandler {
             let timer = Self.timer(timing.stepWait, cut)
@@ -711,10 +719,7 @@ public actor SyncSession {
     }
 
     private func keptPairs() -> [(pair: PairedDevice, secret: SymmetricKey)] {
-        ((try? pairs.pairs()) ?? []).prefix(PairLimit.most).compactMap { pair in
-            guard let secret = try? pairs.secret(for: pair.device) else { return nil }
-            return (pair, secret)
-        }
+        Array(((try? pairs.kept()) ?? []).prefix(PairLimit.most))
     }
 }
 

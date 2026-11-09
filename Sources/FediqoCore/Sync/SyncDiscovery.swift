@@ -6,7 +6,7 @@ import Foundation
 /// one TXT key: a tag that only the two holders of the pair secret can make or recognise, and
 /// that rotates every 15 minutes, so a stranger can neither join nor follow a device around.
 public enum SyncDiscovery {
-    public static let label = "fediqo-sync-1"
+    public static let label = SyncFrame.label
     /// TXT key of a sync listener: the rotating tag, and nothing else in the TXT.
     public static let tagKey = "t"
     /// TXT key marking a pairing hold ("1").
@@ -24,7 +24,7 @@ public enum SyncDiscovery {
     public static func tag(secret: SymmetricKey, bucket: Int64) -> String {
         let key = HKDF<SHA256>.deriveKey(inputKeyMaterial: secret, info: Data("\(label) tag".utf8), outputByteCount: 32)
         let message = withUnsafeBytes(of: bucket.bigEndian) { Data($0) }
-        return hex(Data(HMAC<SHA256>.authenticationCode(for: message, using: key)).prefix(16))
+        return Data(HMAC<SHA256>.authenticationCode(for: message, using: key)).prefix(16).hex
     }
 
     /// Whether `tag` is this pair's for a bucket within one of `date`'s.
@@ -48,10 +48,6 @@ public enum SyncDiscovery {
 
     /// "fq-" and 12 random hex characters. Never the device name.
     public static func instanceName() -> String {
-        "fq-" + hex(PackageKeys.random(6))
-    }
-
-    private static func hex(_ data: Data) -> String {
-        data.map { String(format: "%02x", $0) }.joined()
+        "fq-" + PackageKeys.random(6).hex
     }
 }

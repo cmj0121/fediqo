@@ -6,9 +6,9 @@ import Synchronization
 import Testing
 @testable import FediqoPersistence
 
-/// U4: the pair secret and the device id as Keychain items — the queries they are kept under,
+/// U4: the pair secret as a Keychain item — the queries they are kept under,
 /// and the stores over a Keychain held in memory.
-@Suite("Pairs and the device id in the Keychain")
+@Suite("Pairs in the Keychain")
 struct SyncKeychainTests {
     @Test("Items are generic passwords, this device only after first unlock, never synchronizable")
     func queries() {
@@ -18,41 +18,12 @@ struct SyncKeychainTests {
         #expect(lookup[kSecAttrAccount as String] as? String == "D")
         #expect(lookup[kSecAttrSynchronizable as String] as? Bool == false)
         #expect(SyncKeychain.lookup(service: SyncKeychain.pairService, account: nil)[kSecAttrAccount as String] == nil)
-        let adding = SyncKeychain.adding(service: SyncKeychain.deviceService, account: "this", data: Data("x".utf8))
+        let adding = SyncKeychain.adding(service: SyncKeychain.pairService, account: "D", data: Data("x".utf8))
         #expect(adding[kSecAttrAccessible as String] as? String == kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String)
         #expect(SyncKeychain.accessibility == kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String)
         #expect(adding[kSecAttrSynchronizable as String] as? Bool == false)
         #expect(adding[kSecValueData as String] as? Data == Data("x".utf8))
-        #expect(adding[kSecAttrService as String] as? String == "fediqo.sync.device")
-    }
-
-    @Test("The device id is made fresh only when its item is missing")
-    func deviceID() throws {
-        let items = MemoryKeychainItems()
-        let identity = KeychainDeviceIdentity(items: items)
-        let made = try identity.deviceID()
-        #expect(UUID(uuidString: made) != nil)
-        #expect(try identity.deviceID() == made)
-        #expect(try KeychainDeviceIdentity(items: items).deviceID() == made, "a later run reads the same id")
-        #expect(items.adds == 1)
-        // A restored backup carries no ThisDeviceOnly item: a fresh id.
-        try items.delete(service: SyncKeychain.deviceService, account: SyncKeychain.deviceAccount)
-        let fresh = try identity.deviceID()
-        #expect(fresh != made)
-        // A read that fails another way makes nothing.
-        items.failReads = true
-        #expect(throws: SyncKeychainError.keychain(errSecInteractionNotAllowed)) { try identity.deviceID() }
-        #expect(items.adds == 2)
-        items.failReads = false
-        #expect(try identity.deviceID() == fresh)
-    }
-
-    @Test("A device id made by another caller first is the one returned")
-    func deviceIDRace() throws {
-        let items = MemoryKeychainItems()
-        items.beforeAdd.withLock { $0 = { items.put(service: SyncKeychain.deviceService, account: SyncKeychain.deviceAccount, data: Data("FIRST".utf8)) } }
-        #expect(try KeychainDeviceIdentity(items: items).deviceID() == "FIRST")
-        #expect(try KeychainDeviceIdentity(items: items).deviceID() == "FIRST")
+        #expect(adding[kSecAttrService as String] as? String == "fediqo.sync.pair")
     }
 
     @Test("A pair written again goes in place: a failed write keeps the secret, and update leaves it as it was")
@@ -76,14 +47,6 @@ struct SyncKeychainTests {
         #expect(try store.secret(for: "PHONE") == kept && store.pairs() == [merged], "a failed write leaves the pair as it was")
     }
 
-    @Test("An unreadable device id throws and is not written over")
-    func unreadableID() throws {
-        let items = MemoryKeychainItems()
-        try items.add(service: SyncKeychain.deviceService, account: SyncKeychain.deviceAccount, data: Data())
-        #expect(throws: SyncKeychainError.unreadable) { try KeychainDeviceIdentity(items: items).deviceID() }
-        #expect(items.adds == 1)
-    }
-
     @Test("A pair and its secret are kept, listed, updated without the secret, and forgotten")
     func pairs() throws {
         let items = MemoryKeychainItems()
@@ -96,6 +59,7 @@ struct SyncKeychainTests {
         #expect(try store.pairs() == [tablet, phone])
         #expect(try store.secret(for: "PHONE") == secret)
         #expect(try store.secret(for: "NOBODY") == nil)
+        #expect(try store.kept().map(\.pair) == [tablet, phone] && store.kept("PHONE")?.secret == secret)
 
         var merged = phone
         merged.firstMerged = true
@@ -136,7 +100,6 @@ final class MemoryKeychainItems: SyncKeychainItems {
         var items: [String: [String: Data]] = [:]
         var adds = 0
         var deletes = 0
-        var failReads = false
         var failAdds = false
         var failUpdates = false
     }
@@ -145,8 +108,6 @@ final class MemoryKeychainItems: SyncKeychainItems {
 
     var adds: Int { held.withLock { $0.adds } }
     var deletes: Int { held.withLock { $0.deletes } }
-    /// Runs once, just before the next add: another caller getting there first.
-    let beforeAdd = Mutex<(@Sendable () -> Void)?>(nil)
 
     var failAdds: Bool {
         get { held.withLock { $0.failAdds } }
@@ -158,20 +119,12 @@ final class MemoryKeychainItems: SyncKeychainItems {
         set { held.withLock { $0.failUpdates = newValue } }
     }
 
-    var failReads: Bool {
-        get { held.withLock { $0.failReads } }
-        set { held.withLock { $0.failReads = newValue } }
-    }
-
     func accounts(_ service: String) -> [String] {
         held.withLock { $0.items[service, default: [:]].keys.sorted() }
     }
 
     func read(service: String, account: String) throws -> Data? {
-        try held.withLock { held in
-            if held.failReads { throw SyncKeychainError.keychain(errSecInteractionNotAllowed) }
-            return held.items[service]?[account]
-        }
+        held.withLock { $0.items[service]?[account] }
     }
 
     func accounts(service: String) throws -> [String] {
@@ -179,10 +132,6 @@ final class MemoryKeychainItems: SyncKeychainItems {
     }
 
     func add(service: String, account: String, data: Data) throws {
-        beforeAdd.withLock { hook in
-            defer { hook = nil }
-            return hook
-        }?()
         try held.withLock { held in
             if held.failAdds { throw SyncKeychainError.keychain(errSecIO) }
             guard held.items[service]?[account] == nil else { throw SyncKeychainError.keychain(errSecDuplicateItem) }
@@ -204,10 +153,5 @@ final class MemoryKeychainItems: SyncKeychainItems {
         held.withLock { held in
             if held.items[service]?.removeValue(forKey: account) != nil { held.deletes += 1 }
         }
-    }
-
-    /// Writes straight in, as another process would.
-    func put(service: String, account: String, data: Data) {
-        held.withLock { $0.items[service, default: [:]][account] = data }
     }
 }

@@ -765,8 +765,10 @@ final class Mailbox: NearbyInbox, Sendable {
 
     private let held = Mutex(Held())
     private let pump = Mutex<Task<Void, Never>?>(nil)
+    private let connection: any NearbyPeerConnection
 
     init(_ connection: any NearbyPeerConnection) {
+        self.connection = connection
         // One frame ahead of the consumer and no more: a sender faster than this disk waits on
         // the wire rather than in this memory.
         let task = Task { [self] in
@@ -790,6 +792,12 @@ final class Mailbox: NearbyInbox, Sendable {
         }
         blocked?.resume()
         push(.ended)
+    }
+
+    /// This mailbox closed, and the connection under it: the link cut.
+    func cut() {
+        close()
+        connection.close()
     }
 
     /// Waits until the queue is empty again — the frame pushed was taken — or the mailbox closed.

@@ -23,8 +23,8 @@ public enum PairingEvent: Sendable, Equatable {
 /// Pairing, once, with the six digits (D1). The hold works like `NearbyMove.hold`: a code and
 /// session id each try, rolled on a wrong code, closed as `.guessing` after `guessCap` wrong
 /// codes and as `.timedOut` after `holdTimeout`. The holder advertises under its device name
-/// with TXT `id=<session>` and `p=1`; the joiner picks a `NearbyPeer.pairing` hold whose mark
-/// the person confirmed. Then, inside the channel (holder = `.receiver`, joiner = `.sender`):
+/// with TXT `id=<session>` and `p=1`; the joiner picks a hold from `browse(pairing: true)` whose
+/// mark the person confirmed. Then, inside the channel (holder = `.receiver`, joiner = `.sender`):
 ///
 ///     both ──sync(pairHello{device,name,nonce32})──▶   (sender first, then receiver)
 ///          secret = HKDF<SHA256>(ikm: nonceS ‖ nonceR, salt: sessionID utf8,
@@ -34,7 +34,7 @@ public enum PairingEvent: Sendable, Equatable {
 /// The same id on both ends refuses (`.sameDevice`). A device already paired is replaced, its
 /// first merge not yet made. Where `firstMerge` is given (`SyncSession`), the first merge runs
 /// on the same channel straight after, with the joiner — the one who typed the code — confirming.
-public actor SyncPairing {
+actor SyncPairing {
     /// A channel just paired over, handed to the first merge.
     struct Opened: Sendable {
         let channel: NearbyChannel
@@ -65,24 +65,12 @@ public actor SyncPairing {
 
     /// `device` is this device's id, `name` what it calls itself. `holdClock`, where given, is
     /// the hold's whole wait in place of `holdTimeout`.
-    public init(
-        link: any SyncLink, pairs: any PairStore, device: String, name: String,
-        holdTimeout: Duration = .seconds(600), guessCap: Int = 5,
-        holdClock: (@Sendable () async throws -> Void)? = nil,
-        now: @escaping @Sendable () -> Date = Date.init
-    ) {
-        self.init(
-            link: link, pairs: pairs, device: device, name: name, holdTimeout: holdTimeout, guessCap: guessCap,
-            holdClock: holdClock, now: now, firstMerge: nil
-        )
-    }
-
     init(
         link: any SyncLink, pairs: any PairStore, device: String, name: String,
         holdTimeout: Duration = .seconds(600), guessCap: Int = 5,
         holdClock: (@Sendable () async throws -> Void)? = nil,
         now: @escaping @Sendable () -> Date = Date.init,
-        firstMerge: FirstMerge?
+        firstMerge: FirstMerge? = nil
     ) {
         self.firstMerge = firstMerge
         self.link = link
@@ -95,17 +83,17 @@ public actor SyncPairing {
     }
 
     /// Advertises a pairing hold and waits for a device to join it. The first event is the code.
-    public func hold() -> AsyncStream<PairingEvent> {
+    func hold() -> AsyncStream<PairingEvent> {
         start { [self] in await runHold() }
     }
 
     /// Joins `peer`, a pairing hold, with the code its screen shows.
-    public func join(peer: NearbyPeer, code: String) -> AsyncStream<PairingEvent> {
+    func join(peer: NearbyPeer, code: String) -> AsyncStream<PairingEvent> {
         start { [self] in await runJoin(peer: peer, code: code) }
     }
 
     /// Whatever is running stops, and the stream ends. Nothing half agreed is kept.
-    public func stop() {
+    func stop() {
         task?.cancel()
         task = nil
         continuation?.finish()
@@ -196,7 +184,7 @@ public actor SyncPairing {
             while !roll {
                 var joined: (any NearbyPeerConnection)?
                 var guessed = false
-                for try await arrival in link.advertisePairing(name: name, sessionID: sessionID, psk: psk) {
+                for try await arrival in link.advertise(name: name, sessionID: sessionID, psk: psk, pairing: true) {
                     switch arrival {
                     case .failedHandshake: guessed = true
                     case .joined(let connection): joined = connection
@@ -206,10 +194,7 @@ public actor SyncPairing {
                 if !guessed {
                     guard let connection = joined else { return nil }
                     let mailbox = Mailbox(connection)
-                    let cut: @Sendable () -> Void = {
-                        mailbox.close()
-                        connection.close()
-                    }
+                    let cut = mailbox.cut
                     do {
                         let channel = try await NearbyChannel.open(
                             over: connection, inbox: mailbox, role: .receiver, psk: psk, sessionID: sessionID
@@ -243,16 +228,13 @@ public actor SyncPairing {
             let psk = NearbyCode.psk(code: code, sessionID: peer.sessionID)
             let connection = try await link.connect(to: peer, psk: psk)
             let mailbox = Mailbox(connection)
-            defer {
-                mailbox.close()
-                connection.close()
-            }
+            defer { mailbox.cut() }
             let channel = try await NearbyChannel.open(
                 over: connection, inbox: mailbox, role: .sender, psk: psk, sessionID: peer.sessionID
             )
             let pair = try await exchange(over: channel, role: .sender, sessionID: peer.sessionID)
             emit(.paired(pair))
-            await mergeFirst(Opened(channel: channel, pair: pair, dialer: true, cut: { mailbox.close(); connection.close() }))
+            await mergeFirst(Opened(channel: channel, pair: pair, dialer: true, cut: mailbox.cut))
         } catch {
             fail(error)
         }

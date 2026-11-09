@@ -41,8 +41,9 @@ struct WrittenTimelineStore {
     static let version = 4
 
     /// Posted after every save and every settle that wrote to a file (`userInfo["place"]`:
-    /// `place`; `userInfo["poster"]`: the poster's `ObjectIdentifier`, absent from a merge):
-    /// every other window that keeps its timelines in the same file reads them again.
+    /// `place`; `userInfo["poster"]`: the poster's `ObjectIdentifier`, absent from a merge;
+    /// `userInfo["timelines"]`: the `[TimelineDefinition]` written, as a load reads them): every
+    /// other window that keeps its timelines in the same file takes them up.
     static let kept = Notification.Name("fediqo.timelines.kept")
 
     let defaults: UserDefaults
@@ -134,8 +135,12 @@ struct WrittenTimelineStore {
     /// **no stamp made**; posts `kept` with no poster where anything was written. Nil where the
     /// file is unreadable, a body does not read, or the write fails (nothing written); true
     /// otherwise.
-    func settle(arrived: [UUID: Stamped<SyncTimeline>]) -> Bool? {
-        guard let held = loadStamped() else { return nil }
+    ///
+    /// `held` is what `loadStamped()` just read, where the caller read it already.
+    func settle(
+        arrived: [UUID: Stamped<SyncTimeline>], held: (timelines: [TimelineDefinition], stamps: Stamps)? = nil
+    ) -> Bool? {
+        guard let held = held ?? loadStamped() else { return nil }
         let entries = Self.entries(held)
         var timelines = held.timelines
         var stamps = held.stamps
@@ -162,11 +167,17 @@ struct WrittenTimelineStore {
         return write(timelines, stamps, poster: nil) ? true : nil
     }
 
-    /// The row JSON of one timeline, keys sorted and no stamp: `SyncTimeline.body`.
-    static func body(of timeline: TimelineDefinition) -> Data {
+    /// The row JSON of one timeline, keys sorted and no stamp: `SyncTimeline.body`. `encoder`
+    /// is `bodyEncoder()`'s, made once for many.
+    static func body(of timeline: TimelineDefinition, encoder: JSONEncoder = bodyEncoder()) -> Data {
+        (try? encoder.encode(TimelineRow(timeline, stamp: nil))) ?? Data()
+    }
+
+    /// What writes a body: keys sorted.
+    static func bodyEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
-        return (try? encoder.encode(TimelineRow(timeline, stamp: nil))) ?? Data()
+        return encoder
     }
 
     /// The timeline a body holds, held to every rule `load` holds a row to; nil where it does
@@ -183,9 +194,10 @@ struct WrittenTimelineStore {
         _ held: (timelines: [TimelineDefinition], stamps: Stamps)
     ) -> [UUID: Stamped<SyncTimeline>] {
         var entries = held.stamps.gone.mapValues { Stamped<SyncTimeline>(nil, at: $0) }
+        let encoder = bodyEncoder()
         for timeline in held.timelines {
             entries[timeline.id] = Stamped(
-                SyncTimeline(id: timeline.id, name: timeline.name, body: body(of: timeline)),
+                SyncTimeline(id: timeline.id, name: timeline.name, body: body(of: timeline, encoder: encoder)),
                 at: held.stamps.timelines[timeline.id] ?? .zero
             )
         }
@@ -213,6 +225,10 @@ struct WrittenTimelineStore {
         if let place {
             var info: [String: Any] = ["place": place]
             if let poster { info["poster"] = poster }
+            // As a load would read them back — each row held to the rules a read holds it to —
+            // or not at all, and the other windows read the file.
+            let read = kept.timelines.map(\.definition)
+            if !read.contains(where: { $0 == nil }) { info["timelines"] = read.compactMap { $0 } }
             NotificationCenter.default.post(name: Self.kept, object: nil, userInfo: info)
         }
         return true

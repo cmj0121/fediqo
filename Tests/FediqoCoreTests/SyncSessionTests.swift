@@ -75,6 +75,26 @@ struct SyncSessionTests {
         device.local.events.compactMap { if case .done(_, let outcome) = $0 { outcome } else { nil } }
     }
 
+    @Test("Two ends that looked while apart are still due, and merge at the next check once they meet")
+    func lookedWhileApart() async throws {
+        let link = PipeNearbyLink()
+        let a = device(link, "A-MAC", "Mac", holding: Self.mac)
+        let b = device(link, "B-PHONE", "Phone", holding: Self.phone)
+        try pair(a, b)
+        // Apart: each looks (a due check, and Sync now) and finds nobody.
+        #expect(await a.session.dialDue(period: .hour).isEmpty)
+        #expect(await b.session.syncNow().isEmpty)
+        #expect(await a.session.anyDue(try a.pairs.pairs(), period: .hour), "not seen is left for the next check")
+        #expect(await b.session.anyDue(try b.pairs.pairs(), period: .hour))
+
+        let listening = await listen(a, on: link, until: 1)
+        defer { listening.cancel() }
+        guard case .merged = try #require(await b.session.dialDue(period: .hour)[a.id]) else {
+            Issue.record("not merged once met")
+            return
+        }
+    }
+
     @Test("Two paired ends find each other by tag, join under the pair secret, and both end equal")
     func merges() async throws {
         let link = PipeNearbyLink()
@@ -442,7 +462,7 @@ struct SyncSessionTests {
     /// The pairing hold under `sessionID` once it advertises: the code is said before the hold
     /// is up, as a browser sees it.
     private func pairingHold(on link: PipeNearbyLink, sessionID: String) async throws -> NearbyPeer {
-        for try await peers in link.browse() {
+        for try await peers in link.browse(pairing: true) {
             if let peer = peers.first(where: { $0.sessionID == sessionID }) { return peer }
         }
         throw NearbyDropped()

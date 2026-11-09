@@ -645,11 +645,13 @@ extension ShellSession {
         rebuildQueries()
     }
 
-    /// The timelines read again, kept by another window or by a merge. Not where this window
-    /// kept them itself: it holds them already.
-    func timelinesKeptElsewhere(by poster: ObjectIdentifier?) {
+    /// The timelines kept by another window or by a merge taken up here: `written`, as the
+    /// notice carried them, or else read again. Not where this window kept them itself: it holds
+    /// them already.
+    func timelinesKeptElsewhere(by poster: ObjectIdentifier?, written arrived: [TimelineDefinition]? = nil) {
         guard poster != ObjectIdentifier(self), let timelineStore else { return }
-        guard let kept = taking(timelineStore.load()), kept != written else { return }
+        let loaded = arrived.map(WrittenTimelineStore.Loaded.timelines) ?? timelineStore.load()
+        guard let kept = taking(loaded), kept != written else { return }
         written = kept
         rebuildQueries()
     }

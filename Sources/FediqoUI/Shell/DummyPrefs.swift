@@ -163,6 +163,12 @@ final class DummyPrefs {
         didSet { write("serverFilters", serverFilters ? "" : "0") }
     }
 
+    /// How often paired devices are looked for while Fediqo is in front (D6); an hour unless
+    /// chosen. `ShellSync` is the one that acts on it.
+    var syncPeriod: SyncPeriod {
+        didSet { Self.keep(syncPeriod: syncPeriod, in: defaults) }
+    }
+
     /// The waits a person picks from, in minutes.
     static let waits = [1, 5, 15, 30, 60]
 
@@ -173,6 +179,7 @@ final class DummyPrefs {
         (keepMonths, goneDays, roomBytes, removedPostsStay, latestDate, askMinutes, noticesHidden, language, theme, fontSize) = Self.read(defaults)
         linkPreviews = defaults.string(forKey: Self.prefix + "linkPreviews") != "0"
         serverFilters = defaults.string(forKey: Self.prefix + "serverFilters") != "0"
+        syncPeriod = Self.syncPeriod(in: defaults)
         L10n.language = language
     }
 
@@ -193,6 +200,19 @@ final class DummyPrefs {
         if linkPreviews != previews { linkPreviews = previews }
         let filters = defaults.string(forKey: Self.prefix + "serverFilters") != "0"
         if serverFilters != filters { serverFilters = filters }
+        let period = Self.syncPeriod(in: defaults)
+        if syncPeriod != period { syncPeriod = period }
+    }
+
+    /// The period kept in `defaults`, read alone: what `ShellSync`, one per app, reads without
+    /// a window's whole set of choices.
+    static func syncPeriod(in defaults: UserDefaults) -> SyncPeriod {
+        SyncPeriod(rawValue: defaults.string(forKey: prefix + "syncPeriod") ?? "") ?? .standard
+    }
+
+    /// `period` kept in `defaults`, written alone, as `syncPeriod`'s own write writes it.
+    static func keep(syncPeriod period: SyncPeriod, in defaults: UserDefaults) {
+        defaults.set(period.rawValue, forKey: prefix + "syncPeriod")
     }
 
     private static func read(_ defaults: UserDefaults) -> (
@@ -213,7 +233,7 @@ final class DummyPrefs {
         return (keepMonths, goneDays, roomBytes, removedPostsStay, latestDate, askMinutes, noticesHidden, language, theme, fontSize)
     }
 
-    static let prefix = "fediqo.dummy."
+    private static let prefix = "fediqo.dummy."
 
     private func write(_ name: String, _ value: String) {
         defaults.set(value, forKey: Self.prefix + name)

@@ -5,7 +5,7 @@ import Foundation
 /// file is missing. **Excluded from backup**, so a device restored from another's backup never
 /// shares its id; and no Keychain is asked at launch, which on an ad-hoc-signed Mac can prompt
 /// after every rebuild.
-public struct FileDeviceIdentity: DeviceIdentityStore {
+public struct FileDeviceIdentity: Sendable {
     public static let name = "device-id"
 
     /// Where the id is kept.
@@ -19,14 +19,14 @@ public struct FileDeviceIdentity: DeviceIdentityStore {
     /// What the file holds where it is not one id.
     public struct Unreadable: Error {}
 
+    /// The id kept, or a fresh UUID string kept now **only where none is kept** (a device
+    /// restored from another's backup has no file, so it never shares one). A read that fails
+    /// any other way throws, and nothing fresh is made (else the id would rotate).
     public func deviceID() throws -> String {
         let id = try keptOrMade()
         // Every time, not only when made: a file whose marking failed once is marked now. A
         // marking that fails costs no id: the one read or made is still this device's.
-        var values = URLResourceValues()
-        values.isExcludedFromBackup = true
-        var marked = url
-        try? marked.setResourceValues(values)
+        try? Guarded.excludeFromBackup(url)
         return id
     }
 

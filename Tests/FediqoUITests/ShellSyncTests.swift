@@ -178,6 +178,28 @@ struct ShellSyncTests {
         b.sync.wentAway(b.window)
     }
 
+    @Test("A first-merge question nobody answers within the wait is taken down as a no")
+    func unansweredIsNo() async throws {
+        let link = PipeNearbyLink()
+        let a = try await device(link, "A-MAC", "Mac", sources: [Source(host: "a.example", kind: .mastodon)], sync: SourceSync())
+        let b = try await device(link, "B-PHONE", "Phone", sources: [Source(host: "b.example", kind: .mastodon)], sync: SourceSync())
+        defer { for folder in [a.folder, b.folder] { try? FileManager.default.removeItem(at: folder) } }
+        try pair(a, b, firstMerged: false)
+        a.sync.period = .never
+        b.sync.period = .never
+        a.sync.cameToFront(a.window)
+        b.sync.cameToFront(b.window)
+        a.sync.syncNow()
+        b.sync.syncNow()
+        #expect(await eventually { a.sync.asking != nil || b.sync.asking != nil })
+        let asker = a.sync.asking != nil ? a : b
+        #expect(await eventually { asker.sync.asking == nil }, "taken down once the wait is over")
+        #expect(await eventually { asker.sync.told?.outcome == .notMerged(.declined) })
+        #expect(await b.store.sources().map(\.host) == ["b.example"], "no answer changes nothing")
+        a.sync.wentAway(a.window)
+        b.sync.wentAway(b.window)
+    }
+
     @Test("It listens only while a window is in front and the period is not never; the period is kept; Forget stops it")
     func runsInFront() async throws {
         let link = PipeNearbyLink()
@@ -219,8 +241,8 @@ struct ShellSyncTests {
         a.sync.wentAway(a.window)
         #expect(await eventually { link.listeners.isEmpty }, "back and forth quickly leaves nothing listening")
         a.sync.period = .never
-        a.defaults.set("10m", forKey: ShellSync.periodKey)
-        a.sync.rereadPeriod()
+        a.defaults.set("10m", forKey: "fediqo.dummy.syncPeriod")
+        a.sync.reread()
         #expect(a.sync.period == .tenMinutes, "a read back's period takes effect at once")
 
         let again = ShellSync(

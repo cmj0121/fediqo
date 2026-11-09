@@ -15,7 +15,7 @@ struct SyncPairingTests {
 
     /// The pairing hold under `sessionID`, as a browser lists it.
     private func hold(on link: PipeNearbyLink, sessionID: String) async throws -> NearbyPeer {
-        for try await peers in link.browse() {
+        for try await peers in link.browse(pairing: true) {
             if let peer = peers.first(where: { $0.sessionID == sessionID }) { return peer }
         }
         throw NearbyDropped()
@@ -55,14 +55,16 @@ struct SyncPairingTests {
         #expect(!tags.contains(NearbyFrame.Tag.sync.rawValue))
     }
 
-    @Test("A pairing hold is listed as one; a Move hold is not")
+    @Test("A pairing hold is listed only to pairing; a Move hold only to Move")
     func listed() async throws {
         let link = PipeNearbyLink()
         let psk = NearbyCode.psk(code: "123456", sessionID: "p")
-        let pairingHold = link.advertisePairing(name: "Mac", sessionID: "p", psk: psk)
+        let pairingHold = link.advertise(name: "Mac", sessionID: "p", psk: psk, pairing: true)
         let moveHold = link.advertise(name: "Mac", sessionID: "m", psk: psk)
-        #expect(link.peers.first { $0.sessionID == "p" }?.pairing == true)
-        #expect(link.peers.first { $0.sessionID == "m" }?.pairing == false)
+        var pairingList = link.browse(pairing: true).makeAsyncIterator()
+        var moveList = link.browse().makeAsyncIterator()
+        #expect(try await pairingList.next()?.map(\.sessionID) == ["p"])
+        #expect(try await moveList.next()?.map(\.sessionID) == ["m"])
         _ = (pairingHold, moveHold)
     }
 

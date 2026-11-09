@@ -89,10 +89,15 @@ struct SourceStampTests {
     func stampedAs() async {
         let store = ItemStore(sources: [Self.one], notes: [])
         await store.stamp(with: Self.clock())
-        await store.remove(host: Self.one.host, stampedAs: Self.stamp(42))
-        #expect(await store.sourceSync().gone[Self.one.host] == Self.stamp(42))
-        await store.add(Self.forum, stampedAs: Self.stamp(43))
+        let settled = await store.settle(arrived: [Self.one.host: Stamped(nil, at: Self.stamp(42))])
+        #expect(settled.toRemove == [Self.one.host: Self.stamp(42)])
+        await store.remove(host: Self.one.host)
+        #expect(await store.sourceSync().gone[Self.one.host] == Self.stamp(42), "the removal the merge handed back")
+        _ = await store.settle(arrived: [Self.forum.host: Stamped(SyncSource(Self.forum), at: Self.stamp(43))])
         #expect(await store.sourceSync().stamps[Self.forum.host] == Self.stamp(43))
+        await store.add(Self.one)
+        await store.remove(host: Self.one.host)
+        #expect(await store.sourceSync().gone[Self.one.host]?.device == "here", "a removal of its own is stamped now")
     }
 
     @Test("The clock is told every stamp held: a change made here is later than each")

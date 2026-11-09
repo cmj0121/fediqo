@@ -15,13 +15,26 @@ public protocol NearbyLink: Sendable {
     /// to, and hands over each that joins under `psk`. A device that tried and failed the
     /// handshake — a wrong code — is reported so the code can be rolled. Ends when the task
     /// reading it is cancelled; a device not allowed to look nearby throws
-    /// `NearbyRefusal.notAllowed`.
-    func advertise(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error>
-    /// Every device nearby that is holding, as the list changes. Throws `NearbyRefusal.notAllowed`
-    /// where this device may not look.
-    func browse() -> AsyncThrowingStream<[NearbyPeer], any Error>
+    /// `NearbyRefusal.notAllowed`. A `pairing` hold (paired devices, not a Move) adds TXT `p=1`.
+    func advertise(name: String, sessionID: String, psk: SymmetricKey, pairing: Bool) -> AsyncThrowingStream<NearbyArrival, any Error>
+    /// Every device nearby that is holding, as the list changes: the pairing holds where
+    /// `pairing`, else the Move holds — never both. Throws `NearbyRefusal.notAllowed` where this
+    /// device may not look.
+    func browse(pairing: Bool) -> AsyncThrowingStream<[NearbyPeer], any Error>
     /// Joins `peer` under `psk`. A wrong code fails here, as `NearbyRefusal.wrongCode`.
     func connect(to peer: NearbyPeer, psk: SymmetricKey) async throws -> any NearbyPeerConnection
+}
+
+extension NearbyLink {
+    /// A Move hold.
+    public func advertise(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
+        advertise(name: name, sessionID: sessionID, psk: psk, pairing: false)
+    }
+
+    /// The Move holds nearby.
+    public func browse() -> AsyncThrowingStream<[NearbyPeer], any Error> {
+        browse(pairing: false)
+    }
 }
 
 /// A device nearby that is holding: how it names itself, and the session it advertises.
@@ -32,15 +45,11 @@ public struct NearbyPeer: Sendable, Hashable, Identifiable {
     public let name: String
     /// The session it is holding under, which the code is bound to.
     public let sessionID: String
-    /// A pairing hold (TXT `p=1`) rather than a Move hold. Move's list leaves these out; the
-    /// pairing list shows only these.
-    public let pairing: Bool
 
-    public init(id: String, name: String, sessionID: String, pairing: Bool = false) {
+    public init(id: String, name: String, sessionID: String) {
         self.id = id
         self.name = name
         self.sessionID = sessionID
-        self.pairing = pairing
     }
 }
 

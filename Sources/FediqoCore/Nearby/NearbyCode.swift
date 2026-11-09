@@ -22,7 +22,7 @@ public enum NearbyCode {
 
     /// A fresh session id, 16 random bytes as hex.
     public static func sessionID() -> String {
-        PackageKeys.random(16).map { String(format: "%02x", $0) }.joined()
+        PackageKeys.random(16).hex
     }
 
     /// Whether `code` is six digits, as typed.
