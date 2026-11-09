@@ -11,7 +11,9 @@ import Security
 /// On macOS, as with `MastodonKeychain`, the items land in the file-based login keychain, which
 /// never syncs but ignores the accessibility class: `kSecUseDataProtectionKeychain` needs a
 /// team-signed build, and an ad-hoc one gets -34018. Once the app is team-signed, adding it to
-/// every query here moves them.
+/// every query here moves them. The device id is no longer read from here at launch: the file
+/// keychain can ask for the password after every ad-hoc rebuild, so the launch keeps it in a
+/// file beside the store instead (`FileDeviceIdentity`).
 public enum SyncKeychain {
     public static let accessibility = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String
     /// account = the peer's device id; data = JSON `{"secret": base64, "pair": PairedDevice}`.
@@ -167,7 +169,9 @@ public struct KeychainPairStore: PairStore {
     }
 }
 
-/// This device's id, kept in the Keychain and made fresh only when its item is missing.
+/// This device's id, kept in the Keychain and made fresh only when its item is missing. **Not
+/// what the launch reads**: on an ad-hoc-signed Mac the file keychain can prompt after every
+/// rebuild, so the app keeps its id in `FileDeviceIdentity` instead.
 public struct KeychainDeviceIdentity: DeviceIdentityStore {
     private let items: any SyncKeychainItems
 

@@ -634,10 +634,23 @@ extension ShellSession {
         }
     }
 
+    /// The one write of the timelines: every add, edit, remove, reorder and join is stamped
+    /// here (D3), and every other window is told to read them again.
     private func keep(_ timelines: [TimelineDefinition]) {
         written = timelines
         // Where the device would not keep it, what is shown is not what is kept: said.
-        if let timelineStore { kept(.timelines, written: timelineStore.save(timelines)) }
+        if let timelineStore {
+            kept(.timelines, written: timelineStore.save(timelines, clock: syncClock, poster: ObjectIdentifier(self)))
+        }
+        rebuildQueries()
+    }
+
+    /// The timelines read again, kept by another window or by a merge. Not where this window
+    /// kept them itself: it holds them already.
+    func timelinesKeptElsewhere(by poster: ObjectIdentifier?) {
+        guard poster != ObjectIdentifier(self), let timelineStore else { return }
+        guard let kept = taking(timelineStore.load()), kept != written else { return }
+        written = kept
         rebuildQueries()
     }
 }

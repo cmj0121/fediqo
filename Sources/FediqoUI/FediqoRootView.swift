@@ -158,6 +158,7 @@ public struct FediqoRootView: View {
         lists: ListFiles? = nil,
         nearby: (any NearbyLink)? = nil,
         deviceName: String = "",
+        syncClock: SyncClock = .unpaired,
         staged: ShellStaged? = nil
     ) {
         let session = ShellSession(
@@ -180,6 +181,7 @@ public struct FediqoRootView: View {
         session.storeWritable = storeWritable
         session.nearbyLink = nearby
         session.deviceName = deviceName
+        session.syncClock = syncClock
         session.measureStore = measureStore
         session.compactStore = compactStore
         session.letWordsGo = letWordsGo

@@ -22,6 +22,16 @@ public struct SyncStamp: Hashable, Comparable, Sendable, Codable {
 
     public static let zero = SyncStamp(ms: 0, counter: 0, device: "")
 
+    /// The latest `ms` a stamp read from disk may hold (the end of year 9999): far past any wall
+    /// clock, and far enough from `Int64.max` that the clock never runs out of room.
+    public static let latestMs: Int64 = 253_402_300_799_999
+
+    /// A stamp as kept on disk, held within what the clock can carry on from: `ms` in
+    /// `0...latestMs`, the counter in `UInt32`'s range.
+    public static func bounded(ms: Int64, counter: Int64, device: String) -> SyncStamp {
+        SyncStamp(ms: min(max(ms, 0), latestMs), counter: UInt32(clamping: counter), device: device)
+    }
+
     public static func < (a: SyncStamp, b: SyncStamp) -> Bool {
         (a.ms, a.counter, a.device) < (b.ms, b.counter, b.device)
     }

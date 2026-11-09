@@ -245,6 +245,7 @@ final class ShellSession {
     deinit {
         work.adding(false, by: ObjectIdentifier(self))
         if let allowanceWatch { NotificationCenter.default.removeObserver(allowanceWatch) }
+        if let timelinesWatch { NotificationCenter.default.removeObserver(timelinesWatch) }
     }
 
     var stage: JoinStage? {
@@ -351,6 +352,9 @@ final class ShellSession {
     var timelinesUnreadable = false
     /// Where the reader's timelines are kept, or nothing for a session that keeps none.
     @ObservationIgnored let timelineStore: WrittenTimelineStore?
+    /// What every timelines save made here is stamped by (D3). `.unpaired` until the root view
+    /// hands in the app's clock.
+    @ObservationIgnored var syncClock = SyncClock.unpaired
     /// The timeline editor, where it is open. Edits apply on Done (Decision 21).
     var editing: TimelineDraft?
     /// Whether the list of every timeline is up, on a narrow page (#304).
@@ -1065,6 +1069,17 @@ final class ShellSession {
             let from = (note.object as AnyObject?).map(ObjectIdentifier.init)
             MainActor.assumeIsolated { self?.allowancesChanged(by: from) }
         }
+        // Timelines kept by another window, or by a merge, are read again here: a window left
+        // holding the older ones would write them back over the newer.
+        if let place = timelines?.place {
+            timelinesWatch = NotificationCenter.default.addObserver(
+                forName: WrittenTimelineStore.kept, object: nil, queue: .main
+            ) { [weak self] note in
+                guard note.userInfo?["place"] as? String == place else { return }
+                let from = note.userInfo?["poster"] as? ObjectIdentifier
+                MainActor.assumeIsolated { self?.timelinesKeptElsewhere(by: from) }
+            }
+        }
         // What the notices page draws is what the store holds (#323).
         noticeList.store = store
         // A question about a sign-in goes with it, however it went.
@@ -1091,6 +1106,8 @@ final class ShellSession {
 
     /// The watch on the person's list, taken off as this goes.
     @ObservationIgnored private nonisolated(unsafe) var allowanceWatch: (any NSObjectProtocol)?
+    /// The watch on the timelines kept, taken off as this goes.
+    @ObservationIgnored private nonisolated(unsafe) var timelinesWatch: (any NSObjectProtocol)?
 
     /// The new post being written, kept when the composer closes without sending (#56).
     /// In-session only. A send takes it at the press (`send()`), and what is typed afterwards is
