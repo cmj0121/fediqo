@@ -8,7 +8,8 @@ import Testing
 @Suite("Syncing paired devices nearby")
 struct SyncSessionTests {
     private static let when = Date(timeIntervalSince1970: 1_800_000_000)
-    private static let quick = SyncTiming(syncNowWindow: .seconds(2), answerWait: .seconds(5), stepWait: .seconds(5))
+    /// No test here waits a step or an answer out, so both are long: a loaded runner is slow, not lost.
+    private static let quick = SyncTiming(syncNowWindow: .seconds(2), answerWait: .seconds(60), stepWait: .seconds(60))
 
     private struct Device {
         let id: String
@@ -348,6 +349,8 @@ struct SyncSessionTests {
         #expect(SyncSession.mostListenersTried == 3)
 
         #expect(await b.session.dialDue(period: .hour).isEmpty)
+        // Each listener counts its refused join on its own task, after the dial has moved on.
+        #expect(await eventually { guesses.count == 3 })
         #expect(guesses.count == 3)
         #expect(a.local.snapshots == 0 && done(b).isEmpty)
     }
