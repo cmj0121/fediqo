@@ -34,13 +34,16 @@ public enum NearbyFrame: Sendable, Equatable {
     case confirm(Data)
     /// Any frame after the confirmation, sealed under the agreed key.
     case sealed(Data)
+    /// A `SyncFrame` as it encodes, ridden only inside `sealed`. An older build reads the tag
+    /// as `.malformed`.
+    case sync(Data)
 
     /// The most a `bytes` frame carries, and the most any frame may be on the wire.
     public static let mostBytes = 256 * 1024
     static let mostFrameBytes = mostBytes + 4096
 
     public enum Tag: UInt8 {
-        case offer = 1, accept, refuse, key, have, bytes, done, hello, confirm, sealed
+        case offer = 1, accept, refuse, key, have, bytes, done, hello, confirm, sealed, sync
     }
 
     /// The frame as it rides: tag, then its bytes.
@@ -71,6 +74,9 @@ public enum NearbyFrame: Sendable, Equatable {
         case .sealed(let box):
             out.append(Tag.sealed.rawValue)
             out.append(box)
+        case .sync(let frame):
+            out.append(Tag.sync.rawValue)
+            out.append(frame)
         }
         return out
     }
@@ -121,6 +127,9 @@ public enum NearbyFrame: Sendable, Equatable {
         case .sealed:
             guard body.count >= 28 else { throw NearbyRefusal.malformed }
             return .sealed(Data(body))
+        case .sync:
+            guard body.count >= 2, body.count <= mostBytes else { throw NearbyRefusal.malformed }
+            return .sync(Data(body))
         }
     }
 }

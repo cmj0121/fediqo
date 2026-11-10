@@ -29,6 +29,8 @@ final class Launch {
     private static var gate: StoreGate?
     /// Whether the walk of everything outside the store's folder has been set going.
     private static var walked = false
+    /// This device's id, read where the store is opened; nil where it would not be read.
+    private static var deviceID: String?
 
     /// The run, where the store could be opened at once — every ordinary launch, before the
     /// first frame — and nothing where the device is locked.
@@ -72,6 +74,9 @@ final class Launch {
             // canary reads — the sweep asks it.
             let media = try? MediaCache.caches()
             StorePackager.sweepLeftovers(directory: directory, media: media?.location, protected: protected)
+            // This device's id, read with the store, once its folder is there (D1): a file beside
+            // it, never the Keychain.
+            defer { if deviceID == nil { deviceID = try? FileDeviceIdentity(directory: directory).deviceID() } }
             return StoreFile.openApplicationSupport(protected: protected, unlocked: unlocked)
         }
         gate = made
@@ -79,6 +84,12 @@ final class Launch {
     }
 
     let store: ItemStore
+    /// What every source and timeline change of this run is stamped by (D3): one clock, under
+    /// this device's id — or `.unpaired` where its file would not be read.
+    let clock: SyncClock
+    /// Merging with paired devices nearby (D6), one for every window; nil where this device's id
+    /// would not be read, so nothing is stamped as this device and nothing pairs.
+    let sync: ShellSync?
     let forums: ForumSessions
     let mastodon: MastodonSessions
     let saver: StoreSaver
@@ -125,7 +136,9 @@ final class Launch {
         // The one the gate asked: made once for the store, and the same one here.
         let protected = ProtectedSignals.protected(store: StoreFile.applicationSupportDirectory)
         self.protected = protected
-        store = Self.store(of: opened)
+        let clock = Self.deviceID.map { SyncClock(device: $0) } ?? .unpaired
+        self.clock = clock
+        store = Self.store(of: opened, clock: clock)
         // `nil` when the index could not be read and could not be set aside either: this run
         // then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
         // It is also `nil` when the index was written by a newer build, which is left as found.
@@ -160,6 +173,10 @@ final class Launch {
         // Before anything is asked: every act from here on belongs to one of these, or to a host
         // the person names to add (#220).
         lists = ListFiles(directory: StoreFile.applicationSupportDirectory, defaults: .standard, protected: protected)
+        sync = clock.device.isEmpty ? nil : ShellSync(
+            link: NWNearbyLink(), pairs: KeychainPairStore(), clock: clock, deviceName: Self.deviceName, store: store,
+            lists: lists
+        )
         FediqoRootView.onlyToSources(
             opened.sources.map(\.host), kept: store, read: opened.file != nil && opened.setAside == nil,
             lists: lists
@@ -196,15 +213,16 @@ final class Launch {
     /// file, each row read once it is wanted — a page of the timeline in front, a row a landing
     /// merges with — and a save writes only what changes from here. With no file there is
     /// nothing to read, and the store holds what this run brings.
-    private static func store(of opened: StoreFile.Opened) -> ItemStore {
+    private static func store(of opened: StoreFile.Opened, clock: SyncClock) -> ItemStore {
         guard let file = opened.file else {
             return ItemStore(
-                sources: opened.sources, notes: [], said: opened.said, notices: opened.notices,
-                unsent: opened.unsent, readFromDisk: true
+                sources: opened.sources, notes: [], said: opened.said, sync: opened.sync, clock: clock,
+                notices: opened.notices, unsent: opened.unsent, readFromDisk: true
             )
         }
         return ItemStore(
-            sources: opened.sources, said: opened.said, notices: opened.notices, unsent: opened.unsent, rows: file
+            sources: opened.sources, said: opened.said, sync: opened.sync, clock: clock, notices: opened.notices,
+            unsent: opened.unsent, rows: file
         )
     }
 
@@ -525,7 +543,7 @@ private struct Live: View {
             carrier: launch.carrier,
             storeWritable: launch.file != nil,
             lists: launch.lists,
-            nearby: NWNearbyLink(), deviceName: Launch.deviceName
+            nearby: NWNearbyLink(), deviceName: Launch.deviceName, sync: launch.sync
         )
         .onChange(of: scenePhase) { _, phase in
             if phase == .background {

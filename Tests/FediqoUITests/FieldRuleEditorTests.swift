@@ -64,7 +64,7 @@ struct FieldRuleEditorTests {
 
         let data = try #require(store.defaults.data(forKey: store.key))
         let top = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(top["version"] as? Int == 3)
+        #expect(top["version"] as? Int == 4)
         let rules = try #require((top["timelines"] as? [[String: Any]])?.first?["rules"] as? [[String: Any]])
         #expect(rules.map { $0["kind"] as? String } == ["field", "field", "field", "field"])
         #expect(rules.map { $0["field"] as? String } == ["language", "audience", "covered", "covered"])
@@ -212,7 +212,7 @@ struct FieldRuleEditorTests {
         #expect(store.load() == .timelines([timeline]))
         let data = try #require(store.defaults.data(forKey: store.key))
         let top = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(top["version"] as? Int == 3, "no new version: the text type was in the shape from the start")
+        #expect(top["version"] as? Int == 4, "no version for the text type: it was in the shape from the start")
         let kept = try #require(((top["timelines"] as? [[String: Any]])?.first?["rules"] as? [[String: Any]])?.first)
         #expect(Set(kept.keys) == ["id", "effect", "kind", "field", "type", "value", "host"])
         #expect(kept["kind"] as? String == "field" && kept["field"] as? String == "reblogOf")

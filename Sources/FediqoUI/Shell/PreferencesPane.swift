@@ -28,6 +28,8 @@ struct PreferencesPane: View {
     /// Optional for the reason it is on `UsagePane`: a preview or a test can draw this pane with
     /// no shell around it, and then the page stays on what a person chooses.
     @Environment(ShellSession.self) private var session: ShellSession?
+    /// The run's merging with paired devices, where the app made one.
+    @Environment(ShellSync.self) private var sync: ShellSync?
 
     /// What this build was stamped with. The app's own by default; a test or a preview hands in
     /// another.
@@ -171,6 +173,7 @@ struct PreferencesPane: View {
         ))
         .modifier(CarryFlow(session: session))
         .modifier(NearbyFlow(session: session))
+        .modifier(SyncPairFlow(sync: sync, session: session))
     }
 
     /// The tab the page is on, whole.
@@ -247,13 +250,15 @@ struct PreferencesPane: View {
     }
 
     /// Moving what this device holds (#247, #253): taken away and read back, then sent to a
-    /// device nearby. Each group draws itself only where the shell handed it what it needs.
+    /// device nearby — and, last, the devices it stays merged with. Each group draws itself only
+    /// where the shell handed it what it needs.
     @ViewBuilder
     private var move: some View {
         if let session {
             CarrySection(session: session)
             NearbySection(session: session)
         }
+        if let sync { PairedDevicesSection(sync: sync, session: session) }
     }
 
     /// How long this device waits before asking the sources it holds again (#95).

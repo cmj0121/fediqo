@@ -124,6 +124,9 @@ public struct FediqoRootView: View {
 
     /// Where this launch is put with nothing pressed, where it is put anywhere. See `ShellStaged`.
     private let staged: ShellStaged?
+    /// The run's merging with paired devices nearby, shared by every window; nil where the app
+    /// made none (a preview, a test, a run whose device id would not be read).
+    private let sync: ShellSync?
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -158,6 +161,7 @@ public struct FediqoRootView: View {
         lists: ListFiles? = nil,
         nearby: (any NearbyLink)? = nil,
         deviceName: String = "",
+        sync: ShellSync? = nil,
         staged: ShellStaged? = nil
     ) {
         let session = ShellSession(
@@ -180,6 +184,8 @@ public struct FediqoRootView: View {
         session.storeWritable = storeWritable
         session.nearbyLink = nearby
         session.deviceName = deviceName
+        session.syncClock = sync?.clock ?? .unpaired
+        session.sync = sync
         session.measureStore = measureStore
         session.compactStore = compactStore
         session.letWordsGo = letWordsGo
@@ -195,6 +201,7 @@ public struct FediqoRootView: View {
         _storeTrouble = State(initialValue: storeTrouble)
         self.storeTroubleAnswered = storeTroubleAnswered
         self.staged = staged
+        self.sync = sync
         // Before anything asks whether there is a keyboard (`ShellHands`).
         if staged?.noKeyboard == true { ShellKeyboard.stagedAbsent = true }
         // A launch put somewhere is photographed there, and the mascot would be in the picture.
@@ -522,6 +529,8 @@ public struct FediqoRootView: View {
             .modifier(ActivitySheet(session: session))
             .modifier(StoreNewerNotice(shown: $storeIsNewer, seen: storeNoticeSeen))
             .modifier(StoreTroubleNotice(trouble: $storeTrouble, answered: storeTroubleAnswered))
+            // Paired devices merging while this window is in front (D6), and the first merge's question.
+            .modifier(SyncAcrossWindows(sync: sync, session: session))
             .overlay {
                 if showingShortcuts {
                     ShortcutGuide(tab: $shortcutTab) { showingShortcuts = false }

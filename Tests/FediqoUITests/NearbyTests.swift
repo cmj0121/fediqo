@@ -328,6 +328,19 @@ struct NearbyTests {
         #expect(!left.contains { $0.hasPrefix("incoming-") })
     }
 
+    @Test("A pairing hold is left out of the Move list: only Move holds are offered to")
+    func pairingHoldsLeftOut() async {
+        let two = Two()
+        defer { two.end() }
+        await two.begin()
+        let psk = NearbyCode.psk(code: "123456", sessionID: "p")
+        let pairing = two.link.advertise(name: "a phone pairing", sessionID: "p", psk: psk, pairing: true)
+        let move = two.link.advertise(name: "z laptop", sessionID: "m", psk: psk)
+        await two.settle(two.offering, "the second Move hold is listed, on the sender") { if case .browsing(let peers) = $0 { peers.count == 2 } else { false } }
+        #expect(two.offering.peers.map(\.name) == ["a tablet", "z laptop"])
+        _ = (pairing, move)
+    }
+
     @Test("A wrong code is its own refusal, and a denied look nearby reads as not allowed")
     func wrongCodeAndDenied() async throws {
         let two = Two()

@@ -936,11 +936,11 @@ final class TamperingLink: NearbyLink, @unchecked Sendable {
         self.inner = inner
     }
 
-    func advertise(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
-        inner.advertise(name: name, sessionID: sessionID, psk: psk)
+    func advertise(name: String, sessionID: String, psk: SymmetricKey, pairing: Bool) -> AsyncThrowingStream<NearbyArrival, any Error> {
+        inner.advertise(name: name, sessionID: sessionID, psk: psk, pairing: pairing)
     }
 
-    func browse() -> AsyncThrowingStream<[NearbyPeer], any Error> { inner.browse() }
+    func browse(pairing: Bool) -> AsyncThrowingStream<[NearbyPeer], any Error> { inner.browse(pairing: pairing) }
 
     func connect(to peer: NearbyPeer, psk: SymmetricKey) async throws -> any NearbyPeerConnection {
         Tampered(try await inner.connect(to: peer, psk: psk))

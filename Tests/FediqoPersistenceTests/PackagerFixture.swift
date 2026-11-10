@@ -24,20 +24,29 @@ enum PackagerFixture {
         let store: ItemStore
         let file: StoreFile?
 
-        init(sources: [Source] = [], notes: [Note] = [], noFile: Bool = false) async throws {
+        /// `sync`: the sources' stamps and tombstones, in the store and the file alike. `inPart`:
+        /// the store is over the file, as the app's is, rather than holding every row.
+        init(
+            sources: [Source] = [], notes: [Note] = [], sync: SourceSync = SourceSync(), noFile: Bool = false,
+            inPart: Bool = false
+        ) async throws {
             root = FileManager.default.temporaryDirectory
                 .appendingPathComponent("fediqo-device-\(UUID().uuidString)", isDirectory: true)
             directory = root.appendingPathComponent("Fediqo", isDirectory: true)
             media = try MediaCache(directory: root.appendingPathComponent("media", isDirectory: true))
             suite = "fediqo.test.\(UUID().uuidString)"
             defaults = UserDefaults(suiteName: suite)!
-            store = ItemStore(sources: sources, notes: notes)
             if noFile {
                 file = nil
             } else {
                 let file = try StoreFile(at: directory)
-                try await file.save(sources: sources, notes: notes)
+                try await file.save(sources: sources, notes: notes, sync: sync)
                 self.file = file
+            }
+            if inPart, let file {
+                store = ItemStore(sources: sources, sync: sync, rows: file)
+            } else {
+                store = ItemStore(sources: sources, notes: notes, sync: sync)
             }
         }
 

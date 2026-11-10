@@ -303,19 +303,8 @@ struct NearbyHoldSheet: View {
                 .shellFont(.pane)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .accessibilityAddTraits(.isHeader)
-            digits
-            HStack(spacing: ShellSpace.snug) {
-                Text(name)
-                    .shellFont(.name)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                if !mark.isEmpty {
-                    Text(mark)
-                        .shellFont(.meta)
-                        .monospaced()
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                        .accessibilityLabel(String(format: L10n.t("nearby.mark.spoken"), mark))
-                }
-            }
+            NearbyCodeDigits(code: code)
+            NearbyNameMark(name: name, mark: mark)
             Text(L10n.t("nearby.hold.sheet.line"))
                 .shellFont(.body)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
@@ -338,21 +327,77 @@ struct NearbyHoldSheet: View {
         .presentationDetents([.medium, .large])
     }
 
-    /// The one thing on this sheet that is not quiet: six digits in the display size, spaced by
-    /// three, in the lamp's ink.
-    @ViewBuilder
-    private var digits: some View {
-        if code.isEmpty {
-            ProgressView()
-        } else {
+}
+
+/// The one thing on a holding sheet that is not quiet: six digits in the display size, spaced by
+/// three, in the lamp's ink. A spinner until there is a code. `shrinks` keeps it on one line,
+/// shrunk where the sheet is narrow (the pairing sheet's).
+struct NearbyCodeDigits: View {
+    let code: String?
+    var shrinks = false
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if let code, !code.isEmpty {
             Text(NearbyCode.spaced(code))
                 .shellFont(.code)
                 .monospacedDigit()
                 .tracking(4)
                 .foregroundStyle(ShellChrome.selectInk(colorScheme))
+                .minimumScaleFactor(shrinks ? 0.5 : 1)
+                .lineLimit(shrinks ? 1 : nil)
                 .accessibilityLabel(L10n.t("nearby.code.spoken"))
                 .accessibilityValue(code.map(String.init).joined(separator: " "))
+        } else {
+            ProgressView()
         }
+    }
+}
+
+/// A holding device's name, as the other device lists it, and the session's mark beside it where
+/// there is one: two devices with one name are told apart before a code is typed.
+struct NearbyNameMark: View {
+    let name: String
+    let mark: String?
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack(spacing: ShellSpace.snug) {
+            Text(name)
+                .shellFont(.name)
+                .foregroundStyle(ShellChrome.ink(colorScheme))
+            if let mark, !mark.isEmpty {
+                Text(mark)
+                    .shellFont(.meta)
+                    .monospaced()
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .accessibilityLabel(String(format: L10n.t("nearby.mark.spoken"), mark))
+            }
+        }
+    }
+}
+
+/// Where the six digits another device shows are typed: digits only, six at most.
+struct NearbyCodeField: View {
+    @Binding var code: String
+    let focused: FocusState<Bool>.Binding
+    let onSubmit: () -> Void
+
+    var body: some View {
+        TextField(L10n.t("nearby.pick.code"), text: $code)
+            .shellField(.alone)
+            .monospacedDigit()
+            .focused(focused)
+            .onSubmit(onSubmit)
+            #if os(iOS)
+            .keyboardType(.numberPad)
+            #endif
+            .onChange(of: code) { _, typed in
+                let digits = typed.filter(\.isNumber).prefix(NearbyCode.digits)
+                if String(digits) != typed { code = String(digits) }
+            }
     }
 }
 
@@ -423,18 +468,7 @@ struct NearbyPickSheet: View {
 
     private var fields: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
-            TextField(L10n.t("nearby.pick.code"), text: $code)
-                .shellField(.alone)
-                .monospacedDigit()
-                .focused($focused)
-                .onSubmit(go)
-                #if os(iOS)
-                .keyboardType(.numberPad)
-                #endif
-                .onChange(of: code) { _, typed in
-                    let digits = typed.filter(\.isNumber).prefix(NearbyCode.digits)
-                    if String(digits) != typed { code = String(digits) }
-                }
+            NearbyCodeField(code: $code, focused: $focused, onSubmit: go)
             Picker(L10n.t("nearby.pick.rides"), selection: $rides) {
                 ForEach(ShellNearby.Rides.allCases) { choice in
                     Text(Self.ridesLabel(choice, weight: session.nearby.weight)).tag(choice)

@@ -316,23 +316,23 @@ struct WrittenTimelineTests {
         let data = try #require(store.defaults.data(forKey: store.key))
         #expect(!String(decoding: data, as: UTF8.self).contains("trends"))
         let top = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(top["version"] as? Int == 3)
+        #expect(top["version"] as? Int == 4)
         let rows = try #require(top["timelines"] as? [[String: Any]])
         let rules = try #require(rows.first { $0["name"] as? String == "Mixed" }?["rules"] as? [[String: Any]])
         #expect(rules.map { $0["kind"] as? String } == ["keyword"])
         #expect(store.load() == .timelines(session.written))
     }
 
-    @Test("What is written carries version 3 and nothing but the known fields")
+    @Test("What is written carries version 4 and nothing but the known fields")
     func savedIsVersioned() throws {
         let store = freshStore()
         store.save([TimelineDefinition(name: "V", rules: try everyKind())])
         let data = try #require(store.defaults.data(forKey: store.key))
         let top = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(top["version"] as? Int == 3)
-        #expect(Set(top.keys) == ["version", "timelines"])
+        #expect(top["version"] as? Int == 4)
+        #expect(Set(top.keys) == ["version", "timelines", "gone"])
         let rows = try #require(top["timelines"] as? [[String: Any]])
-        #expect(Set(rows[0].keys) == ["id", "name", "rules"])
+        #expect(Set(rows[0].keys) == ["id", "name", "rules", "stamp"])
     }
 
     @Test("A description round-trips; version 1 without one loads as none")
@@ -343,7 +343,7 @@ struct WrittenTimelineTests {
         #expect(store.load() == .timelines([timeline]))
         let data = try #require(store.defaults.data(forKey: store.key))
         let top = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(top["version"] as? Int == 3)
+        #expect(top["version"] as? Int == 4)
         let rows = try #require(top["timelines"] as? [[String: Any]])
         #expect(rows[0]["desc"] as? String == "Friends posting about Swift")
 

@@ -15,13 +15,26 @@ public protocol NearbyLink: Sendable {
     /// to, and hands over each that joins under `psk`. A device that tried and failed the
     /// handshake — a wrong code — is reported so the code can be rolled. Ends when the task
     /// reading it is cancelled; a device not allowed to look nearby throws
-    /// `NearbyRefusal.notAllowed`.
-    func advertise(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error>
-    /// Every device nearby that is holding, as the list changes. Throws `NearbyRefusal.notAllowed`
-    /// where this device may not look.
-    func browse() -> AsyncThrowingStream<[NearbyPeer], any Error>
+    /// `NearbyRefusal.notAllowed`. A `pairing` hold (paired devices, not a Move) adds TXT `p=1`.
+    func advertise(name: String, sessionID: String, psk: SymmetricKey, pairing: Bool) -> AsyncThrowingStream<NearbyArrival, any Error>
+    /// Every device nearby that is holding, as the list changes: the pairing holds where
+    /// `pairing`, else the Move holds — never both. Throws `NearbyRefusal.notAllowed` where this
+    /// device may not look.
+    func browse(pairing: Bool) -> AsyncThrowingStream<[NearbyPeer], any Error>
     /// Joins `peer` under `psk`. A wrong code fails here, as `NearbyRefusal.wrongCode`.
     func connect(to peer: NearbyPeer, psk: SymmetricKey) async throws -> any NearbyPeerConnection
+}
+
+extension NearbyLink {
+    /// A Move hold.
+    public func advertise(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
+        advertise(name: name, sessionID: sessionID, psk: psk, pairing: false)
+    }
+
+    /// The Move holds nearby.
+    public func browse() -> AsyncThrowingStream<[NearbyPeer], any Error> {
+        browse(pairing: false)
+    }
 }
 
 /// A device nearby that is holding: how it names itself, and the session it advertises.

@@ -25,10 +25,13 @@ public struct RowChanges: Sendable, Equatable {
     /// order they were made: after `deletes` and before `upserts`, so a row the store holds is
     /// written as the store holds it.
     public var ops: [StoreOp] = []
+    /// Every source stamp and tombstone (D3, D4), where any moved or `sources` is written; nil
+    /// where none did. Written whole, like the sources: a few rows.
+    public var sourceSync: SourceSync?
 
     public init(
         upserts: [Note] = [], deletes: [NoteKey] = [], sources: [Source]? = nil, said: [SourceProfile] = [],
-        removedHosts: [String] = [], ops: [StoreOp] = []
+        removedHosts: [String] = [], ops: [StoreOp] = [], sourceSync: SourceSync? = nil
     ) {
         self.upserts = upserts
         self.deletes = deletes
@@ -36,10 +39,11 @@ public struct RowChanges: Sendable, Equatable {
         self.said = said
         self.removedHosts = removedHosts
         self.ops = ops
+        self.sourceSync = sourceSync
     }
 
     public var isEmpty: Bool {
-        upserts.isEmpty && deletes.isEmpty && sources == nil && removedHosts.isEmpty && ops.isEmpty
+        upserts.isEmpty && deletes.isEmpty && sources == nil && removedHosts.isEmpty && ops.isEmpty && sourceSync == nil
     }
 }
 

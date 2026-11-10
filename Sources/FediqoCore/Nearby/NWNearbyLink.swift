@@ -21,7 +21,7 @@ import Synchronization
 /// `NearbyRefusal.notAllowed`: said as that, never as "nobody nearby". A handshake that fails
 /// on the joining side is `.wrongCode`; on the holding side it is `.failedHandshake`, so the
 /// code is rolled — and only a handshake: a probe that never got that far rolls nothing.
-public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
+public final class NWNearbyLink: SyncLink, @unchecked Sendable {
     /// How long a join may take before it is a device out of reach.
     public static let connectTimeout: Duration = .seconds(20)
     /// The suites this link speaks, in order of preference: ECDHE-PSK with ChaCha20-Poly1305,
@@ -33,16 +33,56 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
     public static let fallbackSuite = tls_ciphersuite_t(rawValue: 0x00A8)!
 
     private let queue = DispatchQueue(label: "dev.mini-poc.fediqo.nearby")
-    private let endpoints = Mutex<[String: NWEndpoint]>([:])
+    /// What each kind of browse last found, by the id it lists: holds apart from sync listeners.
+    private let endpoints = Mutex<[Kind: [String: NWEndpoint]]>([:])
+
+    /// The two kinds of listener on the one service: a hold, which a code joins, and a sync
+    /// listener, which a pair's tag joins.
+    private enum Kind {
+        case hold, sync
+    }
+
+    /// One listener, as it advertises and is joined: a hold under its session (`pairing`, TXT
+    /// `p=1`, for paired devices rather than a Move), or a sync listener under its tag.
+    private enum Listing {
+        case hold(sessionID: String, pairing: Bool = false)
+        case sync(tag: String)
+
+        var kind: Kind {
+            switch self {
+            case .hold: .hold
+            case .sync: .sync
+            }
+        }
+
+        var txt: [String: String] {
+            switch self {
+            case .hold(let sessionID, let pairing): pairing ? ["id": sessionID, SyncDiscovery.pairingKey: "1"] : ["id": sessionID]
+            case .sync(let tag): [SyncDiscovery.tagKey: tag]
+            }
+        }
+
+        func parameters(psk: SymmetricKey) -> NWParameters {
+            switch self {
+            case .hold(let sessionID, _): NWNearbyLink.parameters(psk: psk, sessionID: sessionID)
+            case .sync(let tag): NWNearbyLink.parameters(psk: psk, identity: SyncDiscovery.pskIdentity(tag: tag))
+            }
+        }
+    }
 
     public init() {}
 
     /// TLS 1.2 exactly, under `psk` named by the session id, asking for the ECDHE-PSK suite —
     /// so no certificate is ever asked for or trusted — over TCP, with peer-to-peer on.
     public static func parameters(psk: SymmetricKey, sessionID: String) -> NWParameters {
+        parameters(psk: psk, identity: NearbyCode.pskIdentity(sessionID: sessionID))
+    }
+
+    /// The same, under any PSK identity: a sync listener's is `SyncDiscovery.pskIdentity(tag:)`.
+    public static func parameters(psk: SymmetricKey, identity: Data) -> NWParameters {
         let tls = NWProtocolTLS.Options()
         let key = psk.withUnsafeBytes { DispatchData(bytes: $0) }
-        let identity = NearbyCode.pskIdentity(sessionID: sessionID).withUnsafeBytes { DispatchData(bytes: $0) }
+        let identity = identity.withUnsafeBytes { DispatchData(bytes: $0) }
         sec_protocol_options_add_pre_shared_key(tls.securityProtocolOptions, key as __DispatchData, identity as __DispatchData)
         sec_protocol_options_append_tls_ciphersuite(tls.securityProtocolOptions, suite)
         sec_protocol_options_append_tls_ciphersuite(tls.securityProtocolOptions, fallbackSuite)
@@ -67,17 +107,25 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
         (refusal(error) as? NearbyRefusal) == .notAllowed
     }
 
-    public func advertise(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
+    public func advertise(name: String, sessionID: String, psk: SymmetricKey, pairing: Bool) -> AsyncThrowingStream<NearbyArrival, any Error> {
+        listen(name: name, as: .hold(sessionID: sessionID, pairing: pairing), psk: psk)
+    }
+
+    public func advertise(name: String, tag: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
+        listen(name: name, as: .sync(tag: tag), psk: psk)
+    }
+
+    private func listen(name: String, as listing: Listing, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
         let (stream, continuation) = AsyncThrowingStream<NearbyArrival, any Error>.makeStream()
         let listener: NWListener
         do {
-            listener = try NWListener(using: Self.parameters(psk: psk, sessionID: sessionID))
+            listener = try NWListener(using: listing.parameters(psk: psk))
         } catch {
             continuation.finish(throwing: error)
             return stream
         }
         var txt = NWTXTRecord()
-        txt["id"] = sessionID
+        for (key, value) in listing.txt { txt[key] = value }
         listener.service = NWListener.Service(name: name, type: NearbyCode.service, txtRecord: txt)
         // A connection still opening is the listen's, cancelled with it so a stream put away
         // leaves no socket open; one that is ready is handed over and is its taker's — the
@@ -122,15 +170,37 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
         return stream
     }
 
-    public func browse() -> AsyncThrowingStream<[NearbyPeer], any Error> {
-        let (stream, continuation) = AsyncThrowingStream<[NearbyPeer], any Error>.makeStream()
+    public func browse(pairing: Bool) -> AsyncThrowingStream<[NearbyPeer], any Error> {
+        look(.hold, failed: "browse failed") { key, name, txt in
+            // A sync listener (TXT `t`) is never a hold. Every hold is kept to be joined; only
+            // the kind asked for is listed.
+            guard let id = txt["id"], !id.isEmpty, txt[SyncDiscovery.tagKey] == nil else { return nil }
+            return (NearbyPeer(id: key, name: name, sessionID: id), (txt[SyncDiscovery.pairingKey] == "1") == pairing)
+        }
+    }
+
+    public func browseTags() -> AsyncThrowingStream<[SyncPeer], any Error> {
+        look(.sync, failed: "sync browse failed") { key, name, txt in
+            guard let tag = txt[SyncDiscovery.tagKey], !tag.isEmpty else { return nil }
+            return (SyncPeer(id: key, name: name, tag: tag), true)
+        }
+    }
+
+    /// Every listener of `kind` on the service, as the list changes, kept to be joined by the id
+    /// it is listed under; `read` makes one of a result, or nil where it is not of this kind,
+    /// and says whether it is listed. In name order.
+    private func look<Peer: Sendable>(
+        _ kind: Kind, failed: StaticString,
+        _ read: @escaping @Sendable (_ key: String, _ name: String, _ txt: NWTXTRecord) -> (peer: Peer, listed: Bool)?
+    ) -> AsyncThrowingStream<[Peer], any Error> {
+        let (stream, continuation) = AsyncThrowingStream<[Peer], any Error>.makeStream()
         let parameters = NWParameters()
         parameters.includePeerToPeer = true
         let browser = NWBrowser(for: .bonjourWithTXTRecord(type: NearbyCode.service, domain: nil), using: parameters)
         browser.stateUpdateHandler = { state in
             switch state {
             case .failed(let error), .waiting(let error):
-                NearbyLog.note(.sender, "browse failed", Self.kind(error))
+                NearbyLog.note(.sender, failed, Self.kind(error))
                 continuation.finish(throwing: Self.refusal(error))
             case .cancelled:
                 continuation.finish()
@@ -140,28 +210,40 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
         }
         browser.browseResultsChangedHandler = { [weak self] results, _ in
             guard let self else { return }
-            var peers: [NearbyPeer] = []
+            var listed: [(name: String, peer: Peer)] = []
             var found: [String: NWEndpoint] = [:]
             for result in results {
-                guard case .service(let name, _, _, _) = result.endpoint,
-                      case .bonjour(let txt) = result.metadata, let id = txt["id"], !id.isEmpty
-                else { continue }
+                guard case .service(let name, _, _, _) = result.endpoint, case .bonjour(let txt) = result.metadata else { continue }
                 let key = "\(result.endpoint)"
+                guard let read = read(key, name, txt) else { continue }
                 found[key] = result.endpoint
-                peers.append(NearbyPeer(id: key, name: name, sessionID: id))
+                if read.listed { listed.append((name, read.peer)) }
             }
-            self.endpoints.withLock { $0 = found }
-            continuation.yield(peers.sorted { $0.name < $1.name })
+            self.endpoints.withLock { $0[kind] = found }
+            continuation.yield(listed.sorted { $0.name < $1.name }.map(\.peer))
         }
         continuation.onTermination = { _ in browser.cancel() }
         browser.start(queue: queue)
         return stream
     }
 
+    public func connect(to peer: SyncPeer, psk: SymmetricKey) async throws -> any NearbyPeerConnection {
+        try await connect(peer.id, as: .sync(tag: peer.tag), name: peer.name, psk: psk)
+    }
+
     public func connect(to peer: NearbyPeer, psk: SymmetricKey) async throws -> any NearbyPeerConnection {
-        guard let endpoint = endpoints.withLock({ $0[peer.id] }) else { throw NearbyDropped() }
-        let connection = NWConnection(to: endpoint, using: Self.parameters(psk: psk, sessionID: peer.sessionID))
-        let wrapped = NWPeerConnection(connection, peerName: peer.name, queue: queue)
+        try await connect(peer.id, as: .hold(sessionID: peer.sessionID), name: peer.name, psk: psk)
+    }
+
+    /// Joins the listener a browse of its kind listed as `id`.
+    private func connect(_ id: String, as listing: Listing, name: String, psk: SymmetricKey) async throws -> any NearbyPeerConnection {
+        guard let endpoint = endpoints.withLock({ $0[listing.kind]?[id] }) else { throw NearbyDropped() }
+        return try await join(endpoint, parameters: listing.parameters(psk: psk), name: name)
+    }
+
+    private func join(_ endpoint: NWEndpoint, parameters: NWParameters, name: String) async throws -> any NearbyPeerConnection {
+        let connection = NWConnection(to: endpoint, using: parameters)
+        let wrapped = NWPeerConnection(connection, peerName: name, queue: queue)
         // A join put away — the person pressed Cancel — cancels the attempt, and one that takes
         // longer than a device in reach would is a device out of reach.
         let ready = await withTaskCancellationHandler {

@@ -507,6 +507,8 @@ public struct StoreFile: Sendable {
         public let skipped: [NoteKey]
         /// What each source last said about itself, as of when (#188).
         public let said: [SourceProfile]
+        /// When each source was last written, and the tombstone of each removed (D3, D4).
+        public let sync: SourceSync
         /// What the person pressed to send and no source had said landed (`Unsent`).
         public let unsent: [Unsent]
         /// What each source said happened to the person, as the last run left it (`NoticeReach`).
@@ -523,9 +525,10 @@ public struct StoreFile: Sendable {
 
         init(
             file: StoreFile?, sources: [Source] = [], notes: [Note] = [], said: [SourceProfile] = [],
-            skipped: [NoteKey] = [], unsent: [Unsent] = [], notices: [NoticeReach] = [],
-            setAside: URL? = nil, storeIsNewer: Bool = false, trouble: StoreTrouble? = nil
+            sync: SourceSync = SourceSync(), skipped: [NoteKey] = [], unsent: [Unsent] = [],
+            notices: [NoticeReach] = [], setAside: URL? = nil, storeIsNewer: Bool = false, trouble: StoreTrouble? = nil
         ) {
+            self.sync = sync
             self.unsent = unsent
             self.notices = notices
             self.trouble = trouble
@@ -642,6 +645,7 @@ public struct StoreFile: Sendable {
         }
         var file: StoreFile?
         var snapshot: (sources: [Source], notes: [Note], said: [SourceProfile], skipped: [NoteKey]) = ([], [], [], [])
+        var sync = SourceSync()
         var unsent: [Unsent] = []
         var notices: [NoticeReach] = []
         var reading = Reading.opening
@@ -653,10 +657,13 @@ public struct StoreFile: Sendable {
             if first <= .items {
                 reading = .items
                 if rows {
-                    snapshot = try opened.loadRows()
+                    let read = try opened.loadRows()
+                    snapshot = (read.sources, read.notes, read.said, read.skipped)
+                    sync = read.sync
                 } else {
                     let read = try opened.loadSources()
                     snapshot = (read.sources, [], read.said, [])
+                    sync = read.sync
                 }
             }
             if first <= .unsent {
@@ -692,7 +699,7 @@ public struct StoreFile: Sendable {
             }
             return Opened(
                 file: file, sources: snapshot.sources, notes: snapshot.notes, said: snapshot.said,
-                skipped: snapshot.skipped, unsent: unsent, notices: notices,
+                sync: sync, skipped: snapshot.skipped, unsent: unsent, notices: notices,
                 trouble: untold.isEmpty ? nil : .damaged(replacedBy: restored ? .otherStore : .empty)
             )
         } catch {
@@ -909,9 +916,9 @@ public struct StoreFile: Sendable {
 
     /// `load()`, and the keys of the rows it left out: no item to draw — nothing in it, or a
     /// host with no source row and no kind (`NoteRecord.note(from:)`).
-    func loadRows() throws -> (sources: [Source], notes: [Note], said: [SourceProfile], skipped: [NoteKey]) {
+    func loadRows() throws -> (sources: [Source], notes: [Note], said: [SourceProfile], sync: SourceSync, skipped: [NoteKey]) {
         try db.read { db in
-            let (sources, said) = try Self.sources(db)
+            let (sources, said, sync) = try Self.sources(db)
             let byHost = Dictionary(uniqueKeysWithValues: sources.map { ($0.host, $0) })
             // In the order they were written, which `ItemStore.snapshot` made the order they
             // arrived in: the copy of a post a merged row is drawn as is the one that came
@@ -923,19 +930,26 @@ public struct StoreFile: Sendable {
                 if note == nil { skipped.append(NoteKey(host: record.host, id: record.id)) }
                 return note
             }
-            return (sources, notes, said, skipped)
+            return (sources, notes, said, sync, skipped)
         }
     }
 
     /// The sources and what each last said of itself, and no row (#357): what a launch reads.
     /// Every row is read by the page, or by key, once it is wanted (`page`, `HeldRows`).
-    func loadSources() throws -> (sources: [Source], said: [SourceProfile]) {
+    func loadSources() throws -> (sources: [Source], said: [SourceProfile], sync: SourceSync) {
         try db.read(Self.sources)
     }
 
-    static func sources(_ db: Database) throws -> (sources: [Source], said: [SourceProfile]) {
+    /// The sources, what each said, and their stamps and tombstones (D3, D4): a row written
+    /// before stamps were kept reads `.zero` (D8).
+    static func sources(_ db: Database) throws -> (sources: [Source], said: [SourceProfile], sync: SourceSync) {
         let records = try SourceRecord.fetchAll(db)
-        return (records.map(\.source), records.compactMap(\.saidProfile))
+        let gone = try SourceGoneRecord.fetchAll(db)
+        let sync = SourceSync(
+            stamps: Dictionary(records.map { ($0.host, $0.stamp) }, uniquingKeysWith: { a, _ in a }),
+            gone: Dictionary(gone.map { ($0.host, $0.stamp) }, uniquingKeysWith: { a, _ in a })
+        )
+        return (records.map(\.source), records.compactMap(\.saidProfile), sync)
     }
 
     /// **What changed, and nothing else** (#357), in one transaction on GRDB's queue: the
@@ -962,8 +976,20 @@ public struct StoreFile: Sendable {
             for host in changes.removedHosts {
                 try db.execute(sql: "DELETE FROM source WHERE host = ?", arguments: [host])
             }
+            let stamps = changes.sourceSync?.stamps ?? [:]
             for source in changes.sources ?? [] {
-                try SourceRecord(source, said: said[source.host]).upsert(db)
+                try SourceRecord(source, said: said[source.host], stamp: stamps[source.host] ?? .zero).upsert(db)
+            }
+            if let sync = changes.sourceSync {
+                if changes.sources == nil {
+                    for (host, stamp) in sync.stamps {
+                        try db.execute(
+                            sql: "UPDATE source SET stamp_ms = ?, stamp_n = ?, stamp_by = ? WHERE host = ?",
+                            arguments: [stamp.ms, Int64(stamp.counter), stamp.device, host]
+                        )
+                    }
+                }
+                try Self.write(gone: sync.gone, in: db)
             }
             var deleted = false
             for key in changes.deletes {
@@ -986,15 +1012,18 @@ public struct StoreFile: Sendable {
     /// on GRDB's queue rather than the caller's. `said` is what each source last said about
     /// itself (#188), written on its source's row; one of a host not in `sources` goes nowhere.
     /// What a read back writes; the app saves through `StoreSaver`, by row (`save(_:)`).
-    public func save(sources: [Source], notes: [Note], said: [SourceProfile] = []) async throws {
-        try await save(sources: sources, notes: notes, said: said, replacingNotices: nil)
+    public func save(
+        sources: [Source], notes: [Note], said: [SourceProfile] = [], sync: SourceSync = SourceSync()
+    ) async throws {
+        try await save(sources: sources, notes: notes, said: said, sync: sync, replacingNotices: nil)
     }
 
     /// `save(sources:notes:said:)`, with the notices replaced by `notices` **in the same
     /// transaction** where any are named — a read back, which lays in another store's items
     /// and lets go of what this device's sign-ins were told, both or neither.
     func save(
-        sources: [Source], notes: [Note], said: [SourceProfile], replacingNotices notices: [NoticeReach]?
+        sources: [Source], notes: [Note], said: [SourceProfile], sync: SourceSync = SourceSync(),
+        replacingNotices notices: [NoticeReach]?
     ) async throws {
         let saidByHost = Dictionary(said.map { ($0.host, $0) }, uniquingKeysWith: { a, _ in a })
         defer { held.wrote() }
@@ -1004,8 +1033,9 @@ public struct StoreFile: Sendable {
             if try NoteRecord.deleteAll(db) > 0 { Self.emptyWordsInSave(db) }
             try SourceRecord.deleteAll(db)
             for source in sources {
-                try SourceRecord(source, said: saidByHost[source.host]).insert(db)
+                try SourceRecord(source, said: saidByHost[source.host], stamp: sync.stamps[source.host] ?? .zero).insert(db)
             }
+            try Self.write(gone: sync.gone, in: db)
             for note in notes {
                 try NoteRecord(note).insert(db)
             }
@@ -1559,11 +1589,36 @@ private var migrator: DatabaseMigrator {
     // not know, and its next save would lose every such row's category for good. The id makes it
     // refuse the store instead.
     migrator.registerMigration("v24-conversations") { _ in }
+    // When each source was last written, and a tombstone for each removed (D3, D4), never
+    // pruned: what a merge with a paired device settles by. **Its own id**, so a build from
+    // before refuses the store rather than save the sources back without their stamps. Every
+    // row already here reads `.zero` (D8).
+    migrator.registerMigration("v25-sync-stamps") { db in
+        try db.alter(table: "source") { t in
+            t.add(column: "stamp_ms", .integer).notNull().defaults(to: 0)
+            t.add(column: "stamp_n", .integer).notNull().defaults(to: 0)
+            t.add(column: "stamp_by", .text).notNull().defaults(to: "")
+        }
+        try db.create(table: "source_gone", options: .withoutRowID) { t in
+            t.primaryKey("host", .text)
+            t.column("stamp_ms", .integer).notNull()
+            t.column("stamp_n", .integer).notNull()
+            t.column("stamp_by", .text).notNull()
+        }
+    }
     return migrator
 }
 
 extension StoreFile {
     /// Every source by host, as `loadRows` stamps the rows it reads with.
+    /// Every tombstone in place of what `source_gone` held, in the caller's transaction.
+    static func write(gone: [String: SyncStamp], in db: Database) throws {
+        try SourceGoneRecord.deleteAll(db)
+        for (host, stamp) in gone.sorted(by: { $0.key < $1.key }) {
+            try SourceGoneRecord(host: host, stamp: stamp).insert(db)
+        }
+    }
+
     static func sourcesByHost(_ db: Database) throws -> [String: Source] {
         Dictionary(try SourceRecord.fetchAll(db).map { ($0.host, $0.source) }, uniquingKeysWith: { a, _ in a })
     }
@@ -1777,14 +1832,24 @@ private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
     var said: SaidRow?
     /// When `said` was said. Nothing where `said` is nothing.
     var said_at: Date?
+    /// When the source was last written (D3): `SyncStamp`, a column each.
+    var stamp_ms: Int64
+    var stamp_n: Int64
+    var stamp_by: String
 
-    init(_ source: Source, said profile: SourceProfile?) {
+    init(_ source: Source, said profile: SourceProfile?, stamp: SyncStamp) {
         host = source.host
         kind = source.kind.rawValue
         boards = source.boards.map(SubscriptionRow.init) + source.lists.map(SubscriptionRow.init)
         said = profile.map(SaidRow.init)
         said_at = profile?.asOf
+        stamp_ms = stamp.ms
+        stamp_n = Int64(stamp.counter)
+        stamp_by = stamp.device
     }
+
+    /// Held within what the clock can carry on from, whatever the file says.
+    var stamp: SyncStamp { .bounded(ms: stamp_ms, counter: stamp_n, device: stamp_by) }
 
     /// The word this row keeps, marked as of when — or nothing where either half is missing, or
     /// the kind is one this build cannot name: a word with no moment is one nothing could draw as
@@ -1806,6 +1871,24 @@ private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
             }
         )
     }
+}
+
+/// A source removed, and when (D4): a tombstone, never pruned.
+private struct SourceGoneRecord: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "source_gone"
+    var host: String
+    var stamp_ms: Int64
+    var stamp_n: Int64
+    var stamp_by: String
+
+    init(host: String, stamp: SyncStamp) {
+        self.host = host
+        stamp_ms = stamp.ms
+        stamp_n = Int64(stamp.counter)
+        stamp_by = stamp.device
+    }
+
+    var stamp: SyncStamp { .bounded(ms: stamp_ms, counter: stamp_n, device: stamp_by) }
 }
 
 /// `SourceProfile` as `source.said` writes it (#188): every field the page draws, and none of

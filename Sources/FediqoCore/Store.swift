@@ -106,6 +106,16 @@ public actor ItemStore {
     /// itself — nil where that is not known, and the next save writes every source. What a save
     /// finds the sources changed by, without every way of changing one having to say so.
     private var sourcesWritten: (sources: [Source], said: [String: SourceProfile])?
+    /// When each source here was last written, and the tombstone of each removed (D3, D4): what
+    /// a merge with a paired device settles by. Kept with the sources and written with them.
+    private var sync = SourceSync()
+    /// `sync` as the last write that landed left it on disk; nil where that is not known.
+    private var syncWritten: SourceSync?
+    /// What every source change made here is stamped by (`stamp(with:)`).
+    private var clock = SyncClock.unpaired
+    /// Each removal a merge handed back (`settle(arrived:)`), at the stamp it arrived with: the
+    /// tombstone the removal of that host made next keeps, in place of a stamp made now.
+    private var pendingGone: [String: SyncStamp] = [:]
     /// Hosts removed whose removal a write did not land: deleted by the next.
     private var hostsOwed: Set<String> = []
     /// When each row first arrived, as a count that only goes up. Nothing reads the number; what
@@ -325,11 +335,12 @@ public actor ItemStore {
     /// rows the file may not hold, which the first save writes whole. `skipped` are rows the
     /// file holds that are no item (`Opened.skipped`): the first save deletes them.
     public init(
-        sources: [Source], notes incoming: [Note], said: [SourceProfile] = [], notices: [NoticeReach] = [],
-        unsent: [Unsent] = [], readFromDisk: Bool = false, skipped: [NoteKey] = []
+        sources: [Source], notes incoming: [Note], said: [SourceProfile] = [], sync: SourceSync = SourceSync(),
+        clock: SyncClock = .unpaired, notices: [NoticeReach] = [], unsent: [Unsent] = [], readFromDisk: Bool = false,
+        skipped: [NoteKey] = []
     ) {
         self.init(
-            sources: sources, notes: incoming, said: said, notices: notices, unsent: unsent,
+            sources: sources, notes: incoming, said: said, sync: sync, clock: clock, notices: notices, unsent: unsent,
             readFromDisk: readFromDisk, skipped: skipped, disk: nil, cap: Self.poolCap
         )
     }
@@ -338,18 +349,18 @@ public actor ItemStore {
     /// said, the notices and the texts, which are few — and each read by key once it is wanted,
     /// or laid in from a page (`take`). Nothing is owed a write until it changes.
     public init(
-        sources: [Source], said: [SourceProfile] = [], notices: [NoticeReach] = [], unsent: [Unsent] = [],
-        rows: any HeldRows, cap: Int = ItemStore.poolCap
+        sources: [Source], said: [SourceProfile] = [], sync: SourceSync = SourceSync(), clock: SyncClock = .unpaired,
+        notices: [NoticeReach] = [], unsent: [Unsent] = [], rows: any HeldRows, cap: Int = ItemStore.poolCap
     ) {
         self.init(
-            sources: sources, notes: [], said: said, notices: notices, unsent: unsent, readFromDisk: true,
-            skipped: [], disk: rows, cap: cap
+            sources: sources, notes: [], said: said, sync: sync, clock: clock, notices: notices, unsent: unsent,
+            readFromDisk: true, skipped: [], disk: rows, cap: cap
         )
     }
 
     private init(
-        sources: [Source], notes incoming: [Note], said: [SourceProfile], notices: [NoticeReach],
-        unsent: [Unsent], readFromDisk: Bool, skipped: [NoteKey], disk: (any HeldRows)?, cap: Int
+        sources: [Source], notes incoming: [Note], said: [SourceProfile], sync: SourceSync, clock: SyncClock,
+        notices: [NoticeReach], unsent: [Unsent], readFromDisk: Bool, skipped: [NoteKey], disk: (any HeldRows)?, cap: Int
     ) {
         self.disk = disk
         self.cap = cap
@@ -380,7 +391,13 @@ public actor ItemStore {
         var unheld: [NoteKey] = []
         for key in skipped where notes[key] == nil { unheld.append(key) }
         notes.owe(unheld)
-        if readFromDisk { sourcesWritten = (sourceList, saidByHost) }
+        self.sync = Self.held(sync, of: hosts)
+        self.clock = clock
+        clock.witness(self.sync.newest)
+        if readFromDisk {
+            sourcesWritten = (sourceList, saidByHost)
+            syncWritten = self.sync
+        }
         // The order the rows are handed over is the order they arrived in: the run that wrote
         // this snapshot wrote them oldest first. A row named twice keeps the first mention's
         // place, the way `ingest` keeps a row's place when it is met again.
@@ -437,7 +454,12 @@ public actor ItemStore {
     /// **Every notice held goes**: they were said to whoever was signed in here before, and the
     /// sign-ins a read back leaves may be somebody else's. The next read of the page says them
     /// again, to whoever is signed in then.
-    public func replace(sources: [Source], notes arriving: [Note], said: [SourceProfile] = []) {
+    ///
+    /// **The stamps and tombstones come with them, whole, and none is made** (D4): `sync` is the
+    /// package's own, so a merge with the device it came from finds nothing to change.
+    public func replace(
+        sources: [Source], notes arriving: [Note], said: [SourceProfile] = [], sync: SourceSync = SourceSync()
+    ) {
         let incoming = arriving.map { note in
             var settled = note
             settled.refsDue = false
@@ -474,6 +496,7 @@ public actor ItemStore {
         let differing = incoming.map(\.key).filter { notes[$0] == nil || owedLoad.contains($0) }
         notes.owe(differing)
         sourcesWritten = nil
+        takeSync(sync, of: hosts)
         hostsOwed = []
         arrival = [:]
         arrivals = disk == nil ? 0 : Self.arrivingAfterTheFile
@@ -520,8 +543,8 @@ public actor ItemStore {
     /// **Every notice held goes**, as `replace(sources:notes:said:)` lets them go, and every
     /// source is written by the next save, said as the package said it. The texts waiting to be
     /// sent stay, the file's own. **Only over a file**: a store held whole is given its rows.
-    public func replace(sources: [Source], said: [SourceProfile]) {
-        guard disk != nil else { return replace(sources: sources, notes: [], said: said) }
+    public func replace(sources: [Source], said: [SourceProfile], sync: SourceSync = SourceSync()) {
+        guard disk != nil else { return replace(sources: sources, notes: [], said: said, sync: sync) }
         filesCopiedIn += 1
         sourceList = []
         for source in sources where !sourceList.contains(where: { $0.host == source.host }) {
@@ -536,6 +559,7 @@ public actor ItemStore {
         notes.drawing = drawn
         notes.track()
         sourcesWritten = nil
+        takeSync(sync, of: hosts)
         hostsOwed = []
         arrival = [:]
         arrivals = Self.arrivingAfterTheFile
@@ -606,9 +630,12 @@ public actor ItemStore {
         watcher(sourceList.map(\.host))
     }
 
+    /// A host new here is stamped as written now.
     public func add(_ source: Source) {
         if sourceList.contains(where: { $0.host == source.host }) { return }
         sourceList.append(source)
+        sync.stamps[source.host] = clock.now()
+        sync.gone[source.host] = nil
         sourcesWatcher?(sourceList.map(\.host))
         changed(shown: false, replies: false)
     }
@@ -632,6 +659,8 @@ public actor ItemStore {
         sourceList[index] = Source(
             host: existing.host, kind: existing.kind, boards: boards, lists: existing.lists
         )
+        // Stamped only where the boards moved: a restatement of the same ones is no change.
+        if boards != existing.boards { sync.stamps[host] = clock.now() }
         changed(shown: false, replies: false)
     }
 
@@ -1232,9 +1261,18 @@ public actor ItemStore {
     /// nothing reads it once its source is not here. Returns whether any did, so a caller
     /// that must have them off the disk before it goes on knows to wait for the write.
     @discardableResult
+    ///
+    /// **A source here leaves a tombstone** (D4), stamped now — or, where a merge handed this
+    /// removal back (`settle(arrived:)`), at the stamp it arrived with — so a merge does not
+    /// bring it back.
     public func remove(host raw: String, keepingPosts: Bool = false) async -> Bool {
         await untilNoPutBack()
         let host = raw.lowercased()
+        let arrived = pendingGone.removeValue(forKey: host)
+        if sourceList.contains(where: { $0.host == host }) {
+            sync.stamps[host] = nil
+            sync.gone[host] = arrived ?? clock.now()
+        }
         sourceList.removeAll { $0.host == host }
         saidByHost[host] = nil
         // Deleted by the next save whether or not this store knows the file to hold it.
@@ -1261,6 +1299,83 @@ public actor ItemStore {
 
     public func sources() -> [Source] {
         sourceList
+    }
+
+    /// Every source change made here from now on is stamped by `clock` (D3), which is told every
+    /// stamp this store holds so that a change made here is later than each of them. The app
+    /// hands its clock to the init instead, so it is set before the store is shared.
+    public func stamp(with clock: SyncClock) {
+        self.clock = clock
+        clock.witness(sync.newest)
+    }
+
+    /// The stamps and tombstones as they stand.
+    public func sourceSync() -> SourceSync {
+        sync
+    }
+
+    /// `sources()` and `sourceSync()` as merge entries, in one hop.
+    public func syncEntries() -> [String: Stamped<SyncSource>] {
+        sync.entries(sourceList)
+    }
+
+    /// A merge's entries laid in here, each **only where it still wins over what this store holds
+    /// for that host** (`SyncMerge.wins`): a change made here since the snapshot was taken stands.
+    /// A host new here is added with no lists, signed out (D5); a host here takes the arrived
+    /// kind and boards and keeps its own lists. A tombstone for a host not here is kept as it
+    /// came; one for a host here is not applied but handed back in `toRemove`, for the removal
+    /// the person's own path makes, whose tombstone keeps the stamp it arrived with. **No stamp
+    /// is made**: each is kept as it arrived.
+    public func settle(arrived: [String: Stamped<SyncSource>]) -> SourcesSettled {
+        var settled = SourcesSettled()
+        let held = sync.entries(sourceList)
+        let before = sync
+        for (host, entry) in arrived.sorted(by: { $0.key < $1.key }) {
+            if let mine = held[host], !SyncMerge.wins(entry, over: mine) { continue }
+            let index = sourceList.firstIndex { $0.host == host }
+            switch (entry.value, index) {
+            case let (value?, index?):
+                let existing = sourceList[index]
+                let restated = Source(host: host, kind: value.kind, boards: value.boards, lists: existing.lists)
+                if restated != existing {
+                    sourceList[index] = restated
+                    settled.restated.append(host)
+                }
+                sync.stamps[host] = entry.stamp
+            case let (value?, nil):
+                sourceList.append(Source(host: host, kind: value.kind, boards: value.boards))
+                sync.stamps[host] = entry.stamp
+                sync.gone[host] = nil
+                settled.added.append(host)
+            case (nil, _?):
+                settled.toRemove[host] = entry.stamp
+                pendingGone[host] = entry.stamp
+            case (nil, nil):
+                sync.gone[host] = entry.stamp
+            }
+        }
+        if !settled.added.isEmpty { sourcesWatcher?(sourceList.map(\.host)) }
+        if !settled.added.isEmpty || !settled.restated.isEmpty || sync != before {
+            changed(shown: false, replies: false)
+        }
+        return settled
+    }
+
+    /// `sync` of only what `hosts` holds: a stamp of a host here, a tombstone of one not here.
+    private static func held(_ sync: SourceSync, of hosts: Set<String>) -> SourceSync {
+        SourceSync(
+            stamps: sync.stamps.filter { hosts.contains($0.key) },
+            gone: sync.gone.filter { !hosts.contains($0.key) }
+        )
+    }
+
+    /// `sync` in place of every stamp and tombstone here, as a read back brings it, written whole
+    /// by the next save; the clock is told of it.
+    private func takeSync(_ sync: SourceSync, of hosts: Set<String>) {
+        self.sync = Self.held(sync, of: hosts)
+        syncWritten = nil
+        pendingGone = [:]
+        clock.witness(self.sync.newest)
     }
 
     /// Writes down what `profile.host` has just said about itself, as of `moment`, in place of
@@ -1905,12 +2020,12 @@ public actor ItemStore {
 
     /// Everything this store holds, read in one hop, the rows in the order they arrived: what a
     /// take-away writes into a store of its own. A save writes what changed (`takeChanges`).
-    public func snapshot() -> (sources: [Source], notes: [Note], said: [SourceProfile], revision: Int) {
+    public func snapshot() -> (sources: [Source], notes: [Note], said: [SourceProfile], sync: SourceSync, revision: Int) {
         let arrival = self.arrival
         let ordered = notes.values.sorted { (arrival[$0.key] ?? 0) < (arrival[$1.key] ?? 0) }
         // By host, so one state of the store is always written one way.
         let said = saidByHost.values.sorted { $0.host < $1.host }
-        return (sourceList, ordered, said, revision)
+        return (sourceList, ordered, said, sync, revision)
     }
 
     /// **What changed since the last take, and the revision it is of** (#357), in one hop: each
@@ -1940,6 +2055,8 @@ public actor ItemStore {
             changes.said = saidByHost.values.sorted { $0.host < $1.host }
         }
         sourcesWritten = (sourceList, saidByHost)
+        if changes.sources != nil || syncWritten != sync { changes.sourceSync = sync }
+        syncWritten = sync
         hostsOwed = []
         changes.ops = opsOwed
         opsOwed = []
@@ -2120,6 +2237,7 @@ public actor ItemStore {
         notes.owe(changes.upserts.map(\.key) + changes.deletes, dropped: changes.deletes)
         hostsOwed.formUnion(changes.removedHosts)
         if changes.sources != nil { sourcesWritten = nil }
+        if changes.sourceSync != nil { syncWritten = nil }
         opsOwed = changes.ops.filter { $0.number > opsFloor } + opsOwed
     }
 
@@ -2172,6 +2290,7 @@ public actor ItemStore {
         opsSettled = opsFloor
         restoringFile = false
         sourcesWritten = nil
+        syncWritten = nil
         hostsOwed.formUnion(hosts)
         putBackMay = false
         forgetLanded()
@@ -3557,5 +3676,19 @@ private struct Turns {
             heap.swapAt(parent, least)
             parent = least
         }
+    }
+}
+
+/// What `ItemStore.settle(arrived:)` laid in, and what it left for the removal path.
+public struct SourcesSettled: Sendable, Equatable {
+    public var added: [String]
+    public var restated: [String]
+    /// Hosts here whose removal arrived, with the stamp it arrived at (D4: posts kept).
+    public var toRemove: [String: SyncStamp]
+
+    public init(added: [String] = [], restated: [String] = [], toRemove: [String: SyncStamp] = [:]) {
+        self.added = added
+        self.restated = restated
+        self.toRemove = toRemove
     }
 }

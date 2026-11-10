@@ -11,19 +11,56 @@ import Synchronization
 /// is told `.failedHandshake`, as the real handshake would. `cut()` drops every joined pair at
 /// once, as a walk out of range would, and `deny()` makes the next look nearby refused.
 ///
+/// **Sync listeners** (`advertise(name:tag:psk:)`) sit in the same room beside the holds, each
+/// under its instance name: `browseTags` lists only them and `browse` never does.
+/// `holdJoins()` keeps every join waiting until `releaseJoins()`, so two devices dial at once.
+///
 /// **A listen hands over as the real one does**, through the same `NearbyListen`: the end that
 /// joined is the holder's once it is yielded, and a listen put away closes only an end not yet
 /// handed over.
-public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
-    private struct Holding {
-        let peer: NearbyPeer
+public final class PipeNearbyLink: SyncLink, @unchecked Sendable {
+    private enum Kind {
+        case hold, sync
+    }
+
+    /// Where a listener sits in the room: a hold under its session, a sync listener under its
+    /// instance name.
+    private enum Listing: Hashable {
+        case hold(sessionID: String)
+        case sync(name: String)
+
+        var kind: Kind {
+            switch self {
+            case .hold: .hold
+            case .sync: .sync
+            }
+        }
+    }
+
+    /// What a browser lists of a listener.
+    private enum Advert: Sendable {
+        case hold(NearbyPeer, pairing: Bool)
+        case sync(SyncPeer)
+    }
+
+    private struct Listed {
+        let advert: Advert
         let psk: SymmetricKey
         let listen: NearbyListen<PipeConnection>
     }
 
+    private struct Browser {
+        let kind: Kind
+        let tell: @Sendable ([Advert]) -> Void
+    }
+
     private struct Room {
-        var holding: [String: Holding] = [:]
-        var browsers: [Int: AsyncThrowingStream<[NearbyPeer], any Error>.Continuation] = [:]
+        /// Holds and sync listeners side by side, each listed only to a browse of its kind.
+        var listed: [Listing: Listed] = [:]
+        var browsers: [Int: Browser] = [:]
+        /// While set, every join waits here until `releaseJoins()`.
+        var gated = false
+        var gate: [(to: String, join: CheckedContinuation<Void, Never>)] = []
         var pairs: [PipePair] = []
         var next = 0
         var denied = false
@@ -43,9 +80,9 @@ public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
 
     public init() {}
 
-    /// Every device holding right now, as a browser lists them.
+    /// Every device holding right now, pairing or not.
     public var peers: [NearbyPeer] {
-        room.withLock { $0.holding.values.map(\.peer).sorted { $0.name < $1.name } }
+        room.withLock { Self.holds($0.listed.values.map(\.advert), pairing: nil) }
     }
 
     /// From now on, looking nearby is refused: what a denied local-network permission does.
@@ -70,6 +107,40 @@ public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
         room.withLock { $0.cutBeforeLastWord = true }
     }
 
+    /// From now on every join waits, so two devices can be made to dial at once.
+    public func holdJoins() {
+        room.withLock { $0.gated = true }
+    }
+
+    /// How many joins are waiting at the gate.
+    public var joinsHeld: Int {
+        room.withLock { $0.gate.count }
+    }
+
+    /// Every join waiting goes on together, and later joins no longer wait.
+    public func releaseJoins() {
+        let waiting = room.withLock { room in
+            room.gated = false
+            defer { room.gate = [] }
+            return room.gate
+        }
+        for held in waiting { held.join.resume() }
+    }
+
+    /// The joins waiting to reach the listener or hold named `name` go on; the rest wait still.
+    public func releaseJoins(to name: String) {
+        let waiting = room.withLock { room in
+            defer { room.gate.removeAll { $0.to == name } }
+            return room.gate.filter { $0.to == name }
+        }
+        for held in waiting { held.join.resume() }
+    }
+
+    /// Every sync listener right now, as `browseTags` lists them.
+    public var listeners: [SyncPeer] {
+        room.withLock { Self.listeners($0.listed.values.map(\.advert)) }
+    }
+
     /// Every frame that crossed, in order, as it would be recorded off the wire.
     public var transcript: [Data] {
         room.withLock { $0.transcript }
@@ -84,13 +155,53 @@ public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
         for pair in pairs { pair.cut() }
     }
 
-    public func advertise(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
+    public func advertise(name: String, sessionID: String, psk: SymmetricKey, pairing: Bool) -> AsyncThrowingStream<NearbyArrival, any Error> {
+        listen(.hold(sessionID: sessionID), .hold(NearbyPeer(id: sessionID, name: name, sessionID: sessionID), pairing: pairing), psk: psk)
+    }
+
+    public func browse(pairing: Bool) -> AsyncThrowingStream<[NearbyPeer], any Error> {
+        browse(.hold) { Self.holds($0, pairing: pairing) }
+    }
+
+    public func connect(to peer: NearbyPeer, psk: SymmetricKey) async throws -> any NearbyPeerConnection {
+        try await connect(to: .hold(sessionID: peer.sessionID), name: peer.name, psk: psk)
+    }
+
+    public func advertise(name: String, tag: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
+        listen(.sync(name: name), .sync(SyncPeer(id: name, name: name, tag: tag)), psk: psk)
+    }
+
+    public func browseTags() -> AsyncThrowingStream<[SyncPeer], any Error> {
+        browse(.sync, Self.listeners)
+    }
+
+    public func connect(to peer: SyncPeer, psk: SymmetricKey) async throws -> any NearbyPeerConnection {
+        try await connect(to: .sync(name: peer.name), name: peer.name, psk: psk)
+    }
+
+    /// The holds among `adverts`, in name order: the pairing ones or the others, or (nil) all.
+    private static func holds(_ adverts: [Advert], pairing: Bool?) -> [NearbyPeer] {
+        adverts.compactMap { advert -> NearbyPeer? in
+            guard case .hold(let peer, let held) = advert, pairing.map({ $0 == held }) ?? true else { return nil }
+            return peer
+        }.sorted { $0.name < $1.name }
+    }
+
+    /// The sync listeners among `adverts`, in name order.
+    private static func listeners(_ adverts: [Advert]) -> [SyncPeer] {
+        adverts.compactMap { advert -> SyncPeer? in
+            guard case .sync(let peer) = advert else { return nil }
+            return peer
+        }.sorted { $0.name < $1.name }
+    }
+
+    /// One listener in the room, until its stream is put away; a denied look nearby refuses it.
+    private func listen(_ listing: Listing, _ advert: Advert, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
         let (stream, continuation) = AsyncThrowingStream<NearbyArrival, any Error>.makeStream()
-        let peer = NearbyPeer(id: sessionID, name: name, sessionID: sessionID)
         let listen = NearbyListen<PipeConnection>(continuation)
         let denied = room.withLock { room in
             guard !room.denied else { return true }
-            room.holding[sessionID] = Holding(peer: peer, psk: psk, listen: listen)
+            room.listed[listing] = Listed(advert: advert, psk: psk, listen: listen)
             return false
         }
         if denied {
@@ -99,22 +210,26 @@ public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
         }
         continuation.onTermination = { [weak self] _ in
             self?.room.withLock { room in
-                if room.holding[sessionID]?.listen === listen { room.holding[sessionID] = nil }
+                if room.listed[listing]?.listen === listen { room.listed[listing] = nil }
             }
             listen.end()
-            self?.tellBrowsers()
+            self?.tell(listing.kind)
         }
-        tellBrowsers()
+        tell(listing.kind)
         return stream
     }
 
-    public func browse() -> AsyncThrowingStream<[NearbyPeer], any Error> {
-        let (stream, continuation) = AsyncThrowingStream<[NearbyPeer], any Error>.makeStream()
-        let (denied, id, peers) = room.withLock { room -> (Bool, Int, [NearbyPeer]) in
+    /// The listeners of `kind`, as `list` lists them, now and at every change of that kind.
+    private func browse<Peer: Sendable>(
+        _ kind: Kind, _ list: @escaping @Sendable ([Advert]) -> [Peer]
+    ) -> AsyncThrowingStream<[Peer], any Error> {
+        let (stream, continuation) = AsyncThrowingStream<[Peer], any Error>.makeStream()
+        let tell: @Sendable ([Advert]) -> Void = { continuation.yield(list($0)) }
+        let (denied, id, adverts) = room.withLock { room -> (Bool, Int, [Advert]) in
             guard !room.denied else { return (true, 0, []) }
             room.next += 1
-            room.browsers[room.next] = continuation
-            return (false, room.next, room.holding.values.map(\.peer).sorted { $0.name < $1.name })
+            room.browsers[room.next] = Browser(kind: kind, tell: tell)
+            return (false, room.next, room.listed.values.map(\.advert))
         }
         if denied {
             continuation.finish(throwing: NearbyRefusal.notAllowed)
@@ -123,22 +238,40 @@ public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
         continuation.onTermination = { [weak self] _ in
             self?.room.withLock { $0.browsers[id] = nil }
         }
-        continuation.yield(peers)
+        tell(adverts)
         return stream
     }
 
-    public func connect(to peer: NearbyPeer, psk: SymmetricKey) async throws -> any NearbyPeerConnection {
-        let (holding, unreachable) = room.withLock { room -> (Holding?, Bool) in
+    private func connect(to listing: Listing, name: String, psk: SymmetricKey) async throws -> any NearbyPeerConnection {
+        await passGate(to: name)
+        let (listed, unreachable) = room.withLock { room -> (Listed?, Bool) in
             if room.unreachable > 0 {
                 room.unreachable -= 1
                 return (nil, true)
             }
-            return (room.holding[peer.sessionID], false)
+            return (room.listed[listing], false)
         }
         if unreachable { throw NearbyDropped() }
-        guard let holding else { throw NearbyDropped() }
-        guard holding.psk == psk else {
-            holding.listen.failed(nil, handshake: true)
+        guard let listed else { throw NearbyDropped() }
+        return try join(listed.listen, under: listed.psk, with: psk, name: name)
+    }
+
+    private func passGate(to name: String) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let wait = room.withLock { room in
+                guard room.gated else { return false }
+                room.gate.append((name, continuation))
+                return true
+            }
+            if !wait { continuation.resume() }
+        }
+    }
+
+    /// One join into `listen`, held under `held`: refused as the real handshake would where
+    /// `psk` is not it.
+    private func join(_ listen: NearbyListen<PipeConnection>, under held: SymmetricKey, with psk: SymmetricKey, name: String) throws -> any NearbyPeerConnection {
+        guard held == psk else {
+            listen.failed(nil, handshake: true)
             throw NearbyRefusal.wrongCode
         }
         let pair = PipePair(record: { [weak self] data in self?.room.withLock { $0.transcript.append(data) } })
@@ -149,19 +282,20 @@ public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
             pair.cutBeforeLastWord = room.cutBeforeLastWord
             room.cutBeforeLastWord = false
         }
-        let (ours, theirs) = pair.ends(name: peer.name)
+        let (ours, theirs) = pair.ends(name: name)
         // A listen that ended while this join was on its way has nobody to take it: the end is
         // closed there, and this side sees the drop it would on the air.
-        guard holding.listen.opening(theirs) else { throw NearbyDropped() }
-        holding.listen.joined(theirs)
+        guard listen.opening(theirs) else { throw NearbyDropped() }
+        listen.joined(theirs)
         return ours
     }
 
-    private func tellBrowsers() {
-        let (browsers, peers) = room.withLock { room in
-            (Array(room.browsers.values), room.holding.values.map(\.peer).sorted { $0.name < $1.name })
+    /// Every browser of `kind` told what is listed now.
+    private func tell(_ kind: Kind) {
+        let (browsers, adverts) = room.withLock { room in
+            (room.browsers.values.filter { $0.kind == kind }, room.listed.values.map(\.advert))
         }
-        for browser in browsers { browser.yield(peers) }
+        for browser in browsers { browser.tell(adverts) }
     }
 }
 

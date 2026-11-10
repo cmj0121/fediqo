@@ -704,7 +704,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             } else {
                 let snapshot = await store.snapshot()
                 let staged = try StoreFile(at: scratch)
-                try await staged.save(sources: snapshot.sources, notes: snapshot.notes, said: snapshot.said)
+                try await staged.save(sources: snapshot.sources, notes: snapshot.notes, said: snapshot.said, sync: snapshot.sync)
                 (held, said, posts, kept) = (snapshot.sources, snapshot.said, snapshot.notes.count, snapshot.notes.filter(\.kept).count)
             }
             pieces = try self.pieces(
@@ -1173,6 +1173,8 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         let index: StoreFile
         let sources: [Source]
         let said: [SourceProfile]
+        /// The sources' stamps and tombstones as the package holds them (D4): carried, never made.
+        let sync: SourceSync
         let notes: [Note]?
     }
 
@@ -1312,7 +1314,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
                 try index.dropDerivedObjects()
                 // Read by SQL, and no row (#360): the rows are the file's, read as they are
                 // wanted — but for a store held whole, which holds them all.
-                let (sources, said) = try index.loadSources()
+                let (sources, said, sync) = try index.loadSources()
                 let notes = file == nil || !store.heldInPart ? try index.load().notes : nil
                 kept = try index.keptCount()
                 // Read, and so one this build may write: the staged index becomes this device's
@@ -1321,7 +1323,9 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
                 index.scrub()
                 // The profile entries are the words as taken away; the index's rows are the same
                 // words, and where a package carried entries they are what is read back.
-                arrived = Arrived(index: index, sources: sources, said: staged.said.isEmpty ? said : staged.said, notes: notes)
+                arrived = Arrived(
+                    index: index, sources: sources, said: staged.said.isEmpty ? said : staged.said, sync: sync, notes: notes
+                )
             } catch is StoreFile.Newer {
                 throw PackageRefusal.newer
             } catch {
@@ -1667,9 +1671,9 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             if staged.limits != nil { try naming("limits") }
             try commitLimits(staged, into: &undo)
             if let notes = arrived.notes {
-                await store.replace(sources: arrived.sources, notes: notes, said: arrived.said)
+                await store.replace(sources: arrived.sources, notes: notes, said: arrived.said, sync: arrived.sync)
             } else {
-                await store.replace(sources: arrived.sources, said: arrived.said)
+                await store.replace(sources: arrived.sources, said: arrived.said, sync: arrived.sync)
             }
         } catch {
             // Newest first, every one tried, and the ones that refused named: the device is

@@ -102,7 +102,7 @@ extension StoreFile {
         }
         try Task.checkCancellation()
         return try await copy.read { db in
-            let (sources, said) = try Self.sources(db)
+            let (sources, said, _) = try Self.sources(db)
             return TakenCopy(
                 sources: sources, said: said,
                 posts: try Int.fetchOne(db, sql: "SELECT count(*) FROM note") ?? 0,
