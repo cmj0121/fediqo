@@ -283,13 +283,13 @@ struct SyncStampTests {
 
     @Test("now() follows the wall, counts within one ms, and never goes back when the wall does")
     func clockNow() {
-        let wall = Mutex(Date(timeIntervalSince1970: 10))
-        let clock = SyncClock(device: "D", wall: { wall.withLock { $0 } })
+        let wall = Wall(Date(timeIntervalSince1970: 10))
+        let clock = SyncClock(device: "D", wall: { wall.now })
         #expect(clock.now() == SyncStamp(ms: 10_000, counter: 0, device: "D"))
         #expect(clock.now() == SyncStamp(ms: 10_000, counter: 1, device: "D"))
-        wall.withLock { $0 = Date(timeIntervalSince1970: 5) }
+        wall.now = Date(timeIntervalSince1970: 5)
         #expect(clock.now() == SyncStamp(ms: 10_000, counter: 2, device: "D"))
-        wall.withLock { $0 = Date(timeIntervalSince1970: 11) }
+        wall.now = Date(timeIntervalSince1970: 11)
         #expect(clock.now() == SyncStamp(ms: 11_000, counter: 0, device: "D"))
     }
 
@@ -436,5 +436,15 @@ struct SyncStampTests {
         ])
         #expect(sync.newest == SyncStamp(ms: 6, counter: 0, device: "A"))
         #expect(SourceSync().newest == .zero)
+    }
+}
+
+/// A wall clock a test sets by hand; a class, so a clock's closure captures it safely.
+private final class Wall: Sendable {
+    private let held: Mutex<Date>
+    init(_ start: Date) { held = Mutex(start) }
+    var now: Date {
+        get { held.withLock { $0 } }
+        set { held.withLock { $0 = newValue } }
     }
 }

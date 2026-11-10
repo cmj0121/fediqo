@@ -334,12 +334,12 @@ struct SyncSessionTests {
         defer { listening.cancel() }
         let tag = try #require(link.listeners.first?.tag)
         // "fq-0" … "fq-3" list before any real instance name, so they are dialed first.
-        let guesses = Mutex(0)
+        let guesses = Tally()
         let replays = (0..<4).map { index in
             let stream = link.advertise(name: "fq-\(index)", tag: tag, psk: SymmetricKey(size: .bits256))
             return Task {
                 for try await arrival in stream {
-                    if case .failedHandshake = arrival { guesses.withLock { $0 += 1 } }
+                    if case .failedHandshake = arrival { guesses.add() }
                 }
             }
         }
@@ -348,7 +348,7 @@ struct SyncSessionTests {
         #expect(SyncSession.mostListenersTried == 3)
 
         #expect(await b.session.dialDue(period: .hour).isEmpty)
-        #expect(guesses.withLock { $0 } == 3)
+        #expect(guesses.count == 3)
         #expect(a.local.snapshots == 0 && done(b).isEmpty)
     }
 
@@ -448,15 +448,15 @@ struct SyncSessionTests {
 
     @Test("`within` gives nil to a task already cancelled, and never starts the operation")
     func withinCancelled() async {
-        let ran = Mutex(false)
+        let ran = Tally()
         let value = await Task {
             withUnsafeCurrentTask { $0?.cancel() }
             return await SyncSession.within(.seconds(3600)) {
-                ran.withLock { $0 = true }
+                ran.add()
                 return 1
             }
         }.value
-        #expect(value == nil && !ran.withLock { $0 })
+        #expect(value == nil && ran.count == 0)
     }
 
     /// The pairing hold under `sessionID` once it advertises: the code is said before the hold
@@ -553,6 +553,13 @@ struct SyncSessionTests {
         #expect(SyncRefusal.peerOlder.mirrored == .peerNewer && SyncRefusal.unreadableHere.mirrored == .unreadableThere)
         #expect(SyncRefusal.busy.mirrored == .busy)
     }
+}
+
+/// A count a task can add to; a class, so a closure handed to a task captures it safely.
+private final class Tally: Sendable {
+    private let held = Mutex(0)
+    func add() { held.withLock { $0 += 1 } }
+    var count: Int { held.withLock { $0 } }
 }
 
 /// One device's entries and screen, in memory.
