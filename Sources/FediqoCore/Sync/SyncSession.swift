@@ -133,6 +133,8 @@ public actor SyncSession {
     private var nextID = 0
     /// When each pair was last dialed this run: a pair said no to is asked again a period on.
     private var tried: [String: Date] = [:]
+    /// How many dials met their pair's merge already under way and waited for it instead.
+    private(set) var dialsWaited = 0
     /// This device's own listeners, never dialed — kept a bucket past their end, while a browse
     /// may still list them.
     private var ownNames: Set<String> = []
@@ -436,7 +438,10 @@ public actor SyncSession {
     /// One dial, or the merge already under way with that pair. nil where it did not get past
     /// the handshake.
     private func dial(_ pair: PairedDevice, at peer: SyncPeer, secret: SymmetricKey) async -> SyncOutcome? {
-        if let running = active[pair.device] { return await running.task.value }
+        if let running = active[pair.device] {
+            dialsWaited += 1
+            return await running.task.value
+        }
         let psk = SyncDiscovery.psk(secret: secret, tag: peer.tag)
         let running = start(pair.device, dialing: true) {
             guard let connection = try? await self.link.connect(to: peer, psk: psk) else { return nil }

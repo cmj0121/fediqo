@@ -8,8 +8,9 @@ import Testing
 @Suite("Syncing paired devices nearby")
 struct SyncSessionTests {
     private static let when = Date(timeIntervalSince1970: 1_800_000_000)
-    /// No test here waits a step or an answer out, so both are long: a loaded runner is slow, not lost.
-    private static let quick = SyncTiming(syncNowWindow: .seconds(2), answerWait: .seconds(60), stepWait: .seconds(60))
+    /// Long: a look ends once every due pair is met, so only a check that expects nobody waits
+    /// one out — and that gives its own. A loaded runner is then slow, never lost.
+    private static let steady = SyncTiming(syncNowWindow: .seconds(60), answerWait: .seconds(60), stepWait: .seconds(60))
 
     private struct Device {
         let id: String
@@ -20,9 +21,9 @@ struct SyncSessionTests {
         let session: SyncSession
     }
 
-    private func device(_ link: PipeNearbyLink, _ id: String, _ name: String, holding: SyncSnapshot = .empty, answer: Bool? = true, hang: Duration? = nil, timing: SyncTiming = quick) -> Device {
+    private func device(_ link: PipeNearbyLink, _ id: String, _ name: String, holding: SyncSnapshot = .empty, answer: Bool? = true, until gate: Gate? = nil, timing: SyncTiming = steady) -> Device {
         let pairs = MemoryPairStore()
-        let local = MemoryLocal(holding, answer: answer, hang: hang)
+        let local = MemoryLocal(holding, answer: answer, until: gate)
         let clock = SyncClock(device: id, wall: { Self.when })
         let session = SyncSession(link: link, pairs: pairs, clock: clock, name: name, local: local, timing: timing, now: { Self.when })
         return Device(id: id, name: name, pairs: pairs, local: local, clock: clock, session: session)
@@ -79,8 +80,10 @@ struct SyncSessionTests {
     @Test("Two ends that looked while apart are still due, and merge at the next check once they meet")
     func lookedWhileApart() async throws {
         let link = PipeNearbyLink()
-        let a = device(link, "A-MAC", "Mac", holding: Self.mac)
-        let b = device(link, "B-PHONE", "Phone", holding: Self.phone)
+        // Each looks for nobody first, so a look's window is short here.
+        let apart = SyncTiming(syncNowWindow: .seconds(2), answerWait: .seconds(60), stepWait: .seconds(60))
+        let a = device(link, "A-MAC", "Mac", holding: Self.mac, timing: apart)
+        let b = device(link, "B-PHONE", "Phone", holding: Self.phone, timing: apart)
         try pair(a, b)
         // Apart: each looks (a due check, and Sync now) and finds nobody.
         #expect(await a.session.dialDue(period: .hour).isEmpty)
@@ -257,19 +260,22 @@ struct SyncSessionTests {
     @Test("No answer within the wait is a no")
     func firstMergeTimeout() async throws {
         let link = PipeNearbyLink()
-        let timing = SyncTiming(syncNowWindow: .seconds(2), answerWait: .milliseconds(300), stepWait: .seconds(5))
+        let timing = SyncTiming(syncNowWindow: .seconds(60), answerWait: .milliseconds(300), stepWait: .seconds(60))
         let a = device(link, "A-MAC", "Mac", holding: Self.mac, timing: timing)
-        let b = device(link, "B-PHONE", "Phone", holding: Self.phone, answer: true, hang: .seconds(30), timing: timing)
+        // The phone's yes never comes while the test runs: only the wait can end the merge.
+        let never = Gate()
+        let guardTask = watching(never, "the phone's yes, which only the wait may outlast")
+        defer { guardTask.cancel() }
+        let b = device(link, "B-PHONE", "Phone", holding: Self.phone, answer: true, until: never, timing: timing)
         try pair(a, b, firstMerged: false)
         let listening = await listen(a, on: link, until: 1)
         defer { listening.cancel() }
 
-        let started = ContinuousClock.now
         #expect(await b.session.dialDue(period: .hour)[a.id] == .notMerged(.declined))
-        #expect(ContinuousClock.now - started < .seconds(25), "ended by the wait, not by the 30 s confirm")
         #expect(await eventually { done(a) == [.notMerged(.declined)] })
         #expect(a.local.held == Self.mac && b.local.held == Self.phone)
         #expect(try a.pairs.pairs().first?.firstMerged == false && b.pairs.pairs().first?.firstMerged == false)
+        await never.open()
     }
 
     @Test("Both sides dialing at once comes to one merge, whichever join lands first", arguments: [true, false])
@@ -334,10 +340,11 @@ struct SyncSessionTests {
         let listening = await listen(a, on: link, until: 1)
         defer { listening.cancel() }
         let tag = try #require(link.listeners.first?.tag)
-        // "fq-0" … "fq-3" list before any real instance name, so they are dialed first.
+        // "fq--0" … "fq--3" list before any real instance name ("-" sorts before every hex
+        // digit), so they are dialed first.
         let guesses = Tally()
         let replays = (0..<4).map { index in
-            let stream = link.advertise(name: "fq-\(index)", tag: tag, psk: SymmetricKey(size: .bits256))
+            let stream = link.advertise(name: "fq--\(index)", tag: tag, psk: SymmetricKey(size: .bits256))
             return Task {
                 for try await arrival in stream {
                     if case .failedHandshake = arrival { guesses.add() }
@@ -364,7 +371,7 @@ struct SyncSessionTests {
         let listening = await listen(a, on: link, until: 1)
         defer { listening.cancel() }
         let tag = try #require(link.listeners.first?.tag)
-        let replays = (0..<3).map { link.advertise(name: "fq-\($0)", tag: tag, psk: SymmetricKey(size: .bits256)) }
+        let replays = (0..<3).map { link.advertise(name: "fq--\($0)", tag: tag, psk: SymmetricKey(size: .bits256)) }
         defer { withExtendedLifetime(replays) {} }
         _ = await eventually { link.listeners.count == 4 }
 
@@ -409,8 +416,14 @@ struct SyncSessionTests {
     @Test("While a pairing's first merge waits for its answer, no dial or join starts a second one")
     func pairingHoldsThePair() async throws {
         let link = PipeNearbyLink()
-        let a = device(link, "A-MAC", "Mac", holding: Self.mac, answer: false)
-        let b = device(link, "B-PHONE", "Phone", holding: Self.phone, answer: true, hang: .milliseconds(1500))
+        // The look stays open however slow the run: it ends once both dials are met anyway.
+        let timing = SyncTiming(syncNowWindow: .seconds(60), answerWait: .seconds(60), stepWait: .seconds(60))
+        let a = device(link, "A-MAC", "Mac", holding: Self.mac, answer: false, timing: timing)
+        // B answers only once the test has seen both dials wait and the join hear `.busy`.
+        let answer = Gate()
+        let guardTask = watching(answer, "the phone's yes to the first merge")
+        defer { guardTask.cancel() }
+        let b = device(link, "B-PHONE", "Phone", holding: Self.phone, answer: true, until: answer, timing: timing)
         var held = await a.session.holdPairing().makeAsyncIterator()
         guard case .code(let code, let sessionID) = await held.next() else { throw NearbyDropped() }
         let hold = try await pairingHold(on: link, sessionID: sessionID)
@@ -440,6 +453,12 @@ struct SyncSessionTests {
         #expect(try SyncFrame.decode(said) == .refused(.busy))
         mailbox.close()
         connection.close()
+        let bothWait = await eventually {
+            let (waitedA, waitedB) = (await a.session.dialsWaited, await b.session.dialsWaited)
+            return waitedA == 1 && waitedB == 1
+        }
+        #expect(bothWait, "both dials wait for the pairing's merge")
+        await answer.open()
 
         let (outcomesA, outcomesB) = await (fromA, fromB)
         guard case .done(_, .merged) = await joining.value.last, case .merged = outcomesA[b.id], case .merged = outcomesB[a.id] else {
@@ -577,12 +596,12 @@ final class MemoryLocal: SyncLocal {
 
     private let state: Mutex<State>
     private let answer: Bool?
-    private let hang: Duration?
+    private let gate: Gate?
 
-    init(_ held: SyncSnapshot, answer: Bool?, hang: Duration?) {
+    init(_ held: SyncSnapshot, answer: Bool?, until gate: Gate? = nil) {
         state = Mutex(State(held: held))
         self.answer = answer
-        self.hang = hang
+        self.gate = gate
     }
 
     var held: SyncSnapshot { state.withLock { $0.held } }
@@ -602,7 +621,7 @@ final class MemoryLocal: SyncLocal {
 
     func confirm(_ preview: SyncPreview, with peer: PairedDevice) async -> Bool? {
         state.withLock { $0.asked += 1 }
-        if let hang { try? await Task.sleep(for: hang) }
+        await gate?.wait()
         return answer
     }
 
